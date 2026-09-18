@@ -2,5 +2,21 @@
   "app": {
     "name": "Lola",
     "tagline": "Платформа навчання для лінійних команд"
+  },
+  "login": {
+    "phoneLabel": "Номер телефону",
+    "getCode": "Отримати код",
+    "sentTelegram": "Код надіслали в Telegram",
+    "sentSms": "Код надіслали в SMS",
+    "signIn": "Увійти",
+    "resend": "Надіслати код ще раз",
+    "resendIn": "Повторна відправка через {s} с",
+    "codeInvalidLeft": "Код невірний. Залишилось {n} спроби",
+    "chooseSpace": "Оберіть простір"
+  },
+  "home": {
+    "signedInAs": "Ви увійшли як {name}",
+    "space": "Простір: {name}",
+    "logout": "Вийти"
   }
 }

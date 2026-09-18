@@ -15,6 +15,20 @@
       "when": 1789771627563,
       "tag": "0001_rls-and-app-role",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789772362726,
+      "tag": "0002_slippery_brood",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789772363823,
+      "tag": "0003_auth-lookup-functions",
+      "breakpoints": true
     }
   ]
 }

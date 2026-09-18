@@ -4,6 +4,8 @@ const { me, hasScope, logout } = useAuth()
 
 const nav = computed(() => [
   { to: '/admin/courses', label: t('admin.nav.courses'), show: hasScope('course.view') },
+  { to: '/admin/quizzes', label: t('admin.nav.quizzes'), show: hasScope('course.view') },
+  { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue') },
   { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view') },
   { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import') },
   { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },

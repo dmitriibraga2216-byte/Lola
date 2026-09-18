@@ -9,7 +9,7 @@ const enrollmentId = route.params.enrollmentId as string
 interface Tree {
   enrollment: { status: string, progressPct: string, requiredTotal: number, requiredDone: number }
   course: { id: string, title: string, strictOrder: boolean }
-  modules: { id: string, title: string, lessons: { id: string, title: string, isRequired: boolean, status: string }[] }[]
+  modules: { id: string, title: string, lessons: { id: string, title: string, itemType: string, isRequired: boolean, status: string }[] }[]
   resumeLessonId: string | null
 }
 
@@ -25,8 +25,8 @@ onMounted(async () => {
   }
 })
 
-function icon(status: string) {
-  return status === 'completed' ? '✓' : status === 'locked' ? '🔒' : '›'
+function icon(status: string, itemType: string) {
+  return status === 'completed' ? '✓' : status === 'locked' ? '🔒' : itemType === 'quiz' ? '?' : '›'
 }
 </script>
 
@@ -59,12 +59,12 @@ function icon(status: string) {
             :to="`/learn/${enrollmentId}/${lesson.id}`"
             class="lesson-link"
           >
-            <span class="icon">{{ icon(lesson.status) }}</span>
+            <span class="icon">{{ icon(lesson.status, lesson.itemType) }}</span>
             <span class="lesson-title">{{ lesson.title }}</span>
             <span v-if="!lesson.isRequired" class="optional">{{ t('learner.optional') }}</span>
           </NuxtLink>
           <span v-else class="lesson-link">
-            <span class="icon">{{ icon(lesson.status) }}</span>
+            <span class="icon">{{ icon(lesson.status, lesson.itemType) }}</span>
             <span class="lesson-title">{{ lesson.title }}</span>
           </span>
         </li>

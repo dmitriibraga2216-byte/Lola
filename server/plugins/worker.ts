@@ -1,5 +1,6 @@
 import { getBoss } from '../services/queue'
 import { processMedia, type MediaProcessJob } from '../jobs/mediaProcess'
+import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 
 /**
  * Воркер фоновых задач внутри процесса приложения (dev и старт).
@@ -14,6 +15,12 @@ export default defineNitroPlugin(async () => {
     await boss.work<MediaProcessJob>('media.process', async (jobs) => {
       const job = jobs[0]
       if (job) await processMedia(job.data)
+    })
+    await boss.work('attempt.expire', async () => {
+      for (const tenantId of await tenantsWithActiveAttempts()) {
+        const n = await expireStaleAttempts(tenantId)
+        if (n) console.log(`[attempt.expire] ${tenantId}: закрыто ${n}`)
+      }
     })
   }
   catch (err) {

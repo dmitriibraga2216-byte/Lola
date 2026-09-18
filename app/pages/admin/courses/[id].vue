@@ -12,6 +12,8 @@ const courseId = route.params.id as string
 interface Lesson {
   id: string
   title: string
+  itemType: string
+  itemId: string
   isRequired: boolean
   minSeconds: number | null
   videoThresholdPct: number
@@ -36,12 +38,17 @@ const changelog = ref('')
 const busy = ref(false)
 const newModuleTitle = ref('')
 const newLessonTitle = reactive<Record<string, string>>({})
+const quizList = ref<{ id: string, title: string }[]>([])
+const newLessonQuiz = reactive<Record<string, string>>({})
 
 const canEdit = computed(() => hasScope('course.edit'))
 
 async function load() {
   try {
     editor.value = await api<Editor>(`/courses/${courseId}`)
+    if (quizList.value.length === 0) {
+      quizList.value = (await api<{ id: string, title: string, status: string }[]>('/quizzes')).filter(q => q.status === 'published')
+    }
     if (selected.value) {
       const fresh = editor.value.modules.flatMap(m => m.lessons).find(l => l.id === selected.value!.id)
       if (fresh) select(fresh)
@@ -96,10 +103,14 @@ async function addModule() {
 async function addLesson(moduleId: string) {
   const title = newLessonTitle[moduleId]?.trim()
   if (!title) return
+  const quizId = newLessonQuiz[moduleId]
   const lesson = await api<Lesson>(`/courses/${courseId}/lessons`, {
     method: 'POST',
-    body: { moduleId, title, resource: { body: [{ id: `b_${Date.now()}`, type: 'text', html: '<p></p>' }] } },
+    body: quizId
+      ? { moduleId, title, itemType: 'quiz', quizId }
+      : { moduleId, title, resource: { body: [{ id: `b_${Date.now()}`, type: 'text', html: '<p></p>' }] } },
   })
+  newLessonQuiz[moduleId] = ''
   newLessonTitle[moduleId] = ''
   await load()
   const fresh = editor.value?.modules.flatMap(m => m.lessons).find(l => l.id === lesson.id)
@@ -178,6 +189,10 @@ async function publish() {
           </button>
           <div v-if="canEdit" class="add-row">
             <input v-model="newLessonTitle[mod.id]" :placeholder="t('course.newLesson')" @keyup.enter="addLesson(mod.id)">
+            <select v-model="newLessonQuiz[mod.id]" :title="t('course.asQuiz')">
+              <option value="">{{ t('course.material') }}</option>
+              <option v-for="q in quizList" :key="q.id" :value="q.id">? {{ q.title }}</option>
+            </select>
             <button class="chip" @click="addLesson(mod.id)">+</button>
           </div>
         </div>
@@ -204,7 +219,11 @@ async function publish() {
               <input v-model.number="draft.minSeconds" type="number" min="10" max="3600" :disabled="!canEdit" class="num">
             </label>
           </div>
-          <BlockEditor v-if="canEdit" v-model="draft.body" />
+          <div v-if="selected.itemType === 'quiz'" class="quiz-note">
+            {{ t('course.quizLesson') }}
+            <NuxtLink :to="`/admin/quizzes/${selected.itemId}`">{{ t('course.openQuiz') }} →</NuxtLink>
+          </div>
+          <BlockEditor v-else-if="canEdit" v-model="draft.body" />
           <LessonBlocks v-else :blocks="draft.body" :blocks-state="{}" readonly />
         </template>
         <div v-else class="empty">{{ t('course.selectLesson') }}</div>
@@ -316,6 +335,29 @@ h1 {
   display: flex;
   gap: var(--space-1);
   margin-top: var(--space-2);
+}
+
+.add-row select {
+  font: inherit;
+  border: 1px solid var(--color-bg-line);
+  border-radius: var(--radius-s);
+  background: var(--color-bg);
+  color: var(--color-ink);
+  max-width: 110px;
+}
+
+.quiz-note {
+  background: var(--color-bg);
+  border-radius: var(--radius-m);
+  padding: var(--space-4);
+  color: var(--color-ink-muted);
+  display: flex;
+  gap: var(--space-3);
+}
+
+.quiz-note a {
+  color: var(--color-teal-ink);
+  font-weight: 700;
 }
 
 .add-row input,

@@ -11,6 +11,7 @@ const { me, hasScope } = useAuth()
     <nav class="bottom">
       <NuxtLink to="/learn" class="tab">{{ t('learner.nav.learning') }}</NuxtLink>
       <NuxtLink to="/learn/catalog" class="tab">{{ t('learner.nav.catalog') }}</NuxtLink>
+      <NuxtLink to="/learn/certificates" class="tab">{{ t('learner.certificates') }}</NuxtLink>
       <NuxtLink v-if="hasScope('people.view')" to="/admin/people" class="tab">{{ t('learner.nav.admin') }}</NuxtLink>
       <NuxtLink to="/" class="tab">{{ me?.user.fullName.split(' ')[0] || t('learner.nav.profile') }}</NuxtLink>
     </nav>

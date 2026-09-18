@@ -6,7 +6,8 @@
   "common": {
     "loading": "Завантаження…",
     "loadMore": "Показати ще",
-    "saved": "Збережено"
+    "saved": "Збережено",
+    "cancel": "Скасувати"
   },
   "login": {
     "phoneLabel": "Номер телефону",
@@ -23,14 +24,16 @@
     "signedInAs": "Ви увійшли як {name}",
     "space": "Простір: {name}",
     "logout": "Вийти",
-    "adminLink": "Управління"
+    "adminLink": "Управління",
+    "learnLink": "Моє навчання"
   },
   "admin": {
     "nav": {
       "people": "Користувачі",
       "import": "Імпорт",
       "refs": "Довідники",
-      "journals": "Журнали"
+      "journals": "Журнали",
+      "courses": "Курси"
     }
   },
   "people": {
@@ -112,5 +115,99 @@
     "when": "Коли",
     "event": "Подія",
     "details": "Деталі"
+  },
+  "learner": {
+    "nav": {
+      "learning": "Навчання",
+      "catalog": "Каталог",
+      "admin": "Управління",
+      "profile": "Профіль"
+    },
+    "hello": "Привіт, {name}",
+    "counter": "{n} завдань · {deadlines} з дедлайном",
+    "tab": {
+      "active": "Актуальні",
+      "overdue": "Прострочені",
+      "done": "Завершені"
+    },
+    "empty": {
+      "active": "Курсів поки немає. Керівник призначить навчання",
+      "overdue": "Прострочених немає. Так і тримай",
+      "done": "Тут зʼявляться пройдені курси"
+    },
+    "browseCatalog": "Переглянути каталог",
+    "lessons": "{n} уроків",
+    "minutes": "{n} хв",
+    "dueBy": "до {date}",
+    "action": {
+      "start": "Почати",
+      "continue": "Продовжити",
+      "review": "Переглянути"
+    },
+    "badge": {
+      "expired": "Прострочено",
+      "completed": "Завершено"
+    },
+    "searchCatalog": "Пошук курсу",
+    "catalogEmpty": "У каталозі поки порожньо",
+    "alreadyEnrolled": "Вже призначено",
+    "enroll": "Записатися",
+    "progressOf": "Пройдено {done} з {total} обовʼязкових",
+    "optional": "необовʼязковий",
+    "lessonOf": "Урок {n} з {total}",
+    "exit": "Вийти з уроку",
+    "next": "Далі",
+    "finish": "Завершити",
+    "waitSeconds": "Ще {n} секунд",
+    "watchVideo": "Подивись відео до кінця",
+    "checkAll": "Познач усі пункти",
+    "offline": "Немає звʼязку. Прогрес збережеться і надішлеться пізніше"
+  },
+  "course": {
+    "newTitle": "Назва нового курсу",
+    "create": "Створити",
+    "empty": "Курсів поки немає",
+    "status": {
+      "draft": "Чернетка",
+      "published": "Опубліковано",
+      "archived": "Архів"
+    },
+    "inCatalog": "У каталозі",
+    "draftVersion": "чернетка версії {v}",
+    "publish": "Опублікувати",
+    "published": "Опубліковано версію {v}",
+    "changelog": "Що змінилось (обовʼязково, від 5 символів)",
+    "newModule": "Назва розділу",
+    "module": "Розділ",
+    "newLesson": "Новий урок",
+    "deleteLesson": "Видалити урок",
+    "deleteLessonConfirm": "Видалити урок «{title}»?",
+    "savedAt": "Збережено о {time}",
+    "required": "Обовʼязковий",
+    "minSeconds": "Мін. секунд",
+    "selectLesson": "Оберіть урок зліва або створіть новий"
+  },
+  "blocks": {
+    "heading": "Заголовок",
+    "text": "Текст",
+    "image": "Зображення",
+    "video": "Відео",
+    "file": "Файл",
+    "callout": "Виноска",
+    "checklist": "Чек-лист",
+    "quote": "Цитата",
+    "embed": "YouTube / Vimeo",
+    "divider": "Розділювач",
+    "headingText": "Текст заголовка",
+    "textHint": "HTML: p, b, ul, a … — решта вирізається",
+    "uploading": "Завантажуємо…",
+    "uploaded": "Файл завантажено",
+    "alt": "Опис зображення (обовʼязково)",
+    "caption": "Підпис",
+    "calloutTitle": "Заголовок виноски",
+    "checklistHint": "По пункту на рядок",
+    "requireAll": "Потрібно позначити всі пункти",
+    "author": "Автор",
+    "videoId": "ID відео"
   }
 }

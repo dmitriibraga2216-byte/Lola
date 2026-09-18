@@ -15,6 +15,10 @@ export default defineNuxtConfig({
     ],
   },
 
+  nitro: {
+    errorHandler: '~~/server/error',
+  },
+
   runtimeConfig: {
     databaseUrl: '',        // NUXT_DATABASE_URL ← .env DATABASE_URL
     sessionSecret: '',

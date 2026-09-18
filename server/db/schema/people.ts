@@ -5,6 +5,7 @@ import {
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
 import { locations, positions } from './org'
+import { cities } from './refs'
 
 export const users = pgTable('users', {
   ...baseColumns,
@@ -20,9 +21,13 @@ export const users = pgTable('users', {
   telegramChatId: bigint('telegram_chat_id', { mode: 'bigint' }),
   passwordHash: text('password_hash'), // только для e-mail входа
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  externalId: text('external_id'), // ID в учётной системе тенанта (для импорта)
+  cityId: uuid('city_id').references(() => cities.id),
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
 }, t => [
   unique().on(t.tenantId, t.phone),
   unique().on(t.tenantId, t.email),
+  unique().on(t.tenantId, t.externalId),
   index().on(t.tenantId, t.status),
 ])
 

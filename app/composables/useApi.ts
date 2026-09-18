@@ -1,13 +1,17 @@
-/** Обёртка над $fetch: CSRF-заголовок из cookie + разворачивание { data } / { error }. */
+/**
+ * Обёртка над $fetch: CSRF-заголовок из cookie + разворачивание { data } / { error }.
+ * useRequestFetch пробрасывает cookie браузера при SSR — иначе сервер не видел бы сессию.
+ */
 export function useApi() {
   const csrf = useCookie('lola_csrf')
+  const requestFetch = useRequestFetch()
 
   async function api<T>(path: string, opts: Parameters<typeof $fetch>[1] = {}): Promise<T> {
     const method = String(opts.method || 'GET').toUpperCase()
     const headers: Record<string, string> = { ...(opts.headers as Record<string, string> || {}) }
     if (method !== 'GET' && csrf.value) headers['x-csrf-token'] = csrf.value
 
-    const res = await $fetch<{ data: T }>(`/api/v1${path}`, { ...opts, headers })
+    const res = await requestFetch<{ data: T }>(`/api/v1${path}`, { ...opts, headers } as never) as { data: T }
     return res.data
   }
 

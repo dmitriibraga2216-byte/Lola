@@ -3,6 +3,11 @@
     "name": "Lola",
     "tagline": "Learning platform for frontline teams"
   },
+  "common": {
+    "loading": "Loading…",
+    "loadMore": "Load more",
+    "saved": "Saved"
+  },
   "login": {
     "phoneLabel": "Phone number",
     "getCode": "Get code",
@@ -17,6 +22,95 @@
   "home": {
     "signedInAs": "Signed in as {name}",
     "space": "Space: {name}",
-    "logout": "Sign out"
+    "logout": "Sign out",
+    "adminLink": "Manage"
+  },
+  "admin": {
+    "nav": {
+      "people": "People",
+      "import": "Import",
+      "refs": "References",
+      "journals": "Journals"
+    }
+  },
+  "people": {
+    "search": "Search by name or phone",
+    "empty": "No one found",
+    "tab": {
+      "active": "Active",
+      "blocked": "Blocked",
+      "all": "All"
+    },
+    "col": {
+      "name": "Name",
+      "position": "Position",
+      "location": "Location",
+      "roles": "Roles",
+      "status": "Status",
+      "lastSeen": "Last seen"
+    },
+    "status": {
+      "invited": "Invited",
+      "active": "Active",
+      "suspended": "Suspended",
+      "archived": "Archived"
+    }
+  },
+  "person": {
+    "profile": "Profile",
+    "phone": "Phone",
+    "hiredAt": "Hired",
+    "tags": "Tags",
+    "placements": "Placements",
+    "roles": "Roles",
+    "sessions": "Sessions",
+    "sendInvite": "Send invitation",
+    "inviteCreated": "Invitation created",
+    "inviteLink": "Link",
+    "suspend": "Suspend",
+    "activate": "Activate",
+    "archive": "Archive",
+    "location": "Location",
+    "position": "Position",
+    "role": "Role",
+    "wholeTenant": "Whole network",
+    "revoked": "revoked"
+  },
+  "import": {
+    "hint": "An xlsx or csv file following the template.",
+    "template": "Download template",
+    "validate": "Validate",
+    "total": "rows",
+    "toCreate": "create",
+    "toUpdate": "update",
+    "toSkip": "skip",
+    "onlyErrors": "Errors only",
+    "apply": "Apply ({n})",
+    "downloadReport": "Download report",
+    "appliedResult": "Done: {created} created, {updated} updated",
+    "action": "Action",
+    "errors": "Errors",
+    "actions": {
+      "create": "create",
+      "update": "update",
+      "skip": "skip"
+    },
+    "truncated": "Showing {shown} of {total} rows"
+  },
+  "refs": {
+    "cities": "Cities",
+    "position-levels": "Position levels",
+    "positions": "Positions",
+    "org-units": "Org units",
+    "locations": "Locations",
+    "tags": "Tags",
+    "newName": "New name"
+  },
+  "journals": {
+    "audit": "Audit log",
+    "security": "Security log",
+    "when": "When",
+    "event": "Event",
+    "details": "Details"
   }
 }

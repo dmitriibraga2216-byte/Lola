@@ -3,6 +3,7 @@ import { boolean, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, ltree, tenantId } from './_common'
 import { tenants } from './tenants'
 import { users } from './people'
+import { positionLevels } from './refs'
 
 export const orgUnits = pgTable('org_units', {
   ...baseColumns,
@@ -30,6 +31,7 @@ export const positions = pgTable('positions', {
   tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   code: text('code'),
+  levelId: uuid('level_id').references(() => positionLevels.id), // рівень посади
 }, t => [
   unique().on(t.tenantId, t.name),
 ])

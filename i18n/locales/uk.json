@@ -3,6 +3,11 @@
     "name": "Lola",
     "tagline": "Платформа навчання для лінійних команд"
   },
+  "common": {
+    "loading": "Завантаження…",
+    "loadMore": "Показати ще",
+    "saved": "Збережено"
+  },
   "login": {
     "phoneLabel": "Номер телефону",
     "getCode": "Отримати код",
@@ -17,6 +22,95 @@
   "home": {
     "signedInAs": "Ви увійшли як {name}",
     "space": "Простір: {name}",
-    "logout": "Вийти"
+    "logout": "Вийти",
+    "adminLink": "Управління"
+  },
+  "admin": {
+    "nav": {
+      "people": "Користувачі",
+      "import": "Імпорт",
+      "refs": "Довідники",
+      "journals": "Журнали"
+    }
+  },
+  "people": {
+    "search": "Пошук за ПІБ або телефоном",
+    "empty": "Нікого не знайдено",
+    "tab": {
+      "active": "Активні",
+      "blocked": "Заблоковані",
+      "all": "Усі"
+    },
+    "col": {
+      "name": "ПІБ",
+      "position": "Посада",
+      "location": "Точка",
+      "roles": "Ролі",
+      "status": "Статус",
+      "lastSeen": "Остання активність"
+    },
+    "status": {
+      "invited": "Запрошений",
+      "active": "Активний",
+      "suspended": "Заблокований",
+      "archived": "Архівний"
+    }
+  },
+  "person": {
+    "profile": "Профіль",
+    "phone": "Телефон",
+    "hiredAt": "Дата найму",
+    "tags": "Мітки",
+    "placements": "Розміщення",
+    "roles": "Ролі",
+    "sessions": "Сесії",
+    "sendInvite": "Надіслати запрошення",
+    "inviteCreated": "Запрошення створено",
+    "inviteLink": "Посилання",
+    "suspend": "Заблокувати",
+    "activate": "Активувати",
+    "archive": "Архівувати",
+    "location": "Точка",
+    "position": "Посада",
+    "role": "Роль",
+    "wholeTenant": "Вся мережа",
+    "revoked": "відкликана"
+  },
+  "import": {
+    "hint": "Файл xlsx або csv за шаблоном.",
+    "template": "Завантажити шаблон",
+    "validate": "Перевірити",
+    "total": "рядків",
+    "toCreate": "створити",
+    "toUpdate": "оновити",
+    "toSkip": "пропустити",
+    "onlyErrors": "Лише з помилками",
+    "apply": "Застосувати ({n})",
+    "downloadReport": "Завантажити звіт",
+    "appliedResult": "Готово: створено {created}, оновлено {updated}",
+    "action": "Дія",
+    "errors": "Помилки",
+    "actions": {
+      "create": "створити",
+      "update": "оновити",
+      "skip": "пропустити"
+    },
+    "truncated": "Показано {shown} з {total} рядків"
+  },
+  "refs": {
+    "cities": "Міста",
+    "position-levels": "Рівні посад",
+    "positions": "Посади",
+    "org-units": "Підрозділи",
+    "locations": "Точки",
+    "tags": "Мітки",
+    "newName": "Нова назва"
+  },
+  "journals": {
+    "audit": "Журнал дій",
+    "security": "Журнал безпеки",
+    "when": "Коли",
+    "event": "Подія",
+    "details": "Деталі"
   }
 }

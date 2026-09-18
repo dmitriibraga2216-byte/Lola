@@ -54,8 +54,9 @@ jobs:
       - name: Seed
         run: pnpm db:seed
 
-      - name: Tests (unit + integration)
-        run: pnpm test
-
       - name: Build
         run: pnpm build
+
+      # Build идёт до тестов: scopes-http.spec.ts гоняет собранное приложение
+      - name: Tests (unit + integration + http)
+        run: pnpm test

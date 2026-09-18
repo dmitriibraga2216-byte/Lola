@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const { t } = useI18n()
-const { me, logout } = useAuth()
+const { me, logout, hasScope } = useAuth()
 </script>
 
 <template>
@@ -10,6 +10,9 @@ const { me, logout } = useAuth()
     <template v-if="me">
       <p class="who">{{ t('home.signedInAs', { name: me.user.fullName }) }}</p>
       <p class="who muted">{{ t('home.space', { name: me.tenant.name }) }}</p>
+      <NuxtLink v-if="hasScope('people.view')" to="/admin/people" class="admin-link">
+        {{ t('home.adminLink') }}
+      </NuxtLink>
       <button class="logout" @click="logout">{{ t('home.logout') }}</button>
     </template>
   </main>
@@ -44,6 +47,17 @@ p {
 
 .muted {
   color: var(--color-ink-faint);
+}
+
+.admin-link {
+  margin-top: var(--space-3);
+  font-weight: 800;
+  color: var(--color-ink);
+  background: var(--color-sun);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-5);
+  text-decoration: none;
+  justify-self: center;
 }
 
 .logout {

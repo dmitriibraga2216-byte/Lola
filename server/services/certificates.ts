@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { certificateCounters, certificates, courses, enrollments } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { enqueueNotification } from './notifications'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -73,6 +74,8 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
       await tx.update(enrollments).set({ validUntil }).where(eq(enrollments.id, enrollmentId))
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'certificate.issue', entity: 'certificate', entityId: cert.id, after: { number, enrollmentId } })
+    const [c] = await tx.select({ title: courses.title }).from(courses).where(eq(courses.id, enr.subjectId))
+    await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: enr.userId, code: 'certificate_issued', payload: { number, course: c?.title }, dedupKey: `cert_issued:${cert.id}` })
     return { ok: true as const, certificateId: cert.id, number: cert.number, created: true }
   })
 }

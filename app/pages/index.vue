@@ -1,6 +1,12 @@
 <script setup lang="ts">
 const { t } = useI18n()
 const { me, logout, hasScope } = useAuth()
+const { api } = useApi()
+const tgLink = ref<{ url: string | null, token: string } | null>(null)
+
+async function linkTelegram() {
+  tgLink.value = await api('/telegram/link', { method: 'POST' })
+}
 </script>
 
 <template>
@@ -11,6 +17,11 @@ const { me, logout, hasScope } = useAuth()
       <p class="who">{{ t('home.signedInAs', { name: me.user.fullName }) }}</p>
       <p class="who muted">{{ t('home.space', { name: me.tenant.name }) }}</p>
       <NuxtLink to="/learn" class="admin-link">{{ t('home.learnLink') }}</NuxtLink>
+      <button class="admin-link ghost tg" @click="linkTelegram">{{ t('home.linkTelegram') }}</button>
+      <p v-if="tgLink" class="tg-hint">
+        <a v-if="tgLink.url" :href="tgLink.url" target="_blank" rel="noopener">{{ t('home.openTelegram') }}</a>
+        <span v-else>{{ t('home.tgToken', { token: tgLink.token }) }}</span>
+      </p>
       <NuxtLink v-if="hasScope('people.view') || hasScope('course.view')" :to="hasScope('course.view') ? '/admin/courses' : '/admin/people'" class="admin-link ghost">
         {{ t('home.adminLink') }}
       </NuxtLink>
@@ -59,6 +70,23 @@ p {
   padding: var(--space-2) var(--space-5);
   text-decoration: none;
   justify-self: center;
+}
+
+.tg {
+  font: inherit;
+  cursor: pointer;
+}
+
+.tg-hint {
+  font-size: var(--font-size-body-s);
+  color: var(--color-teal-ink);
+  word-break: break-all;
+  max-width: 320px;
+}
+
+.tg-hint a {
+  color: inherit;
+  font-weight: 700;
 }
 
 .admin-link.ghost {

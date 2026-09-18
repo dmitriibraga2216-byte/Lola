@@ -10,6 +10,7 @@ import {
   type GradeResult, type QuizParams, type SnapshotQuestion,
 } from '../../shared/domain/grading'
 import { completeLesson } from './learning'
+import { enqueueNotification } from './notifications'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -256,6 +257,14 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
   }).where(eq(attempts.id, attempt.id))
 
   if (status === 'passed') await onAttemptPassed(tx, ctx, attempt)
+  if (status !== 'review') {
+    const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
+    const left = params.attemptsAllowed > 0 ? Math.max(0, params.attemptsAllowed - attempt.attemptNo) : null
+    await enqueueNotification(tx, {
+      tenantId: ctx.tenantId, userId: attempt.userId, code: status === 'passed' ? 'attempt_passed' : 'attempt_failed',
+      payload: { quiz: quiz?.title, score: totals.score, left }, dedupKey: `attempt_result:${attempt.id}`,
+    })
+  }
   return { status, ...totals }
 }
 
@@ -296,6 +305,19 @@ export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<Submit
 
     const t = await gradeAndFinalize(tx, ctx, attempt, 'submit')
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.submit', entity: 'attempt', entityId: attemptId, after: { status: t.status, score: t.score } })
+    if (t.status === 'review') {
+      const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
+      const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
+      const mentorIds = await tx.execute(sql`
+        select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id
+        where r.scopes @> array['review.queue']::text[] and ur.user_id <> ${ctx.actorId}::uuid
+          and (ur.scope_type = 'tenant' or (ur.scope_type = 'location' and ur.scope_id in
+            (select location_id from user_placements where user_id = ${ctx.actorId}::uuid and ended_at is null)))
+      `)
+      for (const m of mentorIds as unknown as { user_id: string }[]) {
+        await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: m.user_id, code: 'review_needed', payload: { name: me?.fullName, quiz: quiz?.title }, dedupKey: `review_needed:${attemptId}:${m.user_id}` })
+      }
+    }
     return { ok: true as const, status: t.status, score: t.score, passed: t.passed, pendingManual: t.pendingManual, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId }
   })
 
@@ -449,6 +471,8 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
       updatedAt: new Date(),
     }).where(eq(attempts.id, row.att.id))
     if (status === 'passed') await onAttemptPassed(tx, ctx, row.att)
+    const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, row.att.quizId))
+    await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: row.att.userId, code: 'review_done', payload: { quiz: quiz?.title, status: status === 'passed' ? 'зараховано' : 'не зараховано' }, dedupKey: `review_done:${row.att.id}` })
 
     return { ok: true as const, attemptStatus: status, enrollmentId: row.att.enrollmentId, lessonId: row.att.lessonId }
   })

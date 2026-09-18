@@ -424,6 +424,9 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
     if (res.ok && res.courseCompleted) {
       const { issueForEnrollment } = await import('./certificates')
       await issueForEnrollment(ctx, enrollmentId).catch(err => console.error('certificate.issue failed', err))
+      const { runRules } = await import('./automation')
+      const [e] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select({ courseId: enrollments.subjectId }).from(enrollments).where(eq(enrollments.id, enrollmentId)))
+      runRules(ctx.tenantId, 'course.completed', ctx.actorId, { courseId: e?.courseId, enrollmentId }).catch(err => console.error('rules course.completed', err))
     }
     return res
   })

@@ -15,13 +15,22 @@
 | [07-stages.md](docs/07-stages.md) | этапы 0–7, критерии приёмки, порядок работы, DoD |
 | [08-reference-inventory.md](docs/08-reference-inventory.md) | полная карта функций эталона → Lola, этап по каждому модулю |
 | [09-integrations.md](docs/09-integrations.md) | внешние интеграции, OAuth, секреты тенанта, вебхуки, входящий API |
+| [10-catalog-learning.md](docs/10-catalog-learning.md) | каталог, «Моє навчання», записи, прогресс, переаттестация |
+| [11-content-lessons.md](docs/11-content-lessons.md) | материалы, блоки, редактор, версии, медиа, плеер урока |
+| [12-tests-questions.md](docs/12-tests-questions.md) | банк вопросов, 10 типов, тест, попытка, снапшот, подсчёт |
+| [13-workshops.md](docs/13-workshops.md) | практикумы: задание, сдача, проверка, доработка |
+| [14-certification.md](docs/14-certification.md) | аттестация, единая очередь проверки, сертификаты |
+| [15-assignments.md](docs/15-assignments.md) | назначения, конструктор аудитории, профили обучения, автоматизация |
+| [18-meetups-webinars.md](docs/18-meetups-webinars.md) | очные занятия, вебинары, комплексные тесты (R2) |
+| [19-development.md](docs/19-development.md) | компетенции, профили должностей, ИПР, цели, заявки (R2) |
+| [20-assessment.md](docs/20-assessment.md) | оценка персонала и чек-листы (R2) |
 | [26-server-local.md](docs/26-server-local.md) | локальный сервер: VM в Proxmox, compose, переменные, бэкапы, обновления |
 | [27-gateway-public.md](docs/27-gateway-public.md) | веб-шлюз наружу: Cloudflare Tunnel, домены, демо-ссылка для третьих лиц |
 
 ## Что дорабатывается
 
-Модульные документы `10-25` — развёрнутые спецификации каждого модуля до уровня полей,
-форм, валидаций, уведомлений, API и критериев приёмки. Формат задан в `docs/_conventions.md`.
+Модульные документы `16–17`, `21–25` — развёрнутые спецификации остальных модулей до уровня
+полей, форм, валидаций, уведомлений, API и критериев приёмки — ещё пишутся.
 
 Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).
 

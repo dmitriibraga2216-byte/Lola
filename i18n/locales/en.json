@@ -2,5 +2,21 @@
   "app": {
     "name": "Lola",
     "tagline": "Learning platform for frontline teams"
+  },
+  "login": {
+    "phoneLabel": "Phone number",
+    "getCode": "Get code",
+    "sentTelegram": "Code sent to Telegram",
+    "sentSms": "Code sent via SMS",
+    "signIn": "Sign in",
+    "resend": "Resend code",
+    "resendIn": "Resend available in {s}s",
+    "codeInvalidLeft": "Wrong code. {n} attempts left",
+    "chooseSpace": "Choose a space"
+  },
+  "home": {
+    "signedInAs": "Signed in as {name}",
+    "space": "Space: {name}",
+    "logout": "Sign out"
   }
 }

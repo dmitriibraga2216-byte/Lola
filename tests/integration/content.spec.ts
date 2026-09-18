@@ -25,11 +25,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (created.length) {
+    await admin`delete from certificates where course_id in ${admin(created)}`
     await admin`delete from enrollments where subject_id in ${admin(created)}`
     await admin`delete from courses where id in ${admin(created)}`
   }
   await admin.end()
 })
+
+const suffix = Date.now()
 
 const author = () => ({ tenantId, actorId: authorId })
 const learner = () => ({ tenantId, actorId: learnerId })
@@ -59,7 +62,7 @@ describe('курс: создание → публикация → прохожд
 
   it('курс с 4 уроками создаётся, XSS в теле вырезается при сохранении', async () => {
     const course = await createCourse(author(), {
-      title: 'Тест-курс прохождения',
+      title: `Тест-курс прохождения ${suffix}`,
       language: 'uk',
       strictOrder: true,
       isCatalogVisible: true,
@@ -102,7 +105,7 @@ describe('курс: создание → публикация → прохожд
   })
 
   it('курс без уроков публиковать нельзя', async () => {
-    const empty = await createCourse(author(), { title: 'Порожній курс', language: 'uk', strictOrder: true, isCatalogVisible: false, tags: [] })
+    const empty = await createCourse(author(), { title: `Порожній курс ${suffix}`, language: 'uk', strictOrder: true, isCatalogVisible: false, tags: [] })
     created.push(empty.id)
     const result = await publishCourse(author(), empty.id, 'спроба')
     expect(result.ok).toBe(false)

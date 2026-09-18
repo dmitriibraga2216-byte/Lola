@@ -7,7 +7,8 @@
     "loading": "Loading…",
     "loadMore": "Load more",
     "saved": "Saved",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "save": "Save"
   },
   "login": {
     "phoneLabel": "Phone number",
@@ -33,7 +34,9 @@
       "import": "Import",
       "refs": "References",
       "journals": "Journals",
-      "courses": "Courses"
+      "courses": "Courses",
+      "quizzes": "Quizzes",
+      "review": "Review queue"
     }
   },
   "people": {
@@ -161,7 +164,8 @@
     "waitSeconds": "{n} more seconds",
     "watchVideo": "Watch the video to the end",
     "checkAll": "Check all items",
-    "offline": "No connection. Progress will be saved and sent later"
+    "offline": "No connection. Progress will be saved and sent later",
+    "certificates": "Certificates"
   },
   "course": {
     "newTitle": "New course title",
@@ -185,7 +189,11 @@
     "savedAt": "Saved at {time}",
     "required": "Required",
     "minSeconds": "Min. seconds",
-    "selectLesson": "Select a lesson on the left or create one"
+    "selectLesson": "Select a lesson on the left or create one",
+    "asQuiz": "Lesson type",
+    "material": "Material",
+    "quizLesson": "This is a quiz lesson. Questions and settings live in the quiz editor.",
+    "openQuiz": "Open quiz"
   },
   "blocks": {
     "heading": "Heading",
@@ -209,5 +217,88 @@
     "requireAll": "All items must be checked",
     "author": "Author",
     "videoId": "Video ID"
+  },
+  "quiz": {
+    "questionOf": "Question {n} of {total}",
+    "questions": "Questions",
+    "timeLimit": "Time limit",
+    "noLimit": "none",
+    "passScore": "Pass score",
+    "attempts": "Attempts",
+    "unlimited": "unlimited",
+    "attemptsLeft": "{left} of {total} left",
+    "start": "Start",
+    "resume": "Resume attempt",
+    "exhausted": "No attempts left",
+    "critical": "Critical question",
+    "back": "Back",
+    "submit": "Submit",
+    "onReview": "Under review",
+    "onReviewHint": "A mentor will check your open answers. Usually within a day",
+    "passLine": "pass score {pass}%",
+    "passed": "Passed",
+    "failed": "Failed",
+    "backToLearning": "Back to learning"
+  },
+  "quizAdmin": {
+    "newTitle": "New quiz title",
+    "empty": "No quizzes yet",
+    "count": "Questions: {n}",
+    "countShort": "{n} questions",
+    "pts": "pts",
+    "tabQuestions": "Questions",
+    "tabSettings": "Description & settings",
+    "composition": "Composition",
+    "noQuestions": "Add from a bank or create a new one",
+    "bank": "Question bank",
+    "bankName": "Bank name",
+    "newQuestion": "New question",
+    "stem": "Question text",
+    "option": "Option",
+    "value": "Value",
+    "tolerance": "Tolerance",
+    "accepted": "Accepted answers, one per line",
+    "criteria": "Grading criteria for the mentor, one per line",
+    "points": "Points",
+    "critical": "critical",
+    "addQuestion": "Add to quiz",
+    "passScore": "Pass score, %",
+    "attempts": "Attempts (0 = unlimited)",
+    "cooldown": "Cooldown, min",
+    "timeLimit": "Time limit, min (0 = none)",
+    "showAnswers": "Show answers",
+    "shuffleQ": "Shuffle questions",
+    "shuffleO": "Shuffle options",
+    "allowSkip": "Allow skip",
+    "allowBack": "Allow going back",
+    "requireAll": "Require all answered"
+  },
+  "review": {
+    "title": "Review queue",
+    "left": "{n} left",
+    "empty": "Queue is empty. Keep it up",
+    "hoursAgo": "{n}h ago",
+    "question": "Question",
+    "criteria": "Criteria",
+    "reference": "Reference for reviewer",
+    "answer": "Answer",
+    "commentHint": "Comment (required when rejecting)",
+    "commentRequired": "Explain what is wrong — the learner will see this",
+    "accept": "Accept",
+    "reject": "Reject",
+    "savedMore": "Saved. More answers pending in this attempt",
+    "savedFinal": "Saved. Attempt: {status}"
+  },
+  "cert": {
+    "valid": "Valid",
+    "expired": "Expired",
+    "revoked": "Revoked",
+    "empty": "Certificates for completed courses will appear here",
+    "issued": "Issued",
+    "validUntil": "Valid until",
+    "score": "Score",
+    "open": "Open",
+    "share": "Share",
+    "copied": "Copied"
   }
 }

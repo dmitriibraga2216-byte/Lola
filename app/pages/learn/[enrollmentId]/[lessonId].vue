@@ -10,7 +10,7 @@ const enrollmentId = route.params.enrollmentId as string
 const lessonId = route.params.lessonId as string
 
 interface Opened {
-  lesson: { id: string, title: string, minSeconds: number | null, videoThresholdPct: number, body: ContentBlock[] }
+  lesson: { id: string, title: string, itemType: string, itemId: string, minSeconds: number | null, videoThresholdPct: number, body: ContentBlock[] }
   progress: { status: string, secondsSpent: number, blocksState: Record<string, unknown>, videoPct: number }
 }
 interface Tree {
@@ -78,6 +78,11 @@ onMounted(async () => {
       }),
       api<Tree>(`/learning/enrollments/${enrollmentId}`),
     ])
+    // Урок-тест живёт в своём экране (docs/12 §5.4)
+    if (opened.lesson.itemType === 'quiz') {
+      await navigateTo(`/learn/quiz/${opened.lesson.itemId}?enrollmentId=${enrollmentId}&lessonId=${lessonId}`, { replace: true })
+      return
+    }
     data.value = opened
     tree.value = treeRes
     secondsSpent.value = opened.progress.secondsSpent

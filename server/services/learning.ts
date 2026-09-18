@@ -163,6 +163,8 @@ export async function enrollmentTree(ctx: Ctx, enrollmentId: string) {
         id: l.id,
         moduleId: l.moduleId,
         title: l.title,
+        itemType: l.itemType,
+        itemId: l.itemId,
         isRequired: l.isRequired,
         minSeconds: l.minSeconds,
         status: completed ? 'completed' : progress ? 'opened' : available ? 'available' : 'locked',
@@ -265,6 +267,8 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
       lesson: {
         id: lesson.id,
         title: lesson.title,
+        itemType: lesson.itemType,
+        itemId: lesson.itemId,
         minSeconds: lesson.minSeconds,
         videoThresholdPct: lesson.videoThresholdPct,
         isRequired: lesson.isRequired,
@@ -341,6 +345,10 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
 
     if (progress.status !== 'completed') {
       const reasons: string[] = []
+      if (lesson.itemType === 'quiz') {
+        // Урок-тест закрывается зачётом попытки (attempts.ts → onAttemptPassed), не кнопкой
+        return { ok: false as const, code: 'conditions_not_met' as const, reasons: ['Складіть тест'] }
+      }
       if (lesson.minSeconds && progress.secondsSpent < lesson.minSeconds) {
         reasons.push(`Ще ${lesson.minSeconds - progress.secondsSpent} секунд`)
       }
@@ -411,5 +419,12 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
     }, ctx.actorId)
 
     return { ok: true as const, courseCompleted, progressPct }
+  }).then(async (res) => {
+    // Сертификат за курс — после фиксации completed, отдельной транзакцией (docs/14 §7.3, идемпотентно)
+    if (res.ok && res.courseCompleted) {
+      const { issueForEnrollment } = await import('./certificates')
+      await issueForEnrollment(ctx, enrollmentId).catch(err => console.error('certificate.issue failed', err))
+    }
+    return res
   })
 }

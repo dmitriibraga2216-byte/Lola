@@ -15,6 +15,9 @@ export async function getBoss(): Promise<PgBoss> {
     started = boss.start().then(async (b: PgBoss) => {
       // retryLimit=5 с экспонентой (docs/06 §6.3); в pg-boss 12 это свойство очереди
       await b.createQueue('media.process', { retryLimit: 5, retryBackoff: true, expireInSeconds: 600 })
+      await b.createQueue('attempt.expire', { retryLimit: 3, expireInSeconds: 300 })
+      // Каждые 5 минут (docs/06 §6.3); singletonKey не даёт наплодить дублей
+      await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       return b
     })
   }

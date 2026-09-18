@@ -227,15 +227,22 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
     const [mod] = await tx.select().from(modules).where(eq(modules.id, input.moduleId))
     if (!mod) return null
 
-    const [resource] = await tx.insert(resources).values({
-      tenantId: ctx.tenantId,
-      title: input.title,
-      slug: `${slugify(input.title)}-${randomUUID().slice(0, 6)}`,
-      kind: 'article',
-      body: sanitizeBody(input.resource.body as ContentBlock[]),
-      authorIds: [ctx.actorId],
-      status: 'published',
-    }).returning({ id: resources.id })
+    let itemId: string
+    if (input.itemType === 'quiz') {
+      itemId = input.quizId!
+    }
+    else {
+      const [resource] = await tx.insert(resources).values({
+        tenantId: ctx.tenantId,
+        title: input.title,
+        slug: `${slugify(input.title)}-${randomUUID().slice(0, 6)}`,
+        kind: 'article',
+        body: sanitizeBody(input.resource!.body as ContentBlock[]),
+        authorIds: [ctx.actorId],
+        status: 'published',
+      }).returning({ id: resources.id })
+      itemId = resource!.id
+    }
 
     const existing = await tx.select().from(lessons).where(eq(lessons.moduleId, input.moduleId))
     const [lesson] = await tx.insert(lessons).values({
@@ -243,8 +250,8 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
       moduleId: input.moduleId,
       title: input.title,
       sort: existing.length,
-      itemType: 'resource',
-      itemId: resource!.id,
+      itemType: input.itemType,
+      itemId,
       isRequired: input.isRequired,
       minSeconds: input.minSeconds ?? null,
       videoThresholdPct: input.videoThresholdPct,
@@ -312,6 +319,14 @@ export async function publishChecks(ctx: Ctx, courseId: string): Promise<Publish
   if (!editor) return null
 
   const allLessons = editor.modules.flatMap(m => m.lessons)
+  const quizLessons = allLessons.filter(l => l.itemType === 'quiz')
+  const quizzesOk = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    if (quizLessons.length === 0) return true
+    const { quizzes } = await import('../db/schema')
+    const rows = await tx.select({ id: quizzes.id, count: quizzes.questionCount, mode: quizzes.selectionMode })
+      .from(quizzes).where(inArray(quizzes.id, quizLessons.map(l => l.itemId)))
+    return rows.length === quizLessons.length && rows.every(r => r.mode === 'random' || r.count > 0)
+  })
   const mediaIds = allLessons.flatMap(l =>
     (l.body as ContentBlock[]).flatMap(b =>
       'mediaId' in b ? [b.mediaId] : [],
@@ -329,8 +344,9 @@ export async function publishChecks(ctx: Ctx, courseId: string): Promise<Publish
     {
       code: 'lessons_have_content',
       label: 'У кожного уроку заповнений матеріал',
-      ok: allLessons.every(l => (l.body as ContentBlock[]).length > 0),
+      ok: allLessons.every(l => l.itemType !== 'resource' || (l.body as ContentBlock[]).length > 0),
     },
+    { code: 'quizzes_have_questions', label: 'У кожного тесту є питання', ok: quizzesOk },
     { code: 'media_ready', label: 'Усі медіафайли оброблені', ok: mediaReady },
   ]
 }

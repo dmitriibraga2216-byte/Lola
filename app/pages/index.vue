@@ -10,7 +10,8 @@ const { me, logout, hasScope } = useAuth()
     <template v-if="me">
       <p class="who">{{ t('home.signedInAs', { name: me.user.fullName }) }}</p>
       <p class="who muted">{{ t('home.space', { name: me.tenant.name }) }}</p>
-      <NuxtLink v-if="hasScope('people.view')" to="/admin/people" class="admin-link">
+      <NuxtLink to="/learn" class="admin-link">{{ t('home.learnLink') }}</NuxtLink>
+      <NuxtLink v-if="hasScope('people.view') || hasScope('course.view')" :to="hasScope('course.view') ? '/admin/courses' : '/admin/people'" class="admin-link ghost">
         {{ t('home.adminLink') }}
       </NuxtLink>
       <button class="logout" @click="logout">{{ t('home.logout') }}</button>
@@ -58,6 +59,12 @@ p {
   padding: var(--space-2) var(--space-5);
   text-decoration: none;
   justify-self: center;
+}
+
+.admin-link.ghost {
+  background: transparent;
+  border: 1px solid var(--color-bg-line);
+  margin-top: var(--space-2);
 }
 
 .logout {

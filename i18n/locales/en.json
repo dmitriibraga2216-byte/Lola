@@ -6,7 +6,8 @@
   "common": {
     "loading": "Loading…",
     "loadMore": "Load more",
-    "saved": "Saved"
+    "saved": "Saved",
+    "cancel": "Cancel"
   },
   "login": {
     "phoneLabel": "Phone number",
@@ -23,14 +24,16 @@
     "signedInAs": "Signed in as {name}",
     "space": "Space: {name}",
     "logout": "Sign out",
-    "adminLink": "Manage"
+    "adminLink": "Manage",
+    "learnLink": "My learning"
   },
   "admin": {
     "nav": {
       "people": "People",
       "import": "Import",
       "refs": "References",
-      "journals": "Journals"
+      "journals": "Journals",
+      "courses": "Courses"
     }
   },
   "people": {
@@ -112,5 +115,99 @@
     "when": "When",
     "event": "Event",
     "details": "Details"
+  },
+  "learner": {
+    "nav": {
+      "learning": "Learning",
+      "catalog": "Catalog",
+      "admin": "Manage",
+      "profile": "Profile"
+    },
+    "hello": "Hi, {name}",
+    "counter": "{n} tasks · {deadlines} with deadline",
+    "tab": {
+      "active": "Current",
+      "overdue": "Overdue",
+      "done": "Done"
+    },
+    "empty": {
+      "active": "No courses yet. Your manager will assign training",
+      "overdue": "Nothing overdue. Keep it up",
+      "done": "Completed courses will appear here"
+    },
+    "browseCatalog": "Browse catalog",
+    "lessons": "{n} lessons",
+    "minutes": "{n} min",
+    "dueBy": "by {date}",
+    "action": {
+      "start": "Start",
+      "continue": "Continue",
+      "review": "Review"
+    },
+    "badge": {
+      "expired": "Overdue",
+      "completed": "Completed"
+    },
+    "searchCatalog": "Search courses",
+    "catalogEmpty": "Catalog is empty",
+    "alreadyEnrolled": "Already enrolled",
+    "enroll": "Enroll",
+    "progressOf": "{done} of {total} required done",
+    "optional": "optional",
+    "lessonOf": "Lesson {n} of {total}",
+    "exit": "Exit lesson",
+    "next": "Next",
+    "finish": "Finish",
+    "waitSeconds": "{n} more seconds",
+    "watchVideo": "Watch the video to the end",
+    "checkAll": "Check all items",
+    "offline": "No connection. Progress will be saved and sent later"
+  },
+  "course": {
+    "newTitle": "New course title",
+    "create": "Create",
+    "empty": "No courses yet",
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "archived": "Archived"
+    },
+    "inCatalog": "In catalog",
+    "draftVersion": "draft v{v}",
+    "publish": "Publish",
+    "published": "Published version {v}",
+    "changelog": "What changed (required, 5+ chars)",
+    "newModule": "Module title",
+    "module": "Module",
+    "newLesson": "New lesson",
+    "deleteLesson": "Delete lesson",
+    "deleteLessonConfirm": "Delete lesson “{title}”?",
+    "savedAt": "Saved at {time}",
+    "required": "Required",
+    "minSeconds": "Min. seconds",
+    "selectLesson": "Select a lesson on the left or create one"
+  },
+  "blocks": {
+    "heading": "Heading",
+    "text": "Text",
+    "image": "Image",
+    "video": "Video",
+    "file": "File",
+    "callout": "Callout",
+    "checklist": "Checklist",
+    "quote": "Quote",
+    "embed": "YouTube / Vimeo",
+    "divider": "Divider",
+    "headingText": "Heading text",
+    "textHint": "HTML: p, b, ul, a … — the rest is stripped",
+    "uploading": "Uploading…",
+    "uploaded": "File uploaded",
+    "alt": "Image description (required)",
+    "caption": "Caption",
+    "calloutTitle": "Callout title",
+    "checklistHint": "One item per line",
+    "requireAll": "All items must be checked",
+    "author": "Author",
+    "videoId": "Video ID"
   }
 }

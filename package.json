@@ -1,0 +1,42 @@
+{
+  "name": "lola",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "nuxt prepare",
+    "dev": "nuxt dev",
+    "dev:up": "docker compose -f docker/docker-compose.yml up -d --wait && pnpm db:migrate && pnpm db:seed",
+    "dev:down": "docker compose -f docker/docker-compose.yml down",
+    "build": "nuxt build",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx server/db/migrate.ts",
+    "db:seed": "tsx server/db/seed.ts",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "lint": "eslint .",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@nuxtjs/i18n": "^9.1.1",
+    "drizzle-orm": "^0.38.3",
+    "nuxt": "^3.15.1",
+    "postgres": "^3.4.5",
+    "vue": "^3.5.13",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "^0.7.4",
+    "@types/node": "^26.6.1",
+    "dotenv": "^16.4.7",
+    "drizzle-kit": "^0.30.1",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.2.0"
+  }
+}

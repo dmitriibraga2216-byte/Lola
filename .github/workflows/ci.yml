@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: lola
+          POSTGRES_PASSWORD: lola_dev
+          POSTGRES_DB: lola
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lola -d lola"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      DATABASE_URL: postgres://app_user:app_user_dev@localhost:5432/lola
+      DATABASE_ADMIN_URL: postgres://lola:lola_dev@localhost:5432/lola
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Migrate
+        run: pnpm db:migrate
+
+      - name: Seed
+        run: pnpm db:seed
+
+      - name: Tests (unit + integration)
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

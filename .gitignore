@@ -1,0 +1,22 @@
+# deps / build
+node_modules/
+.nuxt/
+.output/
+dist/
+
+# env & secrets — в репозитории только .env.example
+.env
+.env.*
+!.env.example
+
+# логи и локальный мусор
+*.log
+.DS_Store
+
+# данные локальных контейнеров
+docker/data/
+
+# тестовые артефакты
+coverage/
+playwright-report/
+test-results/

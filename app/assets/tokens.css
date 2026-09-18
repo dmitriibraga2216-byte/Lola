@@ -1,0 +1,55 @@
+/*
+ * Токены бренд-бука Lola (docs/lola-brandbook.html).
+ * Единственный источник цветов, радиусов и шрифтов — магических значений
+ * в компонентах нет (CLAUDE.md, правило 9). Теней в бренде нет.
+ */
+
+:root {
+  /* Цвета */
+  --color-bg: #f0e7d7;          /* беж — фон */
+  --color-bg-soft: #faf6ec;     /* светлый беж — карточки */
+  --color-bg-line: #d8cdb8;     /* границы на беже */
+  --color-bg-line-soft: #e5dac4;
+  --color-ink: #0c0f14;         /* чернила — текст */
+  --color-ink-muted: #6b6154;   /* приглушённый текст */
+  --color-ink-faint: #a49b8c;   /* подписи, плейсхолдеры */
+  --color-sun: #ffc933;         /* солнце — действие */
+  --color-sun-ink: #7d5600;     /* текст на солнечном */
+  --color-teal: #2bbfae;        /* бирюза — прогресс и результат */
+  --color-teal-ink: #0d6f66;
+  --color-teal-deep: #06322d;
+  --color-coral: #ff6b4a;       /* коралл — ошибка */
+  --color-coral-ink: #b23c22;
+  --color-coral-deep: #3b0f03;
+
+  /* Шрифт: заголовки 900 */
+  --font-family: 'Nunito', 'Trebuchet MS', sans-serif;
+  --font-size-body-s: 0.8125rem;
+  --font-size-body: 1rem;
+  --font-size-title-l: 1.25rem;
+  --font-size-display: 2.5rem;
+
+  /* Радиусы 16–36 */
+  --radius-s: 16px;
+  --radius-m: 20px;
+  --radius-l: 24px;
+  --radius-xl: 28px;
+  --radius-2xl: 36px;
+  --radius-pill: 999px;
+
+  /* Отступы */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-family);
+}

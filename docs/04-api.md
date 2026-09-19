@@ -58,86 +58,197 @@
 
 Лимиты: `/auth/otp/request` — 3 на номер / 15 мин и 30 на IP / час; `/auth/otp/verify` — 5 на код.
 
-## 4.3 Обучение (кабинет)
+## 4.3 Словарь ресурсов
+
+После разбора эталона API строится вокруг двух центральных сущностей, а не вокруг курса:
+
+| Сущность | Что это | Путь |
+| --- | --- | --- |
+| **Контент** | материал: курс, ресурс, тест, практикум, опрос, комплексный тест, программа, очное занятие, вебинар, чек-лист, оценка | `/content/...` |
+| **Назначение** (`task`) | кому, с какими правилами, в какие сроки | `/tasks/...` |
+
+Правила прохождения (попытки, порог, таймер, сроки, награды) живут **в назначении**
+(`15` §14.3), не в контенте. Это отражено в API: у контента нет ни одного поля,
+влияющего на прохождение.
+
+`contentType` — перечисление из одиннадцати значений:
+`course`, `training_program`, `resource`, `test`, `complex_test`, `workshop`,
+`poll`, `assessment`, `check_list`, `meetup`, `webinar`.
+
+## 4.4 Обучение (кабинет сотрудника)
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/learning/my` | назначенное: активное, просроченное, завершённое |
-| GET | `/learning/catalog` | каталог с фильтрами |
-| POST | `/learning/enroll` | `{courseId}` самозапись |
-| GET | `/learning/enrollments/:id` | курс с деревом модулей и прогрессом |
-| GET | `/learning/lessons/:id` | тело урока (только если урок доступен) |
-| POST | `/learning/lessons/:id/tick` | `{seconds}` идемпотентно, окно 15 с |
-| POST | `/learning/lessons/:id/complete` | завершение урока; сервер проверяет условия |
-| GET | `/learning/certificates` | свои сертификаты |
+| GET | `/me/tasks` | мои задания; `?group=new\|planned\|failed\|overdue\|done` — пять групп эталона |
+| GET | `/me/tasks/:id` | карточка задания: контент, сроки, правила, прогресс |
+| GET | `/me/trajectories` | мои траектории с деревом и текущим блоком |
+| GET | `/me/catalog` | каталог: `?kind=tasks\|trajectories`, фильтр по категории |
+| POST | `/me/catalog/:id/enroll` | самозапись (режим «Вільний доступ») |
+| POST | `/me/catalog/:id/request` | заявка (режим «Подання заявки») |
+| GET | `/me/development-plan` | планы развития: `?status=active\|inactive\|done` |
+| GET | `/me/certificates`, `/me/badges` | достижения |
+| GET | `/me/study-history` | история и динамика рейтинга (свой и внешний) |
+| GET | `/me/bonuses` | баланс и книга операций |
+| GET/PATCH | `/me/notifications/prefs` | свои переключатели уведомлений |
+| POST | `/me/role/switch` | `{roleId}` — переключение активной роли (`01` §1.9.2) |
 
-## 4.4 Тесты и попытки
+## 4.5 Прохождение контента
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| POST | `/quiz/:id/attempts` | старт попытки → снапшот, `attemptId`, дедлайн |
-| GET | `/attempts/:id` | текущее состояние: вопросы (без эталонов), ответы, остаток времени |
-| PUT | `/attempts/:id/answers/:questionId` | сохранить ответ (автосохранение) |
-| POST | `/attempts/:id/submit` | отправка; ответ: результат или `review` |
-| GET | `/attempts/:id/result` | разбор после завершения (по правилу `show_answers`) |
-| POST | `/attempts/:id/reset` | сброс попыток (скоуп `review.grade`) |
+| GET | `/enrollments/:id` | состояние прохождения: дерево, прогресс, доступность элементов |
+| GET | `/enrollments/:id/items/:itemId` | тело урока или ресурса, если элемент доступен |
+| POST | `/enrollments/:id/items/:itemId/tick` | `{seconds, scrollPct, videoPct}` идемпотентно, окно 15 с |
+| POST | `/enrollments/:id/items/:itemId/complete` | завершение; сервер сам проверяет условия зачёта (`11` Г-11.5) |
+| POST | `/enrollments/:id/items/:itemId/acknowledge` | «Я ознайомився» для ссылок и объявлений |
+| POST | `/enrollments/:id/migrate-version` | перейти на новую версию материала (`10` Г-10.1) |
 
-Сервер никогда не отдаёт эталонные ответы до завершения попытки — проверка на уровне сериализатора,
+Клиент никогда не решает, пройден ли элемент: он присылает факты (сколько секунд,
+докуда доскроллил, сколько видео просмотрел), решение принимает сервер.
+
+## 4.6 Попытки теста
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| POST | `/tests/:id/attempts` | старт: снапшот состава + копия `params` назначения, дедлайн |
+| GET | `/attempts/:id` | вопросы без эталонов, сохранённые ответы, остаток времени |
+| PUT | `/attempts/:id/answers/:questionId` | автосохранение ответа |
+| POST | `/attempts/:id/answers/:questionId/files` | вложение к свободному ответу |
+| POST | `/attempts/:id/submit` | отправка → результат либо `review` |
+| GET | `/attempts/:id/result` | разбор по правилам назначения (протокол ошибок, скрытие верных) |
+| POST | `/attempts/:id/recalculate` | **«Перерахувати»** по текущему ключу (`22` §13.7); пишет новую запись результата, снимок не трогает |
+| POST | `/tests/:id/attempt-requests` | запрос дополнительной попытки |
+| GET/POST | `/attempt-requests`, `/attempt-requests/:id/decide` | очередь запросов и решение |
+
+Сервер не отдаёт эталонные ответы до завершения попытки — проверка в сериализаторе,
 отдельный тест `tests/integration/attempt-leak.spec.ts`.
 
-## 4.5 Проверка (наставник)
+## 4.7 Проверка вручную
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/review/queue` | очередь: фильтры по точке, курсу, давности |
-| GET | `/review/answers/:id` | ответ с контекстом вопроса и историей попыток |
-| POST | `/review/answers/:id/grade` | `{isCorrect, score, comment}` |
-| POST | `/attempts/:id/confirm-offline` | подтверждение очной части |
+| GET | `/review/answers` | очередь **ответов** (`12` §14.4); фильтры: `checked`, метки вопросов, точка, курс, давность |
+| POST | `/review/answers/:id/grade` | `{score, comment}`; наставнику видна `grader_hint` |
+| GET | `/review/workshops` | очередь сдач практикумов; сортировка по времени в очереди |
+| POST | `/review/workshops/:id/claim` | взять в работу (блокировка 30 минут) |
+| POST | `/review/workshops/:id/grade` | `{decision: passed\|rework\|failed, criteria[], comment}` |
+| GET | `/review/checklists` | заполненные чек-листы на согласование |
 
-## 4.6 Контент (методист)
-
-| Метод | Путь | Описание |
-| --- | --- | --- |
-| GET/POST | `/courses` | список / создание |
-| GET/PATCH/DELETE | `/courses/:id` | карточка, правка, мягкое удаление |
-| POST | `/courses/:id/versions` | новая черновая версия |
-| POST | `/courses/:id/publish` | публикация версии, `{changelog}` |
-| POST | `/courses/:id/duplicate` | копия |
-| CRUD | `/modules`, `/lessons` | структура курса |
-| POST | `/lessons/:id/reorder` | `{sort}` |
-| CRUD | `/question-banks`, `/questions` | банк вопросов |
-| CRUD | `/quizzes`, `/quizzes/:id/questions` | тесты |
-| CRUD | `/knowledge` | база знаний |
-| CRUD | `/surveys` | опросы |
-
-## 4.7 Люди и назначения
+## 4.8 Контент (методист)
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET/POST | `/people` | список с фильтрами / создание |
-| PATCH | `/people/:id` | профиль, статус |
-| POST | `/people/:id/invite` | выслать приглашение повторно |
-| POST | `/people/:id/placements` | точка и позиция |
-| POST | `/people/:id/roles` | назначение роли в области |
-| POST | `/people/import` | загрузка файла → `importJobId` |
-| GET | `/people/import/:id` | статус, статистика, ссылка на отчёт об ошибках |
-| POST | `/people/import/:id/apply` | применить после предпросмотра |
-| GET/POST | `/assignments` | список / создание |
-| DELETE | `/assignments/:id` | отмена |
-| GET | `/assignments/:id/preview` | сколько человек попадёт под условие (до создания) |
+| GET/POST | `/content` | список всех типов; `?contentType=`, `?tags=`, `?authorId=` |
+| GET/PATCH/DELETE | `/content/:id` | карточка (общие поля всех типов) |
+| POST | `/content/:id/versions` | новая черновая версия |
+| POST | `/content/:id/publish` | публикация; `{notifyAssigned: bool}` — «Сповістити про оновлення» (`11` §14.2) |
+| POST | `/content/:id/duplicate` | копия |
+| CRUD | `/courses/:id/sections`, `/courses/:id/items` | план курса: разделы и элементы, у теста в плане свой `passScorePct` |
+| CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3) |
+| POST | `/tests/:id/questions/import` | «Питання з іншого тесту» (копия) и «з банку» (ссылка) |
+| CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа) |
+| CRUD | `/complex-tests/:id/items` | состав: тесты, сгруппированные по темам |
+| CRUD | `/checklists`, `/assessments` | анкеты; параметры замораживаются после первого заполнения |
+| CRUD | `/criteria-groups`, `/criteria`, `/scales` | словарь критериев и шкал (`24` Г-24.4) |
 
-## 4.8 Отчёты
+## 4.9 Назначения
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/reports/readiness` | готовность по точкам и позициям |
-| GET | `/reports/course/:id` | воронка курса |
-| GET | `/reports/overdue` | просроченные |
-| GET | `/reports/attempts` | результаты аттестаций |
-| GET | `/reports/activity` | активность |
-| POST | `/reports/:name/export` | фоновая выгрузка → уведомление со ссылкой |
+| GET/POST | `/tasks` | список / создание; `?type=manual\|auto\|catalog\|trajectory\|archive` |
+| GET/PATCH | `/tasks/:id` | карточка |
+| GET/PUT | `/tasks/:id/params` | правила прохождения (`assignments.params`, `02` §2.7) |
+| GET/PUT | `/tasks/:id/reminders` | расписание напоминаний (`15` Г-15.1) |
+| GET | `/tasks/:id/audience` | список людей: назначенные, не назначенные, все; фильтры как в эталоне |
+| POST | `/tasks/:id/audience/assign` | `{userIds[]}` или `{filter}` |
+| DELETE | `/tasks/:id/audience/:userId` | снятие назначения (статус `cancelled`, не удаление) |
+| POST | `/tasks/:id/audience/preview` | сколько человек попадёт под условие до применения |
+| POST | `/tasks/:id/audience/import` | CSV (`15` Г-15.4) → `importJobId` + предпросмотр |
+| GET | `/tasks/:id/results` | отчёт назначения (тот же экран, что отчёт по типу, `22` §13.7) |
+| CRUD | `/task-parameters` | «Додаткові параметри для завдань»: текст, список, число |
 
-## 4.9 Медиа
+## 4.10 Правила автоматизации и траектории
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| CRUD | `/automation-rules` | правило: четыре измерения (місто, посада, підрозділ, мітка), каждое с режимом `any\|include\|exclude`, `delayDays`, `onLeaveCondition` |
+| GET | `/automation-rules/:id/preview` | «Буде призначено»: состав аудитории на сейчас |
+| GET | `/automation-rules/:id/usages` | «Використовується для»: обратные ссылки |
+| CRUD | `/trajectories` | траектория |
+| GET/PUT | `/trajectories/:id/graph` | блоки и переходы с условиями (`17` Г-17.1) |
+| POST | `/trajectories/:id/validate` | проверка перед публикацией: недостижимые блоки, пути к Finish, циклы |
+| GET/POST | `/trajectories/:id/audience` | режим назначения и аудитория |
+
+## 4.11 Люди и справочники
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET/POST | `/people` | список с фильтрами (посада, місто, підрозділ, мітки, рівень, активність) |
+| GET/PATCH | `/people/:id` | карточка (`16` §14.4) |
+| POST | `/people/:id/roles` | роли в области |
+| POST | `/people/:id/password` | смена пароля администратором (отдельный эндпоинт, отдельный скоуп) |
+| POST | `/people/import` | CSV → `importJobId`, файл проверяется целиком |
+| GET | `/people/import/:id` | протокол: создать N, обновить M, ошибок K с номерами строк |
+| POST | `/people/import/:id/apply` | применить (всё или ничего) |
+| CRUD | `/org-units`, `/locations`, `/positions`, `/position-levels`, `/cities`, `/user-groups` | справочники |
+| CRUD | `/tags` | метка с обязательной областью действия (`16` §14.2) |
+| GET | `/org-conflicts` | протокол конфликтов оргструктуры |
+
+## 4.12 Развитие и оценка
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| CRUD | `/competencies`, `/competencies/:id/indicators`, `/competency-profiles` | словарь и профили должностей |
+| GET | `/people/:id/competencies` | уровни с источником и датой (`19` Г-19.2) |
+| POST | `/people/:id/competencies/:cid` | ручная установка с причиной |
+| CRUD | `/development-plans` | планы развития |
+| CRUD | `/goals`, `/goal-statuses` | цели и справочник их статусов |
+| CRUD | `/requests` | заявки: `kind=external_learning\|career`, маршрут согласования (`19` Г-19.1) |
+| POST | `/assessments/:id/cycles` | цикл оценки: состав оценщиков по ролям |
+| GET | `/assessments/:id/cycles/:cid/report` | результат с порогом показа (`20` Г-20.2) |
+
+## 4.13 Хаб
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/knowledge/search` | единый поиск: `?in=all\|resources\|news\|forum\|wiki` |
+| CRUD | `/knowledge/access-groups` | группы доступа к ресурсам |
+| POST | `/knowledge/:id/bookmark` | закладка |
+| CRUD | `/news`, `/notices`, `/simple-notices` | лента и объявления |
+| POST | `/notices/:id/acknowledge` | «Ознайомлений» — подтверждение (`21` §14.5) |
+| GET | `/notices/:id/coverage` | кто подтвердил, кто нет |
+| CRUD | `/gift-store/items` | товары магазина |
+| POST | `/gift-store/items/:id/order` | покупка → резерв |
+| POST | `/gift-store/orders/:id/status` | `ready` \| `issued` \| `cancelled` (`21` Г-21.1) |
+| GET | `/bonuses/ledger` | книга операций с остатком в строке |
+| POST | `/bonuses/adjust` | ручное начисление или списание с причиной |
+| CRUD | `/guest-blocks` | гостевая страница |
+| GET | `/comments` | единая лента комментариев со всех источников |
+| POST | `/comments/:id/read`, `/comments/:id/reply` | пометка и ответ автору материала |
+
+## 4.14 Отчёты и журналы
+
+Единая форма: `GET /reports/:name` с общими параметрами
+`?from=&to=&locationIds=&positionIds=&tagIds=&context=any|standalone|in_course|in_program`
+и специфичными для отчёта. Все отчёты отдают одинаковую «левую часть» (`22` §13.3).
+
+| Путь | Что |
+| --- | --- |
+| `/reports/tasks/:contentType` | по типу контента; `?taskId=` даёт отчёт назначения |
+| `/reports/summary` | сводный: `{userFilter, taskFilter, columns, groupBy}` |
+| `/reports/trajectory/:id` | колонка на элемент траектории |
+| `/reports/assessment/:id`, `/reports/checklist/:id` | анкеты; разрез чек-листа по пунктам |
+| `/reports/knowledge` | обращения к базе знаний |
+| `/logs/task-status` | протокол смены статусов |
+| `/logs/task-access` | обращения к заданиям (IP, браузер) |
+| `/logs/security` | журнал безопасности (`16` Г-16.2) |
+| `/logs/sessions` | сессии |
+| `/logs/notifications` | уведомления + вкладка подключений Telegram |
+| `/logs/imports`, `/logs/bonuses`, `/logs/goal-statuses` | остальные журналы |
+| POST `/reports/:name/export` | фоновая выгрузка → уведомление со ссылкой |
+| CRUD `/saved-reports` | сохранённый отчёт с расписанием (`22` Г-22.2, наш конструктор) |
+
+## 4.15 Медиа
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
@@ -146,31 +257,52 @@
 | GET | `/media/:id` | статус и подписанная ссылка на чтение (10 минут) |
 | DELETE | `/media/:id` | мягкое удаление |
 
-Ограничения: изображение ≤ 15 МБ, видео ≤ 500 МБ, документ ≤ 50 МБ; mime — allowlist;
-имя файла не влияет на ключ (ключ — uuid), оригинальное имя хранится в БД.
+Ограничения (`11` Г-11.4): изображение ≤ 10 МБ, документ ≤ 50 МБ, аудио ≤ 100 МБ,
+видео ≤ 500 МБ, на ресурс суммарно ≤ 1 ГБ; mime — allowlist; ключ — uuid,
+оригинальное имя хранится в БД. Файл чужого тенанта — **404, не 403** (`25` §10).
 
-## 4.10 Настройки и служебное
+## 4.16 Настройки
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET/PATCH | `/settings/tenant` | бренд, языки, тихие часы, флаги модулей |
-| CRUD | `/settings/roles` | роли и скоупы |
-| CRUD | `/settings/notifications` | шаблоны |
-| CRUD | `/settings/integrations` | Telegram, SMS, вебхуки, API-токены |
-| GET | `/audit` | журнал с фильтрами |
-| GET | `/health` | liveness: процесс жив |
-| GET | `/ready` | readiness: БД, очередь, S3 |
-| GET | `/metrics` | Prometheus |
+| GET/PATCH | `/settings/tenant` | бренд, языки, флаги модулей (`24` Г-24.2) |
+| GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
+| CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1) |
+| GET/PUT | `/settings/position-role-map` | правило «должность → роль» |
+| CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` |
+| GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
+| GET/PUT | `/settings/email-layout` | шапка и подвал письма |
+| CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены |
+| CRUD | `/settings/translations` | переопределение строк интерфейса |
+| GET | `/settings/usage` | потребление: активные, диск, дата последнего сбора (`24` §4.4.1) |
+| GET | `/audit` | журнал изменений |
+| GET | `/health`, `/ready`, `/metrics` | служебное |
 
-## 4.11 Вебхуки наружу
+## 4.17 Панель оператора платформы
+
+Отдельный префикс `/api/v1/platform`, отдельный набор скоупов, недоступен
+администратору тенанта ни на чтение (`24` Г-24.3).
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET/POST | `/platform/tenants` | список и создание |
+| GET/PATCH | `/platform/tenants/:id` | карточка, тариф, лимиты |
+| POST | `/platform/tenants/:id/impersonate` | вход «от имени»: обязательна причина, 60 минут, запись в журнал безопасности тенанта |
+| GET | `/platform/metrics` | метрики платформы |
+| POST | `/platform/tenants/:id/anonymized-dump` | обезличенный слепок (`25` §16.3) |
+
+## 4.18 Вебхуки наружу
 
 События: `enrollment.completed`, `attempt.passed`, `attempt.failed`, `certificate.issued`,
-`assignment.overdue`. Доставка: POST с подписью `X-Lola-Signature` (HMAC-SHA256 по телу),
-3 повтора с экспонентой, журнал доставок в интерфейсе.
+`certificate.revoked`, `task.overdue`, `notice.acknowledged`, `user.created`.
+Доставка: POST с подписью `X-Lola-Signature` (HMAC-SHA256 по телу), три повтора
+с экспонентой, журнал доставок с телом запроса и ответом, ручной повтор из интерфейса.
 
-## 4.12 Телеграм-бот
+## 4.19 Телеграм-бот
 
-- `/start <token>` — привязка `telegram_chat_id` к пользователю (токен одноразовый, 15 минут).
+- `/start <token>` — привязка `telegram_chat_id` (токен одноразовый, 15 минут).
 - Кнопки под уведомлением: «Пройти», «Відкласти на день», «Не нагадувати про це».
-- Бот не ведёт обучение внутри чата: всё открывается в вебе по ссылке с автологином
-  (одноразовый токен, 10 минут, привязка к chat_id).
+- Бот не ведёт обучение в чате: всё открывается в вебе по ссылке с автологином
+  (одноразовый токен, 10 минут, привязан к `chat_id` и коду уведомления).
+- Ошибки: 403 — бот заблокирован, канал переключается на SMS; 429 — `retry_after`;
+  400 «chat not found» — сброс привязки.

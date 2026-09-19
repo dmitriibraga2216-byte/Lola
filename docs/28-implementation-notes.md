@@ -125,6 +125,18 @@
 - Sentry — только сервер; клиентский `@sentry/vue` не добавлен из-за бюджета первого экрана.
 - Node 23.4 локально ломает `TextDecoder('ascii')` (fontkit) — точечный обход в `certificatePdf.ts`; прод — Node 22.
 
+### Финальный пакет ТЗ 19.09.2026 — расхождения внутри ТЗ и принятые решения
+Пофайловая дельта и очередь работ — `docs/30-spec-delta-2026-09-19.md`. Где документы
+пакета спорят друг с другом, принято:
+- `02` §2.6 держит `quizzes.pass_score/time_limit_sec/attempts_allowed`, а раздел «Что проверяет тест схемы» их запрещает → запрет побеждает: правила только в `assignments.params`, тест `schema-parity.spec.ts` проверяет все таблицы контента.
+- `02` §2.7 DDL `enrollments.status` (`completed|expired`) против перечисления (`not_assigned|not_started|in_progress|done|failed`) → перечисление. `scheduled/expired/cancelled` становятся признаками (`starts_at`, `due_at`, `cancelled_at`), а не статусами.
+- Коды типов вопросов: `12` §3.3 (`multiple|order|match|hotspot|text_long`) против `02`/`03` (`multi|ordering|comparison|answer_by_map|free`) → `02`; старые значения переводятся миграцией.
+- `assignments.content_type` в DDL содержит `poll360`, перечисление — `assessment` → `assessment`.
+- `05` §5.14.5 «условие на стрелке» против `17` §14.3 «логика в узлах» → узлы (снято с эталона).
+- `25` §4 ключи S3 `t/<tenant>/…` против фактических `<tenant>/…` → не мигрируем, тенант в префиксе есть.
+- `00` «wiki не делаем» против уже сделанного (PR #23) → модуль остаётся в коде, по умолчанию выключен флагом модуля; форум/чат/рабочие задачи не делаются.
+- `04`: новые пути (`/content`, `/tasks`, `/me`, `/enrollments/:id/items`) вводятся алиасами к существующим, старые снимаются одним PR в конце R1.
+
 ## 28.3 Переменные окружения, добавленные после docs/26
 
 `APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`,

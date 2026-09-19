@@ -66,7 +66,7 @@ pnpm lint && pnpm typecheck
 | [09-integrations.md](docs/09-integrations.md) | внешние интеграции, OAuth, секреты тенанта, вебхуки, входящий API |
 | [10-catalog-learning.md](docs/10-catalog-learning.md) | каталог, «Моє навчання», записи, прогресс, переаттестация |
 | [11-content-lessons.md](docs/11-content-lessons.md) | материалы, блоки, редактор, версии, медиа, плеер урока |
-| [12-tests-questions.md](docs/12-tests-questions.md) | банк вопросов, 10 типов, тест, попытка, снапшот, подсчёт |
+| [12-tests-questions.md](docs/12-tests-questions.md) | банк вопросов (10 типов), группы вопросов, тесты, попытки, подсчёт |
 | [13-workshops.md](docs/13-workshops.md) | практикумы: задание, сдача, проверка, доработка |
 | [14-certification.md](docs/14-certification.md) | аттестация, единая очередь проверки, сертификаты |
 | [15-assignments.md](docs/15-assignments.md) | назначения, конструктор аудитории, профили обучения, автоматизация |
@@ -74,13 +74,17 @@ pnpm lint && pnpm typecheck
 | [17-programs-trajectories.md](docs/17-programs-trajectories.md) | программы и траектории: конструктор, граф с условиями, режимы назначения, прогресс |
 | [18-meetups-webinars.md](docs/18-meetups-webinars.md) | очные занятия, вебинары, комплексные тесты (R2) |
 | [19-development.md](docs/19-development.md) | компетенции, профили должностей, ИПР, цели, заявки (R2) |
-| [20-assessment.md](docs/20-assessment.md) | оценка персонала и чек-листы (R2) |
+| [20-assessment.md](docs/20-assessment.md) | оценка 360°, чек-листы смен, тайный покупатель |
 | [21-hub.md](docs/21-hub.md) | база знаний, новости, объявления, события, wiki, бонусы |
 | [22-reports.md](docs/22-reports.md) | каркас отчётов, восемь отчётов, журналы, конструктор выгрузок |
 | [23-notifications.md](docs/23-notifications.md) | каналы, шаблоны, тихие часы, Telegram-бот, дайджесты |
 | [24-settings-platform.md](docs/24-settings-platform.md) | настройки тенанта, роли, переводы, панель оператора |
+| [25-multitenancy.md](docs/25-multitenancy.md) | мультитенантность: изоляция данных, файлов, задач, лимиты, миграции, приёмка |
 | [26-server-local.md](docs/26-server-local.md) | локальный сервер: VM в Proxmox, compose, переменные, бэкапы, обновления |
 | [27-gateway-public.md](docs/27-gateway-public.md) | веб-шлюз наружу: Cloudflare Tunnel, домены, демо-ссылка для третьих лиц |
 | [28-implementation-notes.md](docs/28-implementation-notes.md) | решения по реализации, отступления от ТЗ и открытые вопросы к заказчику |
+| [29-audit-2026-09-19.md](docs/29-audit-2026-09-19.md) | аудит выполнения: что не сделано, принятые решения, добавленное сверх ТЗ |
+| [30-spec-delta-2026-09-19.md](docs/30-spec-delta-2026-09-19.md) | дельта финального пакета ТЗ к реализации и очередь доработок |
+| [_conventions.md](docs/_conventions.md) | формат модульных документов и факты, снятые с эталона |
 
 Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

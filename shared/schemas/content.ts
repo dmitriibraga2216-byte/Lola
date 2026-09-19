@@ -32,6 +32,8 @@ export const courseCreateSchema = z.object({
   strictOrder: z.boolean().default(true),
   isCatalogVisible: z.boolean().default(false),
   validityMonths: z.number().int().min(1).max(120).optional(),
+  competencyId: z.string().uuid().nullable().optional(), // docs/19 §7.3: какую компетенцию закрывает курс
+  competencyLevel: z.number().int().min(1).max(5).nullable().optional(),
   tags: z.array(z.string().min(1).max(50)).max(20).default([]),
   coverKey: z.string().max(300).optional(),
 })

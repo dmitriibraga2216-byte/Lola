@@ -37,6 +37,15 @@ async function save() {
   } catch (err) { error.value = apiErrorOf(err).message }
 }
 const compName = (id: string) => comps.value.find(c => c.id === id)?.name ?? '?'
+const coverage = ref<{ people: number, fit: number } | null>(null)
+const current = computed(() => items.value.find(x => x.positionId === form.positionId))
+watch(current, async (p) => { coverage.value = p ? await api<{ people: number, fit: number }>(`/position-profiles/${p.id}/coverage`).catch(() => null) : null }, { immediate: true })
+async function applyToPeople() {
+  if (!current.value) return
+  error.value = ''; notice.value = ''
+  try { const r = await api<{ assignments: number, enrolled: number }>(`/position-profiles/${current.value.id}/apply`, { method: 'POST' }); notice.value = t('dev.applied', { a: r.assignments, e: r.enrolled }) }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 </script>
 <template>
   <div>
@@ -51,6 +60,7 @@ const compName = (id: string) => comps.value.find(c => c.id === id)?.name ?? '?'
       </aside>
       <section v-if="form.positionId" class="card">
         <h2>{{ positions.find(p => p.id === form.positionId)?.name }}</h2>
+        <p v-if="coverage" class="sub">{{ t('dev.coverage', { fit: coverage.fit, people: coverage.people }) }} <NuxtLink v-if="coverage.people" :to="{ path: '/admin/people', query: { positionId: form.positionId } }" class="link">→</NuxtLink></p>
         <textarea v-model="form.description" class="field" rows="2" :placeholder="t('dev.profileDesc')" />
         <label class="sub">{{ t('dev.probation') }} <input v-model.number="form.probationDays" class="field short" type="number" min="1" max="365"></label>
         <h3>{{ t('dev.requirements') }}</h3>
@@ -69,6 +79,7 @@ const compName = (id: string) => comps.value.find(c => c.id === id)?.name ?? '?'
         </div>
         <button class="chip" @click="form.mandatoryContent.push({ subjectType: 'course', subjectId: courses[0]?.id ?? '', dueDays: 14 })">+ {{ t('dev.course') }}</button>
         <button class="primary" data-testid="profile-save" @click="save">{{ t('common.save') }}</button>
+        <button v-if="current" class="chip" @click="applyToPeople">{{ t('dev.applyToPeople') }}</button>
       </section>
       <p v-else class="sub">{{ t('dev.pickPosition') }}</p>
     </div>

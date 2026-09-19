@@ -4,7 +4,7 @@ const { t } = useI18n()
 const { api } = useApi()
 
 interface GapItem { competencyId: string, name: string, requiredLevel: number, currentLevel: number, maxLevel: number, gap: number, isCritical: boolean, source: string | null, whatToLearn: { id: string, title: string }[] }
-interface Goal { id: string, title: string, kind: string, dueAt: string, statusCode: string, statusName: string, statusColor: string, isFinal: boolean, progressPct: number }
+interface Goal { id: string, title: string, kind: string, dueAt: string, statusCode: string, statusName: string, statusColor: string, isFinal: boolean, progressPct: number, approvedAt: string | null, returnComment: string | null }
 interface Plan { id: string, periodFrom: string, periodTo: string, status: string, summary: string | null }
 interface Me {
   gap: { position: { positionName: string } | null, profile: { id: string } | null, items: GapItem[] }
@@ -120,7 +120,10 @@ const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().
           <div class="row">
             <span class="card-title">{{ g.title }}</span>
             <span :class="['badge', g.statusColor]">{{ g.statusName }}</span>
+            <span v-if="!g.approvedAt && g.returnComment" class="badge coral">{{ t('dev.returned') }}</span>
+            <span v-else-if="!g.approvedAt" class="badge">{{ t('dev.awaitingApproval') }}</span>
           </div>
+          <span v-if="g.returnComment && !g.approvedAt" class="sub">{{ g.returnComment }}</span>
           <div class="progress"><span :style="{ width: `${g.progressPct}%` }" /></div>
           <span :class="['sub', { overdue: isOverdue(g) }]">{{ t('dev.due') }} {{ g.dueAt }}{{ isOverdue(g) ? ` · ${t('dev.overdue')}` : '' }}</span>
         </NuxtLink>

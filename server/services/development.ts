@@ -149,7 +149,7 @@ export async function myPlan(ctx: Ctx, userId: string) {
     const [plan] = await tx.select().from(developmentPlans).where(and(eq(developmentPlans.userId, userId), sql`${developmentPlans.status} <> 'closed'`)).orderBy(desc(developmentPlans.createdAt)).limit(1)
     const goals = await tx.select({
       id: developmentGoals.id, title: developmentGoals.title, kind: developmentGoals.kind, dueAt: developmentGoals.dueAt, statusCode: developmentGoals.statusCode,
-      progressPct: developmentGoals.progressPct, competencyId: developmentGoals.competencyId, targetLevel: developmentGoals.targetLevel, planId: developmentGoals.planId,
+      progressPct: developmentGoals.progressPct, competencyId: developmentGoals.competencyId, targetLevel: developmentGoals.targetLevel, planId: developmentGoals.planId, approvedAt: developmentGoals.approvedAt, returnComment: developmentGoals.returnComment,
       statusName: goalStatuses.name, statusColor: goalStatuses.color, isFinal: goalStatuses.isFinal,
     }).from(developmentGoals).innerJoin(goalStatuses, eq(goalStatuses.code, developmentGoals.statusCode))
       .where(eq(developmentGoals.userId, userId)).orderBy(asc(developmentGoals.dueAt))
@@ -201,16 +201,55 @@ export async function transitionPlan(ctx: Ctx, planId: string, action: PlanTrans
 
 // ── Цели ───────────────────────────────────────────────────────────────
 
-export async function createGoal(ctx: Ctx, input: { userId: string, planId?: string, title: string, description?: string, kind: string, competencyId?: string, targetLevel?: number, metric?: string, linkedContent?: unknown[], dueAt: string, mentorId?: string }) {
+export type CreateGoalResult = { ok: true, goal: typeof developmentGoals.$inferSelect } | { ok: false, code: 'due_past' | 'due_outside_plan' | 'level_not_higher' | 'competency_required' }
+
+/** Цель (docs/19 §6.1): срок > сегодня и ≤ конца периода ИПР; целевой уровень выше текущего; при типе competency — компетенция обязательна.
+ *  Если тенант включил согласование (§7.4) и цель ставит сам человек — она ждёт руководителя. */
+export async function createGoal(ctx: Ctx, input: { userId: string, planId?: string, title: string, description?: string, kind: string, competencyId?: string, targetLevel?: number, metric?: string, linkedContent?: unknown[], dueAt: string, mentorId?: string }): Promise<CreateGoalResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const today = new Date().toISOString().slice(0, 10)
+    if (input.dueAt <= today) return { ok: false as const, code: 'due_past' as const }
+    if (input.planId) {
+      const [plan] = await tx.select({ periodTo: developmentPlans.periodTo }).from(developmentPlans).where(eq(developmentPlans.id, input.planId))
+      if (plan && input.dueAt > plan.periodTo) return { ok: false as const, code: 'due_outside_plan' as const }
+    }
+    if (input.kind === 'competency' && !input.competencyId) return { ok: false as const, code: 'competency_required' as const }
+    if (input.competencyId && input.targetLevel) {
+      const cur = (await currentLevels(tx, input.userId)).get(input.competencyId)?.level ?? 0
+      if (input.targetLevel <= cur) return { ok: false as const, code: 'level_not_higher' as const }
+    }
+    const { developmentSettings } = await import('./developmentExtra')
+    const settings = await developmentSettings(tx, ctx.tenantId)
+    const isOwner = input.userId === ctx.actorId
+    const needsApproval = settings.goalsNeedApproval && isOwner
     const [initial] = await tx.select({ code: goalStatuses.code }).from(goalStatuses).where(eq(goalStatuses.isInitial, true)).limit(1)
     const [g] = await tx.insert(developmentGoals).values({
       tenantId: ctx.tenantId, userId: input.userId, planId: input.planId ?? null, title: input.title, description: input.description ?? null, kind: input.kind,
       competencyId: input.competencyId ?? null, targetLevel: input.targetLevel ?? null, metric: input.metric ?? null, linkedContent: input.linkedContent ?? [],
       dueAt: input.dueAt, statusCode: initial?.code ?? 'planned', mentorId: input.mentorId ?? null, createdBy: ctx.actorId,
+      ...(needsApproval ? {} : { approvedBy: ctx.actorId, approvedAt: new Date() }),
     }).returning()
     await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId: g!.id, fromStatus: null, toStatus: g!.statusCode, actorId: ctx.actorId })
-    return g!
+    const mgr = await managerOf(tx, input.userId)
+    if (needsApproval && mgr) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr, code: 'goal_needs_approval', payload: { title: input.title, goalId: g!.id }, dedupKey: `goal_appr:${g!.id}` })
+    else if (!isOwner) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: input.userId, code: 'goal_created', payload: { title: input.title, due: input.dueAt }, dedupKey: `goal_created:${g!.id}` })
+    return { ok: true as const, goal: g! }
+  })
+}
+
+/** Согласование цели руководителем (docs/19 §5.3, §7.4): «Погодити» / «Повернути» с комментарием. */
+export async function approveGoal(ctx: Ctx, goalId: string, decision: 'approve' | 'return', comment?: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [g] = await tx.select().from(developmentGoals).where(eq(developmentGoals.id, goalId))
+    if (!g) return { ok: false as const, code: 'not_found' as const }
+    if (g.userId === ctx.actorId) return { ok: false as const, code: 'self' as const }
+    if (decision === 'return' && !(comment ?? '').trim()) return { ok: false as const, code: 'comment_required' as const }
+    await tx.update(developmentGoals).set(decision === 'approve'
+      ? { approvedBy: ctx.actorId, approvedAt: new Date(), returnComment: null, updatedAt: new Date() }
+      : { approvedBy: null, approvedAt: null, returnComment: comment!, updatedAt: new Date() }).where(eq(developmentGoals.id, goalId))
+    await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: g.userId, code: decision === 'approve' ? 'goal_approved' : 'goal_returned', payload: { title: g.title, comment: comment ?? '' }, dedupKey: `goal_${decision}:${goalId}:${Date.now()}` })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: `goal.${decision}`, entity: 'development_goal', entityId: goalId, after: { comment: comment ?? null } })
+    return { ok: true as const }
   })
 }
 
@@ -236,7 +275,7 @@ export async function updateGoalProgress(ctx: Ctx, id: string, input: { progress
   })
 }
 
-export type GoalTransitionResult = { ok: true, status: string } | { ok: false, code: 'not_found' | 'not_allowed' | 'forbidden' | 'comment_required' }
+export type GoalTransitionResult = { ok: true, status: string } | { ok: false, code: 'not_found' | 'not_allowed' | 'forbidden' | 'comment_required' | 'not_approved' }
 
 /** Смена статуса по настраиваемому жизненному циклу (docs/19 §3.6) с протоколом. */
 export async function transitionGoal(ctx: Ctx, goalId: string, toCode: string, opts: { comment?: string, scopes: string[], evaluation?: string }): Promise<GoalTransitionResult> {
@@ -249,6 +288,9 @@ export async function transitionGoal(ctx: Ctx, goalId: string, toCode: string, o
     const isOwner = g.userId === ctx.actorId
     const canSet = to.whoCanSet.some(s => opts.scopes.includes(s) && (s !== 'development.own' || isOwner))
     if (!canSet) return { ok: false as const, code: 'forbidden' as const }
+    // Несогласованная цель не двигается по жизненному циклу (docs/19 §7.4)
+    if (!g.approvedAt && !from.isInitial) return { ok: false as const, code: 'not_approved' as const }
+    if (!g.approvedAt && !to.isInitial) return { ok: false as const, code: 'not_approved' as const }
     if (to.requiresComment && !(opts.comment ?? '').trim()) return { ok: false as const, code: 'comment_required' as const }
 
     const now = new Date()
@@ -284,7 +326,7 @@ export async function addGoalComment(ctx: Ctx, goalId: string, body: string) {
 export async function teamGoals(ctx: Ctx, filter: { status?: string, overdue?: boolean, locationId?: string } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.execute(sql`
-      select g.id, g.title, g.kind, g.due_at, g.status_code, s.name as status_name, s.color as status_color, s.is_final, g.progress_pct,
+      select g.id, g.title, g.kind, g.due_at, g.status_code, s.name as status_name, s.color as status_color, s.is_final, g.progress_pct, g.approved_at, g.return_comment,
              u.id as user_id, u.full_name, l.name as location, (g.due_at < current_date and not s.is_final) as is_overdue
       from development_goals g
       join goal_statuses s on s.code = g.status_code and s.tenant_id = g.tenant_id

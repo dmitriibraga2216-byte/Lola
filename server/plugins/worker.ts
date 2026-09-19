@@ -52,17 +52,20 @@ export default defineNitroPlugin(async () => {
       const { announcementScan } = await import('../services/news')
       const { programScan } = await import('../services/programs')
       const { inactiveScan } = await import('../services/people')
+      const { planPeriodScan, requestReportScan } = await import('../services/developmentExtra')
       const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
         const inactive = await inactiveScan(tenantId) // docs/16 §11 people.inactive_scan
+        const plans = await planPeriodScan(tenantId) // docs/19 §7.6 plan.period_scan
+        const reqReports = await requestReportScan(tenantId) // docs/19 §7.8 request.report_reminder
         const g = await goalDueScan(tenantId)
         const a = await assessmentScan(tenantId)
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
         const an = await announcementScan(tenantId)
         const pr = await programScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive })
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive, plans, reqReports })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync

@@ -13,5 +13,10 @@ export default defineEventHandler(async (event) => {
   if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Перевірте ціль', { issues: p.error.issues })
   const userId = p.data.userId ?? a.userId
   if (userId !== a.userId && !can(a, 'development.team')) return apiError(event, 403, 'forbidden', 'Немає доступу')
-  return apiData(await createGoal({ tenantId: a.tenantId, actorId: a.userId }, { ...p.data, userId }))
+  const r = await createGoal({ tenantId: a.tenantId, actorId: a.userId }, { ...p.data, userId })
+  if (!r.ok) {
+    const msg: Record<string, string> = { due_past: 'Термін має бути пізніше сьогодні', due_outside_plan: 'Термін виходить за межі плану', level_not_higher: 'Рівень має бути вищим за поточний', competency_required: 'Оберіть компетенцію' }
+    return apiError(event, 422, `goal.${r.code}`, msg[r.code]!)
+  }
+  return apiData(r.goal)
 })

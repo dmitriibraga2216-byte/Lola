@@ -2,7 +2,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'development.team' })
 const { t } = useI18n()
 const { api } = useApi()
-interface G { id: string, title: string, kind: string, due_at: string, status_code: string, status_name: string, status_color: string, is_final: boolean, progress_pct: number, user_id: string, full_name: string, location: string | null, is_overdue: boolean }
+interface G { id: string, title: string, kind: string, due_at: string, status_code: string, status_name: string, status_color: string, is_final: boolean, progress_pct: number, user_id: string, full_name: string, location: string | null, is_overdue: boolean, approved_at: string | null, return_comment: string | null }
 interface Status { code: string, name: string }
 const items = ref<G[]>([])
 const statuses = ref<Status[]>([])
@@ -20,6 +20,18 @@ async function load() {
 onMounted(load)
 watch(filter, load)
 const onReview = computed(() => items.value.filter(g => g.status_code === 'on_review').length)
+const toApprove = computed(() => items.value.filter(g => !g.approved_at && !g.return_comment).length)
+const returning = ref<string | null>(null)
+const returnComment = ref('')
+async function decide(g: G, decision: 'approve' | 'return') {
+  error.value = ''
+  try { await api(`/development/goals/${g.id}/approve`, { method: 'POST', body: { decision, comment: decision === 'return' ? returnComment.value : undefined } }); returning.value = null; returnComment.value = ''; await load() }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+async function remindAll() {
+  const overdue = items.value.filter(g => g.is_overdue)
+  for (const g of overdue) await api(`/development/goals/${g.id}/comments`, { method: 'POST', body: { body: t('dev.remindText') } }).catch(() => null)
+}
 </script>
 <template>
   <div>
@@ -29,6 +41,9 @@ const onReview = computed(() => items.value.filter(g => g.status_code === 'on_re
       <select v-model="filter.status" class="field"><option value="">{{ t('dev.allStatuses') }}</option><option v-for="s in statuses" :key="s.code" :value="s.code">{{ s.name }}</option></select>
       <label class="check"><input v-model="filter.overdue" type="checkbox"> {{ t('dev.onlyOverdue') }}</label>
       <span v-if="onReview" class="badge sun">{{ t('dev.onReviewN', { n: onReview }) }}</span>
+      <span v-if="toApprove" class="badge coral">{{ t('dev.toApproveN', { n: toApprove }) }}</span>
+      <button v-if="items.some(g => g.is_overdue)" class="chip" @click="remindAll">{{ t('dev.remindAll') }}</button>
+      <NuxtLink to="/admin/development/matrix" class="chip">{{ t('dev.matrix') }}</NuxtLink>
     </div>
     <p v-if="items.length === 0" class="sub">{{ t('dev.noGoals') }}</p>
     <table v-else class="table">
@@ -38,7 +53,17 @@ const onReview = computed(() => items.value.filter(g => g.status_code === 'on_re
           <td><b>{{ g.full_name }}</b><div class="sub">{{ g.location ?? '' }}</div></td>
           <td><NuxtLink :to="`/learn/development/goals/${g.id}`" class="link">{{ g.title }}</NuxtLink><div class="sub">{{ t(`dev.kind.${g.kind}`) }}</div></td>
           <td :class="{ red: g.is_overdue }">{{ g.due_at }}</td>
-          <td><span :class="['badge', g.status_color]">{{ g.status_name }}</span></td>
+          <td>
+            <span :class="['badge', g.status_color]">{{ g.status_name }}</span>
+            <div v-if="!g.approved_at" class="approve">
+              <span v-if="g.return_comment" class="sub">{{ t('dev.returned') }}: {{ g.return_comment }}</span>
+              <template v-else>
+                <button class="chip" @click="decide(g, 'approve')">{{ t('dev.approve') }}</button>
+                <button class="chip" @click="returning = returning === g.id ? null : g.id">{{ t('dev.return') }}</button>
+                <div v-if="returning === g.id" class="row"><input v-model="returnComment" class="field" :placeholder="t('dev.returnComment')"><button class="chip" :disabled="returnComment.length < 3" @click="decide(g, 'return')">OK</button></div>
+              </template>
+            </div>
+          </td>
           <td>{{ g.progress_pct }}</td>
         </tr>
       </tbody>
@@ -61,4 +86,6 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; text-decoration: none; }
+.approve { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-1); }
 </style>

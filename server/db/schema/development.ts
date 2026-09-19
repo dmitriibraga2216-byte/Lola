@@ -4,9 +4,8 @@ import {
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
-import { positions } from './org'
+import { positions, orgUnits  } from './org'
 import { positionLevels } from './refs'
-import { courseCategories } from './content'
 
 /**
  * Развитие (docs/19-development.md): библиотека компетенций с уровнями-поведением,
@@ -14,11 +13,21 @@ import { courseCategories } from './content'
  * цели с настраиваемыми статусами, заявки на внешнее обучение и карьеру.
  */
 
+/** Категории компетенций (docs/19 §3.1): сервис, продукт, управление, безопасность. */
+export const competencyCategories = pgTable('competency_categories', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  sort: integer('sort').notNull().default(0),
+}, t => [
+  unique().on(t.tenantId, t.name),
+])
+
 export const competencies = pgTable('competencies', {
   ...baseColumns,
   tenantId: tenantId(),
   name: text('name').notNull(),
-  categoryId: uuid('category_id').references(() => courseCategories.id),
+  categoryId: uuid('category_id').references(() => competencyCategories.id, { onDelete: 'set null' }),
   description: text('description'),
   kind: text('kind').notNull().default('hard'), // hard | soft | managerial
   levels: jsonb('levels').notNull(), // [{level, title, behavior}] — 3–5 уровней
@@ -116,6 +125,10 @@ export const developmentGoals = pgTable('development_goals', {
   evaluatedBy: uuid('evaluated_by').references(() => users.id),
   evaluatedAt: timestamp('evaluated_at', { withTimezone: true }),
   evaluation: text('evaluation'),
+  // Согласование цели (docs/19 §7.4): если тенант включил — цель человека ждёт руководителя
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  returnComment: text('return_comment'),
   createdBy: uuid('created_by').references(() => users.id),
 }, t => [
   index().on(t.tenantId, t.userId, t.statusCode),
@@ -173,3 +186,20 @@ export const careerRequests = pgTable('career_requests', {
   assessmentId: uuid('assessment_id'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
 })
+
+/** Стратегические планы обучения (docs/19 §3.8): период, подразделение, цели, бюджет, KPI. */
+export const strategicPlans = pgTable('strategic_plans', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  title: text('title').notNull(),
+  periodFrom: date('period_from').notNull(),
+  periodTo: date('period_to').notNull(),
+  orgUnitId: uuid('org_unit_id').references(() => orgUnits.id, { onDelete: 'set null' }),
+  goals: jsonb('goals').notNull().default('[]'), // [{title, metric, target}]
+  budget: numeric('budget', { precision: 14, scale: 2 }),
+  kpi: jsonb('kpi').notNull().default('[]'), // [{name, target, unit}]
+  ownerId: uuid('owner_id').references(() => users.id),
+  status: text('status').notNull().default('draft'), // draft | active | closed
+}, t => [
+  index().on(t.tenantId, t.status),
+])

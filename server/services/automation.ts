@@ -313,6 +313,9 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
 /** Триггер: кто-то попал на позицию (docs/15 §7.2, §7.6) — sync + правила. */
 export async function onPlacementChanged(tenantId: string, userId: string) {
   await runRules(tenantId, 'user.placement_changed', userId)
+  // docs/19 §12: новая должность → пересчёт разрыва, критический разрыв — руководителю
+  const { gapDetectedOnPlacement } = await import('./developmentExtra')
+  await gapDetectedOnPlacement(tenantId, userId).catch(err => console.error('gapDetectedOnPlacement', err))
   const { syncAssignments } = await import('./assignments')
   await syncAssignments(tenantId)
 }

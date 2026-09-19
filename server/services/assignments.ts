@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { currentRequestContext } from '../utils/requestContext'
 import type { z } from 'zod'
 import { assignments, complexTests, courses, enrollmentEvents, enrollments, lessons, modules, programs, quizzes, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -211,7 +212,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
 
     if (inserted.length) {
       await tx.insert(enrollmentEvents).values(inserted.map(e => ({
-        tenantId, enrollmentId: e.id, event: 'created', payload: { source: 'assigned', assignmentId }, actorId: a.createdBy,
+        tenantId, enrollmentId: e.id, event: 'created', payload: { source: 'assigned', assignmentId }, actorId: a.createdBy, requestContext: currentRequestContext(),
       })))
       const reminders = a.reminders as { notifyOnAssign?: boolean }
       if (reminders.notifyOnAssign !== false) {
@@ -326,7 +327,7 @@ export async function cancelAssignment(ctx: Ctx, id: string, input: { reason: st
       cancelled = rows.length
       if (rows.length) {
         await tx.insert(enrollmentEvents).values(rows.map(r => ({
-          tenantId: ctx.tenantId, enrollmentId: r.id, event: 'cancelled', payload: { reason: input.reason }, actorId: ctx.actorId,
+          tenantId: ctx.tenantId, enrollmentId: r.id, event: 'cancelled', payload: { reason: input.reason }, actorId: ctx.actorId, requestContext: currentRequestContext(),
         })))
       }
     }
@@ -352,7 +353,7 @@ export async function extendEnrollment(ctx: Ctx, enrollmentId: string, input: { 
       updatedAt: new Date(),
     }).where(eq(enrollments.id, enrollmentId)).returning()
     await tx.insert(enrollmentEvents).values({
-      tenantId: ctx.tenantId, enrollmentId, event: 'extended', payload: { from: e.dueAt, to: dueAt, reason: input.reason }, actorId: ctx.actorId,
+      tenantId: ctx.tenantId, enrollmentId, event: 'extended', payload: { from: e.dueAt, to: dueAt, reason: input.reason }, actorId: ctx.actorId, requestContext: currentRequestContext(),
     })
     if (input.notify) {
       const [course] = await tx.select({ title: courses.title }).from(courses).where(eq(courses.id, e.subjectId))

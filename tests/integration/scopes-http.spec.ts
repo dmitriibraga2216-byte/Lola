@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import postgres from 'postgres'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 /**
  * Приёмка этапа 1 (docs/07-stages.md): «employee не открывает админку
@@ -74,6 +74,13 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
     server?.kill()
   })
 
+  // Каждый тест логинится заново — сбрасываем лимит OTP, иначе шестой вход упирается в rate_limited
+  beforeEach(async () => {
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    await admin`delete from rate_limits where key like ${'otp:%'}`
+    await admin.end()
+  })
+
   it('без сессии — 401', async () => {
     const res = await fetch(`${BASE}/api/v1/people`)
     expect(res.status).toBe(401)
@@ -93,6 +100,42 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
     expect(res.status).toBe(200)
     const body = await res.json() as { data: unknown[] }
     expect(body.data.length).toBeGreaterThan(0)
+  })
+
+  it('CLAUDE.md п. 14: сессия и журнал безопасности пишут единый request_context (ip, браузер)', async () => {
+    const cookie = await login(ADMIN_PHONE)
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      const [s] = await admin`select request_context from sessions where token_hash is not null order by created_at desc limit 1`
+      const rc = s!.request_context as { ip?: string, userAgent?: string, browser?: string | null, device?: string | null } | null
+      expect(rc, 'sessions.request_context').not.toBeNull()
+      expect(rc!.ip).toMatch(/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/)
+      expect(rc!.userAgent).toBeTruthy()
+      expect(rc).toHaveProperty('device')
+      const [sec] = await admin`select request_context from security_log where event like 'login%' order by created_at desc limit 1`
+      expect((sec!.request_context as { ip?: string } | null)?.ip).toBeTruthy()
+    }
+    finally {
+      await admin.end()
+    }
+    expect(cookie).toBeTruthy()
+  })
+
+  it('CLAUDE.md п. 15: файл чужого тенанта — 404, не 403', async () => {
+    const cookie = await login(ADMIN_PHONE)
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      const [other] = await admin`insert into tenants (slug, name) values ('test-isolation', 'Тест ізоляції') on conflict (slug) do update set name = excluded.name returning id`
+      const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status) values (${other!.id}, ${`${other!.id}/2026/09/foreign.jpg`}, 'foreign.jpg', 'image', 'image/jpeg', 10, 'ready') returning id`
+      const res = await fetch(`${BASE}/api/v1/media/${m!.id}`, { headers: { cookie } })
+      expect(res.status).toBe(404)
+      const res2 = await fetch(`${BASE}/api/v1/media/${m!.id}?redirect=1`, { headers: { cookie }, redirect: 'manual' })
+      expect(res2.status).toBe(404)
+      await admin`delete from media_assets where id = ${m!.id}`
+    }
+    finally {
+      await admin.end()
+    }
   })
 
   it('мутация без CSRF-заголовка отклоняется', async () => {

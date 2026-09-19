@@ -1,4 +1,5 @@
 import { and, eq, lte, sql } from 'drizzle-orm'
+import { currentRequestContext } from '../utils/requestContext'
 import { db } from '../db/client'
 import { notificationTemplates, notifications, tenants, userNotificationPrefs, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -162,6 +163,7 @@ export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Pr
   const [row] = await tx.insert(notifications).values({
     tenantId: input.tenantId,
     userId: input.userId,
+    requestContext: currentRequestContext(), // null у фоновых задач — это норма
     code: input.code,
     channel: input.channel ?? 'telegram',
     payload: input.payload,

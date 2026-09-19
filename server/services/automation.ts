@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
+import { currentRequestContext } from '../utils/requestContext'
 import type { z } from 'zod'
 import { assignments, automationRules, automationRuns, learningProfiles, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -299,7 +300,7 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
       for (const r of await assignProgramsForRule(tx, tenantId, rule.id, userId, { dryRun: !!opts.dryRun, delayDays: rule.assignDelayDays })) done.push(r)
 
       if (!opts.dryRun) {
-        await tx.insert(automationRuns).values({ tenantId, ruleId: rule.id, userId, triggerPayload: payload, actionsResult: done, status: 'ok' }).onConflictDoNothing()
+        await tx.insert(automationRuns).values({ tenantId, ruleId: rule.id, userId, triggerPayload: payload, actionsResult: done, status: 'ok', requestContext: currentRequestContext() }).onConflictDoNothing()
         await tx.update(automationRules).set({ lastRunAt: new Date(), stats: sql`jsonb_set(coalesce(${automationRules.stats}, '{}'), '{runs}', (coalesce(${automationRules.stats}->>'runs', '0')::int + 1)::text::jsonb)` }).where(eq(automationRules.id, rule.id))
       }
       results.push({ ruleId: rule.id, ruleName: rule.name, status: 'ok', actions: done })

@@ -1,4 +1,5 @@
 import { securityLog } from '../db/schema'
+import { currentRequestContext } from '../utils/requestContext'
 import { withTenant } from '../utils/withTenant'
 
 /** Запись в журнал безопасности (docs/06-infra.md §6.6). Не должна ронять основной поток. */
@@ -19,6 +20,7 @@ export async function logSecurity(input: {
         meta: input.meta ?? {},
         ip: input.ip ?? null,
         userAgent: input.userAgent ?? null,
+        requestContext: currentRequestContext() ?? (input.ip || input.userAgent ? { ip: input.ip ?? null, userAgent: input.userAgent ?? null } : null),
       })
     })
   }

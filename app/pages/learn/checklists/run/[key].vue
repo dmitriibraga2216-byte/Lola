@@ -11,7 +11,7 @@ const route = useRoute()
 const router = useRouter()
 interface Opt { value: number, label: string, color?: string }
 interface Item { id: string, group?: string, text: string, scaleId: string, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
-interface CL { id: string, title: string, items: Item[], scales: { id: string, options: Opt[], allowNa: boolean, passThreshold: string | null }[], subjectKind: string }
+interface CL { id: string, title: string, items: Item[], scales: { id: string, options: Opt[], allowNa: boolean, passThreshold: string | null }[], subjectKind: string, requireSignature?: boolean }
 const cl = ref<CL | null>(null)
 const run = ref<OfflineRun | null>(null)
 const people = ref<{ id: string, fullName: string }[]>([])
@@ -55,6 +55,7 @@ async function photo(id: string, e: Event) {
   run.value!.answers[id]!.photos.push({ dataUrl })
   offline.save(run.value!)
 }
+function setSignature(dataUrl: string | null) { run.value!.signature = dataUrl ? { dataUrl } : null; offline.save(run.value!) }
 function addAction() { run.value!.actionPlan.push({ id: crypto.randomUUID(), text: '', responsibleId: me.value?.user.id ?? '', dueAt: '', status: 'open' }); offline.save(run.value!) }
 async function finish() {
   error.value = ''; flagged.value = []; busy.value = true
@@ -114,9 +115,13 @@ const itemText = (id: string) => cl.value?.items.find(i => i.id === id)?.text ??
           <input :value="run.answers[it.id]?.comment" class="field" :placeholder="t('assess.comment')" @input="set(it.id, { comment: ($event.target as HTMLInputElement).value })">
         </div>
       </section>
+      <section v-if="cl.requireSignature" class="sign">
+        <h3>{{ t('cl.signature') }}</h3>
+        <SignaturePad @change="setSignature" />
+      </section>
       <div class="sticky">
         <span>{{ t('cl.doneN', { n: done, total: cl.items.length }) }}</span>
-        <button class="primary" :disabled="busy || done < cl.items.length" data-testid="run-finish" @click="finish">{{ t('cl.finish') }}</button>
+        <button class="primary" :disabled="busy || done < cl.items.length || (cl.requireSignature && !run.signature)" data-testid="run-finish" @click="finish">{{ t('cl.finish') }}</button>
       </div>
     </template>
 
@@ -177,4 +182,6 @@ h2, h3 { margin: 0; font-weight: 800; }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
 .offline { background: var(--color-sun); color: var(--color-sun-ink); padding: var(--space-2) var(--space-3); border-radius: var(--radius-m); font-weight: 700; margin: 0 0 var(--space-2); }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
+.sign { display: grid; gap: var(--space-2); margin: var(--space-3) 0; }
+.sign h3 { margin: 0; font-size: var(--font-size-body); }
 </style>

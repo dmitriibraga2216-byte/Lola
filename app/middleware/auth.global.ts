@@ -5,6 +5,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   if (!loaded.value) await fetchMe()
 
+  if (to.path.startsWith('/m/')) return // тайный покупатель — по одноразовой ссылке без входа (docs/20 §7.8)
   if (!me.value && !publicPages.has(to.path)) {
     return navigateTo('/login')
   }

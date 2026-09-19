@@ -108,7 +108,7 @@ export function scoreRun(c: { items: ChecklistItem[], scoring: string, passScore
   return { score, passed, criticalFailed, failedItems, answered, total: c.items.length, missingPhoto }
 }
 
-export type FinishResult = { ok: true, score: RunScore } | { ok: false, code: 'not_found' | 'incomplete' | 'photo_required' | 'action_plan_required', itemIds?: string[] }
+export type FinishResult = { ok: true, score: RunScore } | { ok: false, code: 'not_found' | 'incomplete' | 'photo_required' | 'action_plan_required' | 'signature_required', itemIds?: string[] }
 
 /** Завершение: все пункты отвечены, фото где требуется, при провале — план действий с ответственным и сроком (docs/20 §7.5). */
 export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunAnswer[], actionPlan?: ActionItem[], finishedAt?: string, startedAt?: string, signatureMediaId?: string }): Promise<FinishResult> {
@@ -125,11 +125,13 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
     if (score.missingPhoto.length) return { ok: false as const, code: 'photo_required' as const, itemIds: score.missingPhoto }
     const plan = (input.actionPlan ?? (r.actionPlan as ActionItem[])).filter(p => p.text?.trim() && p.responsibleId && p.dueAt)
     if (!score.passed && !plan.length) return { ok: false as const, code: 'action_plan_required' as const }
+    // Б.1: подпись проверяемого пальцем на экране — PNG в медиа
+    if (c!.requireSignature && !input.signatureMediaId && !r.signatureMediaId && !r.isExternal) return { ok: false as const, code: 'signature_required' as const }
 
     const finishedAt = input.finishedAt ? new Date(input.finishedAt) : new Date()
     await tx.update(checklistRuns).set({
       status: 'finished', answers, actionPlan: plan.map(p => ({ ...p, status: p.status ?? 'open' })), score: String(score.score), passed: score.passed, criticalFailed: score.criticalFailed,
-      finishedAt, ...(input.startedAt ? { startedAt: new Date(input.startedAt) } : {}), signatureMediaId: input.signatureMediaId ?? null, updatedAt: new Date(),
+      finishedAt, ...(input.startedAt ? { startedAt: new Date(input.startedAt) } : {}), signatureMediaId: input.signatureMediaId ?? r.signatureMediaId ?? null, updatedAt: new Date(),
     }).where(eq(checklistRuns.id, runId))
 
     // Уведомления (docs/20 §8): провал → руководителю точки сразу; критический → руководителям сети (admin)
@@ -151,10 +153,14 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
   })
 }
 
-export async function getRun(ctx: Ctx, runId: string) {
+export async function getRun(ctx: Ctx, runId: string, opts: { canSeeUnpublished?: boolean } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [r] = await tx.select().from(checklistRuns).where(eq(checklistRuns.id, runId))
     if (!r) return null
+    if (r.waveId && !opts.canSeeUnpublished) {
+      const [w] = await tx.execute(sql`select status from mystery_waves where id = ${r.waveId}::uuid`) as unknown as { status: string }[]
+      if (w?.status !== 'published') return null
+    }
     const c = await getChecklistTx(tx, r.checklistId)
     const [observer] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, r.observerId))
     const [loc] = r.locationId ? await tx.select({ name: locations.name }).from(locations).where(eq(locations.id, r.locationId)) : []
@@ -209,9 +215,11 @@ export async function addAction(ctx: Ctx, runId: string, item: { text: string, r
 
 // ── Отчёты (docs/20 §9) ─────────────────────────────────────────────────
 
-export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: string, locationId?: string, checklistId?: string, scope?: string[] | null } = {}) {
+export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: string, locationId?: string, checklistId?: string, scope?: string[] | null, canSeeUnpublished?: boolean } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    // Прогоны тайного покупателя до публикации волны видит только руководство сети (docs/20 §7.8)
     const where = sql`r.status = 'finished'
+      ${filter.canSeeUnpublished ? sql`` : sql`and (r.wave_id is null or exists (select 1 from mystery_waves w where w.id = r.wave_id and w.status = 'published'))`}
       ${filter.from ? sql`and r.started_at >= ${filter.from}::date` : sql``}
       ${filter.to ? sql`and r.started_at < (${filter.to}::date + 1)` : sql``}
       ${scopeSql(filter.scope ?? null, sql`r.location_id`)}

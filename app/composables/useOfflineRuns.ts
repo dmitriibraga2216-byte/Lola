@@ -12,6 +12,7 @@ export interface OfflineRun {
   startedAt: string
   finishedAt?: string
   answers: Record<string, { value: number | null, comment: string, isNa: boolean, photos: OfflinePhoto[] }>
+  signature?: OfflinePhoto | null // подпись проверяемого (Б.1), догружается как фото
   actionPlan: { id: string, text: string, responsibleId: string, dueAt: string, status: 'open' }[]
   pendingFinish: boolean
 }
@@ -49,13 +50,14 @@ export function useOfflineRuns() {
         if (!p.mediaId) { p.mediaId = await upload(await dataUrlToBlob(p.dataUrl), 'photo.jpg'); save(run) }
       }
     }
+    if (run.signature && !run.signature.mediaId) { run.signature.mediaId = await upload(await dataUrlToBlob(run.signature.dataUrl), 'signature.png'); save(run) }
     const answers = Object.entries(run.answers).map(([itemId, a]) => ({ itemId, value: a.value, comment: a.comment || null, isNa: a.isNa, photoMediaIds: a.photos.map(p => p.mediaId!).filter(Boolean) }))
     if (!run.pendingFinish) {
       await api(`/checklist-runs/${run.runId}`, { method: 'PUT', body: { answers, startedAt: run.startedAt, actionPlan: run.actionPlan } })
       return { ok: true }
     }
     try {
-      await api(`/checklist-runs/${run.runId}/finish`, { method: 'POST', body: { answers, actionPlan: run.actionPlan, startedAt: run.startedAt, finishedAt: run.finishedAt ?? new Date().toISOString() } })
+      await api(`/checklist-runs/${run.runId}/finish`, { method: 'POST', body: { answers, actionPlan: run.actionPlan, startedAt: run.startedAt, finishedAt: run.finishedAt ?? new Date().toISOString(), signatureMediaId: run.signature?.mediaId } })
       remove(run.key)
       return { ok: true }
     } catch (err) {

@@ -5,7 +5,7 @@
 set -euo pipefail
 DIR="${LOLA_DEMO_DIR:-$HOME/app/lola-demo}"
 cd "$DIR"
-docker compose pull -q
+docker compose pull -q app migrate   # только образ приложения: docker.io (pgvector, cloudflared) с песочницы отдаёт ошибки
 docker compose up -d --wait --quiet-pull   # migrate накатывает миграции до старта app
 docker image prune -f >/dev/null           # диск на песочнице 92 % — только dangling
 # ждём health приложения (образ содержит curl — docker/Dockerfile)

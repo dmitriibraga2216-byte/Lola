@@ -407,7 +407,49 @@
       "delivered_at": "Доставлено",
       "url": "Адреса",
       "geo": "Геолокація",
-      "client": "Браузер"
+      "client": "Браузер",
+      "severity": "Рівень",
+      "ended_at": "Завершено",
+      "active": "Активна",
+      "position": "Посада",
+      "unit": "Підрозділ",
+      "session_time": "Час сесії",
+      "when": "Дата",
+      "person": "Людина"
+    },
+    "crumb": "Звіти · Журнали",
+    "title": {
+      "status": "Протокол змін статусів",
+      "notifications": "Журнал сповіщень",
+      "sessions": "Журнал сесій користувачів",
+      "security": "Журнал безпеки",
+      "import": "Журнал імпорту",
+      "automation": "Журнал автоматизації",
+      "integrations": "Журнал інтеграцій"
+    },
+    "severity": {
+      "any": "Будь-який рівень",
+      "info": "Звичайний",
+      "warning": "Увага",
+      "critical": "Критично"
+    },
+    "reason": "причина",
+    "export": "Вивантажити",
+    "uniquePeople": "Унікальних людей",
+    "sessionsCount": "Сесій",
+    "minutes": "{n} хв",
+    "activeNow": "зараз",
+    "eventText": {
+      "login_otp": "Вхід за кодом",
+      "login_google": "Вхід через Google",
+      "login_telegram": "Вхід через Telegram",
+      "login_invite": "Вхід за запрошенням",
+      "login_failed": "Невірний код входу",
+      "login_blocked": "Пʼять невдалих спроб входу поспіль",
+      "logout": "Вихід",
+      "logout_all": "Вихід на всіх пристроях",
+      "impersonation_start": "Вхід від імені користувача",
+      "telegram_linked": "Підключено Telegram"
     }
   },
   "learner": {

@@ -1633,6 +1633,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "severity": {
+          "name": "severity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'info'"
+        },
         "meta": {
           "name": "meta",
           "type": "jsonb",

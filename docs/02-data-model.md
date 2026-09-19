@@ -912,6 +912,10 @@ saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
 -- Хранится строкой журнала, а не отдельной таблицей — join на каждый показ дороже.
 -- Формат поля request_context jsonb:
 --   {ip, geo:{country,country_code,city}, user_agent, browser, os, device}
+-- Журналы: audit_log, security_log, sessions, enrollment_events, notifications,
+-- import_jobs, goal_status_log, automation_runs (+ points_ledger, когда появится).
+-- Заполняет server/utils/requestContext.ts; вне HTTP-запроса (очередь, вебхук) — null.
+-- security_log.severity text not null default 'info' — security_severity (см. перечисления).
 
 -- Правило автоматизации (`17` §14.2)
 automation_rules(
@@ -1015,4 +1019,5 @@ security_severity: info | warning | critical
 3. Все перечисления из раздела выше объявлены ровно в этом составе; лишнее значение
    или недостающее валит тест.
 4. `enrollment_status` используется во всех отчётных представлениях одинаково.
-5. У каждой таблицы-журнала есть колонка `request_context jsonb`.
+5. У каждой таблицы-журнала есть колонка `request_context jsonb`; `security_log.severity`
+   ограничен CHECK ровно значениями `security_severity`.

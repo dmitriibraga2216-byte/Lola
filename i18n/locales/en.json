@@ -407,7 +407,49 @@
       "delivered_at": "Delivered",
       "url": "URL",
       "geo": "Location",
-      "client": "Browser"
+      "client": "Browser",
+      "severity": "Level",
+      "ended_at": "Ended",
+      "active": "Active",
+      "position": "Position",
+      "unit": "Unit",
+      "session_time": "Session time",
+      "when": "Date",
+      "person": "Person"
+    },
+    "crumb": "Reports · Journals",
+    "title": {
+      "status": "Status change log",
+      "notifications": "Notifications log",
+      "sessions": "User sessions log",
+      "security": "Security log",
+      "import": "Import log",
+      "automation": "Automation log",
+      "integrations": "Integrations log"
+    },
+    "severity": {
+      "any": "Any level",
+      "info": "Normal",
+      "warning": "Warning",
+      "critical": "Critical"
+    },
+    "reason": "reason",
+    "export": "Export",
+    "uniquePeople": "Unique people",
+    "sessionsCount": "Sessions",
+    "minutes": "{n} min",
+    "activeNow": "now",
+    "eventText": {
+      "login_otp": "Signed in with code",
+      "login_google": "Signed in with Google",
+      "login_telegram": "Signed in with Telegram",
+      "login_invite": "Signed in by invitation",
+      "login_failed": "Wrong sign-in code",
+      "login_blocked": "Five failed sign-in attempts in a row",
+      "logout": "Signed out",
+      "logout_all": "Signed out on all devices",
+      "impersonation_start": "Signed in as user",
+      "telegram_linked": "Telegram linked"
     }
   },
   "learner": {

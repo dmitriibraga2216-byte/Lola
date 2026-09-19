@@ -102,23 +102,54 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
     expect(body.data.length).toBeGreaterThan(0)
   })
 
-  it('CLAUDE.md п. 14: сессия и журнал безопасности пишут единый request_context (ip, браузер)', async () => {
+  it('CLAUDE.md п. 14: сессия и журнал безопасности пишут единый request_context (ip, браузер) и severity', async () => {
     const cookie = await login(ADMIN_PHONE)
     const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
     try {
       const [s] = await admin`select request_context from sessions where token_hash is not null order by created_at desc limit 1`
-      const rc = s!.request_context as { ip?: string, userAgent?: string, browser?: string | null, device?: string | null } | null
+      const rc = s!.request_context as { ip?: string, user_agent?: string, browser?: string | null, device?: string | null } | null
       expect(rc, 'sessions.request_context').not.toBeNull()
       expect(rc!.ip).toMatch(/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/)
-      expect(rc!.userAgent).toBeTruthy()
-      expect(rc).toHaveProperty('device')
-      const [sec] = await admin`select request_context from security_log where event like 'login%' order by created_at desc limit 1`
+      expect(rc!.user_agent).toBeTruthy()
+      // Формат docs/02: ip, geo, user_agent, browser, os, device — одинаково во всех журналах
+      expect(Object.keys(rc!).sort()).toEqual(['browser', 'device', 'geo', 'ip', 'os', 'user_agent'])
+      const [sec] = await admin`select request_context, severity from security_log where event = 'login.otp' order by created_at desc limit 1`
       expect((sec!.request_context as { ip?: string } | null)?.ip).toBeTruthy()
+      expect(sec!.severity).toBe('info')
+      // Журнал по API отдаёт тот же контекст колонками мокапа: ip, geo, client, severity
+      const res = await fetch(`${BASE}/api/v1/logs/security?type=login`, { headers: { cookie } })
+      expect(res.status).toBe(200)
+      const row = ((await res.json()) as { data: { rows: Record<string, unknown>[] } }).data.rows[0]!
+      expect(row).toMatchObject({ severity: 'info', event: 'login.otp' })
+      expect(row).toHaveProperty('ip')
+      expect(row).toHaveProperty('client')
     }
     finally {
       await admin.end()
     }
-    expect(cookie).toBeTruthy()
+  })
+
+  it('журнал безопасности: неверный код и блокировка по попыткам — warning', async () => {
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      await admin`delete from otp_codes where phone = ${ADMIN_PHONE}`
+      const reqRes = await fetch(`${BASE}/api/v1/auth/otp/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: ADMIN_PHONE }) })
+      expect(reqRes.ok).toBe(true)
+      let last = 0
+      for (let i = 0; i < 6; i++) {
+        const r = await fetch(`${BASE}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: ADMIN_PHONE, code: '000000' }) })
+        last = r.status
+        if (last === 429) break
+      }
+      expect(last).toBe(429)
+      const rows = await admin`select event, severity from security_log where event in ('login.failed', 'login.blocked') and created_at > now() - interval '1 minute' order by created_at desc limit 10`
+      expect(rows.some(r => r.event === 'login.failed' && r.severity === 'warning')).toBe(true)
+      expect(rows.some(r => r.event === 'login.blocked' && r.severity === 'warning')).toBe(true)
+      await admin`delete from rate_limits where key like ${'otp:%'}`
+    }
+    finally {
+      await admin.end()
+    }
   })
 
   it('CLAUDE.md п. 15: файл чужого тенанта — 404, не 403', async () => {
@@ -132,6 +163,29 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
       const res2 = await fetch(`${BASE}/api/v1/media/${m!.id}?redirect=1`, { headers: { cookie }, redirect: 'manual' })
       expect(res2.status).toBe(404)
       await admin`delete from media_assets where id = ${m!.id}`
+    }
+    finally {
+      await admin.end()
+    }
+  })
+
+  it('CLAUDE.md п. 15: отчёт по чужой точке и страница чужого курса — 404, не 403', async () => {
+    const cookie = await login(ADMIN_PHONE)
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      const [other] = await admin`insert into tenants (slug, name) values ('test-isolation', 'Тест ізоляції') on conflict (slug) do update set name = excluded.name returning id`
+      const cleanup = async () => { await admin`delete from courses where tenant_id = ${other!.id}`; await admin`delete from locations where tenant_id = ${other!.id}`; await admin`delete from org_units where tenant_id = ${other!.id}` }
+      await cleanup()
+      const [unit] = await admin`insert into org_units (tenant_id, name, path) values (${other!.id}, 'Чужий підрозділ', 'foreign') returning id`
+      const [loc] = await admin`insert into locations (tenant_id, org_unit_id, name) values (${other!.id}, ${unit!.id}, 'Чужа точка') returning id`
+      const [course] = await admin`insert into courses (tenant_id, title, slug) values (${other!.id}, 'Чужий курс', 'foreign-course') returning id`
+      // Отчёт с фильтром по чужой точке
+      const rep = await fetch(`${BASE}/api/v1/reports/readiness?locationId=${loc!.id}`, { headers: { cookie } })
+      expect(rep.status).toBe(404)
+      // Данные страницы чужого курса
+      const crs = await fetch(`${BASE}/api/v1/courses/${course!.id}`, { headers: { cookie } })
+      expect(crs.status).toBe(404)
+      await cleanup()
     }
     finally {
       await admin.end()

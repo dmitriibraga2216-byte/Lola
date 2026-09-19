@@ -54,7 +54,7 @@ export const enrollmentEvents = pgTable('enrollment_events', {
   // created | started | progress | completed | failed | expired | extended | cancelled | reset
   payload: jsonb('payload').notNull().default('{}'),
   actorId: uuid('actor_id'), // null — системное событие
-  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, userAgent, browser, os, device}
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
 }, t => [
   index().on(t.tenantId),
 ])

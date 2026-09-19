@@ -17,7 +17,7 @@ describe('request_context: разбор user-agent', () => {
     expect(parseUserAgent(null)).toEqual({ browser: null, os: null, device: null })
   })
   it('строки для интерфейса', () => {
-    expect(describeContext({ ip: '1.2.3.4', geo: { country: 'Україна', countryCode: 'UA', city: 'Одеса' }, userAgent: 'x', browser: 'Chrome 144', os: 'Windows', device: 'desktop' }))
+    expect(describeContext({ ip: '1.2.3.4', geo: { country: 'Україна', country_code: 'UA', city: 'Одеса' }, user_agent: 'x', browser: 'Chrome 144', os: 'Windows', device: 'desktop' }))
       .toEqual({ client: 'Chrome 144, Windows', place: 'Україна, Одеса' })
     expect(describeContext(null)).toEqual({ client: null, place: null })
   })

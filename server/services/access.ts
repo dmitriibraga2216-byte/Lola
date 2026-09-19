@@ -122,6 +122,17 @@ export async function reportScope(access: Access, scope: Scope | string = 'repor
 }
 
 /** Сужение области фильтром из запроса: точка вне области → пусто, а не расширение. */
+/**
+ * Точка из фильтра отчёта: `not_found` — её нет в тенанте (чужая или удалённая; CLAUDE.md п. 15 — 404, существование
+ * не подтверждается), `forbidden` — своя, но вне области видимости (403), иначе `ok`.
+ */
+export async function locationAccess(access: Access, scope: string[] | null, locationId: string): Promise<'ok' | 'forbidden' | 'not_found'> {
+  if (scope?.includes(locationId)) return 'ok'
+  const rows = await withTenant(access.tenantId, access.userId, tx => tx.execute(sql`select 1 from locations where id = ${locationId}::uuid`)) as unknown as unknown[]
+  if (!rows.length) return 'not_found'
+  return scope === null ? 'ok' : 'forbidden'
+}
+
 export function narrowScope(scope: string[] | null, requested?: string | null): string[] | null {
   if (!requested) return scope
   if (scope === null) return [requested]

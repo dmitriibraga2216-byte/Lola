@@ -11,7 +11,7 @@ const header = (event: H3Event, name: string): string | undefined => {
  * Технический контекст события (CLAUDE.md п. 14, docs/02 «Сквозные таблицы», docs/22 §13.4):
  * один и тот же jsonb пишется во все журналы — audit_log, security_log, sessions,
  * enrollment_events, notifications, import_jobs, goal_status_log, automation_runs.
- * Формат: {ip, geo: {country, countryCode, city}, userAgent, browser, os, device}.
+ * Формат — ровно как в docs/02: {ip, geo: {country, country_code, city}, user_agent, browser, os, device}.
  *
  * Контекст кладётся middleware в AsyncLocalStorage, поэтому сервисы берут его через
  * currentRequestContext() без протаскивания event; в фоновых задачах он null.
@@ -19,8 +19,8 @@ const header = (event: H3Event, name: string): string | undefined => {
  */
 export interface RequestContext {
   ip: string | null
-  geo: { country: string | null, countryCode: string | null, city: string | null } | null
-  userAgent: string | null
+  geo: { country: string | null, country_code: string | null, city: string | null } | null
+  user_agent: string | null
   browser: string | null
   os: string | null
   device: 'mobile' | 'tablet' | 'desktop' | 'bot' | null
@@ -106,7 +106,7 @@ async function geoOf(ip: string | null): Promise<RequestContext['geo']> {
     if (!r) return null
     return {
       country: r.country?.names?.uk ?? r.country?.names?.en ?? null,
-      countryCode: r.country?.iso_code ?? null,
+      country_code: r.country?.iso_code ?? null,
       city: r.city?.names?.uk ?? r.city?.names?.en ?? null,
     }
   }
@@ -126,7 +126,7 @@ function ipOf(event: H3Event): string | null {
 export async function requestContextOf(event: H3Event): Promise<RequestContext> {
   const ip = ipOf(event)
   const userAgent = header(event, 'user-agent')?.slice(0, 300) ?? null
-  return { ip, geo: await geoOf(ip), userAgent, ...parseUserAgent(userAgent) }
+  return { ip, geo: await geoOf(ip), user_agent: userAgent, ...parseUserAgent(userAgent) }
 }
 
 /** Строка для журналов и интерфейса: «Chrome 144, Windows» / «Україна, Одеса». */

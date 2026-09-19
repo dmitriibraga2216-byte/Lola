@@ -1,0 +1,86 @@
+# Демо-стенд на маленькой машине (1 ГБ RAM): db + minio + одно приложение с воркером внутри
+# + быстрый туннель Cloudflare без аккаунта (URL *.trycloudflare.com меняется при перезапуске).
+# Запуск: ENV_FILE=./.env docker compose -f docker-compose.demo.yml up -d
+# Не для прода: SMS не шлётся, код входа показывается на экране (OTP_DEBUG=1).
+name: lola-demo
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lola
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: lola
+    command: postgres -c shared_buffers=64MB -c max_connections=40
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lola -d lola"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    deploy:
+      resources: { limits: { memory: 256m } }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: server /data
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-lola}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set in .env}
+    volumes:
+      - minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources: { limits: { memory: 160m } }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/dmitriibraga2216-byte/lola:latest}
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-./.env}
+    environment:
+      WORKER_ENABLED: "1"
+      OTP_DEBUG: "1"
+      VIDEO_TRANSCODE: "0"
+      DB_POOL_MAX: "5"
+      NODE_OPTIONS: "--max-old-space-size=384"
+    depends_on:
+      db: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources: { limits: { memory: 512m } }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://app:3000
+    restart: unless-stopped
+    depends_on: [app]
+    deploy:
+      resources: { limits: { memory: 64m } }
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+volumes:
+  pg:
+  minio:

@@ -70,8 +70,12 @@ pnpm lint && pnpm typecheck
 | [18-meetups-webinars.md](docs/18-meetups-webinars.md) | очные занятия, вебинары, комплексные тесты (R2) |
 | [19-development.md](docs/19-development.md) | компетенции, профили должностей, ИПР, цели, заявки (R2) |
 | [20-assessment.md](docs/20-assessment.md) | оценка персонала и чек-листы (R2) |
+| [21-hub.md](docs/21-hub.md) | база знаний, новости, объявления, события, wiki, бонусы |
+| [22-reports.md](docs/22-reports.md) | каркас отчётов, восемь отчётов, журналы, конструктор выгрузок |
+| [23-notifications.md](docs/23-notifications.md) | каналы, шаблоны, тихие часы, Telegram-бот, дайджесты |
+| [24-settings-platform.md](docs/24-settings-platform.md) | настройки тенанта, роли, переводы, панель оператора |
 | [26-server-local.md](docs/26-server-local.md) | локальный сервер: VM в Proxmox, compose, переменные, бэкапы, обновления |
 | [27-gateway-public.md](docs/27-gateway-public.md) | веб-шлюз наружу: Cloudflare Tunnel, домены, демо-ссылка для третьих лиц |
 | [28-implementation-notes.md](docs/28-implementation-notes.md) | решения по реализации, отступления от ТЗ и открытые вопросы к заказчику |
 
-Модульные документы `21–25` ещё пишутся. Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).
+Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

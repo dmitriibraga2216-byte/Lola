@@ -69,12 +69,13 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
   const bank = await api<{ id: string }>(request, csrf, 'post', '/question-banks', { name: `${PREFIX}банк ${Date.now()}` })
   const q1 = await api<{ id: string }>(request, csrf, 'post', '/questions', { bankId: bank.id, kind: 'single', stem: [{ id: 's', type: 'text', html: '<p>Температура риби?</p>' }], options: [{ id: 'a', text: '0…+4' }, { id: 'b', text: '+10' }], answer: { correctId: 'a' }, points: 1 })
   const q2 = await api<{ id: string }>(request, csrf, 'post', '/questions', { bankId: bank.id, kind: 'text_long', stem: [{ id: 's', type: 'text', html: '<p>Що зробиш, якщо гість каже, що піца холодна?</p>' }], answer: { criteria: ['Вибачення'] }, points: 1 })
-  const quiz = await api<{ id: string }>(request, csrf, 'post', '/quizzes', { title: `${PREFIX}тест`, params: { passScore: 50, shuffleQuestions: false, shuffleOptions: false } })
+  // Правил прохождения у теста нет (CLAUDE.md п. 11): порог — в плане курса, остальное — умолчания тенанта
+  const quiz = await api<{ id: string }>(request, csrf, 'post', '/quizzes', { title: `${PREFIX}тест` })
   await api(request, csrf, 'put', `/quizzes/${quiz.id}/questions`, { items: [{ questionId: q1.id, sort: 0 }, { questionId: q2.id, sort: 1 }] })
   await api(request, csrf, 'patch', `/quizzes/${quiz.id}`, { status: 'published' })
   const course = await api<{ id: string }>(request, csrf, 'post', '/courses', { title: `${PREFIX}Курс з тестом`, isCatalogVisible: true })
   const mod = await api<{ id: string }>(request, csrf, 'post', `/courses/${course.id}/modules`, { title: 'Р' })
-  await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'Фінальний тест', itemType: 'quiz', quizId: quiz.id })
+  await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'Фінальний тест', itemType: 'quiz', quizId: quiz.id, passScorePct: 50 })
   await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'Перша версія' })
 
   await loginViaUi(page, EMPLOYEE_PHONE)
@@ -83,11 +84,14 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
   await page.getByRole('link', { name: /Почати/ }).click()
   await expect(page.getByRole('heading', { name: `${PREFIX}тест` })).toBeVisible()
   await page.getByRole('button', { name: /^Почати$/ }).click()
-  await expect(page.getByText('Питання 1 з 2')).toBeVisible()
-  await page.getByRole('button', { name: '0…+4' }).click()
-  await page.getByRole('button', { name: /Далі/ }).click()
-  await page.getByRole('textbox').fill('Вибачусь і заміню піцу за рахунок закладу')
-  await page.getByRole('button', { name: /Надіслати/ }).click()
+  // Порядок вопросов перемешан умолчаниями — отвечаем по типу вопроса, а не по позиции
+  for (let i = 0; i < 2; i++) {
+    await expect(page.getByText(`Питання ${i + 1} з 2`)).toBeVisible()
+    const option = page.getByRole('button', { name: '0…+4' })
+    if (await option.isVisible()) await option.click()
+    else await page.getByRole('textbox').fill('Вибачусь і заміню піцу за рахунок закладу')
+    await page.getByRole('button', { name: i === 0 ? /Далі/ : /Надіслати/ }).click()
+  }
   await expect(page.getByText('На перевірці')).toBeVisible()
 
   // Наставник: очередь показывает работу, зачёт — через тот же API, что кнопка (UI очереди покрыт отдельно)

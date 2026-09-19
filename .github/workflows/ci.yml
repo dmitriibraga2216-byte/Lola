@@ -117,3 +117,24 @@ jobs:
           docker tag lola/app:${{ github.sha }} $IMAGE:latest
           docker push $IMAGE:${{ github.sha }}
           docker push $IMAGE:latest
+
+  deploy-demo:
+    needs: image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: "Deploy — ssh с forced command → scripts/deploy-demo.sh на стенде (docs/26 §26.4)"
+        env:
+          KEY: ${{ secrets.DEMO_SSH_KEY }}
+          HOST: ${{ secrets.DEMO_SSH_HOST }}
+          USER: ${{ secrets.DEMO_SSH_USER }}
+          KNOWN_HOSTS: ${{ secrets.DEMO_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$KEY" ]; then echo "DEMO_SSH_KEY не задан — стенд не обновляется" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/demo && chmod 600 ~/.ssh/demo
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          OUT=$(ssh -i ~/.ssh/demo -o BatchMode=yes "$USER@$HOST" deploy)
+          echo "$OUT"
+          echo "### Демо-стенд обновлён" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"; echo "$OUT" >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"

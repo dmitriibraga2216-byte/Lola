@@ -405,7 +405,9 @@
       "status_code": "HTTP",
       "attempt": "Спроба",
       "delivered_at": "Доставлено",
-      "url": "Адреса"
+      "url": "Адреса",
+      "geo": "Геолокація",
+      "client": "Браузер"
     }
   },
   "learner": {

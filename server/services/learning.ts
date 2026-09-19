@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { currentRequestContext } from '../utils/requestContext'
 import {
   courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons, modules, resources,
 } from '../db/schema'
@@ -12,7 +13,7 @@ import type { TaskGroup } from './enrollmentStatus'
 interface Ctx { tenantId: string, actorId: string }
 
 async function logEvent(tx: TenantTx, tenantId: string, enrollmentId: string, event: string, payload: Record<string, unknown> = {}, actorId: string | null = null) {
-  await tx.insert(enrollmentEvents).values({ tenantId, enrollmentId, event, payload, actorId })
+  await tx.insert(enrollmentEvents).values({ tenantId, enrollmentId, event, payload, actorId, requestContext: currentRequestContext() })
 }
 
 /** «Мої завдання»: пять групп эталона (docs/04 §4.4, docs/10 Г-10.3) — new | planned | failed | overdue | done. */

@@ -14,6 +14,7 @@ export const auditLog = pgTable('audit_log', {
   after: jsonb('after'),
   ip: inet('ip'),
   userAgent: text('user_agent'),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, userAgent, browser, os, device}
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [
   index().on(t.tenantId, t.createdAt.desc()),

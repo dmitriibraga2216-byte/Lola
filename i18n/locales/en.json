@@ -405,7 +405,9 @@
       "status_code": "HTTP",
       "attempt": "Attempt",
       "delivered_at": "Delivered",
-      "url": "URL"
+      "url": "URL",
+      "geo": "Location",
+      "client": "Browser"
     }
   },
   "learner": {

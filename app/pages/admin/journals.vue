@@ -28,7 +28,8 @@ onMounted(load)
 let timer: ReturnType<typeof setTimeout>
 watch(search, (v) => { clearTimeout(timer); if (!v.trim()) { people.value = []; return } timer = setTimeout(async () => { try { people.value = (await apiRaw<{ data: { id: string, fullName: string }[] }>('/people', { query: { q: v, tab: 'all', limit: 8 } })).data } catch { people.value = [] } }, 300) })
 const columns = computed(() => rows.value[0] ? Object.keys(rows.value[0]).filter(k => !['id', 'user_id', 'meta', 'payload', 'response_body', 'actions_result', 'trigger_payload', 'rendered_text', 'stats', 'entity_id'].includes(k)) : [])
-const fmt = (v: unknown) => v == null ? '—' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('uk', { dateStyle: 'short', timeStyle: 'short' }) : typeof v === 'object' ? JSON.stringify(v) : String(v)
+// geo из request_context — «Україна, Одеса», как в журнале эталона (docs/22 §13.4)
+const fmt = (v: unknown) => v == null || v === '' ? '—' : (typeof v === 'object' && v && 'country' in (v as object)) ? [(v as { country?: string }).country, (v as { city?: string }).city].filter(Boolean).join(', ') || '—' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleString('uk', { dateStyle: 'short', timeStyle: 'short' }) : typeof v === 'object' ? JSON.stringify(v) : String(v)
 const exportUrl = computed(() => `/api/v1/logs/${tab.value}?${new URLSearchParams({ ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), limit: '500' })}`)
 </script>
 

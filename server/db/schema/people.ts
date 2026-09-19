@@ -89,6 +89,7 @@ export const sessions = pgTable('sessions', {
   userAgent: text('user_agent'),
   ip: inet('ip'),
   impersonatedBy: uuid('impersonated_by').references(() => users.id),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, userAgent, browser, os, device}
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, t => [

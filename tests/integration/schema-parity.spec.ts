@@ -143,8 +143,8 @@ describe('3. Перечисления из docs/02', () => {
 })
 
 describe('5. Технический контекст в журналах', () => {
-  it.todo('у каждой таблицы-журнала есть request_context jsonb — parity-3-context (docs/30 §4, PR 4)', () => {
+  it('у каждой таблицы-журнала есть request_context jsonb', () => {
     const missing = LOG_TABLES.filter(t => !columns.some(c => c.table === t && c.column === 'request_context' && c.type === 'jsonb'))
-    expect(missing).toEqual([])
+    expect(missing, `нет request_context: ${missing.join(', ')}`).toEqual([])
   })
 })

@@ -25,38 +25,38 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {}): Promi
       case 'status':
         // Протокол изменений статусов: аудит с before.status → after.status
         return tx.execute(sql`
-          select a.id, a.created_at, a.action, a.entity, a.entity_id, a.before->>'status' as from_status, a.after->>'status' as to_status, u.full_name as actor
+          select a.id, a.created_at, a.action, a.entity, a.entity_id, a.before->>'status' as from_status, a.after->>'status' as to_status, u.full_name as actor, coalesce(a.request_context->>'ip', host(a.ip)) as ip, a.request_context->'geo' as geo, concat_ws(', ', a.request_context->>'browser', a.request_context->>'os') as client
           from audit_log a left join users u on u.id = a.actor_id
           where (a.before ? 'status' or a.after ? 'status') ${period(sql`a.created_at`)} ${cursor(sql`a.created_at`)}
             ${f.userId ? sql`and (a.actor_id = ${f.userId}::uuid or a.entity_id = ${f.userId}::uuid)` : sql``} ${f.type ? sql`and a.action like ${`${f.type}%`}` : sql``}
           order by a.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'notifications':
         return tx.execute(sql`
-          select n.id, n.created_at, n.code, n.channel, n.status, n.error, n.rendered_text, n.sent_at, n.scheduled_for, u.full_name as recipient, n.user_id
+          select n.id, n.created_at, n.code, n.channel, n.status, n.error, n.rendered_text, n.sent_at, n.scheduled_for, u.full_name as recipient, n.user_id, n.request_context->>'ip' as ip, concat_ws(', ', n.request_context->>'browser', n.request_context->>'os') as client
           from notifications n join users u on u.id = n.user_id
           where true ${period(sql`n.created_at`)} ${cursor(sql`n.created_at`)} ${f.userId ? sql`and n.user_id = ${f.userId}::uuid` : sql``} ${f.type ? sql`and n.code = ${f.type}` : sql``}
           order by n.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'sessions':
         return tx.execute(sql`
-          select s.id, s.created_at, s.user_agent, s.ip, s.expires_at, s.revoked_at, s.updated_at as last_active, s.impersonated_by, u.full_name, s.user_id
+          select s.id, s.created_at, s.expires_at, s.revoked_at, s.updated_at as last_active, s.impersonated_by, u.full_name, s.user_id, coalesce(s.request_context->>'ip', host(s.ip)) as ip, s.request_context->'geo' as geo, concat_ws(', ', s.request_context->>'browser', s.request_context->>'os') as client
           from sessions s join users u on u.id = s.user_id
           where true ${period(sql`s.created_at`)} ${cursor(sql`s.created_at`)} ${f.userId ? sql`and s.user_id = ${f.userId}::uuid` : sql``}
           order by s.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'security':
         return tx.execute(sql`
-          select s.id, s.created_at, s.event, s.ip, s.user_agent, s.meta, u.full_name, s.user_id
+          select s.id, s.created_at, s.event, s.meta, u.full_name, s.user_id, coalesce(s.request_context->>'ip', host(s.ip)) as ip, s.request_context->'geo' as geo, concat_ws(', ', s.request_context->>'browser', s.request_context->>'os') as client
           from security_log s left join users u on u.id = s.user_id
           where true ${period(sql`s.created_at`)} ${cursor(sql`s.created_at`)} ${f.userId ? sql`and s.user_id = ${f.userId}::uuid` : sql``} ${f.type ? sql`and s.event like ${`${f.type}%`}` : sql``}
           order by s.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'import':
         return tx.execute(sql`
-          select j.id, j.created_at, j.file_name, j.source, j.status, j.stats, j.finished_at, u.full_name as created_by_name
+          select j.id, j.created_at, j.file_name, j.source, j.status, j.stats, j.finished_at, u.full_name as created_by_name, j.request_context->>'ip' as ip, concat_ws(', ', j.request_context->>'browser', j.request_context->>'os') as client
           from import_jobs j left join users u on u.id = j.created_by
           where true ${period(sql`j.created_at`)} ${cursor(sql`j.created_at`)} ${f.userId ? sql`and j.created_by = ${f.userId}::uuid` : sql``}
           order by j.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'automation':
         return tx.execute(sql`
-          select r.id, r.created_at, r.status, r.error, r.actions_result, r.trigger_payload, ar.name as rule, u.full_name, r.user_id
+          select r.id, r.created_at, r.status, r.error, r.actions_result, r.trigger_payload, ar.name as rule, u.full_name, r.user_id, r.request_context->>'ip' as ip, concat_ws(', ', r.request_context->>'browser', r.request_context->>'os') as client
           from automation_runs r join automation_rules ar on ar.id = r.rule_id left join users u on u.id = r.user_id
           where true ${period(sql`r.created_at`)} ${cursor(sql`r.created_at`)} ${f.userId ? sql`and r.user_id = ${f.userId}::uuid` : sql``} ${f.type ? sql`and r.status = ${f.type}` : sql``}
           order by r.created_at desc limit ${limit}`) as unknown as Promise<Row[]>

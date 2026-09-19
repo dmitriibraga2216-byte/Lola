@@ -8,8 +8,9 @@ const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60
 export function isSecureRequest(event: H3Event): boolean {
   if (process.env.COOKIE_SECURE === '0') return false
   if (process.env.COOKIE_SECURE === '1') return true
-  const proto = getHeader(event, 'x-forwarded-proto') ?? (event.node.req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http'
-  return proto === 'https'
+  const forwarded = getHeader(event, 'x-forwarded-proto')?.split(',')[0]?.trim()
+  if (forwarded) return forwarded === 'https'
+  return Boolean((event.node.req.socket as { encrypted?: boolean }).encrypted)
 }
 
 export function setSessionCookies(event: H3Event, token: string): void {

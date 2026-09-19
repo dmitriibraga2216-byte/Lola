@@ -35,6 +35,16 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   workshop_sla_breach: 'Перевірка «{{title}}» висить {{hours}} год',
   workshop_comment: 'Новий коментар до практикуму «{{title}}»',
   news_published: 'Новина: {{title}}',
+  plan_on_approval: 'План розвитку чекає погодження',
+  plan_approved: 'План розвитку погоджено',
+  plan_returned: 'План розвитку повернуто на доопрацювання. {{comment}}',
+  goal_status: 'Ціль «{{title}}»: {{status}}. {{comment}}',
+  goal_due: 'Ціль «{{title}}» — термін {{due}}',
+  goal_due_mentor: 'У підопічного ціль «{{title}}» — термін {{due}}',
+  request_new: 'Нова заявка: «{{title}}». Потрібне рішення',
+  request_step: 'Заявку «{{title}}» погоджено на цьому етапі',
+  request_approved: 'Заявку «{{title}}» схвалено. {{comment}}',
+  request_rejected: 'Заявку «{{title}}» відхилено. {{comment}}',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

@@ -37,9 +37,11 @@ export default defineNitroPlugin(async () => {
       }
     })
     await boss.work('due.scan', async () => {
+      const { goalDueScan } = await import('../services/development')
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, s)
+        const g = await goalDueScan(tenantId)
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g })
       }
     })
     await boss.work('assignment.sync', async () => {

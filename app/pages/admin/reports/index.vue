@@ -5,7 +5,7 @@ const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 
-type Report = 'readiness' | 'overdue' | 'attempts' | 'activity' | 'mentors'
+type Report = 'readiness' | 'progress' | 'overdue' | 'attempts' | 'questions' | 'mentors' | 'content' | 'activity'
 const report = ref<Report>('readiness')
 const rows = ref<Record<string, unknown>[]>([])
 const extra = ref<Record<string, unknown> | null>(null)
@@ -15,20 +15,61 @@ const loading = ref(false)
 const filters = reactive({ from: '', to: '', locationId: '' })
 const locations = ref<{ id: string, name: string }[]>([])
 
-const reports: Report[] = ['readiness', 'overdue', 'attempts', 'activity', 'mentors']
-const canSee = (r: Report) => (r === 'activity' || r === 'mentors') ? hasScope('report.tenant') : true
+const reports: Report[] = ['readiness', 'progress', 'overdue', 'attempts', 'questions', 'mentors', 'content', 'activity']
+const canSee = (r: Report) => (r === 'activity' || r === 'mentors') ? hasScope('report.tenant') : r === 'content' ? hasScope('course.view') : true
+// Каркас (docs/22 §3): пресеты периода, плитки со сравнением, фоновая выгрузка
+const preset = ref<'today' | '7d' | '30d' | 'quarter' | 'custom'>('30d')
+const day = (d: Date) => d.toISOString().slice(0, 10)
+function applyPreset(p: typeof preset.value) {
+  preset.value = p
+  const now = new Date()
+  if (p === 'custom') return
+  const from = p === 'today' ? now : new Date(now.getTime() - (p === '7d' ? 6 : p === '30d' ? 29 : 89) * 86_400_000)
+  filters.from = day(from); filters.to = day(now)
+  load()
+}
+const tiles = ref<Record<string, unknown> | null>(null)
+const subject = ref<'course' | 'program' | 'quiz' | 'workshop' | 'meetup' | 'survey'>('course')
+const funnel = ref<{ assigned: number, started: number, completed: number, passedFirst: number } | null>(null)
+const contentRows = ref<Record<string, unknown>[]>([])
+const attention = ref<{ id: string, title: string, reasons: string[] }[]>([])
+const activityExtra = ref<{ dau: number, wau: number, mau: number, inactive_30: number, hours: { hour: number, opens: number }[] } | null>(null)
+const exportNotice = ref('')
+async function exportInBackground() {
+  exportNotice.value = ''
+  try {
+    const query = Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
+    const r = await api<{ exportId: string }>(`/reports/${report.value}/export`, { method: 'POST', body: { filters: { ...query, subject: subject.value } } })
+    exportNotice.value = t('reports.exportQueued', { id: r.exportId.slice(0, 8) })
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+const tileDelta = (v: unknown) => { const d = (v as { delta?: number } | null)?.delta; return d == null ? '' : d > 0 ? `+${d}` : String(d) }
+const tileVal = (v: unknown) => (typeof v === 'object' && v !== null && 'value' in v) ? (v as { value: number }).value : v
 
 async function load() {
   loading.value = true
   error.value = ''
   drill.value = null
   try {
-    const query = Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
-    const data = await api<unknown>(`/reports/${report.value}`, { query })
+    const query = { ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)), tiles: 'true', ...(report.value === 'progress' ? { subject: subject.value } : {}) }
+    const res = await api<{ data: unknown, tiles: Record<string, unknown> } | unknown>(`/reports/${report.value}`, { query })
+    const data = (res && typeof res === 'object' && 'tiles' in (res as object)) ? (res as { data: unknown }).data : res
+    tiles.value = (res && typeof res === 'object' && 'tiles' in (res as object)) ? (res as { tiles: Record<string, unknown> }).tiles : null
+    funnel.value = null; contentRows.value = []; attention.value = []; activityExtra.value = null
     if (report.value === 'activity') {
       const d = data as { summary: Record<string, unknown>, daily: Record<string, unknown>[] }
       extra.value = d.summary
       rows.value = d.daily
+      activityExtra.value = await api<typeof activityExtra.value>('/reports/activity-extra', { query }).catch(() => null)
+    }
+    else if (report.value === 'progress') {
+      const d = data as { funnel: typeof funnel.value, rows: Record<string, unknown>[], content: Record<string, unknown>[] }
+      extra.value = null; funnel.value = d.funnel; rows.value = d.rows; contentRows.value = d.content
+    }
+    else if (report.value === 'content') {
+      const d = data as { rows: Record<string, unknown>[], attention: typeof attention.value }
+      extra.value = null; rows.value = d.rows; attention.value = d.attention
     }
     else {
       extra.value = null
@@ -43,6 +84,7 @@ async function load() {
   }
 }
 watch(report, load)
+watch(subject, () => { if (report.value === 'progress') load() })
 onMounted(async () => {
   locations.value = await api<{ id: string, name: string }[]>('/refs/locations').catch(() => [])
   await load()
@@ -78,16 +120,52 @@ const fmtCell = (v: unknown) => v === null || v === undefined ? '—' : typeof v
     </div>
 
     <div class="filters">
-      <label>{{ t('reports.from') }} <input v-model="filters.from" type="date" @change="load"></label>
-      <label>{{ t('reports.to') }} <input v-model="filters.to" type="date" @change="load"></label>
+      <div class="presets" role="group">
+        <button v-for="p in (['today', '7d', '30d', 'quarter', 'custom'] as const)" :key="p" :class="['chip', { on: preset === p }]" @click="applyPreset(p)">{{ t(`reports.preset.${p}`) }}</button>
+      </div>
+      <label>{{ t('reports.from') }} <input v-model="filters.from" type="date" @change="preset = 'custom'; load()"></label>
+      <label>{{ t('reports.to') }} <input v-model="filters.to" type="date" @change="preset = 'custom'; load()"></label>
+      <label v-if="report === 'progress'">{{ t('reports.subject') }}
+        <select v-model="subject"><option v-for="s in ['course', 'program', 'quiz', 'workshop', 'meetup', 'survey']" :key="s" :value="s">{{ t(`reports.subjects.${s}`) }}</option></select>
+      </label>
       <label>{{ t('person.location') }}
         <select v-model="filters.locationId" @change="load">
           <option value="">{{ t('reports.allLocations') }}</option>
           <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
         </select>
       </label>
-      <a v-if="hasScope('report.export')" :href="exportUrl" class="export">{{ t('reports.export') }}</a>
+      <a v-if="hasScope('report.export') && report !== 'content'" :href="exportUrl" class="export">{{ t('reports.export') }}</a>
+      <button v-if="hasScope('report.export')" class="chip" @click="exportInBackground">{{ t('reports.exportBg') }}</button>
+      <NuxtLink to="/admin/reports/exports" class="chip">{{ t('reports.myExports') }}</NuxtLink>
     </div>
+    <p v-if="exportNotice" class="notice" role="status">{{ exportNotice }}</p>
+
+    <!-- Плитки со сравнением с прошлым периодом (docs/22 §3) -->
+    <div v-if="tiles" class="kpis">
+      <template v-for="(v, k) in tiles" :key="k">
+        <div v-if="k !== 'period' && k !== 'previous'" class="kpi"><b>{{ tileVal(v) ?? 0 }}<small v-if="tileDelta(v)" :class="['delta', String(tileDelta(v)).startsWith('+') ? 'up' : 'down']"> {{ tileDelta(v) }}</small></b><span>{{ t(`reports.tile.${k}`) }}</span></div>
+      </template>
+    </div>
+    <div v-if="funnel" class="funnel">
+      <div v-for="k in (['assigned', 'started', 'completed', 'passedFirst'] as const)" :key="k" class="step"><b>{{ funnel[k] }}</b><span>{{ t(`reports.funnel.${k}`) }}</span><i :style="{ width: `${funnel.assigned ? funnel[k] / funnel.assigned * 100 : 0}%` }" /></div>
+    </div>
+    <section v-if="contentRows.length" class="card">
+      <h2>{{ t('reports.worstContent') }}</h2>
+      <table class="table"><thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('reports.funnel.assigned') }}</th><th>{{ t('reports.funnel.completed') }}</th><th>%</th></tr></thead>
+        <tbody><tr v-for="c in contentRows.slice(0, 10)" :key="String(c.subjectId)"><td>{{ c.title }}</td><td>{{ c.assigned }}</td><td>{{ c.completed }}</td><td :class="Number(c.completionPct) < 50 ? 'coral' : ''">{{ c.completionPct }}</td></tr></tbody></table>
+    </section>
+    <section v-if="attention.length" class="card">
+      <h2>{{ t('reports.needsAttention') }}</h2>
+      <ul class="list"><li v-for="a in attention" :key="a.id"><NuxtLink :to="`/admin/courses/${a.id}`" class="link">{{ a.title }}</NuxtLink> <span class="sub">{{ a.reasons.map(r => t(`reports.reason.${r}`)).join(' · ') }}</span></li></ul>
+    </section>
+    <div v-if="activityExtra" class="kpis">
+      <div class="kpi"><b>{{ activityExtra.dau }}</b><span>DAU</span></div><div class="kpi"><b>{{ activityExtra.wau }}</b><span>WAU</span></div><div class="kpi"><b>{{ activityExtra.mau }}</b><span>MAU</span></div>
+      <div class="kpi"><b>{{ activityExtra.inactive_30 }}</b><span>{{ t('reports.inactive30') }}</span></div>
+    </div>
+    <section v-if="activityExtra" class="card">
+      <h2>{{ t('reports.byHour') }}</h2>
+      <div class="hours"><div v-for="h in activityExtra.hours" :key="h.hour" class="hour" :title="`${h.hour}:00 — ${h.opens}`"><i :style="{ height: `${Math.max(2, h.opens / Math.max(1, ...activityExtra.hours.map(x => x.opens)) * 60)}px` }" /><span>{{ h.hour }}</span></div></div>
+    </section>
 
     <p v-if="error" class="error">{{ error }}</p>
     <div v-if="loading" class="empty">{{ t('common.loading') }}</div>
@@ -148,6 +226,24 @@ const fmtCell = (v: unknown) => v === null || v === undefined ? '—' : typeof v
 <style scoped>
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 h2 { margin: var(--space-4) 0 var(--space-2); font-weight: 800; font-size: var(--font-size-title-l); }
+.presets { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; text-decoration: none; }
+.chip.on { background: var(--color-ink); color: var(--color-bg-soft); border-color: var(--color-ink); }
+.delta { font-size: var(--font-size-body-s); font-weight: 700; }
+.delta.up { color: var(--color-teal-ink); }
+.delta.down { color: var(--color-coral-ink); }
+.funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
+.step { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); display: grid; gap: 2px; position: relative; overflow: hidden; }
+.step b { font-size: var(--font-size-title-l); font-weight: 900; }
+.step span { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.step i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--color-teal); }
+.card { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); margin-bottom: var(--space-3); }
+.card h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-body); }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.hours { display: flex; gap: 2px; align-items: flex-end; height: 80px; }
+.hour { flex: 1; display: grid; grid-template-rows: 1fr auto; align-items: end; text-align: center; font-size: 10px; color: var(--color-ink-faint); }
+.hour i { display: block; background: var(--color-sun); border-radius: 2px 2px 0 0; }
+.notice { color: var(--color-teal-ink); }
 .tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); flex-wrap: wrap; }
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }

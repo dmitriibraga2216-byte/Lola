@@ -339,7 +339,52 @@
     "security": "Security log",
     "when": "When",
     "event": "Event",
-    "details": "Details"
+    "details": "Details",
+    "kind": {
+      "status": "Status log",
+      "notifications": "Notifications",
+      "sessions": "Sessions",
+      "security": "Security",
+      "import": "Import",
+      "automation": "Automation",
+      "integrations": "Integrations"
+    },
+    "retention": "Kept for {days} days",
+    "immutable": "records are immutable",
+    "type": "Event type",
+    "typeHint": "e.g. login, role, people.",
+    "col": {
+      "created_at": "When",
+      "action": "Action",
+      "entity": "Entity",
+      "from_status": "From",
+      "to_status": "To",
+      "actor": "Who",
+      "code": "Code",
+      "channel": "Channel",
+      "status": "Status",
+      "error": "Error",
+      "sent_at": "Sent",
+      "scheduled_for": "Scheduled",
+      "recipient": "To",
+      "user_agent": "Device",
+      "ip": "IP",
+      "expires_at": "Valid until",
+      "revoked_at": "Closed",
+      "last_active": "Last active",
+      "impersonated_by": "Impersonated by",
+      "full_name": "Person",
+      "event": "Event",
+      "file_name": "File",
+      "source": "Source",
+      "finished_at": "Finished",
+      "created_by_name": "By",
+      "rule": "Rule",
+      "status_code": "HTTP",
+      "attempt": "Attempt",
+      "delivered_at": "Delivered",
+      "url": "URL"
+    }
   },
   "learner": {
     "nav": {
@@ -695,8 +740,83 @@
       "reviews": "Reviews",
       "avg_hours": "Hours to reply",
       "accept_pct": "% accepted",
-      "sla_breaches": "SLA breaches"
-    }
+      "sla_breaches": "SLA breaches",
+      "learner_rating": "Learner rating",
+      "question": "Question",
+      "answered": "Answers",
+      "failed": "Wrong",
+      "fail_pct": "% wrong",
+      "completion_pct": "Completion %",
+      "avg_minutes": "Avg minutes",
+      "rating": "Course rating",
+      "dropoff_lesson": "Drop-off lesson",
+      "owner": "Owner",
+      "assigned": "Assigned",
+      "completed": "Completed",
+      "title": "Title",
+      "subject_id": "",
+      "is_mandatory": "Mandatory",
+      "passed_first": "First try",
+      "completed_at": "Completed",
+      "created_at": "Created"
+    },
+    "progress": "Learning progress",
+    "questions": "By question",
+    "content": "Content",
+    "preset": {
+      "today": "Today",
+      "7d": "7 days",
+      "30d": "30 days",
+      "quarter": "Quarter",
+      "custom": "Custom"
+    },
+    "subject": "Subject",
+    "subjects": {
+      "course": "Course",
+      "program": "Program",
+      "quiz": "Quiz",
+      "workshop": "Workshop",
+      "meetup": "Meetup",
+      "survey": "Survey"
+    },
+    "exportBg": "Export in background",
+    "myExports": "My exports",
+    "exportQueued": "Export #{id} queued — the link arrives by notification and in “My exports”",
+    "exportExpired": "Link expired (24 hours) — request a new export",
+    "report": "Report",
+    "rows": "Rows",
+    "download": "Download",
+    "exportStatus": {
+      "queued": "queued",
+      "running": "running",
+      "ready": "ready",
+      "failed": "failed"
+    },
+    "tile": {
+      "people": "People",
+      "notReady": "Not ready",
+      "overdue": "Overdue",
+      "certsExpiring": "Certifications expiring in 30 d.",
+      "completed": "Completed",
+      "attempts": "Attempts",
+      "passedFirst": "Passed first try",
+      "active": "Active"
+    },
+    "funnel": {
+      "assigned": "Assigned",
+      "started": "Started",
+      "completed": "Completed",
+      "passedFirst": "Passed first try"
+    },
+    "worstContent": "Worst completion",
+    "needsAttention": "Needs attention",
+    "reason": {
+      "completion": "completion < 50%",
+      "stale": "not updated for a year",
+      "rating": "rating below 3"
+    },
+    "inactive30": "No activity 30+ days",
+    "byHour": "When people learn: by hour (30 days)"
   },
   "kb": {
     "title": "Knowledge base",
@@ -888,7 +1008,9 @@
       "criteria": "Criteria",
       "pending": "Pending",
       "firstPass": "First-pass"
-    }
+    },
+    "rateMentor": "Rate your mentor",
+    "ratedMentor": "You rated the mentor: {n} of 5"
   },
   "ops": {
     "title": "Operator panel",

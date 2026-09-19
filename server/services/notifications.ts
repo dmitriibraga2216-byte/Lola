@@ -25,7 +25,7 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   review_needed: 'Розгорнута відповідь чекає перевірки: {{name}}, «{{quiz}}»',
   review_done: 'Наставник перевірив «{{quiz}}»: {{status}}',
   certificate_issued: 'Сертифікат {{number}} за «{{course}}» видано',
-  weekly_digest: 'Тижневий підсумок по точці: завершено {{completed}}, прострочено {{overdue}}, нових {{assigned}}',
+  weekly_digest: '{{location}} — тиждень: завершено {{completed}}, прострочено {{overdue}}, нових призначень {{assigned}}',
   telegram_linked: 'Telegram підключено. Сюди приходитимуть нагадування про навчання.',
   survey_invite: 'Коротке опитування «{{survey}}» — 1 хвилина',
   workshop_assigned: 'Практикум «{{title}}». Здати до {{due}}',
@@ -88,6 +88,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // docs/16 §8
   user_invited: 'Вас запрошено до Lola. Посилання для входу: {{url}}',
   knowledge_review_due: 'Статтю «{{title}}» час перечитати й підтвердити актуальність',
+  report_export_ready: 'Вивантаження «{{report}}» готове: {{rows}} рядків. {{url}} (посилання діє 24 години)',
+  report_export_failed: 'Вивантаження «{{report}}» не вдалося — спробуйте ще раз або зменшіть період',
   user_role_granted: '{{#name}}{{name}}: {{/name}}видано роль «{{role}}»',
   user_blocked: 'Доступ для {{name}} заблоковано',
   people_inactive: '{{n}} люд. не заходили понад 30 днів — перевірте, чи не час архівувати',

@@ -346,6 +346,15 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
   return result
 }
 
+/** Оценка наставника учеником 1–5 после проверки (docs/22 §4.5, Б.7): одним тапом, один раз. */
+export async function rateMentor(ctx: Ctx, submissionId: string, rating: number) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.update(workshopSubmissions).set({ mentorRating: rating, updatedAt: new Date() })
+      .where(and(eq(workshopSubmissions.id, submissionId), eq(workshopSubmissions.userId, ctx.actorId), sql`${workshopSubmissions.reviewedAt} is not null`, sql`${workshopSubmissions.mentorRating} is null`)).returning({ id: workshopSubmissions.id })
+    return rows.length > 0
+  })
+}
+
 export async function addComment(ctx: Ctx, submissionId: string, body: string, isInternal = false) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [s] = await tx.select({ userId: workshopSubmissions.userId, workshopId: workshopSubmissions.workshopId }).from(workshopSubmissions).where(eq(workshopSubmissions.id, submissionId))

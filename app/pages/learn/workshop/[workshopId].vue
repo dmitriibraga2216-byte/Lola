@@ -11,7 +11,7 @@ const enrollmentId = (route.query.enrollmentId as string) || undefined
 const lessonId = (route.query.lessonId as string) || undefined
 
 interface Criterion { id: string, text: string, isCritical: boolean }
-interface Sub { id: string, status: string, attemptNo: number, body: { text?: string }, files: { mediaId: string, name: string, kind: string, bytes: number }[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null }
+interface Sub { id: string, status: string, attemptNo: number, mentorRating: number | null, reviewerId: string | null, body: { text?: string }, files: { mediaId: string, name: string, kind: string, bytes: number }[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null }
 interface W {
   id: string, title: string, description: ContentBlock[], submissionKinds: string[], minTextLength: number | null, maxFiles: number, maxFileMb: number, allowCameraOnly: boolean,
   criteria: Criterion[], slaHours: number, current: Sub | null, history: { attemptNo: number, status: string, submittedAt: string | null, reviewComment: string | null }[], comments: { id: string, authorName: string, body: string, createdAt: string }[]
@@ -72,6 +72,7 @@ async function addFile(e: Event) {
   }
 }
 
+async function rateMentor(n: number) { if (!w.value?.current) return; try { await api(`/learning/workshops/${w.value.current.id}/rate-mentor`, { method: 'POST', body: { rating: n } }); w.value.current.mentorRating = n } catch (err) { error.value = apiErrorOf(err).message } }
 async function saveDraft() {
   await api(`/learning/workshops/${workshopId}/draft`, { method: 'POST', body: { text: text.value, files: files.value, enrollmentId, lessonId } })
 }
@@ -130,6 +131,10 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
         <b>{{ t('workshop.accepted') }}</b>
         <span v-if="w.current.score">{{ w.current.score }}%</span>
         <p v-if="w.current.reviewComment">{{ w.current.reviewComment }}</p>
+        <div v-if="w.current.reviewerId" class="rate">
+          <span>{{ w.current.mentorRating ? t('workshop.ratedMentor', { n: w.current.mentorRating }) : t('workshop.rateMentor') }}</span>
+          <div v-if="!w.current.mentorRating" class="stars"><button v-for="n in 5" :key="n" class="star" :aria-label="String(n)" @click="rateMentor(n)">★</button></div>
+        </div>
       </div>
       <div v-else-if="w.current?.status === 'rejected'" class="status coral">
         <b>{{ t('workshop.rejected') }}</b>
@@ -228,4 +233,7 @@ summary { cursor: pointer; font-weight: 700; }
 .primary:disabled { opacity: 0.4; }
 .ghost { background: transparent; border: 1px solid var(--color-bg-line); color: var(--color-ink-muted); }
 .error { color: var(--color-coral-ink); }
+.rate { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-2); }
+.stars { display: flex; gap: 2px; }
+.star { font: inherit; font-size: var(--font-size-title-l); border: none; background: transparent; cursor: pointer; color: var(--color-sun-ink); line-height: 1; min-width: 44px; min-height: 44px; }
 </style>

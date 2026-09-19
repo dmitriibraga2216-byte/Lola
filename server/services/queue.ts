@@ -24,6 +24,7 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('meetup.scan', { retryLimit: 3, expireInSeconds: 600 })
       await b.createQueue('certificate.render_pdf', { retryLimit: 3, expireInSeconds: 120 })
       await b.createQueue('webhook.deliver', { retryLimit: 3, expireInSeconds: 300 })
+      await b.createQueue('report.export', { retryLimit: 2, expireInSeconds: 600 }) // docs/22 §10
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -51,4 +52,9 @@ export async function enqueueCertificatePdf(tenantId: string, certificateId: str
 export async function enqueueExpand(tenantId: string, assignmentId: string): Promise<void> {
   const b = await getBoss()
   await b.send('assignment.expand', { tenantId, assignmentId }, { singletonKey: `expand:${assignmentId}` })
+}
+
+export async function enqueueReportExport(tenantId: string, exportId: string) {
+  const b = await getBoss()
+  await b.send('report.export', { tenantId, exportId }, { singletonKey: `export:${exportId}` })
 }

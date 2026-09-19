@@ -65,7 +65,8 @@
       "checklistReport": "Звіт: чек-листи",
       "meetups": "Заняття",
       "complexTests": "Комплексні тести",
-      "attendanceReport": "Звіт: явка"
+      "attendanceReport": "Звіт: явка",
+      "reportBuilder": "Конструктор звітів"
     }
   },
   "people": {
@@ -534,7 +535,21 @@
       "date": "Дата",
       "views": "Переглядів",
       "acks": "Підтвердили"
-    }
+    },
+    "kind": {
+      "news": "Новина",
+      "announcement": "Оголошення"
+    },
+    "ackDue": "Прочитати до",
+    "forLocations": "Для точок (усі, якщо не обрано)",
+    "report": "Хто прочитав",
+    "reportLine": "Підтвердили {acked} з {total} · переглянули {viewed}",
+    "notAcked": "Не підтвердили",
+    "acked": "Підтвердили",
+    "viewedOnly": "переглянув, не підтвердив",
+    "announcement": "Оголошення",
+    "ackUntil": "Підтвердити до {at}",
+    "iRead": "Ознайомився(лась)"
   },
   "survey": {
     "title": "Опитування",
@@ -1052,7 +1067,8 @@
     "new": "Нове заняття",
     "kind": {
       "meetup": "Очне заняття",
-      "webinar": "Вебінар"
+      "webinar": "Вебінар",
+      "event": "Подія"
     },
     "titlePh": "Назва заняття",
     "start": "Початок",
@@ -1147,5 +1163,84 @@
     "avg": "Середній",
     "failedCol": "Провалів",
     "partWord": "частина"
+  },
+  "wiki": {
+    "title": "Wiki",
+    "short": "Wiki",
+    "newPage": "Нова сторінка",
+    "search": "Пошук по wiki",
+    "nothing": "Нічого не знайдено",
+    "empty": "Сторінок ще немає",
+    "pageTitle": "Назва сторінки",
+    "settings": "Права та статус",
+    "viewRoles": "Хто бачить",
+    "editRoles": "Хто редагує",
+    "rolesHint": "Порожньо — як у батьківської сторінки; у кореня порожньо = бачать усі, редагують методисти й адміни. Права діють на всю гілку",
+    "published": "Опубліковано",
+    "changeComment": "Що змінилось (коментар до версії)",
+    "draft": "чернетка",
+    "history": "Історія правок",
+    "subpage": "підсторінка",
+    "subpages": "Підсторінки",
+    "delete": "Видалити гілку",
+    "deleteConfirm": "Видалити сторінку разом із підсторінками?",
+    "restore": "Відновити"
+  },
+  "org": {
+    "title": "Оргструктура",
+    "short": "Структура",
+    "totals": "{l} точок · {p} людей",
+    "people": "осіб",
+    "manager": "Керівник"
+  },
+  "rb": {
+    "saved": "Збережені звіти",
+    "noSaved": "Ще немає",
+    "new": "новий",
+    "entity": {
+      "people": "Люди",
+      "enrollments": "Призначення",
+      "attempts": "Спроби тестів"
+    },
+    "groupBy": "Групувати за",
+    "fields": "Поля",
+    "filters": "Фільтри",
+    "allLocations": "Усі точки",
+    "run": "Побудувати",
+    "rows": "рядків",
+    "saveTitle": "Зберегти як звіт / розклад",
+    "name": "Назва звіту",
+    "schedule": "За розкладом",
+    "daily": "щодня",
+    "weekly": "щотижня",
+    "hour": "о (год)",
+    "recipients": "Кому",
+    "field": {
+      "full_name": "ПІБ",
+      "phone": "Телефон",
+      "status": "Статус",
+      "hired_at": "Прийнято",
+      "location": "Точка",
+      "position": "Посада",
+      "courses_done": "Курсів завершено",
+      "courses_overdue": "Прострочено",
+      "course": "Курс",
+      "progress_pct": "Прогрес, %",
+      "due_at": "Термін",
+      "completed_at": "Завершено",
+      "source": "Джерело",
+      "quiz": "Тест",
+      "attempt_no": "№ спроби",
+      "score": "Бал",
+      "passed": "Складено",
+      "started_at": "Початок",
+      "finished_at": "Кінець",
+      "rows": "Рядків",
+      "avg_courses_done": "Сер. курсів",
+      "avg_courses_overdue": "Сер. прострочено",
+      "avg_progress_pct": "Сер. прогрес",
+      "avg_score": "Сер. бал",
+      "avg_attempt_no": "Сер. № спроби"
+    }
   }
 }

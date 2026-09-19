@@ -3,7 +3,7 @@ import { bodySchema } from '../../../../../shared/schemas/content'
 import { requireScope } from '../../../../services/access'
 import { updateNews } from '../../../../services/news'
 import { apiData, apiError } from '../../../../utils/apiResponse'
-const schema = z.object({ title: z.string().min(3).max(200).optional(), body: bodySchema.optional(), isPinned: z.boolean().optional(), requiresAck: z.boolean().optional(), status: z.enum(['draft', 'published', 'archived']).optional() })
+const schema = z.object({ title: z.string().min(3).max(200).optional(), body: bodySchema.optional(), isPinned: z.boolean().optional(), requiresAck: z.boolean().optional(), kind: z.enum(['news', 'announcement']).optional(), ackDueAt: z.string().datetime({ offset: true }).nullable().optional(), status: z.enum(['draft', 'published', 'archived']).optional() })
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'knowledge.manage')
   const p = schema.safeParse(await readBody(event))

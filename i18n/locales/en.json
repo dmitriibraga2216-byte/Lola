@@ -65,7 +65,8 @@
       "checklistReport": "Checklist report",
       "meetups": "Meetups",
       "complexTests": "Complex tests",
-      "attendanceReport": "Attendance report"
+      "attendanceReport": "Attendance report",
+      "reportBuilder": "Report builder"
     }
   },
   "people": {
@@ -534,7 +535,21 @@
       "date": "Date",
       "views": "Views",
       "acks": "Acked"
-    }
+    },
+    "kind": {
+      "news": "News",
+      "announcement": "Announcement"
+    },
+    "ackDue": "Read by",
+    "forLocations": "For locations (all if none)",
+    "report": "Who read",
+    "reportLine": "Acknowledged {acked} of {total} · viewed {viewed}",
+    "notAcked": "Not acknowledged",
+    "acked": "Acknowledged",
+    "viewedOnly": "viewed, not acknowledged",
+    "announcement": "Announcement",
+    "ackUntil": "Confirm by {at}",
+    "iRead": "I have read this"
   },
   "survey": {
     "title": "Surveys",
@@ -1052,7 +1067,8 @@
     "new": "New meetup",
     "kind": {
       "meetup": "In-person",
-      "webinar": "Webinar"
+      "webinar": "Webinar",
+      "event": "Event"
     },
     "titlePh": "Meetup title",
     "start": "Start",
@@ -1147,5 +1163,84 @@
     "avg": "Avg",
     "failedCol": "Failed",
     "partWord": "part"
+  },
+  "wiki": {
+    "title": "Wiki",
+    "short": "Wiki",
+    "newPage": "New page",
+    "search": "Search wiki",
+    "nothing": "Nothing found",
+    "empty": "No pages yet",
+    "pageTitle": "Page title",
+    "settings": "Permissions & status",
+    "viewRoles": "Who can view",
+    "editRoles": "Who can edit",
+    "rolesHint": "Empty = inherit from parent; at root empty = everyone views, authors/admins edit. Applies to the whole branch",
+    "published": "Published",
+    "changeComment": "What changed (revision comment)",
+    "draft": "draft",
+    "history": "History",
+    "subpage": "subpage",
+    "subpages": "Subpages",
+    "delete": "Delete branch",
+    "deleteConfirm": "Delete the page with all subpages?",
+    "restore": "Restore"
+  },
+  "org": {
+    "title": "Org structure",
+    "short": "Org",
+    "totals": "{l} locations · {p} people",
+    "people": "people",
+    "manager": "Manager"
+  },
+  "rb": {
+    "saved": "Saved reports",
+    "noSaved": "None yet",
+    "new": "new",
+    "entity": {
+      "people": "People",
+      "enrollments": "Enrollments",
+      "attempts": "Quiz attempts"
+    },
+    "groupBy": "Group by",
+    "fields": "Fields",
+    "filters": "Filters",
+    "allLocations": "All locations",
+    "run": "Run",
+    "rows": "rows",
+    "saveTitle": "Save as report / schedule",
+    "name": "Report name",
+    "schedule": "On schedule",
+    "daily": "daily",
+    "weekly": "weekly",
+    "hour": "at (h)",
+    "recipients": "To",
+    "field": {
+      "full_name": "Name",
+      "phone": "Phone",
+      "status": "Status",
+      "hired_at": "Hired",
+      "location": "Location",
+      "position": "Position",
+      "courses_done": "Courses done",
+      "courses_overdue": "Overdue",
+      "course": "Course",
+      "progress_pct": "Progress, %",
+      "due_at": "Due",
+      "completed_at": "Completed",
+      "source": "Source",
+      "quiz": "Quiz",
+      "attempt_no": "Attempt #",
+      "score": "Score",
+      "passed": "Passed",
+      "started_at": "Started",
+      "finished_at": "Finished",
+      "rows": "Rows",
+      "avg_courses_done": "Avg courses",
+      "avg_courses_overdue": "Avg overdue",
+      "avg_progress_pct": "Avg progress",
+      "avg_score": "Avg score",
+      "avg_attempt_no": "Avg attempt #"
+    }
   }
 }

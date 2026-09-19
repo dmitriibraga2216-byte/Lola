@@ -66,6 +66,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   meetup_missed_manager: 'Не прийшли на «{{title}}»: {{names}}',
   meetup_feedback_request: 'Оцініть заняття «{{title}}»',
   webinar_record_ready: 'Запис вебінару «{{title}}» доступний',
+  announcement_reminder: 'Оголошення «{{title}}» чекає на підтвердження{{#due}} до {{due}}{{/due}}',
+  announcement_overdue_manager: 'Не підтвердили оголошення «{{title}}»: {{names}}',
+  scheduled_report: 'Звіт «{{name}}» готовий: {{rows}} рядків. {{url}}',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

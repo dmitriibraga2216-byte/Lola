@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq } from 'drizzle-orm'
 import * as schema from './schema'
 import { SYSTEM_ROLES } from '../../shared/domain/roles'
+import { ensureTenantDefaults } from './tenantDefaults'
 
 /**
  * Сид этапа 0 (docs/07-stages.md): тенант «Каппі», две точки, позиции,
@@ -62,6 +63,7 @@ await db.transaction(async (tx) => {
     })),
   ).returning()
   const role = Object.fromEntries(roles.map(r => [r.code, r]))
+  await ensureTenantDefaults(tx, tenantId)
 
   const people = await tx.insert(schema.users).values([
     { tenantId, phone: '+380661864742', fullName: 'Адмін Каппі', status: 'active' },

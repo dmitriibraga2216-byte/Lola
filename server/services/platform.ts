@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
 import { SYSTEM_ROLES } from '../../shared/domain/roles'
+import { ensureTenantDefaults } from '../db/tenantDefaults'
 import { createSession } from './session'
 import { logSecurity } from './securityLog'
 
@@ -121,6 +122,7 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
       Object.entries(SYSTEM_ROLES).map(([code, r]) => ({ tenantId, code, name: r.name, scopes: [...r.scopes], isSystem: true })),
     ).returning({ id: schema.roles.id, code: schema.roles.code })
     const adminRole = roleRows.find(r => r.code === 'admin')!
+    await ensureTenantDefaults(tx, tenantId)
 
     const [adminUser] = await tx.insert(schema.users).values({ tenantId, phone: input.adminPhone, fullName: input.adminName, status: 'invited' }).returning({ id: schema.users.id })
     await tx.insert(schema.userPlacements).values({ tenantId, userId: adminUser!.id, locationId: loc!.id, positionId: pos!.id, isPrimary: true })

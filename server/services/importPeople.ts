@@ -6,6 +6,8 @@ import {
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { enqueueNotification } from './notifications'
+import { splitName } from './people'
 import { phoneSchema } from '../../shared/schemas/auth'
 
 /**
@@ -16,7 +18,46 @@ import { phoneSchema } from '../../shared/schemas/auth'
 export const IMPORT_COLUMNS = [
   'ПІБ', 'Телефон', 'Email', 'Посада', 'Рівень посади', 'Місто',
   'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Зовнішній ID',
+  'Прізвище', 'Імʼя', 'По батькові', 'Дата народження',
 ] as const
+export type ImportColumn = typeof IMPORT_COLUMNS[number]
+
+/** Синонимы заголовков для автосопоставления (docs/16 §5.4 шаг 2). */
+const COLUMN_ALIASES: Record<ImportColumn, string[]> = {
+  'ПІБ': ['піб', 'пиб', 'фио', 'full name', 'fullname', 'name', 'імя та прізвище', 'прізвище та імя', 'працівник'],
+  'Телефон': ['телефон', 'phone', 'mobile', 'тел', 'моб', 'номер'],
+  'Email': ['email', 'e-mail', 'пошта', 'почта', 'mail'],
+  'Посада': ['посада', 'должность', 'position', 'job title', 'title'],
+  'Рівень посади': ['рівень посади', 'рівень', 'level', 'уровень', 'grade'],
+  'Місто': ['місто', 'город', 'city'],
+  'Підрозділ': ['підрозділ', 'подразделение', 'department', 'unit', 'org unit', 'відділ'],
+  'Точка': ['точка', 'локація', 'location', 'заклад', 'магазин', 'store', 'obiekt', 'обʼєкт', 'обєкт'],
+  'Роль': ['роль', 'role'],
+  'Мітки': ['мітки', 'теги', 'tags', 'метки', 'tag'],
+  'Дата найму': ['дата найму', 'дата прийняття', 'hired', 'hire date', 'hired at', 'дата приема', 'прийнятий'],
+  'Зовнішній ID': ['зовнішній id', 'external id', 'external_id', 'ext id', 'табельний', 'табельный', 'id', 'external'],
+  'Прізвище': ['прізвище', 'фамилия', 'last name', 'lastname', 'surname'],
+  'Імʼя': ['імя', 'ім\'я', 'имя', 'first name', 'firstname', 'given name'],
+  'По батькові': ['по батькові', 'отчество', 'middle name', 'patronymic'],
+  'Дата народження': ['дата народження', 'дата рождения', 'birth date', 'birthday', 'dob', 'д.н.'],
+}
+const norm = (s: string) => s.toLowerCase().replace(/[ʼ'’`]/g, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim()
+
+/** Угадать сопоставление «заголовок файла → колонка шаблона». */
+export function guessMapping(headers: string[]): Record<string, ImportColumn> {
+  const out: Record<string, ImportColumn> = {}
+  const used = new Set<ImportColumn>()
+  for (const h of headers) {
+    const n = norm(h)
+    if (!n) continue
+    const exact = IMPORT_COLUMNS.find(c => norm(c) === n)
+    const hit = exact ?? (Object.entries(COLUMN_ALIASES) as [ImportColumn, string[]][]).find(([, al]) => al.some(a => norm(a) === n))?.[0]
+    if (hit && !used.has(hit)) { out[h] = hit; used.add(hit) }
+  }
+  return out
+}
+
+export interface ImportOptions { createRefs?: boolean, archiveMissing?: boolean, sendInvites?: boolean }
 
 export interface ImportRow {
   line: number
@@ -32,8 +73,14 @@ export interface ImportRow {
   tags: string[]
   hiredAt: string
   externalId: string
+  lastName?: string
+  firstName?: string
+  middleName?: string
+  birthDate?: string
   action: 'create' | 'update' | 'skip'
   errors: string[]
+  warnings?: string[]
+  raw?: Record<string, string> // исходная строка — для пересопоставления колонок
 }
 
 interface Ctx { tenantId: string, actorId: string }
@@ -102,68 +149,100 @@ export async function parseImportFile(fileName: string, buffer: Buffer): Promise
   return rows
 }
 
-/** Построчная валидация + определение create/update. Пишет import_job со строками. */
-export async function validateImport(ctx: Ctx, fileName: string, raw: Record<string, string>[]) {
+/** Применить сопоставление: строка файла → строка по колонкам шаблона. */
+function remap(rec: Record<string, string>, mapping: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [h, col] of Object.entries(mapping)) if (col && rec[h] !== undefined) out[col] = rec[h]!
+  return out
+}
+
+/** Построчная валидация + определение create/update (docs/16 §5.4, §12). Пишет import_job со строками. */
+export async function validateImport(ctx: Ctx, fileName: string, raw: Record<string, string>[], input: { mapping?: Record<string, string>, options?: ImportOptions, jobId?: string } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [existingPhones, existingExternal, positionRows, roleRows] = await Promise.all([
+    const headers = [...new Set(raw.flatMap(r => Object.keys(r)))]
+    const mapping = input.mapping ?? (headers.every(h => (IMPORT_COLUMNS as readonly string[]).includes(h)) ? Object.fromEntries(headers.map(h => [h, h])) : guessMapping(headers))
+    const options: ImportOptions = { createRefs: true, archiveMissing: false, sendInvites: false, ...input.options }
+    const [existingPhones, existingExternal, positionRows, roleRows, cityRows, levelRows, unitRows, locRows] = await Promise.all([
       tx.select({ phone: users.phone, id: users.id }).from(users).where(sql`${users.phone} is not null`),
       tx.select({ externalId: users.externalId, id: users.id }).from(users).where(sql`${users.externalId} is not null`),
       tx.select({ name: positions.name }).from(positions),
       tx.select({ code: roles.code, name: roles.name }).from(roles),
+      tx.select({ name: cities.name }).from(cities),
+      tx.select({ name: positionLevels.name }).from(positionLevels),
+      tx.select({ name: orgUnits.name }).from(orgUnits),
+      tx.select({ name: locations.name }).from(locations),
     ])
     const phoneMap = new Map(existingPhones.map(r => [r.phone!, r.id]))
     const externalMap = new Map(existingExternal.map(r => [r.externalId!, r.id]))
-    const knownPositions = new Set(positionRows.map(r => r.name.toLowerCase()))
+    const known = {
+      positions: new Set(positionRows.map(r => r.name.toLowerCase())),
+      cities: new Set(cityRows.map(r => r.name.toLowerCase())),
+      levels: new Set(levelRows.map(r => r.name.toLowerCase())),
+      orgUnits: new Set(unitRows.map(r => r.name.toLowerCase())),
+      locations: new Set(locRows.map(r => r.name.toLowerCase())),
+    }
     const knownRoles = new Map(roleRows.flatMap(r => [[r.code.toLowerCase(), r.code], [r.name.toLowerCase(), r.code]] as [string, string][]))
 
     const seenPhones = new Map<string, number>()
     const seenExternal = new Map<string, number>()
 
-    const rows: ImportRow[] = raw.map((rec, idx) => {
+    const rows: ImportRow[] = raw.map((src, idx) => {
+      const rec = remap(src, mapping)
       const line = idx + 2 // строка в файле, после заголовка
       const errors: string[] = []
+      const warnings: string[] = []
 
-      const fullName = rec['ПІБ'] ?? ''
-      if (fullName.length < 2) errors.push('ПІБ обовʼязкове')
+      const lastName = rec['Прізвище'] ?? ''
+      const firstName = rec['Імʼя'] ?? ''
+      const middleName = rec['По батькові'] ?? ''
+      const fullName = rec['ПІБ'] || [lastName, firstName, middleName].filter(Boolean).join(' ')
+      if (fullName.length < 2) errors.push('ПІБ: обовʼязкове')
 
+      const externalId = rec['Зовнішній ID'] ?? ''
       let phone = rec['Телефон'] ?? ''
       if (!phone) {
-        errors.push('Телефон обовʼязковий')
+        // Без телефона, но с external_id — принимается, статус invited без входа (docs/16 §12)
+        if (externalId) warnings.push('Телефон: порожній — людина не зможе увійти, поки не вкажете номер')
+        else errors.push('Телефон: обовʼязковий')
       }
       else {
         const parsed = phoneSchema.safeParse(phone)
-        if (!parsed.success) errors.push('Невірний формат телефону')
+        if (!parsed.success) errors.push('Телефон: невірний формат')
         else phone = parsed.data
       }
 
       const position = rec['Посада'] ?? ''
-      if (!position) errors.push('Посада обовʼязкова')
-
+      if (!position) errors.push('Посада: обовʼязкова')
       const orgUnit = rec['Підрозділ'] ?? ''
-      if (!orgUnit) errors.push('Підрозділ обовʼязковий')
-
+      if (!orgUnit) errors.push('Підрозділ: обовʼязковий')
       const location = rec['Точка'] ?? ''
-      if (!location) errors.push('Точка обовʼязкова')
+      if (!location) errors.push('Точка: обовʼязкова')
+
+      if (!options.createRefs) {
+        if (position && !known.positions.has(position.toLowerCase())) errors.push(`Посада: невідома «${position}»`)
+        if (orgUnit && !known.orgUnits.has(orgUnit.toLowerCase())) errors.push(`Підрозділ: невідомий «${orgUnit}»`)
+        if (location && !known.locations.has(location.toLowerCase())) errors.push(`Точка: невідома «${location}»`)
+        const city = rec['Місто'] ?? ''
+        if (city && !known.cities.has(city.toLowerCase())) errors.push(`Місто: невідоме «${city}»`)
+        const level = rec['Рівень посади'] ?? ''
+        if (level && !known.levels.has(level.toLowerCase())) errors.push(`Рівень посади: невідомий «${level}»`)
+      }
 
       const role = rec['Роль'] ?? ''
-      if (role && !knownRoles.has(role.toLowerCase())) {
-        errors.push(`Невідома роль «${role}»`)
-      }
+      if (role && !knownRoles.has(role.toLowerCase())) errors.push(`Роль: невідома «${role}»`)
 
       const hiredAt = rec['Дата найму'] ?? ''
-      if (hiredAt && !/^\d{4}-\d{2}-\d{2}$/.test(hiredAt)) {
-        errors.push('Дата найму — у форматі РРРР-ММ-ДД')
-      }
+      if (hiredAt && !/^\d{4}-\d{2}-\d{2}$/.test(hiredAt)) errors.push('Дата найму: у форматі РРРР-ММ-ДД')
+      const birthDate = rec['Дата народження'] ?? ''
+      if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) errors.push('Дата народження: у форматі РРРР-ММ-ДД')
 
       const email = rec['Email'] ?? ''
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Невірний email')
-
-      const externalId = rec['Зовнішній ID'] ?? ''
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email: невірний')
 
       // Дубликаты внутри файла
-      if (phone && seenPhones.has(phone)) errors.push(`Дубль телефону (рядок ${seenPhones.get(phone)})`)
+      if (phone && seenPhones.has(phone)) errors.push(`Телефон: дубль (рядок ${seenPhones.get(phone)})`)
       else if (phone) seenPhones.set(phone, line)
-      if (externalId && seenExternal.has(externalId)) errors.push(`Дубль зовнішнього ID (рядок ${seenExternal.get(externalId)})`)
+      if (externalId && seenExternal.has(externalId)) errors.push(`Зовнішній ID: дубль (рядок ${seenExternal.get(externalId)})`)
       else if (externalId) seenExternal.set(externalId, line)
 
       // Идентификация существующего: по external_id, иначе по телефону (docs/06-infra.md §6.5.6)
@@ -183,8 +262,11 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
         tags: (rec['Мітки'] ?? '').split(/[,;]/).map(s => s.trim()).filter(Boolean),
         hiredAt,
         externalId,
+        lastName, firstName, middleName, birthDate,
         action: errors.length > 0 ? 'skip' : existingId ? 'update' : 'create',
         errors,
+        warnings,
+        raw: src,
       } satisfies ImportRow
     })
 
@@ -194,21 +276,57 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
       update: rows.filter(r => r.action === 'update').length,
       skip: rows.filter(r => r.action === 'skip').length,
       errors: rows.filter(r => r.errors.length > 0).length,
-      newPositions: [...new Set(rows.filter(r => r.errors.length === 0 && r.position && !knownPositions.has(r.position.toLowerCase())).map(r => r.position))],
+      warnings: rows.filter(r => r.warnings?.length).length,
+      newPositions: [...new Set(rows.filter(r => r.errors.length === 0 && r.position && !known.positions.has(r.position.toLowerCase())).map(r => r.position))],
+      unmapped: (IMPORT_COLUMNS as readonly string[]).filter(c => ['ПІБ', 'Телефон', 'Посада', 'Підрозділ', 'Точка'].includes(c) && !Object.values(mapping).includes(c) && !(c === 'ПІБ' && Object.values(mapping).includes('Прізвище'))),
     }
 
-    const [job] = await tx.insert(importJobs).values({
-      tenantId: ctx.tenantId,
-      kind: 'users',
-      fileName,
-      status: 'ready',
-      rows,
-      stats,
-      createdBy: ctx.actorId,
-    }).returning({ id: importJobs.id, stats: importJobs.stats, status: importJobs.status })
-
-    return { jobId: job!.id, stats, rows }
+    const values = { fileName, status: 'ready' as const, rows, stats, mapping, options, updatedAt: new Date() }
+    let jobId = input.jobId
+    if (jobId) {
+      const [j] = await tx.update(importJobs).set(values).where(and(eq(importJobs.id, jobId), inArray(importJobs.status, ['ready', 'validating']))).returning({ id: importJobs.id })
+      if (!j) throw new Error('import job is not editable')
+    }
+    else {
+      const [job] = await tx.insert(importJobs).values({ tenantId: ctx.tenantId, kind: 'users', source: 'csv', createdBy: ctx.actorId, ...values }).returning({ id: importJobs.id })
+      jobId = job!.id
+    }
+    return { jobId, stats, rows, headers, mapping, options }
   })
+}
+
+/** Пересопоставление колонок и/или опций (POST /people/import/:id/mapping): повторная валидация тех же строк. */
+export async function remapImport(ctx: Ctx, jobId: string, input: { mapping?: Record<string, string>, options?: ImportOptions, presetName?: string }) {
+  const job = await getImportJob(ctx, jobId)
+  if (!job || job.status !== 'ready') return null
+  const raw = (job.rows as ImportRow[]).map(r => r.raw ?? {})
+  const mapping = input.mapping ?? (job.mapping as Record<string, string> | null) ?? undefined
+  const options = { ...(job.options as ImportOptions), ...input.options }
+  const result = await validateImport(ctx, job.fileName, raw, { mapping, options, jobId })
+  if (mapping) await saveMappingPreset(ctx, input.presetName ?? 'default', mapping)
+  return result
+}
+
+/** Пресеты сопоставления — в tenants.settings.importPresets (docs/16 §5.4 шаг 2). */
+export async function saveMappingPreset(ctx: Ctx, name: string, mapping: Record<string, string>) {
+  return withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`
+    update tenants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{importPresets}', coalesce(settings->'importPresets', '{}'::jsonb) || jsonb_build_object(${name}::text, ${JSON.stringify(mapping)}::jsonb))
+    where id = ${ctx.tenantId}::uuid
+  `))
+}
+export async function listMappingPresets(ctx: Ctx): Promise<Record<string, Record<string, string>>> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [r] = await tx.execute(sql`select coalesce(settings->'importPresets', '{}'::jsonb) as p from tenants where id = ${ctx.tenantId}::uuid`) as unknown as { p: Record<string, Record<string, string>> }[]
+    return r?.p ?? {}
+  })
+}
+
+/** История загрузок (docs/16 §5.5 «Импорт»). */
+export async function listImportJobs(ctx: Ctx) {
+  return withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`
+    select j.id, j.file_name, j.source, j.status, j.stats, j.created_at, j.started_at, j.finished_at, u.full_name as created_by_name
+    from import_jobs j left join users u on u.id = j.created_by where j.kind = 'users' order by j.created_at desc limit 100
+  `) as unknown as Promise<Record<string, unknown>[]>)
 }
 
 export async function getImportJob(ctx: Ctx, jobId: string) {
@@ -222,12 +340,28 @@ export async function getImportJob(ctx: Ctx, jobId: string) {
 export async function applyImport(ctx: Ctx, jobId: string) {
   const job = await getImportJob(ctx, jobId)
   if (!job || job.status !== 'ready') return null
-
+  const options = job.options as ImportOptions
+  const baseStats = job.stats as Record<string, unknown>
   const rows = job.rows as ImportRow[]
   const applicable = rows.filter(r => r.action !== 'skip')
   let created = 0
   let updated = 0
+  const touched: string[] = []
+  const createdIds: string[] = []
 
+  await withTenant(ctx.tenantId, ctx.actorId, tx => tx.update(importJobs).set({ status: 'applying', startedAt: new Date(), updatedAt: new Date() }).where(eq(importJobs.id, jobId)))
+  try {
+    await applyBatches()
+  }
+  catch (err) {
+    await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+      await tx.update(importJobs).set({ status: 'failed', finishedAt: new Date(), stats: { ...(job.stats as Record<string, unknown>), created, updated, error: String((err as Error).message ?? err) }, updatedAt: new Date() }).where(eq(importJobs.id, jobId))
+      if (job.createdBy) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: job.createdBy, code: 'import_failed', payload: { file: job.fileName, error: String((err as Error).message ?? err) }, dedupKey: `import_failed:${jobId}`, urgent: true })
+    })
+    throw err
+  }
+
+  async function applyBatches() {
   for (let offset = 0; offset < applicable.length; offset += 200) {
     const batch = applicable.slice(offset, offset + 200)
 
@@ -327,17 +461,22 @@ export async function applyImport(ctx: Ctx, jobId: string) {
             .from(users)
             .where(or(...lookupConds))
         : []
-      const byPhone = new Map(existing.map(r => [r.phone, r.id]))
+      const byPhone = new Map(existing.filter(r => r.phone).map(r => [r.phone, r.id]))
       const byExternal = new Map(existing.filter(r => r.externalId).map(r => [r.externalId, r.id]))
 
       for (const row of batch) {
-        const userId = (row.externalId && byExternal.get(row.externalId)) || byPhone.get(row.phone) || null
+        const userId = (row.externalId && byExternal.get(row.externalId)) || (row.phone && byPhone.get(row.phone)) || null
+        const name = splitName({ fullName: row.fullName, lastName: row.lastName || undefined, firstName: row.firstName || undefined, middleName: row.middleName || undefined })
         const base = {
-          fullName: row.fullName,
+          fullName: name.fullName,
+          lastName: name.lastName,
+          firstName: name.firstName,
+          middleName: name.middleName,
           email: row.email || null,
           cityId: row.city ? cityByName.get(row.city.toLowerCase()) ?? null : null,
           tags: row.tags,
           hiredAt: row.hiredAt || null,
+          birthDate: row.birthDate || null,
           externalId: row.externalId || null,
         }
 
@@ -348,14 +487,18 @@ export async function applyImport(ctx: Ctx, jobId: string) {
           updated++
         }
         else {
+          // Без телефона — invited без возможности входа (docs/16 §12)
           const [inserted] = await tx.insert(users).values({
             tenantId: ctx.tenantId,
-            phone: row.phone,
+            phone: row.phone || null,
+            status: 'invited',
             ...base,
           }).returning({ id: users.id })
           id = inserted!.id
           created++
+          createdIds.push(id)
         }
+        touched.push(id)
 
         const locationId = locationByName.get(row.location.toLowerCase())
         const positionId = positionByName.get(row.position.toLowerCase())
@@ -393,13 +536,44 @@ export async function applyImport(ctx: Ctx, jobId: string) {
           }).onConflictDoNothing()
         }
       }
+      // Прогресс для UI (docs/16 §5.4 шаг 5)
+      await tx.update(importJobs).set({ stats: { ...baseStats, processed: Math.min(offset + 200, applicable.length), created, updated }, updatedAt: new Date() }).where(eq(importJobs.id, jobId))
+    })
+  }
+  }
+
+  // Приглашения созданным (options.sendInvites) — только тем, у кого есть телефон
+  if (options.sendInvites) {
+    const { createInvitation } = await import('./people')
+    for (const id of createdIds) await createInvitation(ctx, id).catch(() => null)
+  }
+
+  // Людей не из файла — в архив (options.archiveMissing); администраторов не трогаем
+  let archived = 0
+  if (options.archiveMissing) {
+    archived = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+      const rows = await tx.execute(sql`
+        update users u set status = 'archived', archived_at = now(), updated_at = now()
+        where u.status in ('active','invited') and not u.is_hidden
+          and u.id <> ${ctx.actorId}::uuid
+          ${touched.length ? sql`and u.id not in ${touched}` : sql``}
+          and not exists (select 1 from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = u.id and r.code = 'admin')
+        returning u.id
+      `) as unknown as { id: string }[]
+      if (rows.length) {
+        const ids = rows.map(r => r.id)
+        await tx.update(userPlacements).set({ endedAt: sql`current_date` }).where(and(inArray(userPlacements.userId, ids), isNull(userPlacements.endedAt)))
+        await tx.execute(sql`update sessions set revoked_at = now() where user_id in ${ids} and revoked_at is null`)
+        await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'import.archive_missing', entity: 'import_job', entityId: jobId, after: { archived: ids.length } })
+      }
+      return rows.length
     })
   }
 
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const finalStats = { ...(job.stats as Record<string, unknown>), created, updated }
+    const finalStats = { ...(job.stats as Record<string, unknown>), processed: applicable.length, created, updated, archived }
     const [saved] = await tx.update(importJobs)
-      .set({ status: 'applied', stats: finalStats, updatedAt: new Date() })
+      .set({ status: 'applied', stats: finalStats, finishedAt: new Date(), updatedAt: new Date() })
       .where(eq(importJobs.id, jobId))
       .returning({ id: importJobs.id, stats: importJobs.stats })
 
@@ -411,6 +585,9 @@ export async function applyImport(ctx: Ctx, jobId: string) {
       entityId: jobId,
       after: finalStats,
     })
+    if (job.createdBy) {
+      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: job.createdBy, code: 'import_finished', payload: { file: job.fileName, created, updated, errors: (job.stats as { errors?: number }).errors ?? 0, url: `/admin/import?job=${jobId}` }, dedupKey: `import_finished:${jobId}` })
+    }
     return saved!
   }).then(async (saved) => {
     const { syncAssignments } = await import('./assignments')
@@ -426,7 +603,7 @@ export async function buildImportReport(ctx: Ctx, jobId: string): Promise<Buffer
 
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet('Звіт')
-  ws.addRow(['Рядок', 'ПІБ', 'Телефон', 'Дія', 'Помилки'])
+  ws.addRow(['Рядок', 'ПІБ', 'Телефон', 'Дія', 'Помилки', 'Попередження'])
   for (const row of job.rows as ImportRow[]) {
     ws.addRow([
       row.line,
@@ -434,6 +611,7 @@ export async function buildImportReport(ctx: Ctx, jobId: string): Promise<Buffer
       row.phone,
       row.action === 'skip' ? 'пропущено' : row.action === 'create' ? 'створено' : 'оновлено',
       row.errors.join('; '),
+      (row.warnings ?? []).join('; '),
     ])
   }
   return Buffer.from(await wb.xlsx.writeBuffer())

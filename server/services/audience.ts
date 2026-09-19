@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { enrollments, orgUnits, roles, userPlacements, userRoles, users } from '../db/schema'
+import { enrollments, orgUnits, roles, userGroups, userPlacements, userRoles, users } from '../db/schema'
 import type { TenantTx } from '../utils/withTenant'
 import type { Audience, AudienceRule } from '../../shared/schemas/assignments'
 
@@ -10,7 +10,8 @@ import type { Audience, AudienceRule } from '../../shared/schemas/assignments'
  */
 
 async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string>> {
-  const activePeople = inArray(users.status, ['invited', 'active'])
+  // Скрытые (docs/16 §7.5) не попадают в выбор людей при назначении
+  const activePeople = and(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false))!
 
   switch (rule.type) {
     case 'user': {
@@ -66,9 +67,25 @@ async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string
         .where(and(sql`${users.tags} && ARRAY[${sql.join(rule.values.map(v => sql`${v}`), sql`, `)}]::text[]`, activePeople))
       return new Set(rows.map(r => r.id))
     }
+    case 'group': {
+      // Статическая — members; динамическая — её фильтр как segment (docs/16 §3.4)
+      const groups = await tx.select().from(userGroups).where(and(inArray(userGroups.id, rule.ids), eq(userGroups.isActive, true)))
+      const out = new Set<string>()
+      for (const g of groups) {
+        if (g.kind === 'static') { for (const id of g.members) out.add(id) }
+        else if (g.filter) for (const id of await resolveRule(tx, { type: 'segment', filter: g.filter as never })) out.add(id)
+      }
+      if (out.size) {
+        const rows = await tx.select({ id: users.id }).from(users).where(and(inArray(users.id, [...out]), activePeople))
+        return new Set(rows.map(r => r.id))
+      }
+      return out
+    }
     case 'segment': {
       const f = rule.filter
       const conds = [f.status?.length ? inArray(users.status, f.status) : activePeople]
+      if (f.positionLevelIds?.length) conds.push(sql`exists (select 1 from ${userPlacements} up where up.user_id = ${users.id} and up.ended_at is null and up.position_level_id in ${f.positionLevelIds})`)
+      if (f.certificateExpiringDays) conds.push(sql`exists (select 1 from certificates c where c.user_id = ${users.id} and c.revoked_at is null and c.valid_until between now() and now() + (${f.certificateExpiringDays} || ' days')::interval)`)
       if (f.hiredFrom) conds.push(sql`${users.hiredAt} >= ${f.hiredFrom}`)
       if (f.hiredTo) conds.push(sql`${users.hiredAt} <= ${f.hiredTo}`)
       if (f.positionIds?.length || f.locationIds?.length) {

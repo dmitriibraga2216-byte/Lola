@@ -21,6 +21,7 @@ export const locations = pgTable('locations', {
   orgUnitId: uuid('org_unit_id').notNull().references(() => orgUnits.id),
   name: text('name').notNull(),
   address: text('address'),
+  cityId: uuid('city_id'),
   timezone: text('timezone').notNull().default('Europe/Kyiv'),
   managerId: uuid('manager_id').references((): AnyPgColumn => users.id),
   isActive: boolean('is_active').notNull().default(true),
@@ -34,6 +35,7 @@ export const positions = pgTable('positions', {
   name: text('name').notNull(),
   code: text('code'),
   levelId: uuid('level_id').references(() => positionLevels.id), // рівень посади
+  isActive: boolean('is_active').notNull().default(true), // элемент справочника не удаляется, если используется — деактивируется
 }, t => [
   unique().on(t.tenantId, t.name),
 ])

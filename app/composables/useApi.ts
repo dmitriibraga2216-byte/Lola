@@ -15,7 +15,7 @@ export function useApi() {
     return res.data
   }
 
-  return { api }
+  return { api, csrf }
 }
 
 export interface ApiErrorBody {

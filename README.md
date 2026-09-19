@@ -67,5 +67,6 @@ pnpm lint && pnpm typecheck
 | [20-assessment.md](docs/20-assessment.md) | оценка персонала и чек-листы (R2) |
 | [26-server-local.md](docs/26-server-local.md) | локальный сервер: VM в Proxmox, compose, переменные, бэкапы, обновления |
 | [27-gateway-public.md](docs/27-gateway-public.md) | веб-шлюз наружу: Cloudflare Tunnel, домены, демо-ссылка для третьих лиц |
+| [28-implementation-notes.md](docs/28-implementation-notes.md) | решения по реализации, отступления от ТЗ и открытые вопросы к заказчику |
 
 Модульные документы `16–17`, `21–25` ещё пишутся. Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

@@ -71,7 +71,8 @@
       "meetups": "Meetups",
       "complexTests": "Complex tests",
       "attendanceReport": "Attendance report",
-      "reportBuilder": "Report builder"
+      "reportBuilder": "Report builder",
+      "rules": "Automation rules"
     }
   },
   "people": {
@@ -437,7 +438,11 @@
     "extendTitle": "Extend deadline: {name}",
     "newDue": "New deadline",
     "reason": "Reason",
-    "reasonHint": "Describe the reason — the network manager will see it"
+    "reasonHint": "Describe the reason — the network manager will see it",
+    "remindAll": "Remind all",
+    "reminded": "Reminded {n} people",
+    "archive": "Archive",
+    "archiveConfirm": "Archive? Auto-sync stops, history stays"
   },
   "profiles": {
     "hint": "Position profile: a person lands on a position → the course set is assigned automatically.",
@@ -1268,5 +1273,57 @@
       "avg_score": "Avg score",
       "avg_attempt_no": "Avg attempt #"
     }
+  },
+  "rules": {
+    "hint": "A rule defines the audience and trigger. What to assign is set by a programme referencing the rule, or by actions below",
+    "trigger": "Trigger",
+    "runs": "Runs",
+    "lastRun": "Last run",
+    "usedFor": "Used for",
+    "days": "d",
+    "userList": "User list",
+    "dryRun": "Dry run",
+    "runManual": "Run now",
+    "delete": "Delete",
+    "deleteConfirm": "Delete the rule?",
+    "usersNow": "match now",
+    "new": "New rule",
+    "name": "Name*",
+    "description": "Description",
+    "when": "When",
+    "if": "If",
+    "then": "Then",
+    "triggers": {
+      "user.activated": "First activated",
+      "user.attributes_changed": "Received the attributes",
+      "user.created": "User created",
+      "user.placement_changed": "Placement changed",
+      "course.completed": "Course completed",
+      "course.failed": "Course failed",
+      "certificate.expiring": "Certificate expiring",
+      "assignment.overdue": "Assignment overdue"
+    },
+    "whichCourse": "Which course",
+    "cities": "Cities",
+    "positions": "Positions",
+    "orgUnits": "Org units",
+    "tags": "Tags",
+    "allExcept": "All except",
+    "any": "Any",
+    "willAssign": "Will be assigned to",
+    "thenHint": "Actions are optional: a programme using this rule assigns itself",
+    "act": {
+      "assign_content": "Assign course",
+      "add_tag": "Add tag",
+      "remove_tag": "Remove tag",
+      "notify_user": "Notify user"
+    },
+    "dueDays": "due, days",
+    "tag": "Tag",
+    "text": "Message",
+    "action": "action",
+    "delay": "Assign after, days",
+    "oncePerUser": "once per user",
+    "publish": "Publish"
   }
 }

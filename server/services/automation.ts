@@ -1,6 +1,6 @@
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { z } from 'zod'
-import { assignments, automationRules, automationRuns, learningProfiles, userPlacements, users } from '../db/schema'
+import { assignments, automationRules, automationRuns, learningProfiles, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -100,10 +100,35 @@ export async function applyProfile(ctx: Ctx, id: string): Promise<{ assignments:
 
 // ── Правила автоматизации (docs/15 §3.6, §7.6–7.9) ────────────────────
 
-export type RuleTrigger = 'user.created' | 'user.activated' | 'user.placement_changed' | 'course.completed' | 'course.failed' | 'certificate.expiring' | 'assignment.overdue'
+export type RuleTrigger = 'user.activated' | 'user.attributes_changed' | 'user.created' | 'user.placement_changed' | 'course.completed' | 'course.failed' | 'certificate.expiring' | 'assignment.overdue'
+
+/** «Отримали зазначені атрибути» = любое изменение размещения/меток; «вперше активовані» = первый вход. */
+const TRIGGER_ALIASES: Record<string, RuleTrigger[]> = {
+  'user.placement_changed': ['user.placement_changed', 'user.attributes_changed'],
+  'user.tag_changed': ['user.attributes_changed'],
+  'user.activated': ['user.activated'],
+}
 
 export async function listRules(ctx: Ctx) {
-  return withTenant(ctx.tenantId, ctx.actorId, async tx => tx.select().from(automationRules).orderBy(automationRules.name))
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rules = await tx.select().from(automationRules).orderBy(automationRules.name)
+    const { programsUsingRules } = await import('./programs')
+    const used = await programsUsingRules(tx, rules.map(r => r.id))
+    return rules.map(r => ({ ...r, usedBy: used.get(r.id) ?? [] }))
+  })
+}
+
+export async function deleteRule(ctx: Ctx, id: string): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'in_use', usedBy: string[] }> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [r] = await tx.select({ id: automationRules.id, name: automationRules.name }).from(automationRules).where(eq(automationRules.id, id))
+    if (!r) return { ok: false as const, code: 'not_found' as const, usedBy: [] }
+    const { programsUsingRules } = await import('./programs')
+    const used = (await programsUsingRules(tx, [id])).get(id) ?? []
+    if (used.length) return { ok: false as const, code: 'in_use' as const, usedBy: used.map(u => u.title) }
+    await tx.delete(automationRules).where(eq(automationRules.id, id))
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'rule.delete', entity: 'automation_rule', entityId: id, before: { name: r.name } })
+    return { ok: true as const }
+  })
 }
 
 export async function createRule(ctx: Ctx, input: z.infer<typeof ruleSchema>) {
@@ -131,21 +156,59 @@ export async function listRuns(ctx: Ctx, ruleId: string) {
   })
 }
 
-type Conditions = { positionIds?: string[], locationIds?: string[], courseIds?: string[], tags?: string[] }
+export type Conditions = {
+  cityIds?: string[], cityInvert?: boolean, positionIds?: string[], positionInvert?: boolean, orgUnitIds?: string[], orgUnitInvert?: boolean,
+  tags?: string[], tagInvert?: boolean, locationIds?: string[], courseIds?: string[],
+}
 
-async function matchesConditions(tx: TenantTx, userId: string, cond: Conditions, payload: Record<string, unknown>): Promise<boolean> {
+/** Группа условий эталона: пусто = «Будь-який»; invert = «Всі, окрім». */
+const groupOk = (wanted: string[] | undefined, invert: boolean | undefined, actual: string[]): boolean => {
+  if (!wanted?.length) return true
+  const hit = wanted.some(w => actual.includes(w))
+  return invert ? !hit : hit
+}
+
+export async function matchesConditions(tx: TenantTx, userId: string, cond: Conditions, payload: Record<string, unknown> = {}): Promise<boolean> {
   if (cond.courseIds?.length && !cond.courseIds.includes(String(payload.courseId))) return false
-  if (cond.positionIds?.length || cond.locationIds?.length) {
-    const [pl] = await tx.select().from(userPlacements).where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-    if (!pl) return false
-    if (cond.positionIds?.length && !cond.positionIds.includes(pl.positionId)) return false
-    if (cond.locationIds?.length && !cond.locationIds.includes(pl.locationId)) return false
-  }
-  if (cond.tags?.length) {
-    const [u] = await tx.select({ tags: users.tags }).from(users).where(eq(users.id, userId))
-    if (!u || !cond.tags.some(t => u.tags.includes(t))) return false
-  }
+  const [row] = await tx.execute(sql`
+    select u.tags, u.city_id, up.position_id, up.location_id, l.org_unit_id
+    from users u
+    left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+    left join locations l on l.id = up.location_id
+    where u.id = ${userId}::uuid
+  `) as unknown as { tags: string[], city_id: string | null, position_id: string | null, location_id: string | null, org_unit_id: string | null }[]
+  if (!row) return false
+  if (!groupOk(cond.cityIds, cond.cityInvert, row.city_id ? [row.city_id] : [])) return false
+  if (!groupOk(cond.positionIds, cond.positionInvert, row.position_id ? [row.position_id] : [])) return false
+  if (!groupOk(cond.orgUnitIds, cond.orgUnitInvert, row.org_unit_id ? [row.org_unit_id] : [])) return false
+  if (!groupOk(cond.tags, cond.tagInvert, row.tags ?? [])) return false
+  if (cond.locationIds?.length && !(row.location_id && cond.locationIds.includes(row.location_id))) return false
   return true
+}
+
+/** «Список користувачів»: кто подпадает под условия прямо сейчас (docs/15 §3.6). */
+export async function ruleUsers(ctx: Ctx, ruleId: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [rule] = await tx.select().from(automationRules).where(eq(automationRules.id, ruleId))
+    if (!rule) return null
+    const people = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.status, 'active')).orderBy(users.fullName)
+    const out: { id: string, fullName: string }[] = []
+    for (const p of people) if (await matchesConditions(tx, p.id, rule.conditions as Conditions)) out.push(p)
+    return out
+  })
+}
+
+/** «Виконати вручну»: разовый запуск правила по всем подходящим людям. */
+export async function runRuleManually(ctx: Ctx, ruleId: string, opts: { dryRun?: boolean } = {}) {
+  const people = await ruleUsers(ctx, ruleId)
+  if (!people) return null
+  const [rule] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select().from(automationRules).where(eq(automationRules.id, ruleId)))
+  const results: { userId: string, fullName: string, status: string, actions: unknown[] }[] = []
+  for (const p of people) {
+    const r = await runRules(ctx.tenantId, rule!.trigger as RuleTrigger, p.id, { manual: true }, { dryRun: opts.dryRun, ruleId })
+    results.push({ userId: p.id, fullName: p.fullName, status: r[0]?.status ?? 'skipped', actions: r[0]?.actions ?? [] })
+  }
+  return { rule: rule!, total: people.length, ran: results.filter(r => r.status === 'ok').length, results }
 }
 
 type Action
@@ -164,9 +227,10 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
   const toExpand: string[] = []
 
   await withTenant(tenantId, null, async (tx) => {
+    const triggers = [...new Set([trigger, ...(TRIGGER_ALIASES[trigger] ?? [])])]
     const rules = await tx.select().from(automationRules).where(and(
-      eq(automationRules.trigger, trigger),
-      ...(opts.ruleId ? [eq(automationRules.id, opts.ruleId)] : [eq(automationRules.isActive, true)]),
+      opts.ruleId ? eq(automationRules.id, opts.ruleId) : inArray(automationRules.trigger, triggers),
+      ...(opts.ruleId ? [] : [eq(automationRules.isActive, true)]),
     ))
 
     for (const rule of rules) {
@@ -201,6 +265,7 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
               const [a] = await tx.insert(assignments).values({
                 tenantId, title: `${rule.name}: автоматично`, kind: 'auto', subjectType: action.subjectType, subjectId: action.subjectId,
                 audience: { rules: [{ type: 'user', ids: [userId] }], match: 'any', ruleId: rule.id },
+                startsAt: rule.assignDelayDays ? new Date(Date.now() + rule.assignDelayDays * 86_400_000) : new Date(),
                 dueMode: 'relative', dueDays: action.dueDays, isMandatory: true, autoSync: true, status: 'active', createdBy: null,
                 reminders: { enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7], channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true },
               }).returning({ id: assignments.id })
@@ -228,6 +293,10 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
             break
         }
       }
+
+      // Программы/траектории с режимом automation, привязанные к правилу (docs/17 §3.4, §7.8)
+      const { assignProgramsForRule } = await import('./programs')
+      for (const r of await assignProgramsForRule(tx, tenantId, rule.id, userId, { dryRun: !!opts.dryRun, delayDays: rule.assignDelayDays })) done.push(r)
 
       if (!opts.dryRun) {
         await tx.insert(automationRuns).values({ tenantId, ruleId: rule.id, userId, triggerPayload: payload, actionsResult: done, status: 'ok' }).onConflictDoNothing()

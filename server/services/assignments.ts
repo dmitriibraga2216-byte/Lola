@@ -365,3 +365,45 @@ export async function manageEnrollments(ctx: Ctx, filter: { status?: string, cou
   })
 }
 
+
+/** Статусы назначения (docs/15 §4): draft→active→paused→archived; в paused новые записи не создаются. */
+export async function setAssignmentStatus(ctx: Ctx, id: string, action: 'pause' | 'resume' | 'archive'): Promise<{ ok: true, status: string } | { ok: false, code: 'not_found' | 'bad_status' }> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [a] = await tx.select({ status: assignments.status }).from(assignments).where(eq(assignments.id, id))
+    if (!a) return { ok: false as const, code: 'not_found' as const }
+    const next = action === 'pause' ? (a.status === 'active' ? 'paused' : null) : action === 'resume' ? (a.status === 'paused' || a.status === 'draft' ? 'active' : null) : (a.status !== 'archived' ? 'archived' : null)
+    if (!next) return { ok: false as const, code: 'bad_status' as const }
+    await tx.update(assignments).set({ status: next, ...(next === 'archived' ? { autoSync: false } : {}), updatedAt: new Date() }).where(eq(assignments.id, id))
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: `assignment.${action}`, entity: 'assignment', entityId: id, before: { status: a.status }, after: { status: next } })
+    return { ok: true as const, status: next }
+  })
+}
+
+/** «Нагадати всім» незавершившим (docs/15 §10). */
+export async function remindAssignment(ctx: Ctx, id: string): Promise<number | null> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [a] = await tx.select({ id: assignments.id, title: assignments.title }).from(assignments).where(eq(assignments.id, id))
+    if (!a) return null
+    const rows = await tx.select({ userId: enrollments.userId, dueAt: enrollments.dueAt }).from(enrollments).where(and(eq(enrollments.assignmentId, id), inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'overdue'])))
+    const day = new Date().toISOString().slice(0, 10)
+    let n = 0
+    for (const r of rows) {
+      if (await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: r.userId, code: 'assignment_due_soon', payload: { course: a.title, due: r.dueAt?.toISOString() ?? null }, dedupKey: `remind_manual:${id}:${r.userId}:${day}` })) n++
+    }
+    return n
+  })
+}
+
+/** Таблица людей назначения с фильтром по статусу (docs/15 §5.3, §10). */
+export async function assignmentPeople(ctx: Ctx, id: string, filter: { status?: string } = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    return tx.execute(sql`
+      select e.id as enrollment_id, e.status, e.progress_pct, e.score, e.due_at, e.started_at, e.completed_at, u.id as user_id, u.full_name, l.name as location, p.name as position
+      from enrollments e join users u on u.id = e.user_id
+      left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+      left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
+      where e.assignment_id = ${id}::uuid ${filter.status ? sql`and e.status = ${filter.status}` : sql``}
+      order by e.status, u.full_name limit 1000
+    `) as unknown as Promise<Record<string, unknown>[]>
+  })
+}

@@ -106,23 +106,28 @@ export const profileSchema = z.object({
   isActive: z.boolean().default(true),
 })
 
+/** Правило автоматизации (docs/15 §3.6, снято с эталона): четыре группы условий с инверсией «Всі, окрім». */
 export const ruleSchema = z.object({
   name: z.string().min(2).max(120),
-  trigger: z.enum(['user.created', 'user.activated', 'user.placement_changed', 'course.completed', 'course.failed', 'certificate.expiring', 'assignment.overdue']),
+  description: z.string().max(1000).optional(),
+  trigger: z.enum(['user.activated', 'user.attributes_changed', 'user.created', 'user.placement_changed', 'course.completed', 'course.failed', 'certificate.expiring', 'assignment.overdue']),
   conditions: z.object({
-    positionIds: z.array(z.string().uuid()).optional(),
+    cityIds: z.array(z.string().uuid()).optional(), cityInvert: z.boolean().optional(),
+    positionIds: z.array(z.string().uuid()).optional(), positionInvert: z.boolean().optional(),
+    orgUnitIds: z.array(z.string().uuid()).optional(), orgUnitInvert: z.boolean().optional(),
+    tags: z.array(z.string()).optional(), tagInvert: z.boolean().optional(),
     locationIds: z.array(z.string().uuid()).optional(),
     courseIds: z.array(z.string().uuid()).optional(), // для course.* — какой курс
-    tags: z.array(z.string()).optional(),
     daysBefore: z.number().int().min(1).max(90).optional(), // для certificate.expiring
   }).default({}),
+  assignDelayDays: z.number().int().min(0).max(365).default(0),
   actions: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('assign_content'), subjectType: z.enum(['course', 'quiz']).default('course'), subjectId: z.string().uuid(), dueDays: z.number().int().min(1).max(365).default(14) }),
     z.object({ type: z.literal('notify_user'), code: z.string().max(50), text: z.string().max(500) }),
     z.object({ type: z.literal('notify_manager'), text: z.string().max(500) }),
     z.object({ type: z.literal('add_tag'), tag: z.string().max(50) }),
     z.object({ type: z.literal('remove_tag'), tag: z.string().max(50) }),
-  ])).min(1).max(10),
+  ])).max(10).default([]),
   isActive: z.boolean().default(true),
   runLimit: z.object({ oncePerUser: z.boolean().default(true) }).default({ oncePerUser: true }),
 })

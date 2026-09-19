@@ -339,7 +339,52 @@
     "security": "Журнал безпеки",
     "when": "Коли",
     "event": "Подія",
-    "details": "Деталі"
+    "details": "Деталі",
+    "kind": {
+      "status": "Протокол статусів",
+      "notifications": "Сповіщення",
+      "sessions": "Сесії",
+      "security": "Безпека",
+      "import": "Імпорт",
+      "automation": "Автоматизація",
+      "integrations": "Інтеграції"
+    },
+    "retention": "Зберігається {days} дн.",
+    "immutable": "записи незмінні",
+    "type": "Тип події",
+    "typeHint": "напр. login, role, people.",
+    "col": {
+      "created_at": "Коли",
+      "action": "Дія",
+      "entity": "Сутність",
+      "from_status": "Було",
+      "to_status": "Стало",
+      "actor": "Хто",
+      "code": "Код",
+      "channel": "Канал",
+      "status": "Статус",
+      "error": "Помилка",
+      "sent_at": "Надіслано",
+      "scheduled_for": "Заплановано",
+      "recipient": "Кому",
+      "user_agent": "Пристрій",
+      "ip": "IP",
+      "expires_at": "Діє до",
+      "revoked_at": "Закрито",
+      "last_active": "Остання активність",
+      "impersonated_by": "Від імені",
+      "full_name": "Людина",
+      "event": "Подія",
+      "file_name": "Файл",
+      "source": "Джерело",
+      "finished_at": "Завершено",
+      "created_by_name": "Хто",
+      "rule": "Правило",
+      "status_code": "HTTP",
+      "attempt": "Спроба",
+      "delivered_at": "Доставлено",
+      "url": "Адреса"
+    }
   },
   "learner": {
     "nav": {
@@ -684,7 +729,7 @@
       "status": "Статус",
       "score": "Бал",
       "passed": "Зараховано",
-      "started_at": "Почав",
+      "started_at": "Початок",
       "submitted_at": "Здав",
       "time_spent_sec": "Сек",
       "position": "Посада",
@@ -695,8 +740,83 @@
       "reviews": "Перевірок",
       "avg_hours": "Год. на відповідь",
       "accept_pct": "% зарахувань",
-      "sla_breaches": "SLA порушено"
-    }
+      "sla_breaches": "SLA порушено",
+      "learner_rating": "Оцінка учнів",
+      "question": "Питання",
+      "answered": "Відповідей",
+      "failed": "Помилок",
+      "fail_pct": "% помилок",
+      "completion_pct": "Завершуваність %",
+      "avg_minutes": "Хв. у середньому",
+      "rating": "Оцінка курсу",
+      "dropoff_lesson": "Де відвалюються",
+      "owner": "Власник",
+      "assigned": "Призначено",
+      "completed": "Завершено",
+      "title": "Назва",
+      "subject_id": "",
+      "is_mandatory": "Обовʼязк.",
+      "passed_first": "З 1-го разу",
+      "completed_at": "Завершено",
+      "created_at": "Створено"
+    },
+    "progress": "Прогрес навчання",
+    "questions": "По питаннях",
+    "content": "Контент",
+    "preset": {
+      "today": "Сьогодні",
+      "7d": "7 днів",
+      "30d": "30 днів",
+      "quarter": "Квартал",
+      "custom": "Свій період"
+    },
+    "subject": "Предмет",
+    "subjects": {
+      "course": "Курс",
+      "program": "Програма",
+      "quiz": "Тест",
+      "workshop": "Практикум",
+      "meetup": "Заняття",
+      "survey": "Опитування"
+    },
+    "exportBg": "Вивантажити у фоні",
+    "myExports": "Мої вивантаження",
+    "exportQueued": "Вивантаження №{id} у черзі — посилання прийде сповіщенням і зʼявиться у «Мої вивантаження»",
+    "exportExpired": "Посилання застаріло (24 години) — зробіть нове вивантаження",
+    "report": "Звіт",
+    "rows": "Рядків",
+    "download": "Завантажити",
+    "exportStatus": {
+      "queued": "у черзі",
+      "running": "готується",
+      "ready": "готово",
+      "failed": "помилка"
+    },
+    "tile": {
+      "people": "Людей",
+      "notReady": "Не готові",
+      "overdue": "Прострочено",
+      "certsExpiring": "Атестацій спливає за 30 дн.",
+      "completed": "Завершено",
+      "attempts": "Спроб",
+      "passedFirst": "Склали з першого разу",
+      "active": "Активних"
+    },
+    "funnel": {
+      "assigned": "Призначено",
+      "started": "Почали",
+      "completed": "Завершили",
+      "passedFirst": "Склали з першого разу"
+    },
+    "worstContent": "Що проходять найгірше",
+    "needsAttention": "Потребує уваги",
+    "reason": {
+      "completion": "завершуваність < 50%",
+      "stale": "не оновлювався рік",
+      "rating": "оцінка нижче 3"
+    },
+    "inactive30": "Без активності 30+ днів",
+    "byHour": "Коли навчаються: за годинами доби (30 днів)"
   },
   "kb": {
     "title": "База знань",
@@ -888,7 +1008,9 @@
       "criteria": "Критеріїв",
       "pending": "На перевірці",
       "firstPass": "З першого разу"
-    }
+    },
+    "rateMentor": "Оцініть роботу наставника",
+    "ratedMentor": "Ви оцінили наставника: {n} з 5"
   },
   "ops": {
     "title": "Панель оператора",

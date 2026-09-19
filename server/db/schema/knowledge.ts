@@ -215,6 +215,7 @@ export const workshopSubmissions = pgTable('workshop_submissions', {
   passed: boolean('passed'),
   reviewComment: text('review_comment'),
   reworkCount: integer('rework_count').notNull().default(0),
+  mentorRating: integer('mentor_rating'), // оценка наставника учеником 1–5 после проверки (docs/22 §4.5, Б.7)
   slaDueAt: timestamp('sla_due_at', { withTimezone: true }),
   device: text('device'),
 }, t => [

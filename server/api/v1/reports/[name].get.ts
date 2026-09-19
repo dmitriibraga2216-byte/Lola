@@ -1,11 +1,14 @@
 import { z } from 'zod'
 import { can, narrowScope, reportScope, requireScope } from '../../../services/access'
 import * as R from '../../../services/reports'
+import * as X from '../../../services/reportsExtra'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
 const q = z.object({
   from: z.string().date().optional(), to: z.string().date().optional(),
   locationId: z.string().uuid().optional(), positionId: z.string().uuid().optional(), courseId: z.string().uuid().optional(),
+  subject: z.enum(['course', 'program', 'quiz', 'workshop', 'meetup', 'survey']).optional(), subjectId: z.string().uuid().optional(), status: z.string().max(40).optional(), mandatoryOnly: z.coerce.boolean().optional(),
+  tiles: z.coerce.boolean().optional(),
   format: z.enum(['json', 'xlsx']).default('json'),
 })
 
@@ -37,10 +40,15 @@ export default defineEventHandler(async (event) => {
     case 'attempts': data = rows = await R.attemptsReport(ctx, f); break
     case 'activity': { const r = await R.activity(ctx, f); data = r; rows = r.daily; break }
     case 'mentors': data = rows = await R.mentors(ctx, f); break
-    case 'personal': { const r = await R.personal(ctx, a.userId); data = r; rows = r.enrollments; break }
+    case 'personal': { const r = await R.personal(ctx, a.userId); data = { ...r, competencies: await X.myCompetencies(ctx, a.userId) }; rows = r.enrollments; break }
+    case 'progress': { const r = await X.progress(ctx, f); data = r; rows = r.rows; break }
+    case 'content': { const r = await X.content(ctx, f); data = r; rows = r.rows; break }
+    case 'questions': data = rows = await X.failedQuestions(ctx, f); break
+    case 'activity-extra': data = await X.activityExtra(ctx, f); break
     default: return apiError(event, 404, 'not_found', 'Невідомий звіт')
   }
 
+  if (f.tiles && !['personal', 'activity-extra'].includes(name)) data = { data, tiles: await X.tiles(ctx, name, f) }
   if (f.format === 'xlsx') {
     if (!rows) return apiError(event, 400, 'validation_failed', 'Цей звіт не вивантажується')
     if (!can(a, 'report.export')) return apiError(event, 403, 'forbidden', 'Немає права на вивантаження')

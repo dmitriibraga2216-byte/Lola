@@ -29,6 +29,10 @@ export default defineNitroPlugin(async () => {
       if (job) await processMedia(job.data)
     })
     // PDF сертификата (docs/14 §7.5) — фоном после выдачи
+    await work<{ tenantId: string, exportId: string }>('report.export', async (jobs) => {
+      const { runExport } = await import('../services/reportExports')
+      for (const j of jobs) await runExport(j.data.exportId, j.data.tenantId)
+    })
     await work<{ tenantId: string, certificateId: string }>('certificate.render_pdf', async (jobs) => {
       const { renderAndStore } = await import('../services/certificatePdf')
       for (const j of jobs) await renderAndStore(j.data.tenantId, j.data.certificateId)
@@ -54,6 +58,9 @@ export default defineNitroPlugin(async () => {
       const { inactiveScan } = await import('../services/people')
       const { planPeriodScan, requestReportScan } = await import('../services/developmentExtra')
       const { reviewScan } = await import('../services/knowledge')
+      const { weeklyDigest } = await import('../services/reportsExtra')
+      const { retentionScan } = await import('../services/logs')
+      const { expireExports } = await import('../services/reportExports')
       const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
@@ -61,13 +68,16 @@ export default defineNitroPlugin(async () => {
         const plans = await planPeriodScan(tenantId) // docs/19 §7.6 plan.period_scan
         const reqReports = await requestReportScan(tenantId) // docs/19 §7.8 request.report_reminder
         const kbReview = await reviewScan(tenantId) // docs/21 §11 knowledge.review_scan
+        const digest = monday ? await weeklyDigest(tenantId) : 0 // docs/22 §10 digest.weekly
+        const retention = await retentionScan(tenantId) // docs/22 §10 logs.retention
+        const expired = await expireExports(tenantId)
         const g = await goalDueScan(tenantId)
         const a = await assessmentScan(tenantId)
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
         const an = await announcementScan(tenantId)
         const pr = await programScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive, plans, reqReports, kbReview })
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync

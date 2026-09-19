@@ -57,5 +57,25 @@ export const savedReports = pgTable('saved_reports', {
   groupBy: text('group_by'),
   schedule: jsonb('schedule'), // {every: daily|weekly, hour, weekday, channel: telegram|email, recipients: uuid[]}
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  format: text('format').notNull().default('xlsx'), // xlsx | csv (docs/22 §6)
+  sort: text('sort'), // поле сортировки
   createdBy: uuid('created_by').references(() => users.id),
 })
+
+/** Фоновые выгрузки (docs/22 §7.3, §13.3): > 5000 строк — задача, ссылка уведомлением, живёт 24 часа. */
+export const reportExports = pgTable('report_exports', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  report: text('report').notNull(), // имя отчёта или saved:<id>
+  filters: jsonb('filters').notNull().default('{}'),
+  format: text('format').notNull().default('xlsx'),
+  status: text('status').notNull().default('queued'), // queued | running | ready | failed
+  rows: integer('rows'),
+  fileKey: text('file_key'),
+  error: text('error'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+}, t => [
+  index().on(t.tenantId, t.userId, t.createdAt.desc()),
+])

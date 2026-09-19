@@ -86,6 +86,7 @@ pnpm lint && pnpm typecheck
 | [28-implementation-notes.md](docs/28-implementation-notes.md) | решения по реализации, отступления от ТЗ и открытые вопросы к заказчику |
 | [29-audit-2026-09-19.md](docs/29-audit-2026-09-19.md) | аудит выполнения: что не сделано, принятые решения, добавленное сверх ТЗ |
 | [30-spec-delta-2026-09-19.md](docs/30-spec-delta-2026-09-19.md) | дельта финального пакета ТЗ к реализации и очередь доработок |
+| [31-mockups-map.md](docs/31-mockups-map.md) | мокапы 90 экранов (`docs/mockups/`) и карта соответствия экранам Lola |
 | [_conventions.md](docs/_conventions.md) | формат модульных документов и факты, снятые с эталона |
 
 Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

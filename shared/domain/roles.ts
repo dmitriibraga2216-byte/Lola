@@ -22,6 +22,8 @@ export const SCOPES = [
   'development.own', 'development.team', 'development.manage', 'competency.manage', 'position_profile.manage', 'request.decide',
   // Оценка и чек-листы (docs/20 §2)
   'assessment.own', 'assessment.team', 'assessment.run', 'assessment.manage', 'checklist.run', 'checklist.manage',
+  // Очные занятия, вебинары, комплексные тесты (docs/18 §2)
+  'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'complextest.manage',
 ] as const
 
 export type Scope = typeof SCOPES[number]
@@ -30,7 +32,7 @@ export type Scope = typeof SCOPES[number]
 export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
   employee: {
     name: 'Співробітник',
-    scopes: ['learn.view', 'learn.catalog', 'learn.attempt', 'report.own', 'development.own', 'assessment.own'],
+    scopes: ['learn.view', 'learn.catalog', 'learn.attempt', 'report.own', 'development.own', 'assessment.own', 'meetup.view', 'meetup.enroll'],
   },
   mentor: {
     name: 'Наставник',
@@ -39,6 +41,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'people.view', 'assignment.create', 'assignment.cancel',
       'review.queue', 'review.grade', 'certification.confirm',
       'report.own', 'report.team', 'development.own', 'development.team', 'assessment.own', 'checklist.run',
+      'meetup.view', 'meetup.enroll', 'meetup.attendance',
     ],
   },
   manager: {
@@ -50,6 +53,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'review.queue', 'review.grade', 'certification.confirm',
       'report.own', 'report.team', 'report.export', 'development.own', 'development.team', 'request.decide',
       'assessment.own', 'assessment.team', 'assessment.run', 'checklist.run',
+      'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage',
     ],
   },
   author: {
@@ -64,6 +68,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'report.own', 'report.team', 'report.tenant', 'report.export',
       'development.own', 'development.team', 'development.manage', 'competency.manage', 'position_profile.manage',
       'assessment.own', 'assessment.run', 'assessment.manage', 'checklist.manage',
+      'meetup.view', 'meetup.enroll', 'meetup.manage', 'webinar.manage', 'complextest.manage',
     ],
   },
   admin: {

@@ -9,6 +9,9 @@ const route = useRoute()
 const quizId = route.params.quizId as string
 const enrollmentId = (route.query.enrollmentId as string) || undefined
 const lessonId = (route.query.lessonId as string) || undefined
+// Часть комплексного теста (docs/18 §5.5): попытка уже создана, после результата — назад в комплекс
+const complexAttemptId = (route.query.complexAttemptId as string) || undefined
+const presetAttemptId = (route.query.attemptId as string) || undefined
 
 interface Intro {
   title: string
@@ -64,7 +67,10 @@ async function loadIntro() {
     error.value = apiErrorOf(err).message
   }
 }
-onMounted(loadIntro)
+onMounted(async () => {
+  if (presetAttemptId && complexAttemptId) { await loadState(presetAttemptId); return }
+  await loadIntro()
+})
 
 async function start() {
   busy.value = true
@@ -147,7 +153,7 @@ function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-const backTo = computed(() => enrollmentId ? `/learn/${enrollmentId}` : '/learn')
+const backTo = computed(() => complexAttemptId ? `/learn/complex/${route.query.complexId}?attemptId=${complexAttemptId}` : enrollmentId ? `/learn/${enrollmentId}` : '/learn')
 </script>
 
 <template>

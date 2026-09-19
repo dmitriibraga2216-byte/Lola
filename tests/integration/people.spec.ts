@@ -11,7 +11,7 @@ const { withTenant } = await import('../../server/utils/withTenant')
 const R = await import('../../server/services/refs')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
-let tenantId: string, adminId: string, lazarevaId: string, segedskaId: string, posId: string
+let tenantId: string, adminId: string, lazarevaId: string, segedskaId: string, posId: string, courseId: string, versionId: string, quizId: string
 const userIds: string[] = []
 const groupIds: string[] = []
 const PHONE_PREFIX = '+38097'
@@ -32,6 +32,11 @@ beforeAll(async () => {
   lazarevaId = (await admin`select id from locations where tenant_id = ${tenantId} and name = 'Лазарева'`)[0]!.id as string
   segedskaId = (await admin`select id from locations where tenant_id = ${tenantId} and name = 'Сегедська'`)[0]!.id as string
   posId = (await admin`insert into positions (tenant_id, name, code) values (${tenantId}, ${`Бариста-people-${Date.now()}`}, 'barista-people') returning id`)[0]!.id as string
+  // Свой курс с версией и тест: в CI сид без опубликованного контента
+  courseId = (await admin`insert into courses (tenant_id, title, slug, status) values (${tenantId}, ${`Курс-people-${Date.now()}`}, ${`people-${Date.now()}`}, 'published') returning id`)[0]!.id as string
+  versionId = (await admin`insert into course_versions (tenant_id, course_id, version) values (${tenantId}, ${courseId}, 1) returning id`)[0]!.id as string
+  await admin`update courses set published_version_id = ${versionId} where id = ${courseId}`
+  quizId = (await admin`insert into quizzes (tenant_id, title, status) values (${tenantId}, ${`Тест-people-${Date.now()}`}, 'published') returning id`)[0]!.id as string
 })
 afterAll(async () => {
   if (groupIds.length) await admin`delete from user_groups where id in ${admin(groupIds)}`
@@ -48,6 +53,10 @@ afterAll(async () => {
     await admin`delete from users where id in ${admin(ids)}`
   }
   await admin`delete from positions where id = ${posId}`
+  await admin`delete from quizzes where id = ${quizId}`
+  await admin`update courses set published_version_id = null where id = ${courseId}`
+  await admin`delete from course_versions where id = ${versionId}`
+  await admin`delete from courses where id = ${courseId}`
   await admin.end()
 })
 
@@ -81,9 +90,8 @@ describe('люди (docs/16 §13)', () => {
   it('§13.4: архив закрывает сессии, снимает обучение, сертификат остаётся по публичной ссылке', async () => {
     const id = await makePerson('Архів Тест')
     await admin`insert into sessions (tenant_id, user_id, token_hash, expires_at) values (${tenantId}, ${id}, ${`h-${id}`}, now() + interval '1 day')`
-    const [course] = await admin`select id, published_version_id from courses where tenant_id = ${tenantId} and status = 'published' limit 1`
-    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${id}, ${course!.id}, ${course!.published_version_id}, 'self', 1, 'in_progress')`
-    const [cert] = await admin`insert into certificates (tenant_id, user_id, course_id, number, score, issued_at, public_token) values (${tenantId}, ${id}, ${course!.id}, ${`PS-${Date.now()}`}, 90, now(), ${`tok-${id}`}) returning public_token`
+    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${id}, ${courseId}, ${versionId}, 'self', 1, 'in_progress')`
+    const [cert] = await admin`insert into certificates (tenant_id, user_id, course_id, number, score, issued_at, public_token) values (${tenantId}, ${id}, ${courseId}, ${`PS-${Date.now()}`}, 90, now(), ${`tok-${id}`}) returning public_token`
     const r = await P.archivePerson(ctx(), id, { reason: 'dismissal', comment: 'тест' })
     expect(r).toMatchObject({ ok: true, cancelled: 1 })
     const [s] = await admin`select revoked_at from sessions where user_id = ${id}`
@@ -96,7 +104,7 @@ describe('люди (docs/16 §13)', () => {
     expect(pub).not.toBeNull()
     // Блокировка (docs/16 §7.4) обучение не снимает
     const id2 = await makePerson('Блок Тест')
-    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${id2}, ${course!.id}, ${course!.published_version_id}, 'self', 1, 'in_progress')`
+    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${id2}, ${courseId}, ${versionId}, 'self', 1, 'in_progress')`
     expect(await P.setBlocked(ctx(), id2, true)).toEqual({ ok: true })
     const [e2] = await admin`select status from enrollments where user_id = ${id2}`
     expect(e2!.status).toBe('in_progress')
@@ -120,10 +128,8 @@ describe('люди (docs/16 §13)', () => {
   it('§13.6: слияние дублей переносит попытки и сертификаты, дубль помечен «Обʼєднано»', async () => {
     const primary = await makePerson('Основний Дубль')
     const dup = await makePerson('Другий Дубль')
-    const [course] = await admin`select id, published_version_id from courses where tenant_id = ${tenantId} and status = 'published' limit 1`
-    const [quiz] = await admin`select id from quizzes where tenant_id = ${tenantId} limit 1`
-    await admin`insert into certificates (tenant_id, user_id, course_id, number, score, issued_at, public_token) values (${tenantId}, ${dup}, ${course!.id}, ${`PS-D-${Date.now()}`}, 80, now(), ${`tok-d-${dup}`})`
-    await admin`insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, started_at) values (${tenantId}, ${quiz!.id}, ${dup}, 1, '{}', '{}', 'submitted', now())`
+    await admin`insert into certificates (tenant_id, user_id, course_id, number, score, issued_at, public_token) values (${tenantId}, ${dup}, ${courseId}, ${`PS-D-${Date.now()}`}, 80, now(), ${`tok-d-${dup}`})`
+    await admin`insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, started_at) values (${tenantId}, ${quizId}, ${dup}, 1, '{}', '{}', 'submitted', now())`
     const r = await P.mergePeople(ctx(), primary, dup)
     expect(r.ok).toBe(true)
     const [c] = await admin`select count(*)::int as n from certificates where user_id = ${primary}`

@@ -3,24 +3,32 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'com
 const { t } = useI18n()
 const { api } = useApi()
 interface Level { level: number, title: string, behavior: string }
-interface C { id: string, name: string, kind: string, description: string | null, levels: Level[], linkedCourses: string[], isActive: boolean }
+interface C { id: string, name: string, kind: string, description: string | null, levels: Level[], linkedCourses: string[], isActive: boolean, categoryId: string | null }
+interface Cat { id: string, name: string, sort: number }
 const items = ref<C[]>([])
 const courses = ref<{ id: string, title: string }[]>([])
+const categories = ref<Cat[]>([])
+const newCategory = ref('')
+const catFilter = ref('')
 const error = ref('')
 const editing = ref<string | null>(null)
-const blank = () => ({ name: '', kind: 'hard', description: '', levels: [1, 2, 3].map(n => ({ level: n, title: '', behavior: '' })) as Level[], linkedCourses: [] as string[] })
+const blank = () => ({ name: '', kind: 'hard', description: '', categoryId: '', levels: [1, 2, 3].map(n => ({ level: n, title: '', behavior: '' })) as Level[], linkedCourses: [] as string[] })
 const form = reactive(blank())
 
 async function load() {
-  try { items.value = await api<C[]>('/competencies'); courses.value = (await api<{ id: string, title: string, status: string }[]>('/courses')).filter(c => c.status === 'published') }
+  try { items.value = await api<C[]>('/competencies'); courses.value = (await api<{ id: string, title: string, status: string }[]>('/courses')).filter(c => c.status === 'published'); categories.value = await api<Cat[]>('/competency-categories') }
   catch (err) { error.value = apiErrorOf(err).message }
 }
 onMounted(load)
-function edit(c: C) { editing.value = c.id; Object.assign(form, { name: c.name, kind: c.kind, description: c.description ?? '', levels: c.levels.map(l => ({ ...l })), linkedCourses: [...c.linkedCourses] }) }
+function edit(c: C) { editing.value = c.id; Object.assign(form, { name: c.name, kind: c.kind, description: c.description ?? '', categoryId: c.categoryId ?? '', levels: c.levels.map(l => ({ ...l })), linkedCourses: [...c.linkedCourses] }) }
+const visible = computed(() => catFilter.value ? items.value.filter(i => i.categoryId === catFilter.value) : items.value)
+const catName = (id: string | null) => categories.value.find(c => c.id === id)?.name ?? ''
+async function addCategory() { if (!newCategory.value.trim()) return; try { await api('/competency-categories', { method: 'PUT', body: { name: newCategory.value.trim(), sort: categories.value.length } }); newCategory.value = ''; await load() } catch (err) { error.value = apiErrorOf(err).message } }
+async function removeCategory(c: Cat) { if (!confirm(t('dev.deleteCategory', { name: c.name }))) return; try { await api(`/competency-categories/${c.id}`, { method: 'DELETE' }); await load() } catch (err) { error.value = apiErrorOf(err).message } }
 function reset() { editing.value = null; Object.assign(form, blank()) }
 async function save() {
   error.value = ''
-  const body = { ...form, description: form.description || undefined, levels: form.levels.filter(l => l.title.trim() && l.behavior.trim()) }
+  const body = { ...form, description: form.description || undefined, categoryId: form.categoryId || undefined, levels: form.levels.filter(l => l.title.trim() && l.behavior.trim()) }
   try {
     if (editing.value) await api(`/competencies/${editing.value}`, { method: 'PATCH', body })
     else await api('/competencies', { method: 'POST', body })
@@ -33,11 +41,17 @@ async function toggle(c: C) { await api(`/competencies/${c.id}`, { method: 'PATC
   <div>
     <h1>{{ t('admin.nav.competencies') }}</h1>
     <p v-if="error" class="error">{{ error }}</p>
+    <section class="cats">
+      <button :class="['chip', { on: !catFilter }]" @click="catFilter = ''">{{ t('dev.allCategories') }}</button>
+      <span v-for="c in categories" :key="c.id" class="cat"><button :class="['chip', { on: catFilter === c.id }]" @click="catFilter = c.id">{{ c.name }}</button><button class="chip x" :aria-label="t('groups.delete')" @click="removeCategory(c)">×</button></span>
+      <input v-model="newCategory" class="field" :placeholder="t('dev.newCategory')" @keyup.enter="addCategory">
+      <button class="chip" :disabled="!newCategory.trim()" @click="addCategory">+</button>
+    </section>
     <table class="table">
       <thead><tr><th>{{ t('dev.competency') }}</th><th>{{ t('dev.kindCol') }}</th><th>{{ t('dev.levels') }}</th><th /></tr></thead>
       <tbody>
-        <tr v-for="c in items" :key="c.id" :class="{ off: !c.isActive }">
-          <td><b>{{ c.name }}</b><div v-if="c.description" class="sub">{{ c.description }}</div></td>
+        <tr v-for="c in visible" :key="c.id" :class="{ off: !c.isActive }">
+          <td><b>{{ c.name }}</b><span v-if="c.categoryId" class="sub"> · {{ catName(c.categoryId) }}</span><div v-if="c.description" class="sub">{{ c.description }}</div></td>
           <td class="sub">{{ t(`dev.ckind.${c.kind}`) }}</td>
           <td class="sub">{{ c.levels.map(l => `${l.level} ${l.title}`).join(' · ') }}</td>
           <td class="acts"><button class="chip" @click="edit(c)">{{ t('common.edit') }}</button><button class="chip" @click="toggle(c)">{{ c.isActive ? t('common.deactivate') : t('common.activate') }}</button></td>
@@ -49,6 +63,7 @@ async function toggle(c: C) { await api(`/competencies/${c.id}`, { method: 'PATC
       <div class="row">
         <input v-model="form.name" class="field grow" :placeholder="t('dev.competencyName')" data-testid="comp-name">
         <select v-model="form.kind"><option v-for="k in ['hard', 'soft', 'managerial']" :key="k" :value="k">{{ t(`dev.ckind.${k}`) }}</option></select>
+        <select v-model="form.categoryId" :aria-label="t('dev.category')"><option value="">{{ t('dev.category') }}: —</option><option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option></select>
       </div>
       <textarea v-model="form.description" class="field" rows="2" :placeholder="t('dev.competencyDesc')" />
       <div v-for="l in form.levels" :key="l.level" class="row">
@@ -90,4 +105,8 @@ tr.off { opacity: 0.5; }
 .primary:disabled { opacity: 0.5; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }
+.cats { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
+.cat { display: inline-flex; }
+.chip.on { background: var(--color-ink); color: var(--color-bg-soft); border-color: var(--color-ink); }
+.chip.x { border-left: none; border-radius: 0 var(--radius-pill) var(--radius-pill) 0; }
 </style>

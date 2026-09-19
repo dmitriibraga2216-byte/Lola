@@ -20,7 +20,7 @@ interface Lesson {
   body: ContentBlock[]
 }
 interface Editor {
-  course: { id: string, title: string, status: string, isCatalogVisible: boolean, strictOrder: boolean, summary: string | null }
+  course: { id: string, title: string, status: string, isCatalogVisible: boolean, strictOrder: boolean, summary: string | null, competencyId: string | null, competencyLevel: number | null }
   version: { id: string, version: number, status: string }
   modules: { id: string, title: string, lessons: Lesson[] }[]
 }
@@ -129,6 +129,16 @@ async function deleteLesson(lesson: Lesson) {
   await load()
 }
 
+// docs/19 §7.3: какую компетенцию и до какого уровня закрывает курс (засчитывается при сданном итоговом тесте)
+const competencies = ref<{ id: string, name: string, levels: { level: number, title: string }[] }[]>([])
+const comp = reactive({ competencyId: '', competencyLevel: 0 })
+watch(editor, (e) => { if (e) { comp.competencyId = e.course.competencyId ?? ''; comp.competencyLevel = e.course.competencyLevel ?? 0 } })
+onMounted(async () => { try { competencies.value = await api('/competencies') } catch { /* модуль недоступен */ } })
+async function saveCompetency() {
+  await api(`/courses/${courseId}`, { method: 'PATCH', body: { competencyId: comp.competencyId || null, competencyLevel: comp.competencyId && comp.competencyLevel ? comp.competencyLevel : null } })
+  notice.value = t('common.saved')
+}
+
 async function toggleCatalog() {
   if (!editor.value) return
   await api(`/courses/${courseId}`, { method: 'PATCH', body: { isCatalogVisible: !editor.value.course.isCatalogVisible } })
@@ -175,6 +185,13 @@ async function publish() {
         <button v-if="hasScope('course.publish')" class="primary" @click="openPublish">{{ t('course.publish') }}</button>
       </div>
     </header>
+    <div v-if="competencies.length && canEdit" class="comp-row">
+      <span class="sub">{{ t('course.closesCompetency') }}</span>
+      <select v-model="comp.competencyId" class="field" :aria-label="t('dev.competency')"><option value="">—</option><option v-for="c in competencies" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+      <select v-if="comp.competencyId" v-model.number="comp.competencyLevel" class="field" :aria-label="t('dev.level')"><option :value="0">—</option><option v-for="l in (competencies.find(c => c.id === comp.competencyId)?.levels ?? [])" :key="l.level" :value="l.level">{{ t('dev.level') }} {{ l.level }} · {{ l.title }}</option></select>
+      <button class="chip" @click="saveCompetency">{{ t('common.save') }}</button>
+      <span class="sub">{{ t('course.closesCompetencyHint') }}</span>
+    </div>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="notice">{{ notice }}</p>
@@ -529,4 +546,6 @@ textarea {
   justify-content: flex-end;
   gap: var(--space-2);
 }
+.comp-row .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); max-width: 260px; }
+.comp-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
 </style>

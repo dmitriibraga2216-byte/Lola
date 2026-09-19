@@ -4,6 +4,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
+import { developmentSettings } from './developmentExtra'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -52,9 +53,9 @@ export async function myRequests(ctx: Ctx) {
 }
 
 /** Очередь на решение (docs/19 §5.1 заявки): руководитель видит new, HR — manager_approved. */
-export async function pendingRequests(ctx: Ctx, opts: { isHr: boolean }) {
+export async function pendingRequests(ctx: Ctx, opts: { isHr: boolean, isAdmin?: boolean }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const st = opts.isHr ? ['new', 'manager_approved'] : ['new']
+    const st = opts.isAdmin ? ['new', 'manager_approved', 'hr_approved'] : opts.isHr ? ['new', 'manager_approved'] : ['new']
     const external = await tx.select({ r: externalTrainingRequests, fullName: users.fullName }).from(externalTrainingRequests).innerJoin(users, eq(users.id, externalTrainingRequests.userId))
       .where(sql`${externalTrainingRequests.status} = any(${st})`).orderBy(desc(externalTrainingRequests.createdAt))
     const career = await tx.select({ r: careerRequests, fullName: users.fullName, targetPosition: positions.name }).from(careerRequests).innerJoin(users, eq(users.id, careerRequests.userId)).innerJoin(positions, eq(positions.id, careerRequests.targetPositionId))
@@ -63,10 +64,10 @@ export async function pendingRequests(ctx: Ctx, opts: { isHr: boolean }) {
   })
 }
 
-export type DecideResult = { ok: true, status: string } | { ok: false, code: 'not_found' | 'bad_step' | 'self' }
+export type DecideResult = { ok: true, status: string } | { ok: false, code: 'not_found' | 'bad_step' | 'self' | 'admin_required' }
 
 /** Решение по шагу: approve двигает по маршруту, reject — в rejected. Сам себе решить нельзя. */
-export async function decideRequest(ctx: Ctx, kind: 'external' | 'career', id: string, decision: 'approve' | 'reject', opts: { comment?: string, isHr: boolean }): Promise<DecideResult> {
+export async function decideRequest(ctx: Ctx, kind: 'external' | 'career', id: string, decision: 'approve' | 'reject', opts: { comment?: string, isHr: boolean, isAdmin?: boolean }): Promise<DecideResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const table = kind === 'external' ? externalTrainingRequests : careerRequests
     const [r] = await tx.select().from(table).where(eq(table.id, id))
@@ -76,12 +77,30 @@ export async function decideRequest(ctx: Ctx, kind: 'external' | 'career', id: s
     if (idx < 0 || idx >= EXT_FLOW.length - 1) return { ok: false as const, code: 'bad_step' as const }
     // HR-шаг только для HR; руководительский — для любого с request.decide
     if (r.status === 'manager_approved' && !opts.isHr) return { ok: false as const, code: 'bad_step' as const }
+    // docs/19 §7.7, §13.4: сумма выше порога — после HR нужен администратор (hr_approved → approved)
+    const settings = await developmentSettings(tx, ctx.tenantId)
+    const overThreshold = kind === 'external' && 'cost' in r && r.cost != null && Number(r.cost) > settings.externalTrainingThreshold
+    if (r.status === 'hr_approved' && !opts.isAdmin) return { ok: false as const, code: 'admin_required' as const }
 
     const now = new Date()
-    const next = decision === 'reject' ? 'rejected' : (kind === 'career' && r.status === 'manager_approved') || (opts.isHr && r.status === 'manager_approved') ? 'approved' : EXT_FLOW[idx + 1]!
+    let next: string
+    if (decision === 'reject') next = 'rejected'
+    else if (kind === 'career') next = r.status === 'manager_approved' ? 'approved' : EXT_FLOW[idx + 1]!
+    else if (r.status === 'manager_approved') next = overThreshold ? 'hr_approved' : 'approved'
+    else next = EXT_FLOW[idx + 1]!
     const approvals = [...(r.approvals as unknown[]), { step: r.status, by: ctx.actorId, at: now.toISOString(), decision, comment: opts.comment ?? null }]
     await tx.update(table).set({ status: next, approvals, ...(next === 'approved' || next === 'rejected' ? { decidedAt: now } : {}), updatedAt: now }).where(eq(table.id, id))
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: r.userId, code: next === 'rejected' ? 'request_rejected' : next === 'approved' ? 'request_approved' : 'request_step', payload: { title: 'title' in r ? r.title : 'Карʼєрна заявка', comment: opts.comment ?? '' }, dedupKey: `req:${id}:${next}` })
+    if (next === 'hr_approved') {
+      // Администраторам тенанта — на решение
+      const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles ro on ro.id = ur.role_id where ro.code = 'admin' and ur.scope_type = 'tenant'`) as unknown as { user_id: string }[]
+      for (const a of admins) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: a.user_id, code: 'request_new', payload: { title: `${'title' in r ? r.title : ''} (понад ${settings.externalTrainingThreshold} ${'currency' in r ? r.currency : 'UAH'})`, requestId: id }, dedupKey: `req_admin:${id}:${a.user_id}` })
+    }
+    // docs/19 §7.9: одобренная карьерная заявка → обучение профиля целевой должности и, если настроено, цикл оценки готовности
+    if (kind === 'career' && next === 'approved') {
+      const { careerApproved } = await import('./developmentExtra')
+      await careerApproved(tx, ctx, r as typeof careerRequests.$inferSelect, settings.careerAssessmentFormId)
+    }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: `request.${kind}.${decision}`, entity: kind === 'external' ? 'external_training_request' : 'career_request', entityId: id, before: { status: r.status }, after: { status: next } })
     return { ok: true as const, status: next }
   })

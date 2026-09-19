@@ -61,6 +61,9 @@ export const courses = pgTable('courses', {
   isCatalogVisible: boolean('is_catalog_visible').notNull().default(false),
   validityMonths: integer('validity_months'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+  // docs/19 §7.3: курс закрывает разрыв — оценка уровня ставится при завершении, если есть сданный итоговый тест
+  competencyId: uuid('competency_id'),
+  competencyLevel: integer('competency_level'),
   createdBy: uuid('created_by').references(() => users.id),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, t => [

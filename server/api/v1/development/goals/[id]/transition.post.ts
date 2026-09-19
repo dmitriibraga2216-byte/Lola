@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   const scopes = [...new Set(a.grants.flatMap(g => g.scopes))]
   const r = await transitionGoal({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data.to, { comment: p.data.comment, evaluation: p.data.evaluation, scopes })
   if (!r.ok) {
-    const map: Record<string, [number, string]> = { not_found: [404, 'Ціль не знайдено'], not_allowed: [409, 'Перехід у цей статус неможливий'], forbidden: [403, 'Цей статус ставить інша роль'], comment_required: [422, 'Потрібен коментар'] }
+    const map: Record<string, [number, string]> = { not_found: [404, 'Ціль не знайдено'], not_allowed: [409, 'Перехід у цей статус неможливий'], forbidden: [403, 'Цей статус ставить інша роль'], comment_required: [422, 'Потрібен коментар'], not_approved: [409, 'Ціль ще не погоджена керівником'] }
     const [st, msg] = map[r.code]!
     return apiError(event, st, `goal.${r.code}`, msg)
   }

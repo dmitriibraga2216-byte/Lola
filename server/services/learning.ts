@@ -437,6 +437,8 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       const [e] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select({ courseId: enrollments.subjectId }).from(enrollments).where(eq(enrollments.id, enrollmentId)))
       runRules(ctx.tenantId, 'course.completed', ctx.actorId, { courseId: e?.courseId, enrollmentId }).catch(err => console.error('rules course.completed', err))
       if (e) import('./programs').then(p => p.onItemResult(ctx.tenantId, ctx.actorId, 'course', e.courseId, { passed: true, enrollmentId })).catch(err => console.error('program course hook', err))
+      // docs/19 §7.3: курс с компетенцией и сданным итоговым тестом → оценка уровня source=test
+      if (e) import('./developmentExtra').then(d => d.onCourseCompletedCompetency(ctx.tenantId, ctx.actorId, e.courseId, enrollmentId)).catch(err => console.error('competency course hook', err))
       if (e) {
         const { triggerCourseFeedback } = await import('./surveys')
         triggerCourseFeedback(ctx.tenantId, ctx.actorId, e.courseId, enrollmentId).catch(err => console.error('survey trigger', err))

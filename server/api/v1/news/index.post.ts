@@ -4,7 +4,7 @@ import { audienceSchema } from '../../../../shared/schemas/assignments'
 import { requireScope } from '../../../services/access'
 import { createNews } from '../../../services/news'
 import { apiData, apiError } from '../../../utils/apiResponse'
-const schema = z.object({ title: z.string().min(3).max(200), body: bodySchema.min(1), coverKey: z.string().optional(), isPinned: z.boolean().optional(), requiresAck: z.boolean().optional(), audience: audienceSchema.nullable().optional(), publish: z.boolean().optional() })
+const schema = z.object({ title: z.string().min(3).max(200), body: bodySchema.min(1), coverKey: z.string().optional(), isPinned: z.boolean().optional(), requiresAck: z.boolean().optional(), kind: z.enum(['news', 'announcement']).optional(), ackDueAt: z.string().datetime({ offset: true }).nullable().optional(), audience: audienceSchema.nullable().optional(), publish: z.boolean().optional() })
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'knowledge.manage')
   const p = schema.safeParse(await readBody(event))

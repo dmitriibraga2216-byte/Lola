@@ -3,7 +3,7 @@ import { requireScope, can } from '../../../services/access'
 import { createMeetup } from '../../../services/meetups'
 import { apiData, apiError } from '../../../utils/apiResponse'
 export const meetupSchema = z.object({
-  kind: z.enum(['meetup', 'webinar']).default('meetup'), title: z.string().min(3, 'Назва від 3 символів').max(200), description: z.array(z.unknown()).optional(), courseId: z.string().uuid().nullable().optional(),
+  kind: z.enum(['meetup', 'webinar', 'event']).default('meetup'), title: z.string().min(3, 'Назва від 3 символів').max(200), description: z.array(z.unknown()).optional(), courseId: z.string().uuid().nullable().optional(),
   startsAt: z.string().datetime({ offset: true }), endsAt: z.string().datetime({ offset: true }), timezone: z.string().optional(), locationId: z.string().uuid().nullable().optional(), room: z.string().max(120).nullable().optional(), address: z.string().max(300).nullable().optional(),
   trainerIds: z.array(z.string().uuid()).min(1, 'Оберіть тренера'), capacity: z.number().int().min(1, 'Від 1 до 500').max(500, 'Від 1 до 500').nullable().optional(), waitlistEnabled: z.boolean().optional(),
   enrollDeadlineHours: z.number().int().min(0).max(720).optional(), cancelDeadlineHours: z.number().int().min(0).max(720).optional(), attendanceMode: z.enum(['manual', 'qr', 'both']).optional(),

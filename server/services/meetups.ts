@@ -10,7 +10,7 @@ import { completeLesson } from './learning'
 interface Ctx { tenantId: string, actorId: string }
 
 export interface MeetupInput {
-  kind?: 'meetup' | 'webinar'
+  kind?: 'meetup' | 'webinar' | 'event'
   title: string
   description?: unknown[]
   courseId?: string | null

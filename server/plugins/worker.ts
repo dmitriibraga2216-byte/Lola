@@ -40,6 +40,7 @@ export default defineNitroPlugin(async () => {
       const { goalDueScan } = await import('../services/development')
       const { assessmentScan } = await import('../services/assessment')
       const { actionDueScan, frequencyScan } = await import('../services/checklists')
+      const { announcementScan } = await import('../services/news')
       const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
@@ -47,10 +48,17 @@ export default defineNitroPlugin(async () => {
         const a = await assessmentScan(tenantId)
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf })
+        const an = await announcementScan(tenantId)
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an })
       }
     })
+    // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync
     await boss.work('assignment.sync', async () => {
+      const { scheduledReportsScan } = await import('../services/reportBuilder')
+      for (const tenantId of await allActiveTenants()) {
+        const n = await scheduledReportsScan(tenantId)
+        if (n) console.log(`[report.scheduled] ${tenantId}: ${n}`)
+      }
       for (const tenantId of await allActiveTenants()) {
         const n = await syncAssignments(tenantId)
         if (n) console.log(`[assignment.sync] ${tenantId}: +${n}`)

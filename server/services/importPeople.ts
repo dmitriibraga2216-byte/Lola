@@ -252,6 +252,11 @@ export async function applyImport(ctx: Ctx, jobId: string) {
           .onConflictDoNothing()
       }
       if (wanted.orgUnits.length) {
+        // Уникальность org_units — по path, а не по имени: не плодим «Каппі» с кириллическим путём рядом с «kappi»
+        const existingUnits = new Set((await tx.select({ name: orgUnits.name }).from(orgUnits)).map(u => u.name.toLowerCase()))
+        wanted.orgUnits = wanted.orgUnits.filter(name => !existingUnits.has(name.toLowerCase()))
+      }
+      if (wanted.orgUnits.length) {
         await tx.insert(orgUnits)
           .values(wanted.orgUnits.map(name => ({
             tenantId: ctx.tenantId,

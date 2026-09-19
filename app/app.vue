@@ -1,5 +1,7 @@
 <script setup lang="ts">
 const impersonated = useCookie('lola_impersonated')
+const route = useRoute()
+const isPublic = computed(() => route.path.startsWith('/login') || route.path.startsWith('/ops') || route.path.startsWith('/c/'))
 </script>
 
 <template>
@@ -7,6 +9,7 @@ const impersonated = useCookie('lola_impersonated')
     Режим «від імені» · оператор {{ impersonated }}
   </div>
   <NuxtPage />
+  <AnnouncementGate v-if="!isPublic" />
 </template>
 
 <style>

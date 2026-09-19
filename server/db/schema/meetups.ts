@@ -17,7 +17,7 @@ import { surveys } from './knowledge'
 export const meetups = pgTable('meetups', {
   ...baseColumns,
   tenantId: tenantId(),
-  kind: text('kind').notNull().default('meetup'), // meetup | webinar
+  kind: text('kind').notNull().default('meetup'), // meetup | webinar | event (корпоративное событие хаба)
   title: text('title').notNull(),
   description: jsonb('description').notNull().default('[]'), // блоки
   courseId: uuid('course_id').references(() => courses.id),

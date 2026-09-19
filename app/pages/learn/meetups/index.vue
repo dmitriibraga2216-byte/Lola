@@ -49,7 +49,7 @@ const badge = (m: M) => m.my_status === 'registered' || m.my_status === 'attende
     <section v-for="[d, list] in days" :key="d" class="day">
       <h2>{{ fmtD(list[0]!.starts_at) }}</h2>
       <NuxtLink v-for="m in list" :key="m.id" :to="`/learn/meetups/${m.id}`" class="card" :data-testid="`mt-${m.id}`">
-        <div class="row between"><span class="card-title">{{ m.kind === 'webinar' ? '🎥 ' : '' }}{{ m.title }}</span><span :class="['badge', m.my_status ?? '']">{{ badge(m) }}</span></div>
+        <div class="row between"><span class="card-title">{{ m.kind === 'webinar' ? '🎥 ' : m.kind === 'event' ? '🎉 ' : '' }}{{ m.title }}</span><span :class="['badge', m.my_status ?? '']">{{ badge(m) }}</span></div>
         <span class="sub">{{ fmtT(m.starts_at) }}–{{ fmtT(m.ends_at) }}<template v-if="m.location"> · {{ m.location }}</template><template v-if="m.room">, {{ m.room }}</template> · {{ m.trainers.join(', ') }}</span>
       </NuxtLink>
     </section>

@@ -10,6 +10,8 @@ const admin = postgres(process.env.DATABASE_ADMIN_URL ?? 'postgres://lola:lola_d
 /** Сброс OTP-лимитов между сценариями — они честно считают попытки. */
 export async function resetOtp() {
   await admin`delete from rate_limits where key like 'otp:%'`
+  // Объявления с обязательным прочтением блокируют весь кабинет — не должны оставаться от других прогонов/ручных проверок
+  await admin`update news set status = 'archived' where kind = 'announcement' and status = 'published' and title not like 'E2E-%'`
   await admin`delete from otp_codes where phone in (${ADMIN_PHONE}, ${EMPLOYEE_PHONE}, ${MENTOR_PHONE})`
 }
 

@@ -3,19 +3,23 @@ import type { ContentBlock } from '../../../shared/schemas/content'
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
 const { t } = useI18n()
 const { api } = useApi()
-interface N { id: string, title: string, status: string, isPinned: boolean, requiresAck: boolean, publishedAt: string | null, views: number, acks: number }
+interface N { id: string, title: string, status: string, isPinned: boolean, requiresAck: boolean, kind: string, ackDueAt: string | null, publishedAt: string | null, views: number, acks: number }
+interface Report { total: number, acked: number, viewed: number, byLocation: { location: string, total: number, acked: number, pct: number }[], notAcked: { id: string, fullName: string, location: string | null, viewedAt: string | null }[], readers: { id: string, fullName: string, location: string | null, ackedAt: string }[] }
 const items = ref<N[]>([])
 const error = ref('')
 const notice = ref('')
-const form = reactive({ title: '', body: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], isPinned: false, requiresAck: false })
+const form = reactive({ title: '', body: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], isPinned: false, requiresAck: false, kind: 'news', ackDueAt: '', locationIds: [] as string[] })
+const locations = ref<{ id: string, name: string }[]>([])
+const report = ref<{ title: string, data: Report } | null>(null)
 const readers = ref<{ id: string, list: { fullName: string, viewedAt: string, ackedAt: string | null }[] } | null>(null)
-async function load() { try { items.value = await api<N[]>('/news', { query: { all: '1' } }) } catch (err) { error.value = apiErrorOf(err).message } }
+async function load() { try { items.value = await api<N[]>('/news', { query: { all: '1' } }); locations.value = await api('/refs/locations') } catch (err) { error.value = apiErrorOf(err).message } }
+async function showReport(n: N) { report.value = { title: n.title, data: await api(`/news/${n.id}/report`) } }
 onMounted(load)
 async function publish() {
   error.value = ''
   try {
-    await api('/news', { method: 'POST', body: { ...form, publish: true } })
-    Object.assign(form, { title: '', body: [{ id: `b${Date.now()}`, type: 'text', html: '<p></p>' }], isPinned: false, requiresAck: false })
+    await api('/news', { method: 'POST', body: { title: form.title, body: form.body, isPinned: form.isPinned, requiresAck: form.requiresAck, kind: form.kind, ackDueAt: form.ackDueAt ? new Date(form.ackDueAt).toISOString() : null, audience: form.locationIds.length ? { rules: [{ type: 'location', ids: form.locationIds }], match: 'any' } : null, publish: true } })
+    Object.assign(form, { title: '', body: [{ id: `b${Date.now()}`, type: 'text', html: '<p></p>' }], isPinned: false, requiresAck: false, kind: 'news', ackDueAt: '', locationIds: [] })
     notice.value = t('news.published')
     await load()
   } catch (err) { error.value = apiErrorOf(err).message }
@@ -34,9 +38,12 @@ async function toggle(n: N, field: 'isPinned' | 'status') {
     <section class="card">
       <input v-model="form.title" class="field" :placeholder="t('news.newTitle')">
       <BlockEditor v-model="form.body" />
+      <div class="row"><span class="sub">{{ t('news.forLocations') }}:</span><label v-for="l in locations" :key="l.id" class="check"><input v-model="form.locationIds" type="checkbox" :value="l.id"> {{ l.name }}</label></div>
       <div class="row">
         <label class="check"><input v-model="form.isPinned" type="checkbox"> {{ t('news.pin') }}</label>
         <label class="check"><input v-model="form.requiresAck" type="checkbox"> {{ t('news.requireAck') }}</label>
+        <select v-model="form.kind" class="field"><option value="news">{{ t('news.kind.news') }}</option><option value="announcement">{{ t('news.kind.announcement') }}</option></select>
+        <label v-if="form.kind === 'announcement'" class="sub">{{ t('news.ackDue') }} <input v-model="form.ackDueAt" class="field" type="datetime-local"></label>
         <button class="primary" :disabled="form.title.trim().length < 3" @click="publish">{{ t('news.publish') }}</button>
       </div>
     </section>
@@ -44,18 +51,30 @@ async function toggle(n: N, field: 'isPinned' | 'status') {
       <thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('news.col.date') }}</th><th>{{ t('news.col.views') }}</th><th>{{ t('news.col.acks') }}</th><th /></tr></thead>
       <tbody>
         <tr v-for="n in items" :key="n.id">
-          <td><span v-if="n.isPinned">📌 </span><b>{{ n.title }}</b><span v-if="n.status !== 'published'" class="sub"> · {{ t(`course.status.${n.status}`) }}</span></td>
+          <td><span v-if="n.isPinned">📌 </span><span v-if="n.kind === 'announcement'">📣 </span><b>{{ n.title }}</b><span v-if="n.status !== 'published'" class="sub"> · {{ t(`course.status.${n.status}`) }}</span></td>
           <td class="sub">{{ n.publishedAt ? new Date(n.publishedAt).toLocaleDateString('uk') : '—' }}</td>
           <td>{{ n.views }}</td>
           <td>{{ n.requiresAck ? n.acks : '—' }}</td>
           <td class="acts">
-            <button class="chip" @click="showReaders(n)">{{ t('news.readers') }}</button>
+            <button v-if="n.kind === 'announcement'" class="chip" @click="showReport(n)">{{ t('news.report') }}</button>
+            <button v-else class="chip" @click="showReaders(n)">{{ t('news.readers') }}</button>
             <button class="chip" @click="toggle(n, 'isPinned')">{{ n.isPinned ? t('news.unpin') : t('news.pin') }}</button>
             <button class="chip" @click="toggle(n, 'status')">{{ n.status === 'published' ? t('news.archive') : t('news.publish') }}</button>
           </td>
         </tr>
       </tbody>
     </table>
+    <div v-if="report" class="modal-backdrop" @click.self="report = null">
+      <div class="modal">
+        <h2>{{ report.title }}</h2>
+        <p class="sub">{{ t('news.reportLine', { acked: report.data.acked, total: report.data.total, viewed: report.data.viewed }) }}</p>
+        <table class="table plain"><tbody><tr v-for="l in report.data.byLocation" :key="l.location" :class="{ ok: l.pct === 100 }"><td>{{ l.location }}</td><td>{{ l.acked }} / {{ l.total }}</td><td><b>{{ l.pct }}%</b></td></tr></tbody></table>
+        <h3>{{ t('news.notAcked') }} ({{ report.data.notAcked.length }})</h3>
+        <ul><li v-for="r in report.data.notAcked" :key="r.id">{{ r.fullName }} <span class="sub">{{ r.location ?? '' }}{{ r.viewedAt ? ` · ${t('news.viewedOnly')}` : '' }}</span></li><li v-if="!report.data.notAcked.length" class="sub">—</li></ul>
+        <h3>{{ t('news.acked') }} ({{ report.data.readers.length }})</h3>
+        <ul><li v-for="r in report.data.readers" :key="r.id">✓ {{ r.fullName }} <span class="sub">{{ new Date(r.ackedAt).toLocaleString('uk') }}</span></li></ul>
+      </div>
+    </div>
     <div v-if="readers" class="modal-backdrop" @click.self="readers = null">
       <div class="modal">
         <h2>{{ t('news.readers') }}</h2>
@@ -67,6 +86,9 @@ async function toggle(n: N, field: 'isPinned' | 'status') {
 <style scoped>
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 h2 { margin: 0 0 var(--space-3); font-weight: 800; }
+h3 { margin: var(--space-3) 0 var(--space-1); font-weight: 800; font-size: var(--font-size-body); }
+.table.plain { background: transparent; margin: 0; }
+tr.ok td { color: var(--color-teal-deep); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); margin-bottom: var(--space-4); }
 .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .row { display: flex; gap: var(--space-4); align-items: center; }

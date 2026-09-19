@@ -24,6 +24,8 @@ export const SCOPES = [
   'assessment.own', 'assessment.team', 'assessment.run', 'assessment.manage', 'checklist.run', 'checklist.manage',
   // Очные занятия, вебинары, комплексные тесты (docs/18 §2)
   'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'complextest.manage',
+  // Хаб (docs/03 §3.22, §3.26)
+  'wiki.edit', 'report.builder',
 ] as const
 
 export type Scope = typeof SCOPES[number]
@@ -68,7 +70,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'report.own', 'report.team', 'report.tenant', 'report.export',
       'development.own', 'development.team', 'development.manage', 'competency.manage', 'position_profile.manage',
       'assessment.own', 'assessment.run', 'assessment.manage', 'checklist.manage',
-      'meetup.view', 'meetup.enroll', 'meetup.manage', 'webinar.manage', 'complextest.manage',
+      'meetup.view', 'meetup.enroll', 'meetup.manage', 'webinar.manage', 'complextest.manage', 'wiki.edit', 'report.builder',
     ],
   },
   admin: {

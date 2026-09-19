@@ -103,6 +103,8 @@ export const news = pgTable('news', {
   categoryId: uuid('category_id').references(() => courseCategories.id),
   isPinned: boolean('is_pinned').notNull().default(false),
   requiresAck: boolean('requires_ack').notNull().default(false),
+  kind: text('kind').notNull().default('news'), // news | announcement — объявление показывается модально при входе до подтверждения
+  ackDueAt: timestamp('ack_due_at', { withTimezone: true }), // до какого срока объявление должно быть прочитано
   audience: jsonb('audience'), // null = все; иначе конструктор аудитории
   status: text('status').notNull().default('draft'), // draft | published | archived
   publishedAt: timestamp('published_at', { withTimezone: true }),

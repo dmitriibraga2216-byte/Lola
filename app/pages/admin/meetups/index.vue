@@ -49,14 +49,14 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'sho
     <section class="card">
       <h2>{{ t('mt.new') }}</h2>
       <div class="row">
-        <select v-model="form.kind" class="field"><option value="meetup">{{ t('mt.kind.meetup') }}</option><option v-if="hasScope('webinar.manage')" value="webinar">{{ t('mt.kind.webinar') }}</option></select>
+        <select v-model="form.kind" class="field"><option value="meetup">{{ t('mt.kind.meetup') }}</option><option v-if="hasScope('webinar.manage')" value="webinar">{{ t('mt.kind.webinar') }}</option><option value="event">{{ t('mt.kind.event') }}</option></select>
         <input v-model="form.title" class="field grow" :placeholder="t('mt.titlePh')" data-testid="mt-title">
       </div>
       <div class="row">
         <label class="sub">{{ t('mt.start') }} <input v-model="form.startsAt" class="field" type="datetime-local" data-testid="mt-start"></label>
         <label class="sub">{{ t('mt.end') }} <input v-model="form.endsAt" class="field" type="datetime-local" data-testid="mt-end"></label>
       </div>
-      <div v-if="form.kind === 'meetup'" class="row">
+      <div v-if="form.kind !== 'webinar'" class="row">
         <select v-model="form.locationId" class="field"><option value="">{{ t('mt.noLocation') }}</option><option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>
         <input v-model="form.room" class="field" :placeholder="t('mt.room')" maxlength="120">
         <input v-model="form.address" class="field grow" :placeholder="t('mt.address')">

@@ -26,6 +26,7 @@ const nav = computed(() => [
   { to: '/admin/meetups', label: t('admin.nav.meetups'), show: hasScope('meetup.manage') || hasScope('meetup.attendance') },
   { to: '/admin/meetups/complex', label: t('admin.nav.complexTests'), show: hasScope('complextest.manage') },
   { to: '/admin/meetups/report', label: t('admin.nav.attendanceReport'), show: hasScope('report.team') },
+  { to: '/admin/reports/builder', label: t('admin.nav.reportBuilder'), show: hasScope('report.builder') },
   { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view') },
   { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import') },
   { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },

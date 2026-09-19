@@ -1,5 +1,5 @@
-import { eq } from 'drizzle-orm'
-import { tenants, users } from '../../../db/schema'
+import { and, eq, isNull } from 'drizzle-orm'
+import { locations, positions, roles, tenants, userPlacements, userRoles, users } from '../../../db/schema'
 import { db } from '../../../db/client'
 import { withTenant } from '../../../utils/withTenant'
 import type { AuthContext } from '../../../services/session'
@@ -22,7 +22,16 @@ export default defineEventHandler(async (event) => {
       locale: users.locale,
       status: users.status,
     }).from(users).where(eq(users.id, auth.userId))
-    return u ?? null
+    if (!u) return null
+    // Роли и основное размещение — для карточки человека в меню и профиля (мокапы Main, Profile)
+    const roleRows = await tx.select({ code: roles.code, name: roles.name }).from(userRoles)
+      .innerJoin(roles, eq(roles.id, userRoles.roleId)).where(eq(userRoles.userId, auth.userId))
+    const [placement] = await tx.select({ position: positions.name, location: locations.name })
+      .from(userPlacements)
+      .leftJoin(positions, eq(positions.id, userPlacements.positionId))
+      .leftJoin(locations, eq(locations.id, userPlacements.locationId))
+      .where(and(eq(userPlacements.userId, auth.userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    return { ...u, roles: [...new Map(roleRows.map(r => [r.code, r])).values()], position: placement?.position ?? null, location: placement?.location ?? null }
   })
   if (!profile) return apiError(event, 401, 'auth_required', 'Користувача не знайдено')
 

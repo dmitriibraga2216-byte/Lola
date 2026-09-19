@@ -15,7 +15,10 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk', { dateStyle: 'short'
 </script>
 <template>
   <div class="bell-wrap">
-    <button class="bell" :aria-label="t('notif.bell')" :aria-expanded="open" @click="open = !open">🔔<span v-if="unread" class="cnt">{{ unread > 50 ? '50+' : unread }}</span></button>
+    <button class="bell" :aria-label="t('notif.bell')" :aria-expanded="open" @click="open = !open">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6M10.5 20a2 2 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <span v-if="unread" class="cnt">{{ unread > 50 ? '50+' : unread }}</span>
+    </button>
     <div v-if="open" class="panel" role="dialog">
       <div class="head"><b>{{ t('notif.title') }}</b><button v-if="unread" class="chip" @click="readAll">{{ t('notif.readAll') }}</button><NuxtLink to="/learn/notifications" class="chip" @click="open = false">{{ t('notif.settings') }}</NuxtLink></div>
       <p v-if="items.length === 0" class="sub">{{ t('notif.empty') }}</p>
@@ -30,8 +33,9 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk', { dateStyle: 'short'
 </template>
 <style scoped>
 .bell-wrap { position: relative; }
-.bell { font: inherit; font-size: var(--font-size-title-l); border: none; background: transparent; cursor: pointer; position: relative; min-width: 44px; min-height: 44px; }
-.cnt { position: absolute; top: 4px; right: 2px; background: var(--color-coral); color: var(--color-coral-deep); font-size: 11px; font-weight: 900; border-radius: var(--radius-pill); padding: 0 5px; line-height: 16px; }
+.bell { font: inherit; border: none; background: transparent; cursor: pointer; position: relative; min-width: 44px; min-height: 44px; color: var(--color-ink); display: grid; place-items: center; }
+.bell svg { width: 24px; height: 24px; }
+.cnt { position: absolute; top: 2px; right: 0; min-width: 17px; height: 17px; background: var(--color-coral); color: var(--color-ink); font-size: 10px; font-weight: 900; border-radius: var(--radius-pill); padding: 0 4px; line-height: 17px; text-align: center; }
 .panel { position: absolute; right: 0; top: 100%; z-index: 30; width: min(360px, 92vw); background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-l); box-shadow: 0 12px 32px rgb(0 0 0 / 14%); padding: var(--space-3); display: grid; gap: var(--space-2); max-height: 70dvh; overflow: auto; }
 .backdrop { position: fixed; inset: 0; z-index: 29; }
 .head { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }

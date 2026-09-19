@@ -8,7 +8,10 @@ const isPublic = computed(() => route.path.startsWith('/login') || route.path.st
   <div v-if="impersonated" class="impersonation-bar">
     Режим «від імені» · оператор {{ impersonated }}
   </div>
-  <NuxtPage />
+  <!-- Без NuxtLayout лейауты (сайдбар админки, нижняя панель кабинета) не применяются вовсе -->
+  <NuxtLayout>
+    <NuxtPage />
+  </NuxtLayout>
   <AnnouncementGate v-if="!isPublic" />
 </template>
 

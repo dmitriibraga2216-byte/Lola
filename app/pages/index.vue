@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: false })
 const { t } = useI18n()
 const { me, logout, hasScope } = useAuth()
 const { api } = useApi()

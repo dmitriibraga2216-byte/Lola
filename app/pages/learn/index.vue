@@ -59,6 +59,28 @@ onMounted(load)
 
 const withDeadline = computed(() => items.value.filter(i => i.dueAt).length)
 
+/** Группы списка по мокапу MyTasks: «Прострочено · Цього тижня · Пізніше» (по сроку). */
+type Bucket = 'overdue' | 'week' | 'later'
+function bucketOf(card: Card): Bucket {
+  if (card.overdue) return 'overdue'
+  if (card.dueAt && +new Date(card.dueAt) - Date.now() <= 7 * 86_400_000) return 'week'
+  return 'later'
+}
+const buckets = computed(() => (['overdue', 'week', 'later'] as Bucket[])
+  .map(b => ({ key: b, items: items.value.filter(c => bucketOf(c) === b) }))
+  .filter(b => b.items.length > 0))
+const grouped = computed(() => tab.value === 'active' && buckets.value.length > 1)
+
+function dueBadge(card: Card): string {
+  const due = new Date(card.dueAt!)
+  const days = Math.round((Date.UTC(due.getFullYear(), due.getMonth(), due.getDate()) - Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())) / 86_400_000)
+  if (days === 0) return t('learner.badge.today')
+  if (days === -1) return t('learner.badge.yesterday')
+  if (days < -1) return t('learner.badge.overdueDays', { n: -days })
+  if (days === 1) return t('learner.badge.tomorrow')
+  return t('learner.badge.due', { date: shortDate(card.dueAt!) })
+}
+
 function shortDate(iso: string) {
   const d = new Date(iso)
   return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -85,8 +107,13 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
 
 <template>
   <div>
-    <p class="greet">{{ t('learner.greeting') }}</p>
-    <h1 class="hello">{{ me?.user.fullName.split(' ')[1] || me?.user.fullName.split(' ')[0] || '' }}</h1>
+    <div class="greet-row">
+      <div>
+        <p class="greet">{{ t('learner.greeting') }}</p>
+        <h1 class="hello">{{ me?.user.fullName.split(' ')[1] || me?.user.fullName.split(' ')[0] || '' }}</h1>
+      </div>
+      <NotificationBell />
+    </div>
 
     <div class="chips" role="tablist">
       <button
@@ -108,19 +135,23 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
     </div>
 
     <div v-else-if="items.length === 0" class="empty">
+      <p class="empty-title">{{ t('learner.emptyTitle') }}</p>
       <p>{{ emptyText }}</p>
-      <NuxtLink to="/learn/catalog" class="link">{{ t('learner.browseCatalog') }}</NuxtLink>
+      <NuxtLink v-if="tab === 'active'" to="/learn/catalog" class="btn primary">{{ t('learner.browseCatalog') }}</NuxtLink>
     </div>
 
-    <div v-else class="cards">
-      <NuxtLink v-for="card in items" :key="card.id" :to="`/learn/${card.id}`" :class="['card', { coral: card.overdue }]" :data-testid="`task-${card.status}`">
+    <template v-else>
+      <template v-for="b in (grouped ? buckets : [{ key: 'all', items }])" :key="b.key">
+        <h2 v-if="grouped" class="bucket">{{ t(`learner.bucket.${b.key}`) }} <span class="bucket-n">{{ b.items.length }}</span></h2>
+        <div class="cards">
+          <NuxtLink v-for="card in b.items" :key="card.id" :to="`/learn/${card.id}`" :class="['card', { coral: card.overdue }]" :data-testid="`task-${card.status}`">
         <div class="head">
           <div class="title">{{ card.title }}</div>
-          <span v-if="card.overdue" class="badge coral">{{ t('learner.badge.overdue') }}</span>
+          <span v-if="card.overdue" class="badge coral">{{ dueBadge(card) }}</span>
           <span v-else-if="card.planned && card.startsAt" class="badge muted">{{ t('learner.badge.planned', { date: longDate(card.startsAt) }) }}</span>
           <span v-else-if="card.status === 'done'" class="badge teal">{{ t('learner.badge.completed') }}</span>
           <span v-else-if="card.status === 'failed'" class="badge coral">{{ t('learner.badge.failed') }}</span>
-          <span v-else-if="card.dueAt" class="badge sun">{{ t('learner.badge.due', { date: shortDate(card.dueAt) }) }}</span>
+          <span v-else-if="card.dueAt" class="badge sun">{{ dueBadge(card) }}</span>
         </div>
         <div class="meta">
           {{ t('learner.metaCourse', { n: card.requiredTotal }) }}<template v-if="card.estimatedMinutes"> · {{ t('learner.minutes', { n: card.estimatedMinutes }) }}</template><template v-if="card.dueAt"> · {{ t('learner.dueBy', { date: longDate(card.dueAt) }) }}</template>
@@ -133,7 +164,9 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
           <span class="action">{{ action(card) }}</span>
         </div>
       </NuxtLink>
-    </div>
+        </div>
+      </template>
+    </template>
 
     <nav class="sections" :aria-label="t('learner.sections')">
       <NuxtLink v-for="sct in sections" :key="sct.to" :to="sct.to" class="section">{{ sct.label }}</NuxtLink>
@@ -143,7 +176,10 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
 </template>
 
 <style scoped>
+.greet-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .greet { margin: 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
+.bucket { margin: var(--space-4) 0 var(--space-2); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-muted); display: flex; gap: var(--space-2); }
+.bucket-n { color: var(--color-ink-faint); }
 .hello { margin: 2px 0 0; font-weight: 900; font-size: 28px; letter-spacing: -0.02em; }
 
 .chips { display: flex; gap: var(--space-2); margin: var(--space-4) 0 var(--space-3); overflow-x: auto; padding-bottom: 2px; }
@@ -183,7 +219,8 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 
-.empty { text-align: center; padding: var(--space-6) 0; color: var(--color-ink-muted); }
+.empty { text-align: center; padding: var(--space-7) var(--space-4); color: var(--color-ink-muted); display: grid; gap: var(--space-3); justify-items: center; }
+.empty-title { margin: 0; font-size: var(--font-size-title-l); font-weight: 900; color: var(--color-ink); }
 .link { color: var(--color-teal-ink); font-weight: 700; }
 .error { color: var(--color-coral-ink); }
 

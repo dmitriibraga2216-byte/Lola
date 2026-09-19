@@ -51,6 +51,21 @@ export async function myLearning(ctx: Ctx, group: TaskGroup) {
   })
 }
 
+/** Активность за неделю (Пн–Нд текущей недели): число событий прохождения по дням — для профиля. */
+export async function myWeekActivity(ctx: Ctx): Promise<{ days: { date: string, events: number }[], total: number }> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.execute(sql`
+      with days as (select generate_series(date_trunc('week', now())::date, date_trunc('week', now())::date + 6, interval '1 day')::date as d)
+      select d.d::text as date,
+             (select count(*)::int from enrollment_events ev join enrollments e on e.id = ev.enrollment_id
+               where e.user_id = ${ctx.actorId}::uuid and ev.created_at::date = d.d)
+             + (select count(*)::int from lesson_progress lp join enrollments e on e.id = lp.enrollment_id
+               where e.user_id = ${ctx.actorId}::uuid and coalesce(lp.completed_at, lp.updated_at)::date = d.d) as events
+      from days d order by d.d`) as unknown as { date: string, events: number }[]
+    return { days: rows, total: rows.reduce((s, r) => s + r.events, 0) }
+  })
+}
+
 /** Счётчики пяти групп для шапки «Мої завдання». */
 export async function myTaskCounts(ctx: Ctx): Promise<Record<TaskGroup, number>> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {

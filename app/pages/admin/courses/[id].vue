@@ -317,13 +317,13 @@ h1 {
 
 .split {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: var(--space-4);
 }
 
 @media (max-width: 900px) {
   .split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -516,8 +516,8 @@ textarea {
   overflow: auto;
   background: rgb(12 15 20 / 40%);
   display: grid;
-  place-items: center;
-  padding: var(--space-4);
+  place-items: start center; /* якорь сверху: модалка не «плывёт», когда меняется высота содержимого */
+  padding: 10vh var(--space-4) var(--space-4);
 }
 
 .modal {

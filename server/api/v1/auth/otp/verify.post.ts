@@ -17,7 +17,12 @@ export default defineEventHandler(async (event) => {
 
   const result = await verifyOtp(phone, code)
   if (!result.ok) {
-    if (result.code === 'rate_limited') {
+    // Журнал безопасности (docs/16 §15): неудачный вход — warning, блокировка по попыткам — warning; пишется в каждый тенант номера
+    const blocked = result.code === 'rate_limited'
+    for (const u of await usersByPhone(phone)) {
+      await logSecurity({ tenantId: u.tenant_id, userId: u.user_id, event: blocked ? 'login.blocked' : 'login.failed', meta: blocked ? { reason: 'attempts' } : { attemptsLeft: result.attemptsLeft ?? null } })
+    }
+    if (blocked) {
       return apiError(event, 429, 'rate_limited', 'Забагато невірних спроб. Номер заблоковано на 30 хвилин')
     }
     return apiError(event, 401, 'otp_invalid', 'Код невірний', {

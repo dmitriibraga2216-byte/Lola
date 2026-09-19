@@ -127,7 +127,7 @@ describe('3. Перечисления из docs/02', () => {
   it('ограничения в БД совпадают с перечислениями', async () => {
     const checks = await admin`
       select conname, pg_get_constraintdef(oid) as def from pg_constraint
-      where contype = 'c' and conname in ('assignments_subject_type_content_type', 'assignments_kind_task_type', 'enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status')`
+      where contype = 'c' and conname in ('assignments_subject_type_content_type', 'assignments_kind_task_type', 'enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status', 'security_log_severity_security_severity')`
     const defOf = (n: string) => checks.find(c => c.conname === n)?.def as string | undefined
     const valuesIn = (def: string) => [...def.matchAll(/'([a-z_]+)'::text/g)].map(m => m[1]!)
     expect(defOf('assignments_subject_type_content_type')).toBeDefined()
@@ -139,12 +139,15 @@ describe('3. Перечисления из docs/02', () => {
       expect(defOf(c), c).toBeDefined()
       expect(valuesIn(defOf(c)!)).toEqual([...ENUMS.enrollment_status!])
     }
+    // Уровень события журнала безопасности — security_severity (docs/02), колонка security_log.severity
+    expect(defOf('security_log_severity_security_severity')).toBeDefined()
+    expect(valuesIn(defOf('security_log_severity_security_severity')!)).toEqual([...ENUMS.security_severity!])
   })
 })
 
 describe('5. Технический контекст в журналах', () => {
-  it.todo('у каждой таблицы-журнала есть request_context jsonb — parity-3-context (docs/30 §4, PR 4)', () => {
+  it('у каждой таблицы-журнала есть request_context jsonb', () => {
     const missing = LOG_TABLES.filter(t => !columns.some(c => c.table === t && c.column === 'request_context' && c.type === 'jsonb'))
-    expect(missing).toEqual([])
+    expect(missing, `нет request_context: ${missing.join(', ')}`).toEqual([])
   })
 })

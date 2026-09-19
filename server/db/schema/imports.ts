@@ -15,6 +15,7 @@ export const importJobs = pgTable('import_jobs', {
   mapping: jsonb('mapping'), // {колонка файла → поле}
   options: jsonb('options').notNull().default('{}'), // {createRefs, archiveMissing, sendInvites}
   reportKey: text('report_key'),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
   startedAt: timestamp('started_at', { withTimezone: true }),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   status: text('status').notNull().default('validating'), // validating | ready | applied | failed

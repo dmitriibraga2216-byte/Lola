@@ -79,6 +79,7 @@ export const automationRuns = pgTable('automation_runs', {
   ruleId: uuid('rule_id').notNull().references(() => automationRules.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   triggerPayload: jsonb('trigger_payload').notNull().default(sql`'{}'::jsonb`),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
   actionsResult: jsonb('actions_result').notNull().default(sql`'[]'::jsonb`),
   status: text('status').notNull().default('ok'), // ok | skipped | failed
   error: text('error'),
@@ -141,6 +142,7 @@ export const notifications = pgTable('notifications', {
   code: text('code').notNull(),
   channel: text('channel').notNull(),
   payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14)
   renderedText: text('rendered_text'),
   dedupKey: text('dedup_key'), // одно due_soon на курс в сутки и т.п.
   status: text('status').notNull().default('queued'), // queued | sending | sent | failed | skipped | read

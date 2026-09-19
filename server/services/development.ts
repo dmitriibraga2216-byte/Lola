@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { currentRequestContext } from '../utils/requestContext'
 import {
   competencies, competencyAssessments, courses, developmentGoals, developmentPlans, goalComments, goalStatusLog,
   goalStatuses, positionProfiles, positions, userPlacements, users,
@@ -229,7 +230,7 @@ export async function createGoal(ctx: Ctx, input: { userId: string, planId?: str
       dueAt: input.dueAt, statusCode: initial?.code ?? 'planned', mentorId: input.mentorId ?? null, createdBy: ctx.actorId,
       ...(needsApproval ? {} : { approvedBy: ctx.actorId, approvedAt: new Date() }),
     }).returning()
-    await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId: g!.id, fromStatus: null, toStatus: g!.statusCode, actorId: ctx.actorId })
+    await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId: g!.id, fromStatus: null, toStatus: g!.statusCode, actorId: ctx.actorId, requestContext: currentRequestContext() })
     const mgr = await managerOf(tx, input.userId)
     if (needsApproval && mgr) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr, code: 'goal_needs_approval', payload: { title: input.title, goalId: g!.id }, dedupKey: `goal_appr:${g!.id}` })
     else if (!isOwner) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: input.userId, code: 'goal_created', payload: { title: input.title, due: input.dueAt }, dedupKey: `goal_created:${g!.id}` })
@@ -300,7 +301,7 @@ export async function transitionGoal(ctx: Ctx, goalId: string, toCode: string, o
       ...(to.isSuccess ? { progressPct: 100 } : {}),
       updatedAt: now,
     }).where(eq(developmentGoals.id, goalId))
-    await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId, fromStatus: g.statusCode, toStatus: toCode, actorId: ctx.actorId, comment: opts.comment ?? null })
+    await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId, fromStatus: g.statusCode, toStatus: toCode, actorId: ctx.actorId, comment: opts.comment ?? null, requestContext: currentRequestContext() })
 
     // Достигнутая цель по компетенции → оценка уровня от руководителя
     if (to.isSuccess && g.competencyId && g.targetLevel && !isOwner) {

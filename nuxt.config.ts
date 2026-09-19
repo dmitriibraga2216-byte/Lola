@@ -29,6 +29,7 @@ export default defineNuxtConfig({
 
   nitro: {
     errorHandler: '~~/server/error',
+    experimental: { asyncContext: true }, // useEvent() в сервисах → request_context без протаскивания event (CLAUDE.md п. 14)
   },
 
   runtimeConfig: {

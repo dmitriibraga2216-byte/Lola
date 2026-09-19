@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { can, narrowScope, reportScope, requireScope } from '../../../services/access'
+import { can, locationAccess, narrowScope, reportScope, requireScope } from '../../../services/access'
 import * as R from '../../../services/reports'
 import * as X from '../../../services/reportsExtra'
 import { apiData, apiError } from '../../../utils/apiResponse'
@@ -21,6 +21,9 @@ export default defineEventHandler(async (event) => {
   const ctx = { tenantId: a.tenantId, actorId: a.userId }
   // Область видимости (docs/22 §2, §13.1): фильтр «точка» может только сузить
   const visible = name === 'personal' ? null : await reportScope(a, scope)
+  // CLAUDE.md п. 15: точка чужого тенанта в фильтре — 404, существование не подтверждается; своя вне области — сужение до пустого
+  const la = f.locationId ? await locationAccess(a, visible, f.locationId) : 'ok'
+  if (la === 'not_found') return apiError(event, 404, 'not_found', 'Точку не знайдено')
   f.scope = narrowScope(visible, f.locationId)
 
   let data: unknown
@@ -29,7 +32,7 @@ export default defineEventHandler(async (event) => {
     case 'readiness': data = rows = await R.readiness(ctx, f); break
     case 'readiness-people': {
       if (!f.locationId || !f.positionId) return apiError(event, 400, 'validation_failed', 'Вкажіть точку і посаду')
-      if (f.scope && !f.scope.includes(f.locationId)) return apiError(event, 403, 'forbidden', 'Ця точка поза вашою областю')
+      if (la === 'forbidden') return apiError(event, 403, 'forbidden', 'Ця точка поза вашою областю')
       data = rows = await R.readinessPeople(ctx, f.locationId, f.positionId); break
     }
     case 'course': {

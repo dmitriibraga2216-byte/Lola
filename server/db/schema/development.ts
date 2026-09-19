@@ -143,6 +143,7 @@ export const goalStatusLog = pgTable('goal_status_log', {
   toStatus: text('to_status').notNull(),
   actorId: uuid('actor_id').references(() => users.id),
   comment: text('comment'),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
 }, t => [
   index().on(t.tenantId),
 ])

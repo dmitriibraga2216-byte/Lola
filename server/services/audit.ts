@@ -1,4 +1,5 @@
 import { auditLog } from '../db/schema'
+import { currentRequestContext } from '../utils/requestContext'
 import type { TenantTx } from '../utils/withTenant'
 
 /**
@@ -22,5 +23,6 @@ export async function recordAudit(tx: TenantTx, input: {
     entityId: input.entityId ?? null,
     before: input.before ?? null,
     after: input.after ?? null,
+    requestContext: currentRequestContext(), // CLAUDE.md п. 14: единый технический контекст
   })
 }

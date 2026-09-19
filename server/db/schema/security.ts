@@ -19,9 +19,11 @@ export const securityLog = pgTable('security_log', {
   tenantId: tenantId(),
   userId: uuid('user_id'),
   event: text('event').notNull(), // login.otp | login.failed | logout | session.revoked | role.assigned | …
+  severity: text('severity').notNull().default('info'), // security_severity (docs/02): info | warning | critical — «Рівень» в журнале, по нему настраивается рассылка на почту (docs/22 §13.4)
   meta: jsonb('meta').notNull().default('{}'),
   ip: inet('ip'),
   userAgent: text('user_agent'),
+  requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14, docs/02): {ip, geo, user_agent, browser, os, device}
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [
   index().on(t.tenantId, t.createdAt.desc()),

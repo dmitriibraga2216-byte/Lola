@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { currentRequestContext } from '../utils/requestContext'
 import { eq } from 'drizzle-orm'
 import { sessions, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -33,6 +34,7 @@ export async function createSession(input: {
       tokenHash: hashToken(token),
       userAgent: input.userAgent ?? null,
       ip: input.ip ?? null,
+      requestContext: currentRequestContext(),
       impersonatedBy: input.impersonatedBy ?? null,
       expiresAt,
     }).returning({ id: sessions.id })

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { currentRequestContext } from '../utils/requestContext'
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import {
   cities, importJobs, locations, orgUnits, positionLevels, positions, roles,
@@ -288,7 +289,7 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
       if (!j) throw new Error('import job is not editable')
     }
     else {
-      const [job] = await tx.insert(importJobs).values({ tenantId: ctx.tenantId, kind: 'users', source: 'csv', createdBy: ctx.actorId, ...values }).returning({ id: importJobs.id })
+      const [job] = await tx.insert(importJobs).values({ tenantId: ctx.tenantId, kind: 'users', source: 'csv', createdBy: ctx.actorId, requestContext: currentRequestContext(), ...values }).returning({ id: importJobs.id })
       jobId = job!.id
     }
     return { jobId, stats, rows, headers, mapping, options }

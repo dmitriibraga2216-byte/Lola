@@ -2,6 +2,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'audit.view' })
 
 const { t } = useI18n()
+const { api } = useApi()
 
 const tab = ref<'audit' | 'security'>('audit')
 const rows = ref<Record<string, unknown>[]>([])
@@ -10,9 +11,7 @@ const error = ref('')
 async function load() {
   error.value = ''
   try {
-    const path = tab.value === 'audit' ? '/api/v1/audit' : '/api/v1/security-log'
-    const res = await $fetch<{ data: Record<string, unknown>[] }>(path)
-    rows.value = res.data
+    rows.value = await api<Record<string, unknown>[]>(tab.value === 'audit' ? '/audit' : '/security-log')
   }
   catch (err) {
     error.value = apiErrorOf(err).message

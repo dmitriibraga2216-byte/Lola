@@ -1,11 +1,11 @@
 /** Загрузка файла через presigned PUT (docs/06 §6.1): upload-url → PUT → complete. Возвращает mediaId. */
 export function useMediaUpload() {
-  const { api, csrf } = useApi()
+  const { api } = useApi()
   async function upload(file: Blob, filename: string): Promise<string> {
     const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename, mime: file.type, bytes: file.size } })
     const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     if (!put.ok) throw new Error('upload failed')
-    await $fetch(`/api/v1/media/${mediaId}/complete`, { method: 'POST', headers: csrf.value ? { 'x-csrf-token': csrf.value } : {} })
+    await api(`/media/${mediaId}/complete`, { method: 'POST' })
     return mediaId
   }
   /** Сжатие фото с камеры до ~1280px в JPEG — для офлайн-хранения и быстрой отправки. */

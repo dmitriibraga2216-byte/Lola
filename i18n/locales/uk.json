@@ -24,7 +24,12 @@
     "resend": "Надіслати код ще раз",
     "resendIn": "Повторна відправка через {s} с",
     "codeInvalidLeft": "Код невірний. Залишилось {n} спроби",
-    "chooseSpace": "Оберіть простір"
+    "chooseSpace": "Оберіть простір",
+    "google": "Увійти через Google",
+    "errors": {
+      "google_no_user": "Цей акаунт Google не привʼязаний до жодного співробітника",
+      "oauth": "Вхід через Google не завершено. Спробуйте ще раз або увійдіть за телефоном"
+    }
   },
   "home": {
     "signedInAs": "Ви увійшли як {name}",
@@ -693,7 +698,8 @@
     "state": {
       "not_configured": "Не налаштовано",
       "connected": "Працює",
-      "failing": "Мовчить"
+      "failing": "Мовчить",
+      "not_connected": "Не підключено"
     },
     "lastOk": "оновлено {at}",
     "notConfiguredHint": "Підключіть акаунт — заповніть ключі нижче",
@@ -720,7 +726,26 @@
     "revokeConfirm": "Відкликати токен? Інтеграція перестане працювати.",
     "tokenName": "Назва (наприклад, 1С)",
     "expiresDays": "Діє днів",
-    "createToken": "Створити токен"
+    "createToken": "Створити токен",
+    "google": "Google Workspace",
+    "zoom": "Zoom",
+    "oauthNotConfigured": "Інтеграцію не налаштовано. Зверніться до адміністратора Lola",
+    "oauthNotConnected": "Підключіть акаунт",
+    "connecting": "Підключається…",
+    "reconnect": "Підключити заново",
+    "connectedAs": "Підключено як {account}, оновлено {at}",
+    "silentSince": "Інтеграція не відповідає з {at}",
+    "googleUses": "Календар для очних занять, Meet для вебінарів, імпорт людей із Workspace, вхід через Google",
+    "zoomUses": "Зустрічі для вебінарів і автоматична відвідуваність зі звіту Zoom",
+    "wsImport": "Імпорт людей із Google Workspace",
+    "wsDomain": "Домен (необовʼязково)",
+    "wsPosition": "Посада за замовчуванням",
+    "wsOrgUnit": "Підрозділ за замовчуванням",
+    "wsLocation": "Точка за замовчуванням",
+    "wsPreview": "Перевірити",
+    "wsApply": "Імпортувати",
+    "wsResult": "Отримано {n} людей",
+    "wsErrors": "з помилками"
   },
   "dev": {
     "title": "Мій розвиток",

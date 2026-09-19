@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// Нетипизированный вызов: типизированные роуты Nitro при сотнях эндпоинтов дают TS2589
+const rawFetch = $fetch as unknown as <T>(url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => Promise<T>
 const { t } = useI18n()
 const { fetchMe } = useAuth()
 
@@ -9,6 +11,19 @@ const code = ref('')
 const channel = ref<'telegram' | 'sms'>('sms')
 const error = ref('')
 const busy = ref(false)
+// Вход через Google (docs/09 §9.1): ссылку даёт сервер; тенант — из ?tenant= или единственный на этом хосте
+const route = useRoute()
+const googleAvailable = ref(false)
+const tenantSlug = computed(() => String(route.query.tenant || useRuntimeConfig().public.defaultTenant || 'kappi'))
+onMounted(async () => {
+  const err = route.query.error as string | undefined
+  if (err) error.value = err === 'google_no_user' ? t('login.errors.google_no_user') : t('login.errors.oauth')
+  try { await rawFetch<unknown>(`/api/v1/auth/google/url?tenant=${encodeURIComponent(tenantSlug.value)}`); googleAvailable.value = true } catch { googleAvailable.value = false }
+})
+async function loginGoogle() {
+  try { const r = await rawFetch<{ data: { url: string } }>(`/api/v1/auth/google/url?tenant=${encodeURIComponent(tenantSlug.value)}`); window.location.href = r.data.url }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 const resendIn = ref(0)
 const selectToken = ref('')
 const tenantOptions = ref<{ tenantId: string, name: string, slug: string }[]>([])
@@ -32,7 +47,7 @@ async function requestCode() {
   error.value = ''
   busy.value = true
   try {
-    const data = await $fetch<{ data: { channel: 'telegram' | 'sms' } }>(
+    const data = await rawFetch<{ data: { channel: 'telegram' | 'sms' } }>(
       '/api/v1/auth/otp/request',
       { method: 'POST', body: { phone: normalizedPhone() } },
     )
@@ -53,7 +68,7 @@ async function verifyCode() {
   error.value = ''
   busy.value = true
   try {
-    const res = await $fetch<{ data: {
+    const res = await rawFetch<{ data: {
       requiresTenantSelect: boolean
       selectToken?: string
       tenants?: { tenantId: string, name: string, slug: string }[]
@@ -86,7 +101,7 @@ async function selectTenant(tenantId: string) {
   error.value = ''
   busy.value = true
   try {
-    await $fetch('/api/v1/auth/tenant/select', {
+    await rawFetch('/api/v1/auth/tenant/select', {
       method: 'POST',
       body: { selectToken: selectToken.value, tenantId },
     })
@@ -125,6 +140,7 @@ async function selectTenant(tenantId: string) {
         <button class="primary" :disabled="busy || phone.replace(/\D/g, '').length !== 9" @click="requestCode">
           {{ t('login.getCode') }}
         </button>
+        <button v-if="googleAvailable" class="ghost" data-testid="login-google" @click="loginGoogle">{{ t('login.google') }}</button>
       </template>
 
       <template v-else-if="step === 'code'">

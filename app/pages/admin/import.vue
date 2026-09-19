@@ -2,7 +2,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'people.import' })
 
 const { t } = useI18n()
-const csrf = useCookie('lola_csrf')
+const { api } = useApi()
 
 interface ImportRowView {
   line: number
@@ -43,13 +43,10 @@ async function upload() {
   try {
     const form = new FormData()
     form.append('file', file.value)
-    const res = await $fetch<{ data: { jobId: string, stats: ImportStats, rows: ImportRowView[] } }>(
-      '/api/v1/people/import',
-      { method: 'POST', body: form, headers: csrf.value ? { 'x-csrf-token': csrf.value } : {} },
-    )
-    jobId.value = res.data.jobId
-    stats.value = res.data.stats
-    rows.value = res.data.rows
+    const res = await api<{ jobId: string, stats: ImportStats, rows: ImportRowView[] }>('/people/import', { method: 'POST', body: form })
+    jobId.value = res.jobId
+    stats.value = res.stats
+    rows.value = res.rows
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -63,11 +60,8 @@ async function apply() {
   busy.value = true
   error.value = ''
   try {
-    const res = await $fetch<{ data: { stats: { created: number, updated: number } } }>(
-      `/api/v1/people/import/${jobId.value}/apply`,
-      { method: 'POST', headers: csrf.value ? { 'x-csrf-token': csrf.value } : {} },
-    )
-    applied.value = res.data.stats
+    const res = await api<{ stats: { created: number, updated: number } }>(`/people/import/${jobId.value}/apply`, { method: 'POST' })
+    applied.value = res.stats
   }
   catch (err) {
     error.value = apiErrorOf(err).message

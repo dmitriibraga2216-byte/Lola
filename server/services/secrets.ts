@@ -15,6 +15,9 @@ export const SECRET_KEYS = {
   sms: { API_KEY: 'api_key', SENDER: 'sender', PROVIDER: 'provider' },
   smtp: { URL: 'url', FROM: 'from' },
   s3: { ACCESS_KEY: 'access_key', SECRET_KEY: 'secret_key', ENDPOINT: 'endpoint', BUCKET: 'bucket' },
+  // OAuth-провайдеры (docs/09 §9.2): храним только refresh_token, access_token запрашиваем каждый раз
+  google: { REFRESH_TOKEN: 'refresh_token', ACCOUNT_EMAIL: 'account_email', CALENDAR_ID: 'calendar_id' },
+  zoom: { REFRESH_TOKEN: 'refresh_token', ACCOUNT_EMAIL: 'account_email' },
 } as const
 
 export type Provider = keyof typeof SECRET_KEYS
@@ -35,7 +38,8 @@ export async function setSecret(ctx: Ctx, provider: Provider, key: string, value
 /** Значение никогда не уходит наружу (в API/логи) — только внутренним сервисам. */
 export async function getSecret(tenantId: string, provider: Provider, key: string): Promise<string | null> {
   return withTenant(tenantId, null, async (tx) => {
-    const [row] = await tx.select().from(tenantSecrets).where(and(eq(tenantSecrets.provider, provider), eq(tenantSecrets.key, key), eq(tenantSecrets.status, 'active')))
+    // failing — тоже читаем: интеграция «мовчить», но должна суметь восстановиться при следующем удачном вызове
+    const [row] = await tx.select().from(tenantSecrets).where(and(eq(tenantSecrets.provider, provider), eq(tenantSecrets.key, key), sql`${tenantSecrets.status} <> 'revoked'`))
     if (!row) return null
     try {
       return decrypt(row.valueEncrypted, row.nonce)

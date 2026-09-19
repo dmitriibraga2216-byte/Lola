@@ -12,6 +12,31 @@ interface Token { id: string, name: string, prefix: string, scopes: string[], la
 
 const providers: Provider[] = ['telegram', 'sms', 'smtp']
 const statuses = ref<Record<string, Status>>({})
+// OAuth-провайдеры (docs/09 §9.2–9.3): ссылку даёт сервер, окно закрывается само, панель следит и за окном, и за postMessage
+interface OAuthStatus { provider: string, configured: boolean, connected: boolean, state: 'not_configured' | 'not_connected' | 'connected' | 'failing', accountLabel: string | null, lastOkAt: string | null, lastError: string | null, connectedAt: string | null }
+const oauth = ref<Record<string, OAuthStatus>>({})
+const connecting = ref<string | null>(null)
+const oauthError = ref<Record<string, string>>({})
+async function loadOAuth() { for (const p of ['google', 'zoom']) { try { oauth.value[p] = await api<OAuthStatus>(`/integrations/${p}/status`) } catch { /* нет прав */ } } }
+async function connectOAuth(p: string) {
+  oauthError.value[p] = ''
+  try {
+    const { url } = await api<{ url: string }>(`/integrations/${p}/auth-url`)
+    connecting.value = p
+    const win = window.open(url, 'lola-oauth', 'width=520,height=680')
+    const done = async () => { window.removeEventListener('message', onMsg); connecting.value = null; await loadOAuth() }
+    const onMsg = (e: MessageEvent) => { if (e.data?.type === 'lola:oauth') { if (!e.data.ok) oauthError.value[p] = e.data.message; done() } }
+    window.addEventListener('message', onMsg)
+    const poll = setInterval(() => { if (!win || win.closed) { clearInterval(poll); done() } }, 700)
+  } catch (err) { oauthError.value[p] = apiErrorOf(err).message }
+}
+async function disconnectOAuth(p: string) { await api(`/integrations/${p}/disconnect`, { method: 'POST' }); await loadOAuth() }
+const wsImport = reactive({ domain: '', defaultPosition: '', defaultOrgUnit: '', defaultLocation: '', result: null as null | { fetched: number, stats: Record<string, number>, errors: { row: string, errors: string[] }[] }, busy: false })
+async function importWorkspace(apply: boolean) {
+  wsImport.busy = true; oauthError.value.google = ''
+  try { wsImport.result = await api('/integrations/google/import-people', { method: 'POST', body: { domain: wsImport.domain || undefined, apply, defaultPosition: wsImport.defaultPosition, defaultOrgUnit: wsImport.defaultOrgUnit, defaultLocation: wsImport.defaultLocation } }) }
+  catch (err) { oauthError.value.google = apiErrorOf(err).message } finally { wsImport.busy = false }
+}
 const forms = reactive<Record<string, Record<string, string>>>({ telegram: {}, sms: {}, smtp: {} })
 const webhooks = ref<{ endpoints: Endpoint[], events: string[] }>({ endpoints: [], events: [] })
 const whForm = reactive({ url: '', events: [] as string[], description: '' })
@@ -26,6 +51,7 @@ const notice = ref('')
 async function load() {
   try {
     for (const p of providers) statuses.value[p] = await api<Status>(`/settings/integrations/${p}`)
+    await loadOAuth()
     webhooks.value = await api('/settings/webhooks')
     tokens.value = await api('/settings/api-tokens')
   }
@@ -102,6 +128,35 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
             <button class="primary" @click="saveProvider(p)">{{ t('integrations.connect') }}</button>
             <button v-if="statuses[p]!.state !== 'not_configured'" class="chip danger" @click="disconnectProvider(p)">{{ t('integrations.disconnect') }}</button>
           </div>
+        </template>
+      </section>
+    </div>
+
+    <!-- OAuth: Google и Zoom (docs/09 §9.2) -->
+    <div class="grid">
+      <section v-for="p in ['google', 'zoom']" :key="p" class="card">
+        <div class="card-head">
+          <h2>{{ t(`integrations.${p}`) }}</h2>
+          <span v-if="oauth[p]" :class="['badge', oauth[p]!.state]">{{ t(`integrations.state.${oauth[p]!.state}`) }}</span>
+        </div>
+        <template v-if="oauth[p]">
+          <p v-if="oauthError[p]" class="fail">{{ oauthError[p] }} <button class="chip" @click="connectOAuth(p)">{{ t('integrations.retry') }}</button></p>
+          <p v-if="oauth[p]!.state === 'not_configured'" class="sub">{{ t('integrations.oauthNotConfigured') }}</p>
+          <p v-else-if="oauth[p]!.state === 'not_connected'" class="sub">{{ t('integrations.oauthNotConnected') }}</p>
+          <p v-else-if="oauth[p]!.state === 'failing'" class="fail">{{ t('integrations.silentSince', { at: fmt(oauth[p]!.lastOkAt) }) }} · {{ oauth[p]!.lastError }}</p>
+          <p v-else class="sub">{{ t('integrations.connectedAs', { account: oauth[p]!.accountLabel ?? '', at: fmt(oauth[p]!.lastOkAt ?? oauth[p]!.connectedAt) }) }}</p>
+          <p class="sub">{{ t(`integrations.${p}Uses`) }}</p>
+          <div class="actions">
+            <button v-if="oauth[p]!.configured && !oauth[p]!.connected" class="primary" :disabled="connecting === p" :data-testid="`oauth-connect-${p}`" @click="connectOAuth(p)">{{ connecting === p ? t('integrations.connecting') : t('integrations.connect') }}</button>
+            <button v-if="oauth[p]!.connected" class="chip" :disabled="connecting === p" @click="connectOAuth(p)">{{ t('integrations.reconnect') }}</button>
+            <button v-if="oauth[p]!.connected" class="chip danger" :data-testid="`oauth-disconnect-${p}`" @click="disconnectOAuth(p)">{{ t('integrations.disconnect') }}</button>
+          </div>
+          <details v-if="p === 'google' && oauth[p]!.connected">
+            <summary class="sub">{{ t('integrations.wsImport') }}</summary>
+            <div class="row"><input v-model="wsImport.domain" :placeholder="t('integrations.wsDomain')"><input v-model="wsImport.defaultPosition" :placeholder="t('integrations.wsPosition')"><input v-model="wsImport.defaultOrgUnit" :placeholder="t('integrations.wsOrgUnit')"><input v-model="wsImport.defaultLocation" :placeholder="t('integrations.wsLocation')"></div>
+            <div class="actions"><button class="chip" :disabled="wsImport.busy || !wsImport.defaultPosition" @click="importWorkspace(false)">{{ t('integrations.wsPreview') }}</button><button class="primary" :disabled="wsImport.busy || !wsImport.result" @click="importWorkspace(true)">{{ t('integrations.wsApply') }}</button></div>
+            <p v-if="wsImport.result" class="sub">{{ t('integrations.wsResult', { n: wsImport.result.fetched }) }} · {{ JSON.stringify(wsImport.result.stats) }}<template v-if="wsImport.result.errors.length"> · {{ wsImport.result.errors.length }} {{ t('integrations.wsErrors') }}</template></p>
+          </details>
         </template>
       </section>
     </div>

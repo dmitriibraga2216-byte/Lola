@@ -40,7 +40,7 @@ onMounted(async () => {
     const [c, p, l, o, r, tg, ppl] = await Promise.all([
       api<Course[]>('/courses'), api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/org-units'),
       api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags'),
-      $fetch<{ data: { id: string, fullName: string }[] }>('/api/v1/people', { query: { limit: 100 } }).then(r => r.data.map(x => ({ id: x.id, name: x.fullName }))),
+      api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).then(r => r.map(x => ({ id: x.id, name: x.fullName }))),
     ])
     courses.value = c.filter(x => x.status === 'published')
     Object.assign(refs, { positions: p, locations: l, orgUnits: o, roles: r, tags: tg, people: ppl })

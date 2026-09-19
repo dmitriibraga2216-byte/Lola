@@ -30,6 +30,9 @@ export default defineNuxtConfig({
       accessKey: '',
       secretKey: '',
     },
+    public: {
+      defaultTenant: 'kappi', // NUXT_PUBLIC_DEFAULT_TENANT — простір для входу через Google без ?tenant=
+    },
   },
 
   typescript: {

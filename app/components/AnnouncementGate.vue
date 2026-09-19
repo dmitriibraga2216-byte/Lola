@@ -11,10 +11,10 @@ async function load() {
   try { items.value = await api<A[]>('/news/pending-announcements') } catch { items.value = [] }
 }
 onMounted(load)
-watch(() => me.value?.user.id, load)
+watch(() => me.value?.user.id as string | undefined, () => { load() })
 async function ack(a: A) {
   busy.value = true
-  try { await api(`/news/${a.id}/ack`, { method: 'POST' }); items.value = items.value.filter(x => x.id !== a.id) }
+  try { await api<unknown>(`/news/${a.id}/ack`, { method: 'POST' }); items.value = items.value.filter(x => x.id !== a.id) }
   finally { busy.value = false }
 }
 </script>

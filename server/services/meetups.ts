@@ -57,7 +57,18 @@ export async function createMeetup(ctx: Ctx, input: MeetupInput) {
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.create', entity: 'meetup', entityId: m!.id })
     return m!
+  }).then(async (m) => {
+    // Интеграции (docs/09 §9.1): событие в Google Calendar, Meet/Zoom-ссылка для вебинара — в фоне, ошибки в last_error провайдера
+    setImmediate(() => syncExternal(ctx.tenantId, m.id, input.kind === 'webinar' ? input.webinar?.provider : undefined).catch(() => {}))
+    return m
   })
+}
+
+async function syncExternal(tenantId: string, meetupId: string, webinarProvider?: string) {
+  const { createZoomMeeting, syncMeetupToCalendar } = await import('./googleApps')
+  const { getSecret, SECRET_KEYS } = await import('./secrets')
+  if (webinarProvider === 'zoom' && await getSecret(tenantId, 'zoom', SECRET_KEYS.zoom.REFRESH_TOKEN)) await createZoomMeeting(tenantId, meetupId)
+  if (await getSecret(tenantId, 'google', SECRET_KEYS.google.REFRESH_TOKEN)) await syncMeetupToCalendar(tenantId, meetupId)
 }
 
 /** Изменение: если сдвинулись дата/время/место — участникам уходит meetup_changed (docs/18 §8). */
@@ -87,7 +98,10 @@ export async function updateMeetup(ctx: Ctx, id: string, input: Partial<MeetupIn
       for (const r of regs) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: r.userId, code: 'webinar_record_ready', payload: { title: after!.title }, dedupKey: `wb_record:${id}:${r.userId}` })
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.update', entity: 'meetup', entityId: id, before: { startsAt: before.startsAt, locationId: before.locationId }, after: { startsAt: after!.startsAt, locationId: after!.locationId } })
-    return after!
+    return { after: after!, moved }
+  }).then((r) => {
+    if (r && r.moved) setImmediate(() => syncExternal(ctx.tenantId, id).catch(() => {}))
+    return r ? r.after : null
   })
 }
 
@@ -112,6 +126,9 @@ export async function cancelMeetup(ctx: Ctx, id: string, input: { reason: string
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.cancel', entity: 'meetup', entityId: id, after: { reason: input.reason, registrations: regs.length } })
     return { cancelled: regs.length }
+  }).then((r) => {
+    if (r) setImmediate(() => import('./googleApps').then(g => g.removeMeetupFromCalendar(ctx.tenantId, id)).catch(() => {}))
+    return r
   })
 }
 

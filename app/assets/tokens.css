@@ -53,3 +53,14 @@ body {
   color: var(--color-ink);
   font-family: var(--font-family);
 }
+
+/* Видимый фокус с клавиатуры (docs/07 DoD): одинаково для кнопок, ссылок и полей */
+:focus-visible {
+  outline: 3px solid var(--color-teal);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

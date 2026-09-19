@@ -1,6 +1,9 @@
 import { getBoss } from '../services/queue'
 import { processMedia, type MediaProcessJob } from '../jobs/mediaProcess'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
+import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
+import { allActiveTenants, runDueScan } from '../services/dueScan'
+import { expandAssignment, syncAssignments } from '../services/assignments'
 
 /**
  * Воркер фоновых задач внутри процесса приложения (dev и старт).
@@ -21,6 +24,28 @@ export default defineNitroPlugin(async () => {
         const n = await expireStaleAttempts(tenantId)
         if (n) console.log(`[attempt.expire] ${tenantId}: закрыто ${n}`)
       }
+    })
+    await boss.work('notification.dispatch', async () => {
+      for (const tenantId of await tenantsWithQueued()) {
+        const s = await dispatchNotifications(tenantId)
+        if (s.sent || s.failed) console.log(`[notification.dispatch] ${tenantId}:`, s)
+      }
+    })
+    await boss.work('due.scan', async () => {
+      for (const tenantId of await allActiveTenants()) {
+        const s = await runDueScan(tenantId)
+        console.log(`[due.scan] ${tenantId}:`, s)
+      }
+    })
+    await boss.work('assignment.sync', async () => {
+      for (const tenantId of await allActiveTenants()) {
+        const n = await syncAssignments(tenantId)
+        if (n) console.log(`[assignment.sync] ${tenantId}: +${n}`)
+      }
+    })
+    await boss.work<{ tenantId: string, assignmentId: string }>('assignment.expand', async (jobs) => {
+      const job = jobs[0]
+      if (job) await expandAssignment(job.data.tenantId, job.data.assignmentId)
     })
   }
   catch (err) {

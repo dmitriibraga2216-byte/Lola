@@ -282,6 +282,11 @@ export async function addPlacement(ctx: Ctx, userId: string, input: {
       after: input,
     })
     return placement!
+  }).then(async (placement) => {
+    // Новый человек на позиции → профили/правила/автосинхронизация (docs/15 §7.2, §7.6)
+    const { onPlacementChanged } = await import('./automation')
+    onPlacementChanged(ctx.tenantId, userId).catch(err => console.error('onPlacementChanged', err))
+    return placement
   })
 }
 

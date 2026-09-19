@@ -407,6 +407,10 @@ export async function applyImport(ctx: Ctx, jobId: string) {
       after: finalStats,
     })
     return saved!
+  }).then(async (saved) => {
+    const { syncAssignments } = await import('./assignments')
+    syncAssignments(ctx.tenantId).catch(err => console.error('syncAssignments after import', err))
+    return saved
   })
 }
 

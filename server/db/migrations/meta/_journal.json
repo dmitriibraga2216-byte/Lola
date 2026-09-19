@@ -50,6 +50,13 @@
       "when": 1789774869263,
       "tag": "0006_short_captain_universe",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789775850665,
+      "tag": "0007_vengeful_gladiator",
+      "breakpoints": true
     }
   ]
 }

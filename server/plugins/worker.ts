@@ -1,4 +1,5 @@
 import { getBoss } from '../services/queue'
+import { timedJob } from '../utils/metrics'
 import { processMedia, type MediaProcessJob } from '../jobs/mediaProcess'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
@@ -20,23 +21,31 @@ export default defineNitroPlugin(async () => {
 
   try {
     const boss = await getBoss()
-    await boss.work<MediaProcessJob>('media.process', async (jobs) => {
+    // Каждая задача — с метриками длительности и результата (docs/06 §6.7)
+    const work = <T = object>(name: string, fn: (jobs: { data: T }[]) => Promise<unknown>) =>
+      boss.work<T>(name, jobs => timedJob(name, () => fn(jobs as { data: T }[])))
+    await work<MediaProcessJob>('media.process', async (jobs) => {
       const job = jobs[0]
       if (job) await processMedia(job.data)
     })
-    await boss.work('attempt.expire', async () => {
+    // PDF сертификата (docs/14 §7.5) — фоном после выдачи
+    await work<{ tenantId: string, certificateId: string }>('certificate.render_pdf', async (jobs) => {
+      const { renderAndStore } = await import('../services/certificatePdf')
+      for (const j of jobs) await renderAndStore(j.data.tenantId, j.data.certificateId)
+    })
+    await work('attempt.expire', async () => {
       for (const tenantId of await tenantsWithActiveAttempts()) {
         const n = await expireStaleAttempts(tenantId)
         if (n) console.log(`[attempt.expire] ${tenantId}: закрыто ${n}`)
       }
     })
-    await boss.work('notification.dispatch', async () => {
+    await work('notification.dispatch', async () => {
       for (const tenantId of await tenantsWithQueued()) {
         const s = await dispatchNotifications(tenantId)
         if (s.sent || s.failed) console.log(`[notification.dispatch] ${tenantId}:`, s)
       }
     })
-    await boss.work('due.scan', async () => {
+    await work('due.scan', async () => {
       const { goalDueScan } = await import('../services/development')
       const { assessmentScan } = await import('../services/assessment')
       const { actionDueScan, frequencyScan } = await import('../services/checklists')
@@ -53,7 +62,7 @@ export default defineNitroPlugin(async () => {
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync
-    await boss.work('assignment.sync', async () => {
+    await work('assignment.sync', async () => {
       const { scheduledReportsScan } = await import('../services/reportBuilder')
       for (const tenantId of await allActiveTenants()) {
         const n = await scheduledReportsScan(tenantId)
@@ -65,7 +74,7 @@ export default defineNitroPlugin(async () => {
       }
     })
     // Занятия (docs/18 §11): статусы planned→ongoing→finished, неявки, напоминания за сутки/час
-    await boss.work('meetup.scan', async () => {
+    await work('meetup.scan', async () => {
       const { reminderScan, statusScan } = await import('../services/meetups')
       for (const tenantId of await allActiveTenants()) {
         const s = await statusScan(tenantId)
@@ -73,19 +82,19 @@ export default defineNitroPlugin(async () => {
         if (s.started || s.finished || r) console.log(`[meetup.scan] ${tenantId}:`, { ...s, reminded: r })
       }
     })
-    await boss.work('workshop.sla_scan', async () => {
+    await work('workshop.sla_scan', async () => {
       for (const tenantId of await allActiveTenants()) {
         const s = await workshopSlaScan(tenantId)
         if (s.released || s.breached || s.expired) console.log(`[workshop.sla_scan] ${tenantId}:`, s)
       }
     })
-    await boss.work('webhook.deliver', async () => {
+    await work('webhook.deliver', async () => {
       for (const tenantId of await tenantsWithPendingWebhooks()) {
         const s = await deliverPending(tenantId)
         if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)
       }
     })
-    await boss.work<{ tenantId: string, assignmentId: string }>('assignment.expand', async (jobs) => {
+    await work<{ tenantId: string, assignmentId: string }>('assignment.expand', async (jobs) => {
       const job = jobs[0]
       if (job) await expandAssignment(job.data.tenantId, job.data.assignmentId)
     })

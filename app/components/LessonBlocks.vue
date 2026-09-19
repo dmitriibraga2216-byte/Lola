@@ -74,7 +74,7 @@ function imageSrc(mediaId: string): string | undefined {
       <div v-else-if="block.type === 'video'" class="video">
         <video
           v-if="mediaUrls[block.mediaId]?.urls.original"
-          :src="mediaUrls[block.mediaId]!.urls.original"
+          :src="mediaUrls[block.mediaId]!.urls['720'] || mediaUrls[block.mediaId]!.urls.original"
           :poster="mediaUrls[block.mediaId]!.urls.poster"
           controls
           playsinline

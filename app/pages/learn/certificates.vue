@@ -67,6 +67,7 @@ async function share(c: Cert) {
           <template v-if="c.score"><dt>{{ t('cert.score') }}</dt><dd>{{ Number(c.score) }}%</dd></template>
         </dl>
         <div class="actions">
+          <a v-if="!c.revokedAt" :href="`/api/v1/certificates/${c.id}/pdf`" target="_blank" rel="noopener" class="btn ghost" data-testid="cert-pdf">{{ t('cert.downloadPdf') }}</a>
           <a :href="`/c/${c.publicToken}`" target="_blank" rel="noopener" class="btn ghost">{{ t('cert.open') }}</a>
           <button class="btn primary" @click="share(c)">{{ copied === c.id ? t('cert.copied') : t('cert.share') }}</button>
         </div>

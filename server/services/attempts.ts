@@ -3,6 +3,7 @@ import {
   attemptAnswers, attempts, lessonProgress, lessons, questions, quizQuestions, quizzes, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import {
@@ -141,6 +142,7 @@ export async function startAttempt(ctx: Ctx, quizId: string, opts: { enrollmentI
       ip: opts.ip ?? null,
     }).returning({ id: attempts.id, attemptNo: attempts.attemptNo })
 
+    business.inc({ event: 'attempt_started' })
     return { ok: true as const, attemptId: attempt!.id, attemptNo: attempt!.attemptNo, deadlineAt }
   })
 }

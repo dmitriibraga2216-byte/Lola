@@ -23,6 +23,7 @@ COPY --from=build /app/.output ./.output
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
 COPY --from=build /app/server/db ./server/db
+COPY --from=build /app/server/assets ./server/assets
 COPY --from=build /app/shared ./shared
 COPY --from=build /app/drizzle.config.ts ./
 RUN addgroup -S lola && adduser -S lola -G lola && chown -R lola:lola /app

@@ -335,7 +335,8 @@
     "score": "Бал",
     "open": "Відкрити",
     "share": "Поділитись",
-    "copied": "Скопійовано"
+    "copied": "Скопійовано",
+    "downloadPdf": "Завантажити PDF"
   },
   "enrollment": {
     "scheduled": "Заплановано",

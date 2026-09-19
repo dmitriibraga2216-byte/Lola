@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { eq } from 'drizzle-orm'
 import { mediaAssets } from '../db/schema'
@@ -61,6 +61,19 @@ export function s3(): S3Client {
 
 export const S3_BUCKET = () => process.env.S3_BUCKET || 'lola-media'
 
+let bucketReady: Promise<void> | undefined
+/** Бакет создаётся при первом обращении (dev/CI с чистым MinIO); на проде обычно уже есть. */
+export function ensureBucket(): Promise<void> {
+  bucketReady ??= (async () => {
+    try { await s3().send(new HeadBucketCommand({ Bucket: S3_BUCKET() })) }
+    catch {
+      try { await s3().send(new CreateBucketCommand({ Bucket: S3_BUCKET() })) }
+      catch (e) { bucketReady = undefined; throw e }
+    }
+  })()
+  return bucketReady
+}
+
 interface Ctx { tenantId: string, actorId: string }
 
 export type UploadUrlResult
@@ -95,6 +108,7 @@ export async function createUploadUrl(ctx: Ctx, input: {
     return row!.id
   })
 
+  await ensureBucket()
   const uploadUrl = await getSignedUrl(s3(), new PutObjectCommand({
     Bucket: S3_BUCKET(),
     Key: key,

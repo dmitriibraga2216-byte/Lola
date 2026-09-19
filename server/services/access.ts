@@ -24,9 +24,9 @@ export interface Access {
 
 export async function loadAccess(auth: AuthContext): Promise<Access | null> {
   return withTenant(auth.tenantId, auth.userId, async (tx) => {
-    const [user] = await tx.select({ status: users.status })
+    const [user] = await tx.select({ status: users.status, isBlocked: users.isBlocked })
       .from(users).where(eq(users.id, auth.userId))
-    if (!user || user.status !== 'active') return null
+    if (!user || user.status !== 'active' || user.isBlocked) return null
 
     const rows = await tx.select({
       scopes: roles.scopes,

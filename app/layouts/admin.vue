@@ -30,8 +30,11 @@ const nav = computed(() => [
   { to: '/admin/meetups/report', label: t('admin.nav.attendanceReport'), show: hasScope('report.team') },
   { to: '/admin/reports/builder', label: t('admin.nav.reportBuilder'), show: hasScope('report.builder') },
   { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view') },
+  { to: '/admin/people/groups', label: t('admin.nav.groups'), show: hasScope('people.view') },
+  { to: '/admin/org', label: t('admin.nav.org'), show: hasScope('people.view') },
   { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import') },
   { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },
+  { to: '/admin/reports/people', label: t('admin.nav.peopleReport'), show: hasScope('report.team') },
   { to: '/admin/journals', label: t('admin.nav.journals'), show: hasScope('audit.view') },
   { to: '/admin/settings/integrations', label: t('admin.nav.integrations'), show: hasScope('settings.integrations') },
 ].filter(i => i.show))

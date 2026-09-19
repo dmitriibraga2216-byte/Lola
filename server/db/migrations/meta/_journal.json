@@ -134,6 +134,13 @@
       "when": 1789791046843,
       "tag": "0018_programs_available_from",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789792339224,
+      "tag": "0019_people_spec16",
+      "breakpoints": true
     }
   ]
 }

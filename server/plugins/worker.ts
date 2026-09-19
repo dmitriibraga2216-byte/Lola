@@ -51,24 +51,29 @@ export default defineNitroPlugin(async () => {
       const { actionDueScan, frequencyScan } = await import('../services/checklists')
       const { announcementScan } = await import('../services/news')
       const { programScan } = await import('../services/programs')
+      const { inactiveScan } = await import('../services/people')
       const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
+        const inactive = await inactiveScan(tenantId) // docs/16 §11 people.inactive_scan
         const g = await goalDueScan(tenantId)
         const a = await assessmentScan(tenantId)
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
         const an = await announcementScan(tenantId)
         const pr = await programScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr })
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync
     await work('assignment.sync', async () => {
       const { scheduledReportsScan } = await import('../services/reportBuilder')
+      const { recalcGroups } = await import('../services/groups')
       for (const tenantId of await allActiveTenants()) {
         const n = await scheduledReportsScan(tenantId)
         if (n) console.log(`[report.scheduled] ${tenantId}: ${n}`)
+        const g = await recalcGroups(tenantId) // docs/16 §11 groups.recalc — до раскрытия аудиторий
+        if (g) console.log(`[groups.recalc] ${tenantId}: ${g}`)
       }
       for (const tenantId of await allActiveTenants()) {
         const n = await syncAssignments(tenantId)

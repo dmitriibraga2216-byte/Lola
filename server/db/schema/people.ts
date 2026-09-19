@@ -1,18 +1,29 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigint, boolean, date, index, inet, pgTable, text, timestamp, unique, uuid,
+  bigint, boolean, date, index, inet, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
-import { locations, positions } from './org'
-import { cities } from './refs'
+import { locations, orgUnits, positions } from './org'
+import { cities, positionLevels } from './refs'
 
 export const users = pgTable('users', {
   ...baseColumns,
   tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
-  phone: text('phone'), // E.164, уникален в тенанте
+  phone: text('phone'), // E.164, уникален в тенанте — ключ входа
   email: text('email'),
-  fullName: text('full_name').notNull(),
+  fullName: text('full_name').notNull(), // «Прізвище Імʼя По батькові» — собирается из частей
+  lastName: text('last_name'),
+  firstName: text('first_name'),
+  middleName: text('middle_name'),
+  latinName: text('latin_name'), // транслитерация для сертификатов на английском
+  workContacts: jsonb('work_contacts').notNull().default(sql`'{}'::jsonb`), // {ext, workEmail, messenger}
+  birthDate: date('birth_date'),
+  gender: text('gender'), // male | female | unspecified
+  positionSince: date('position_since'),
+  comment: text('comment'), // внутренняя заметка, человеку не видна
+  isBlocked: boolean('is_blocked').notNull().default(false), // вход запрещён, обучение не снимается
+  isHidden: boolean('is_hidden').notNull().default(false), // не виден в списках, рейтингах и публичной оргструктуре
   avatarKey: text('avatar_key'),
   locale: text('locale'), // null → локаль тенанта
   status: text('status').notNull().default('invited'), // invited | active | suspended | archived
@@ -37,6 +48,9 @@ export const userPlacements = pgTable('user_placements', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   locationId: uuid('location_id').notNull().references(() => locations.id),
   positionId: uuid('position_id').notNull().references(() => positions.id),
+  positionLevelId: uuid('position_level_id').references(() => positionLevels.id),
+  cityId: uuid('city_id').references(() => cities.id),
+  orgUnitId: uuid('org_unit_id').references(() => orgUnits.id),
   isPrimary: boolean('is_primary').notNull().default(true),
   startedAt: date('started_at').notNull().default(sql`current_date`),
   endedAt: date('ended_at'),

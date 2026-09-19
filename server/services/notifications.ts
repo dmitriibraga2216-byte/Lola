@@ -76,6 +76,13 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   program_completed: 'Програму «{{title}}» завершено',
   program_stuck: 'Підопічний не рухається по програмі «{{title}}» 14 днів',
   program_request: 'Заявка на програму «{{title}}» чекає рішення',
+  // docs/16 §8
+  user_invited: 'Вас запрошено до Lola. Посилання для входу: {{url}}',
+  user_role_granted: '{{#name}}{{name}}: {{/name}}видано роль «{{role}}»',
+  user_blocked: 'Доступ для {{name}} заблоковано',
+  people_inactive: '{{n}} люд. не заходили понад 30 днів — перевірте, чи не час архівувати',
+  import_finished: 'Імпорт «{{file}}» завершено: створено {{created}}, оновлено {{updated}}, помилок {{errors}}. {{url}}',
+  import_failed: 'Імпорт «{{file}}» не вдався: {{error}}',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

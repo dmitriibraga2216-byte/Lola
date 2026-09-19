@@ -11,7 +11,7 @@ export async function orgTree(ctx: Ctx) {
     const locs = await tx.select({ id: locations.id, name: locations.name, orgUnitId: locations.orgUnitId, managerId: locations.managerId, address: locations.address }).from(locations).where(eq(locations.isActive, true)).orderBy(asc(locations.name))
     const people = await tx.select({ id: users.id, fullName: users.fullName, locationId: userPlacements.locationId, position: positions.name, positionId: positions.id })
       .from(userPlacements).innerJoin(users, eq(users.id, userPlacements.userId)).innerJoin(positions, eq(positions.id, userPlacements.positionId))
-      .where(and(eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt), eq(users.status, 'active'))).orderBy(asc(users.fullName))
+      .where(and(eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt), eq(users.status, 'active'), eq(users.isHidden, false))).orderBy(asc(users.fullName))
     const [counts] = await tx.execute(sql`select count(distinct l.id)::int as locations, count(distinct up.user_id)::int as people from locations l left join user_placements up on up.location_id = l.id and up.is_primary and up.ended_at is null`) as unknown as { locations: number, people: number }[]
     const byLoc = new Map<string, typeof people>()
     for (const p of people) byLoc.set(p.locationId, [...(byLoc.get(p.locationId) ?? []), p])

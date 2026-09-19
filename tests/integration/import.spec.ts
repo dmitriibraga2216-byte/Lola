@@ -75,9 +75,9 @@ describe('импорт людей: 500 строк с намеренными ош
     expect(result.stats.errors).toBe(result.stats.skip)
 
     const broken = result.rows.filter(r => r.errors.length > 0)
-    expect(broken.some(r => r.errors.some(e => e.includes('телефон')))).toBe(true)
-    expect(broken.some(r => r.errors.some(e => e.includes('Дубль')))).toBe(true)
-    expect(broken.some(r => r.errors.some(e => e.includes('роль')))).toBe(true)
+    expect(broken.some(r => r.errors.some(e => e.includes('Телефон')))).toBe(true)
+    expect(broken.some(r => r.errors.some(e => e.includes('дубль')))).toBe(true)
+    expect(broken.some(r => r.errors.some(e => e.includes('Роль')))).toBe(true)
   })
 
   it('применение: корректные создаются с размещением и ролью', async () => {

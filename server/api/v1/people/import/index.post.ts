@@ -1,5 +1,5 @@
 import { requireScope } from '../../../../services/access'
-import { parseImportFile, validateImport } from '../../../../services/importPeople'
+import { listMappingPresets, parseImportFile, validateImport } from '../../../../services/importPeople'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 
 /** Загрузка файла импорта (multipart) → разбор → валидация → предпросмотр. */
@@ -29,10 +29,11 @@ export default defineEventHandler(async (event) => {
     return apiError(event, 400, 'validation_failed', 'Не більше 5000 рядків за один імпорт')
   }
 
-  const result = await validateImport(
-    { tenantId: access.tenantId, actorId: access.userId },
-    file.filename,
-    raw,
-  )
-  return apiData(result)
+  // Пресет сопоставления из прошлого раза, если подходит к заголовкам файла (docs/16 §5.4 шаг 2)
+  const ctx = { tenantId: access.tenantId, actorId: access.userId }
+  const presets = await listMappingPresets(ctx)
+  const headers = Object.keys(raw[0] ?? {})
+  const preset = presets.default && Object.keys(presets.default).every(h => headers.includes(h)) ? presets.default : undefined
+  const result = await validateImport(ctx, file.filename, raw, preset ? { mapping: preset } : {})
+  return apiData({ ...result, presetUsed: Boolean(preset) })
 })

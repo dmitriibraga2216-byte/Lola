@@ -17,7 +17,7 @@ pnpm dev           # http://localhost:3000
 Панель оператора — `/ops`, e-mail и пароль из `.env` (`PLATFORM_ADMIN_*`).
 
 ```bash
-pnpm test          # unit + integration (123) — нужны поднятые контейнеры
+pnpm test          # unit + integration (124) — нужны поднятые контейнеры
 pnpm build && pnpm test:e2e   # Playwright, 11 сценариев (docs/06 §6.10 + чек-лист, занятие, объявление)
 pnpm lint && pnpm typecheck
 ```
@@ -62,6 +62,8 @@ pnpm lint && pnpm typecheck
 | [13-workshops.md](docs/13-workshops.md) | практикумы: задание, сдача, проверка, доработка |
 | [14-certification.md](docs/14-certification.md) | аттестация, единая очередь проверки, сертификаты |
 | [15-assignments.md](docs/15-assignments.md) | назначения, конструктор аудитории, профили обучения, автоматизация |
+| [16-people.md](docs/16-people.md) | люди, размещения, справочники, группы, оргструктура, импорт, журналы |
+| [17-programs-trajectories.md](docs/17-programs-trajectories.md) | программы и траектории: конструктор, граф с условиями, режимы назначения, прогресс |
 | [18-meetups-webinars.md](docs/18-meetups-webinars.md) | очные занятия, вебинары, комплексные тесты (R2) |
 | [19-development.md](docs/19-development.md) | компетенции, профили должностей, ИПР, цели, заявки (R2) |
 | [20-assessment.md](docs/20-assessment.md) | оценка персонала и чек-листы (R2) |
@@ -69,4 +71,4 @@ pnpm lint && pnpm typecheck
 | [27-gateway-public.md](docs/27-gateway-public.md) | веб-шлюз наружу: Cloudflare Tunnel, домены, демо-ссылка для третьих лиц |
 | [28-implementation-notes.md](docs/28-implementation-notes.md) | решения по реализации, отступления от ТЗ и открытые вопросы к заказчику |
 
-Модульные документы `16–17`, `21–25` ещё пишутся. Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).
+Модульные документы `21–25` ещё пишутся. Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

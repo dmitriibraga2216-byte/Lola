@@ -40,6 +40,8 @@ async function setStatus(status: string) {
   await load()
 }
 
+async function remind() { try { const r = await api<{ reminded: number }>(`/assignments/${id}/remind`, { method: 'POST' }); notice.value = t('assign.reminded', { n: r.reminded }) } catch (err) { error.value = apiErrorOf(err).message } }
+async function archive() { if (!confirm(t('assign.archiveConfirm'))) return; try { await api(`/assignments/${id}/archive`, { method: 'POST' }); await load() } catch (err) { error.value = apiErrorOf(err).message } }
 async function cancel() {
   const reason = prompt(t('assign.cancelReason'))
   if (!reason || reason.length < 3) return
@@ -79,6 +81,8 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : 'â€
       <div class="actions">
         <button v-if="a.status === 'active'" class="chip" @click="setStatus('paused')">{{ t('assign.pause') }}</button>
         <button v-if="a.status === 'paused'" class="chip" @click="setStatus('active')">{{ t('assign.resume') }}</button>
+        <button v-if="a.status !== 'archived'" class="chip" @click="remind">{{ t('assign.remindAll') }}</button>
+        <button v-if="hasScope('assignment.cancel') && a.status !== 'archived'" class="chip" @click="archive">{{ t('assign.archive') }}</button>
         <button v-if="hasScope('assignment.cancel') && a.status !== 'archived'" class="chip danger" @click="cancel">{{ t('assign.cancel') }}</button>
       </div>
     </header>

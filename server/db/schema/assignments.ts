@@ -58,9 +58,11 @@ export const automationRules = pgTable('automation_rules', {
   ...baseColumns,
   tenantId: tenantId(),
   name: text('name').notNull(),
-  trigger: text('trigger').notNull(), // user.created | user.placement_changed | course.completed | certificate.expiring | …
-  conditions: jsonb('conditions').notNull().default(sql`'{}'::jsonb`),
-  actions: jsonb('actions').notNull(), // [{type: 'assign_content', subjectType, subjectId, dueDays}, {type: 'add_tag', tag}, …]
+  description: text('description'),
+  trigger: text('trigger').notNull(), // user.activated (вперше активовані) | user.attributes_changed (отримали атрибути) | user.created | user.placement_changed | course.completed | …
+  conditions: jsonb('conditions').notNull().default(sql`'{}'::jsonb`), // {cityIds, positionIds, orgUnitIds, tags, *Invert} — «Всі, окрім» (docs/15 §3.6)
+  actions: jsonb('actions').notNull().default(sql`'[]'::jsonb`), // может быть пустым: что назначать — задаёт программа, ссылающаяся на правило
+  assignDelayDays: integer('assign_delay_days').notNull().default(0), // «Призначення через N днів»
   isActive: boolean('is_active').notNull().default(true),
   runLimit: jsonb('run_limit').notNull().default(sql`'{"oncePerUser":true}'::jsonb`),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),

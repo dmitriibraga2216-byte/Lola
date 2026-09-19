@@ -255,7 +255,7 @@ describe('профиль обучения и правила автоматиза
     const rule = await createRule(ctx(), {
       name: `Після А → Б ${Date.now()}`, trigger: 'course.completed', conditions: { courseIds: [cA] },
       actions: [{ type: 'assign_content', subjectType: 'course', subjectId: cB, dueDays: 5 }, { type: 'add_tag', tag: 'просунутий' }],
-      isActive: true, runLimit: { oncePerUser: true },
+      isActive: true, runLimit: { oncePerUser: true }, assignDelayDays: 0,
     })
     ruleIds.push(rule.id)
     const person = await makePerson('Правило-людина', baristaPosId, lazarevaId)
@@ -300,5 +300,50 @@ describe('отчёт готовности сходится с ручной пр�
 
     const xlsx = await toXlsx('readiness', rows)
     expect(xlsx.length).toBeGreaterThan(1000)
+  })
+})
+
+describe('правила по эталону (docs/15 §3.6): четыре группы с «Всі, окрім», список людей, ручной запуск, задержка', () => {
+  it('условие «посада Бариста, всі окрім міста Одеса»; список пользователей; ручной запуск с задержкой; удаление', async () => {
+    const { ruleUsers, runRuleManually, deleteRule, listRules } = await import('../../server/services/automation')
+    const [odesa] = await admin`insert into cities (tenant_id, name) values (${tenantId}, ${`Одеса-${Date.now()}`}) returning id`
+    const [lviv] = await admin`insert into cities (tenant_id, name) values (${tenantId}, ${`Львів-${Date.now()}`}) returning id`
+    const inOdesa = await makePerson('Бариста Одеса', baristaPosId, lazarevaId)
+    const inLviv = await makePerson('Бариста Львів', baristaPosId, lazarevaId)
+    await admin`update users set city_id = ${odesa!.id} where id = ${inOdesa}`
+    await admin`update users set city_id = ${lviv!.id} where id = ${inLviv}`
+    const course = await makeCourse('Правило-еталон')
+    const rule = await createRule(ctx(), {
+      name: `Бариста не з Одеси ${Date.now()}`, trigger: 'user.attributes_changed', assignDelayDays: 3,
+      conditions: { positionIds: [baristaPosId], cityIds: [odesa!.id as string], cityInvert: true },
+      actions: [{ type: 'assign_content', subjectType: 'course', subjectId: course, dueDays: 7 }], isActive: true, runLimit: { oncePerUser: true },
+    })
+    ruleIds.push(rule.id)
+    const who = await ruleUsers(ctx(), rule.id)
+    expect(who!.map(w => w.id)).toContain(inLviv)
+    expect(who!.map(w => w.id)).not.toContain(inOdesa)
+
+    // Тестовый запуск ничего не пишет; ручной — назначает с задержкой старта
+    const dry = await runRuleManually(ctx(), rule.id, { dryRun: true })
+    expect(dry!.ran).toBeGreaterThanOrEqual(1)
+    expect((await admin`select count(*)::int as c from automation_runs where rule_id = ${rule.id}`)[0]!.c).toBe(0)
+    const real = await runRuleManually(ctx(), rule.id)
+    expect(real!.ran).toBe(dry!.ran)
+    const [a] = await admin`select starts_at, audience from assignments where kind = 'auto' and audience->>'ruleId' = ${rule.id}`
+    expect(new Date(a!.starts_at as string).getTime()).toBeGreaterThan(Date.now() + 2 * 86_400_000)
+    expect((a!.audience as { rules: { ids: string[] }[] }).rules[0]!.ids).toContain(inLviv)
+    // Повтор — once_per_user
+    expect((await runRuleManually(ctx(), rule.id))!.ran).toBe(0)
+    // Триггер «отримали атрибути» срабатывает и от смены размещения
+    const fresh = await makePerson('Бариста новий', baristaPosId, lazarevaId)
+    await admin`update users set city_id = ${lviv!.id} where id = ${fresh}`
+    const r = await runRules(tenantId, 'user.placement_changed', fresh)
+    expect(r.find(x => x.ruleId === rule.id)?.status).toBe('ok')
+
+    expect((await listRules(ctx())).find(x => x.id === rule.id)?.usedBy).toEqual([])
+    expect(await deleteRule(ctx(), rule.id)).toEqual({ ok: true })
+    ruleIds.splice(ruleIds.indexOf(rule.id), 1)
+    await admin`update users set city_id = null where city_id in (${odesa!.id}, ${lviv!.id})`
+    await admin`delete from cities where id in (${odesa!.id}, ${lviv!.id})`
   })
 })

@@ -412,11 +412,16 @@
     "action": {
       "start": "Start",
       "continue": "Continue",
-      "review": "Review"
+      "review": "Review",
+      "retry": "Retry"
     },
     "badge": {
       "expired": "Overdue",
-      "completed": "Completed"
+      "completed": "Done",
+      "overdue": "Overdue",
+      "failed": "Failed",
+      "due": "Due {date}",
+      "planned": "Scheduled from {date}"
     },
     "searchCatalog": "Search courses",
     "catalogEmpty": "Catalog is empty",
@@ -432,7 +437,17 @@
     "watchVideo": "Watch the video to the end",
     "checkAll": "Check all items",
     "offline": "No connection. Progress will be saved and sent later",
-    "certificates": "Certificates"
+    "certificates": "Certificates",
+    "greeting": "Good morning,",
+    "sections": "Sections",
+    "metaCourse": "Course · {n} items",
+    "state": {
+      "done": "Done",
+      "failed": "Failed",
+      "autoClosed": "Closed by deadline",
+      "progress": "{pct}% done",
+      "notStarted": "Not started"
+    }
   },
   "course": {
     "newTitle": "New course title",
@@ -578,12 +593,13 @@
     "downloadPdf": "Download PDF"
   },
   "enrollment": {
-    "scheduled": "Scheduled",
+    "not_assigned": "Not assigned",
     "not_started": "Not started",
+    "planned": "Scheduled",
     "in_progress": "In progress",
-    "completed": "Completed",
+    "done": "Done",
     "failed": "Failed",
-    "expired": "Overdue",
+    "overdue": "Overdue",
     "cancelled": "Cancelled"
   },
   "assign": {

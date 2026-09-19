@@ -30,7 +30,7 @@ export async function listPrograms(ctx: Ctx, opts: { all?: boolean } = {}) {
       select p.*, r.name as rule_name,
              (select count(*)::int from program_nodes n where n.program_id = p.id and n.node_type = 'item') as items,
              (select count(*)::int from program_enrollments e where e.program_id = p.id and e.status in ('not_started','in_progress')) as active_people,
-             (select count(*)::int from program_enrollments e where e.program_id = p.id and e.status = 'completed') as completed_people,
+             (select count(*)::int from program_enrollments e where e.program_id = p.id and e.status = 'done' and e.cancelled_at is null) as completed_people,
              u.full_name as updated_by_name
       from programs p left join automation_rules r on r.id = p.automation_rule_id left join users u on u.id = p.updated_by
       where ${opts.all ? sql`true` : sql`p.status = 'published'`} order by p.updated_at desc
@@ -218,7 +218,7 @@ export async function duplicateProgram(ctx: Ctx, id: string) {
 async function priorResult(tx: TenantTx, userId: string, itemType: string, itemId: string): Promise<{ done: boolean, score: number | null, enrollmentId: string | null }> {
   if (itemType === 'course') {
     const [e] = await tx.select({ id: enrollments.id, score: enrollments.score, validUntil: enrollments.validUntil }).from(enrollments)
-      .where(and(eq(enrollments.userId, userId), eq(enrollments.subjectId, itemId), eq(enrollments.status, 'completed'))).orderBy(desc(enrollments.completedAt)).limit(1)
+      .where(and(eq(enrollments.userId, userId), eq(enrollments.subjectId, itemId), eq(enrollments.status, 'done'), isNull(enrollments.cancelledAt))).orderBy(desc(enrollments.completedAt)).limit(1)
     if (e && (!e.validUntil || e.validUntil.getTime() > Date.now())) return { done: true, score: e.score != null ? Number(e.score) : null, enrollmentId: e.id }
   }
   if (itemType === 'quiz') {
@@ -307,10 +307,10 @@ export async function enrollProgram(tx: TenantTx, tenantId: string, programId: s
   const [p] = await tx.select().from(programs).where(eq(programs.id, programId))
   if (!p) return { ok: false, code: 'not_found' }
   if (p.status !== 'published') return { ok: false, code: 'not_published' }
-  const prior = await tx.select({ id: programEnrollments.id, status: programEnrollments.status }).from(programEnrollments).where(and(eq(programEnrollments.programId, programId), eq(programEnrollments.userId, userId)))
-  const active = prior.find(x => ['not_started', 'in_progress'].includes(x.status))
+  const prior = await tx.select({ id: programEnrollments.id, status: programEnrollments.status, cancelledAt: programEnrollments.cancelledAt }).from(programEnrollments).where(and(eq(programEnrollments.programId, programId), eq(programEnrollments.userId, userId)))
+  const active = prior.find(x => ['not_started', 'in_progress'].includes(x.status) && !x.cancelledAt)
   if (active) return { ok: true, enrollmentId: active.id, created: false }
-  if (p.noAssignAfterFinish && prior.some(x => x.status === 'completed')) return { ok: false, code: 'finished_no_reassign' }
+  if (p.noAssignAfterFinish && prior.some(x => x.status === 'done')) return { ok: false, code: 'finished_no_reassign' }
   const [enr] = await tx.insert(programEnrollments).values({
     tenantId, programId, userId, programVersion: p.version, source: opts.source, ruleId: opts.ruleId ?? null, assignmentId: opts.assignmentId ?? null,
     availableFrom: opts.availableFrom ?? null, dueAt: p.dueDays ? new Date(Date.now() + p.dueDays * 86_400_000) : null, status: 'not_started',
@@ -338,13 +338,13 @@ async function persistState(tx: TenantTx, tenantId: string, enr: typeof programE
   const pct = required.length ? Math.floor(done / required.length * 100) : 0
   const current = nodes.filter(n => n.nodeType === 'item').sort((a, b) => a.sort - b.sort).find(n => ['available', 'in_progress'].includes(r.state[n.id]?.status ?? ''))
   const now = new Date()
-  const status = r.completed ? 'completed' : (enr.status === 'not_started' && Object.values(r.state).some(s => s.status !== 'locked' && s.via !== 'prior' && s.status !== 'available') && done > 0) ? 'in_progress' : enr.status === 'completed' ? 'completed' : enr.status
+  const status = r.completed ? 'done' : (enr.status === 'not_started' && Object.values(r.state).some(s => s.status !== 'locked' && s.via !== 'prior' && s.status !== 'available') && done > 0) ? 'in_progress' : enr.status === 'completed' ? 'completed' : enr.status
   await tx.update(programEnrollments).set({ nodesState: r.state, progressPct: String(pct), currentNodeId: current?.id ?? null, status, availableFrom: null, ...(r.completed && !enr.completedAt ? { completedAt: now } : {}), lastActivityAt: now, updatedAt: now }).where(eq(programEnrollments.id, enr.id))
   for (const id of r.unlocked) {
     const n = nodes.find(x => x.id === id)!
     if (Object.keys(enr.nodesState as NodesState).length) await enqueueNotification(tx, { tenantId, userId: enr.userId, code: 'program_node_unlocked', payload: { title: p.title, step: n.titleOverride ?? '' }, dedupKey: `prog_unlock:${enr.id}:${id}` })
   }
-  if (r.completed && enr.status !== 'completed') {
+  if (r.completed && enr.status !== 'done') {
     await enqueueNotification(tx, { tenantId, userId: enr.userId, code: 'program_completed', payload: { title: p.title }, dedupKey: `prog_done:${enr.id}` })
     await recordAudit(tx, { tenantId, actorId: null, action: 'program.complete', entity: 'program_enrollment', entityId: enr.id })
   }
@@ -386,7 +386,7 @@ export async function openNode(ctx: Ctx, enrollmentId: string, nodeId: string): 
     if (n.itemType === 'course') {
       let eid = s.enrollmentId
       if (!eid) {
-        const [ex] = await tx.select({ id: enrollments.id }).from(enrollments).where(and(eq(enrollments.userId, ctx.actorId), eq(enrollments.subjectId, n.itemId!), inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'completed'])))
+        const [ex] = await tx.select({ id: enrollments.id }).from(enrollments).where(and(eq(enrollments.userId, ctx.actorId), eq(enrollments.subjectId, n.itemId!), inArray(enrollments.status, ['not_started', 'in_progress', 'done']), isNull(enrollments.cancelledAt)))
         if (ex) eid = ex.id
         else {
           const [course] = await tx.select({ publishedVersionId: courses.publishedVersionId }).from(courses).where(eq(courses.id, n.itemId!))
@@ -435,7 +435,7 @@ export async function myPrograms(ctx: Ctx) {
       select e.id, e.status, e.progress_pct, e.due_at, e.completed_at, e.current_node_id, p.id as program_id, p.title, p.mode, p.cover_key,
              (select count(*)::int from program_nodes n where n.program_id = p.id and n.node_type = 'item' and n.is_required) as total
       from program_enrollments e join programs p on p.id = e.program_id
-      where e.user_id = ${ctx.actorId}::uuid and e.status <> 'cancelled' and (e.available_from is null or e.available_from <= now())
+      where e.user_id = ${ctx.actorId}::uuid and e.cancelled_at is null and e.status <> 'not_assigned' and (e.available_from is null or e.available_from <= now())
       order by case e.status when 'in_progress' then 0 when 'not_started' then 1 else 2 end, e.due_at nulls last
     `) as unknown as Promise<Record<string, unknown>[]>
   })
@@ -459,7 +459,7 @@ export async function selfEnrollProgram(ctx: Ctx, programId: string): Promise<En
     if (!p) return { ok: false as const, code: 'not_found' as const }
     if (p.assignmentMode.includes('catalog_free')) return enrollProgram(tx, ctx.tenantId, programId, ctx.actorId, { source: 'catalog', actorId: ctx.actorId })
     if (p.assignmentMode.includes('catalog_request')) {
-      await tx.insert(programEnrollments).values({ tenantId: ctx.tenantId, programId, userId: ctx.actorId, programVersion: p.version, source: 'catalog', status: 'requested' }).onConflictDoNothing()
+      await tx.insert(programEnrollments).values({ tenantId: ctx.tenantId, programId, userId: ctx.actorId, programVersion: p.version, source: 'catalog', status: 'not_assigned', requestedAt: new Date() }).onConflictDoNothing()
       const mgr = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${ctx.actorId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
       if (mgr[0]?.manager_id) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr[0].manager_id, code: 'program_request', payload: { title: p.title, programId }, dedupKey: `prog_req:${programId}:${ctx.actorId}` })
       return { ok: false as const, code: 'requested' as const }
@@ -470,9 +470,10 @@ export async function selfEnrollProgram(ctx: Ctx, programId: string): Promise<En
 
 export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [enr] = await tx.select().from(programEnrollments).where(and(eq(programEnrollments.id, enrollmentId), eq(programEnrollments.status, 'requested')))
+    // Заявка через каталог: status = not_assigned + requested_at; отказ — cancelled_at
+    const [enr] = await tx.select().from(programEnrollments).where(and(eq(programEnrollments.id, enrollmentId), eq(programEnrollments.status, 'not_assigned'), sql`${programEnrollments.requestedAt} is not null`, isNull(programEnrollments.cancelledAt)))
     if (!enr) return null
-    if (!approve) { await tx.update(programEnrollments).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId)); return { status: 'cancelled' } }
+    if (!approve) { await tx.update(programEnrollments).set({ cancelledAt: new Date(), updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId)); return { status: 'cancelled' } }
     await tx.update(programEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
     await openEnrollment(tx, ctx.tenantId, enrollmentId)
     const [p] = await tx.select({ title: programs.title }).from(programs).where(eq(programs.id, enr.programId))
@@ -519,7 +520,7 @@ export async function programReport(ctx: Ctx, programId: string) {
       return { nodeId: n.id, title: n.titleOverride ?? titles.get(`${n.itemType}:${n.itemId}`) ?? '?', reached, done: done.length, failed: enrs.filter(e => (e.nodesState as NodesState)[n.id]?.status === 'failed').length, avgScore: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null }
     })
     const people = enrs.map(e => ({ enrollmentId: e.id, userId: e.userId, fullName: e.fullName, status: e.status, progressPct: Number(e.progressPct), dueAt: e.dueAt, currentStep: e.currentNodeId ? (nodes.findIndex(n => n.id === e.currentNodeId) + 1) : null, currentTitle: e.currentNodeId ? funnel.find(f => f.nodeId === e.currentNodeId)?.title ?? null : null }))
-    return { program: { id: p.id, title: p.title }, total: enrs.length, completed: enrs.filter(e => e.status === 'completed').length, funnel, people }
+    return { program: { id: p.id, title: p.title }, total: enrs.length, completed: enrs.filter(e => e.status === 'done').length, funnel, people }
   })
 }
 
@@ -538,7 +539,8 @@ export async function programScan(tenantId: string): Promise<{ opened: number, s
     for (const s of stuck) if (await enqueueNotification(tx, { tenantId, userId: s.manager_id, code: 'program_stuck', payload: { title: s.title, userId: s.user_id }, dedupKey: `prog_stuck:${s.id}:${day.slice(0, 7)}` })) out.stuck++
     const soon = await tx.execute(sql`select e.id, e.user_id, p.title, e.due_at from program_enrollments e join programs p on p.id = e.program_id where e.status in ('not_started','in_progress') and e.due_at between now() and now() + interval '3 days'`) as unknown as { id: string, user_id: string, title: string, due_at: string }[]
     for (const s of soon) if (await enqueueNotification(tx, { tenantId, userId: s.user_id, code: 'program_due_soon', payload: { title: s.title, due: s.due_at }, dedupKey: `prog_due:${s.id}:${day}` })) out.dueSoon++
-    await tx.update(programEnrollments).set({ status: 'expired', updatedAt: new Date() }).where(and(inArray(programEnrollments.status, ['not_started', 'in_progress']), sql`${programEnrollments.dueAt} < now() - interval '1 day'`))
+    // Автозакрытие по сроку: failed через 14 дней просрочки (как у записей на курс, dueScan)
+    await tx.update(programEnrollments).set({ status: 'failed', updatedAt: new Date() }).where(and(inArray(programEnrollments.status, ['not_started', 'in_progress']), isNull(programEnrollments.cancelledAt), sql`${programEnrollments.dueAt} < now() - interval '14 days'`))
   })
   return out
 }

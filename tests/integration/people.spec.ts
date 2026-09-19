@@ -96,8 +96,8 @@ describe('люди (docs/16 §13)', () => {
     expect(r).toMatchObject({ ok: true, cancelled: 1 })
     const [s] = await admin`select revoked_at from sessions where user_id = ${id}`
     expect(s!.revoked_at).not.toBeNull()
-    const [e] = await admin`select status from enrollments where user_id = ${id}`
-    expect(e!.status).toBe('cancelled')
+    const [e] = await admin`select cancelled_at from enrollments where user_id = ${id}`
+    expect(e!.cancelled_at).not.toBeNull()
     const [pl] = await admin`select ended_at from user_placements where user_id = ${id}`
     expect(pl!.ended_at).not.toBeNull()
     const pub = await publicCertificate(cert!.public_token as string)

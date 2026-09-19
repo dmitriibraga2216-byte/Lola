@@ -142,7 +142,7 @@ export async function handleUpdate(update: Record<string, unknown>): Promise<voi
     if (cmd === '/menu') {
       const rows = await withTenant(who.tenant_id, who.user_id, tx => tx.execute(sql`
         select e.id, coalesce(c.title, '') as title, e.due_at, e.progress_pct from enrollments e left join courses c on c.id = e.subject_id
-        where e.user_id = ${who.user_id}::uuid and e.status in ('not_started','in_progress','expired') order by e.due_at nulls last limit 5`)) as unknown as { id: string, title: string, due_at: string | null, progress_pct: number }[]
+        where e.user_id = ${who.user_id}::uuid and e.cancelled_at is null and e.status in ('not_started','in_progress') order by e.due_at nulls last limit 5`)) as unknown as { id: string, title: string, due_at: string | null, progress_pct: number }[]
       const appUrl = process.env.APP_URL || 'http://localhost:3000'
       const text = rows.length ? `Мої завдання:\n${rows.map((r, i) => `${i + 1}. ${r.title} — ${r.progress_pct}%${r.due_at ? ` (до ${String(r.due_at).slice(0, 10)})` : ''}`).join('\n')}` : 'Активних завдань немає 🎉'
       await sendTelegram(chatId, text, rows[0] ? { url: `/learn/${rows[0].id}` } : undefined)

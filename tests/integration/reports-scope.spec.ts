@@ -91,7 +91,7 @@ describe('docs/22: каркас, прогресс, выгрузка, журна�
     const [ver] = await admin`insert into course_versions (tenant_id, course_id, version) values (${tenantId}, ${course!.id}, 1) returning id`
     await admin`update courses set published_version_id = ${ver!.id} where id = ${course!.id}`
     const u1 = await makePerson('Прогрес Один', lazarevaId), u2 = await makePerson('Прогрес Два', lazarevaId)
-    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status, started_at, completed_at) values (${tenantId}, ${u1}, ${course!.id}, ${ver!.id}, 'self', 1, 'completed', now(), now())`
+    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status, started_at, completed_at) values (${tenantId}, ${u1}, ${course!.id}, ${ver!.id}, 'self', 1, 'done', now(), now())`
     await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${u2}, ${course!.id}, ${ver!.id}, 'self', 1, 'not_started')`
     try {
       const p = await X.progress(ctx, { subject: 'course', subjectId: course!.id as string, scope: [lazarevaId] })

@@ -94,10 +94,10 @@ async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string
           ${f.locationIds?.length ? sql`and up.location_id in ${f.locationIds}` : sql``})`)
       }
       if (f.hasCompletedCourseIds?.length) {
-        conds.push(sql`exists (select 1 from ${enrollments} e where e.user_id = ${users.id} and e.status = 'completed' and e.subject_id in ${f.hasCompletedCourseIds})`)
+        conds.push(sql`exists (select 1 from ${enrollments} e where e.user_id = ${users.id} and e.status = 'done' and e.cancelled_at is null and e.subject_id in ${f.hasCompletedCourseIds})`)
       }
       if (f.notCompletedCourseIds?.length) {
-        conds.push(sql`not exists (select 1 from ${enrollments} e where e.user_id = ${users.id} and e.status = 'completed' and e.subject_id in ${f.notCompletedCourseIds})`)
+        conds.push(sql`not exists (select 1 from ${enrollments} e where e.user_id = ${users.id} and e.status = 'done' and e.cancelled_at is null and e.subject_id in ${f.notCompletedCourseIds})`)
       }
       const rows = await tx.select({ id: users.id }).from(users).where(and(...conds))
       return new Set(rows.map(r => r.id))

@@ -145,6 +145,12 @@
 - Каждой таблице с `tenant_id` добавлен индекс по `tenant_id` (37 таблиц не имели) — docs/25 §15.
 - Назначения тестов и комплексных тестов записи (`enrollments`) не создают: правила берутся при старте попытки; аудитория и «Мої завдання» для них — PR spec-15-tasks.
 
+### Паритет 2 — пять статусов прохождения (CLAUDE.md п. 12)
+- `enrollments.status` и `program_enrollments.status` принимают ровно `not_assigned | not_started | in_progress | done | failed` (CHECK, миграция 0026). Бывшие статусы стали признаками: `scheduled` → `starts_at > now()`; `expired` → `failed` + `expired_at` (автозакрытие); `cancelled` → `cancelled_at` (статус замораживается, строка исчезает из списков и отчётов, но не удаляется — docs/04 §4.9); `requested` у программ → `not_assigned` + `requested_at` (заявка через каталог до решения). Помощник — `server/services/enrollmentStatus.ts` (`taskGroupWhere`, `overdueSql`, `deriveTaskState`).
+- Просрочка не меняет статус (docs/10 §7.5): «протерміновано» = открытая запись с `due_at < now()`. Автозакрытие по сроку (эталон: «автоматично завершені завдання після закінчення терміну») — через `tenants.settings.learning.autoCloseAfterDays` (по умолчанию 14) дней просрочки → `failed` + `expired_at`; продление срока открывает такую запись заново.
+- «Мої завдання»: API `?group=new|planned|failed|overdue|done` (docs/04 §4.4) + `?counts=1`; «нові» = `not_started`/`in_progress` без просрочки и не заплановані (эталон не выделяет «в процесі» в отдельную группу). Экран по мокапу MyTasks: три чипа — «Актуальні» (new + planned + failed), «Прострочені», «Завершені»; заплановані и провалені видны бейджем на карточке.
+- `not_assigned` в записях на курс не пишется: элемент программы/траектории, ещё не выданный человеку, записи не имеет — отчёты показывают «Не призначено» по отсутствию строки; у программ статус используется для заявок.
+
 ## 28.3 Переменные окружения, добавленные после docs/26
 
 `APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`,

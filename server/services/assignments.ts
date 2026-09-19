@@ -7,6 +7,7 @@ import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
 import { paramsFor } from '../../shared/schemas/assignments'
+import { deriveTaskState, overdueSql } from './enrollmentStatus'
 import type { Audience, assignmentCreateSchema, assignmentUpdateSchema } from '../../shared/schemas/assignments'
 import type { ContentType } from '../../shared/enums'
 
@@ -163,14 +164,15 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
 
     const wanted = await resolveAudience(tx, a.audience as Audience, a.exclude as Audience)
     const existing = await tx.select({ userId: enrollments.userId }).from(enrollments)
-      .where(eq(enrollments.assignmentId, assignmentId))
+      .where(eq(enrollments.assignmentId, assignmentId)) // снятые (cancelled_at) тоже считаются — повторно не назначаем
     const have = new Set(existing.map(e => e.userId))
 
     // Профиль (docs/15 §7.11): уже пройденные с действующим результатом не назначаются заново
     const alreadyValid = a.profileId
       ? new Set((await tx.select({ userId: enrollments.userId }).from(enrollments).where(and(
           eq(enrollments.subjectId, a.subjectId),
-          eq(enrollments.status, 'completed'),
+          eq(enrollments.status, 'done'),
+          isNull(enrollments.cancelledAt),
           sql`(${enrollments.validUntil} is null or ${enrollments.validUntil} > now())`,
         ))).map(e => e.userId))
       : new Set<string>()
@@ -201,7 +203,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
       versionId,
       assignmentId,
       source: 'assigned',
-      status: startsAt ? 'scheduled' : 'not_started',
+      status: 'not_started', // «заплановано» — признак starts_at > now()
       requiredTotal,
       startsAt,
       dueAt,
@@ -245,9 +247,9 @@ export async function syncAssignments(tenantId: string): Promise<number> {
 async function recalcStats(tx: TenantTx, assignmentId: string) {
   const [s] = await tx.select({
     assigned: sql<number>`count(*)::int`,
-    started: sql<number>`count(*) filter (where ${enrollments.status} in ('in_progress','completed','failed'))::int`,
-    completed: sql<number>`count(*) filter (where ${enrollments.status} = 'completed')::int`,
-    overdue: sql<number>`count(*) filter (where ${enrollments.status} = 'expired')::int`,
+    started: sql<number>`count(*) filter (where ${enrollments.status} in ('in_progress','done','failed') and ${enrollments.cancelledAt} is null)::int`,
+    completed: sql<number>`count(*) filter (where ${enrollments.status} = 'done' and ${enrollments.cancelledAt} is null)::int`,
+    overdue: sql<number>`count(*) filter (where ${overdueSql(enrollments)})::int`,
   }).from(enrollments).where(eq(enrollments.assignmentId, assignmentId))
   await tx.update(assignments).set({ stats: s }).where(eq(assignments.id, assignmentId))
 }
@@ -265,12 +267,15 @@ export async function getAssignment(ctx: Ctx, id: string) {
       dueAt: enrollments.dueAt,
       completedAt: enrollments.completedAt,
       lastActivityAt: enrollments.lastActivityAt,
+      startsAt: enrollments.startsAt,
+      expiredAt: enrollments.expiredAt,
+      cancelledAt: enrollments.cancelledAt,
     })
       .from(enrollments)
       .innerJoin(users, eq(users.id, enrollments.userId))
-      .where(eq(enrollments.assignmentId, id))
+      .where(and(eq(enrollments.assignmentId, id), isNull(enrollments.cancelledAt))) // снятые — во вкладке «Не призначено» (spec-15-tasks)
       .orderBy(users.fullName)
-    return { ...a, people }
+    return { ...a, people: people.map(p => ({ ...p, ...deriveTaskState(p) })) }
   })
 }
 
@@ -304,18 +309,19 @@ export async function cancelAssignment(ctx: Ctx, id: string, input: { reason: st
     const [a] = await tx.select().from(assignments).where(eq(assignments.id, id))
     if (!a) return null
 
-    const removed = await tx.delete(enrollments)
-      .where(and(eq(enrollments.assignmentId, id), inArray(enrollments.status, ['scheduled', 'not_started'])))
+    // Снятие — признак cancelled_at, не удаление (docs/04 §4.9); неначатые снимаются всегда
+    const removed = await tx.update(enrollments).set({ cancelledAt: new Date(), cancelledBy: ctx.actorId, cancelReason: input.reason, updatedAt: new Date() })
+      .where(and(eq(enrollments.assignmentId, id), eq(enrollments.status, 'not_started'), isNull(enrollments.cancelledAt)))
       .returning({ id: enrollments.id })
 
     let cancelled = 0
     if (!input.keepStarted) {
       const rows = await tx.update(enrollments).set({
-        status: 'cancelled',
+        cancelledAt: new Date(),
         cancelledBy: ctx.actorId,
         cancelReason: input.reason,
         updatedAt: new Date(),
-      }).where(and(eq(enrollments.assignmentId, id), inArray(enrollments.status, ['in_progress', 'failed', 'expired'])))
+      }).where(and(eq(enrollments.assignmentId, id), inArray(enrollments.status, ['in_progress', 'failed']), isNull(enrollments.cancelledAt)))
         .returning({ id: enrollments.id })
       cancelled = rows.length
       if (rows.length) {
@@ -340,7 +346,8 @@ export async function extendEnrollment(ctx: Ctx, enrollmentId: string, input: { 
     const dueAt = new Date(input.dueAt)
     const [after] = await tx.update(enrollments).set({
       dueAt,
-      status: e.status === 'expired' ? 'in_progress' : e.status,
+      // автозакрытое по сроку (failed + expired_at) открывается заново
+      status: e.status === 'failed' && e.expiredAt ? (e.startedAt ? 'in_progress' : 'not_started') : e.status,
       expiredAt: null,
       updatedAt: new Date(),
     }).where(eq(enrollments.id, enrollmentId)).returning()
@@ -408,7 +415,7 @@ export async function remindAssignment(ctx: Ctx, id: string): Promise<number | n
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [a] = await tx.select({ id: assignments.id, title: assignments.title }).from(assignments).where(eq(assignments.id, id))
     if (!a) return null
-    const rows = await tx.select({ userId: enrollments.userId, dueAt: enrollments.dueAt }).from(enrollments).where(and(eq(enrollments.assignmentId, id), inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'overdue'])))
+    const rows = await tx.select({ userId: enrollments.userId, dueAt: enrollments.dueAt }).from(enrollments).where(and(eq(enrollments.assignmentId, id), inArray(enrollments.status, ['not_started', 'in_progress']), isNull(enrollments.cancelledAt)))
     const day = new Date().toISOString().slice(0, 10)
     let n = 0
     for (const r of rows) {
@@ -426,7 +433,7 @@ export async function assignmentPeople(ctx: Ctx, id: string, filter: { status?: 
       from enrollments e join users u on u.id = e.user_id
       left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
-      where e.assignment_id = ${id}::uuid ${filter.status ? sql`and e.status = ${filter.status}` : sql``}
+      where e.assignment_id = ${id}::uuid and e.cancelled_at is null ${filter.status ? sql`and e.status = ${filter.status}` : sql``}
       order by e.status, u.full_name limit 1000
     `) as unknown as Promise<Record<string, unknown>[]>
   })

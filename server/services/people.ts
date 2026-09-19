@@ -430,7 +430,7 @@ export async function archivePerson(ctx: Ctx, userId: string, input: { reason: '
     if (input.closeSessions !== false) await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
     let cancelled = 0
     if (input.cancelLearning !== false) {
-      cancelled = (await tx.update(enrollments).set({ status: 'cancelled', updatedAt: new Date() }).where(and(eq(enrollments.userId, userId), inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'overdue']))).returning({ id: enrollments.id })).length
+      cancelled = (await tx.update(enrollments).set({ cancelledAt: new Date(), cancelledBy: ctx.actorId, cancelReason: 'archived', updatedAt: new Date() }).where(and(eq(enrollments.userId, userId), inArray(enrollments.status, ['not_started', 'in_progress']), isNull(enrollments.cancelledAt))).returning({ id: enrollments.id })).length
     }
     await tx.delete(userRoles).where(eq(userRoles.userId, userId))
     // docs/21 §12: статьи уволившегося владельца → тому, кто архивирует, с пометкой «потребує перевірки»
@@ -621,9 +621,9 @@ export async function personLearning(ctx: Ctx, userId: string) {
                coalesce(c.title, p.title, q.title) as title
         from enrollments e
         left join courses c on e.subject_type = 'course' and c.id = e.subject_id
-        left join programs p on e.subject_type = 'program' and p.id = e.subject_id
-        left join quizzes q on e.subject_type = 'quiz' and q.id = e.subject_id
-        where e.user_id = ${userId}::uuid order by e.created_at desc limit 200`) as unknown as Promise<Record<string, unknown>[]>,
+        left join programs p on e.subject_type = 'training_program' and p.id = e.subject_id
+        left join quizzes q on e.subject_type = 'test' and q.id = e.subject_id
+        where e.user_id = ${userId}::uuid and e.cancelled_at is null order by e.created_at desc limit 200`) as unknown as Promise<Record<string, unknown>[]>,
       tx.execute(sql`
         select a.id, a.attempt_no, a.status, a.score, a.max_score, a.passed, a.submitted_at, a.started_at, q.title
         from attempts a join quizzes q on q.id = a.quiz_id where a.user_id = ${userId}::uuid order by a.started_at desc limit 200`) as unknown as Promise<Record<string, unknown>[]>,

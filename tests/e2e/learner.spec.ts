@@ -109,7 +109,7 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
 
   // Ученик видит результат и разбор
   await page.goto('/learn?tab=done')
-  await page.getByRole('button', { name: 'Завершені' }).click()
+  await page.getByRole('tab', { name: /Завершені/ }).click()
   await page.locator('.card', { hasText: `${PREFIX}Курс з тестом` }).click()
   await expect(page.getByText('Завершено', { exact: true })).toBeVisible()
   // Разбор доступен ученику по API результата (show_answers=after_attempt)

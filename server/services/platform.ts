@@ -71,7 +71,7 @@ export async function listTenants() {
            (select count(*)::int from users u where u.tenant_id = t.id) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
            (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
-           (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'completed' and e.completed_at >= now() - interval '30 days') as completed_30d
+           (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
     from tenants t order by t.created_at desc
   `) as unknown as Promise<Record<string, unknown>[]>
 }

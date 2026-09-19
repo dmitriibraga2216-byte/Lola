@@ -16,15 +16,16 @@ export const ENTITIES = {
     from: sql`users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id`,
     fields: {
       full_name: sql`u.full_name`, phone: sql`u.phone`, status: sql`u.status`, hired_at: sql`u.hired_at`, location: sql`l.name`, position: sql`p.name`,
-      courses_done: sql`(select count(*) from enrollments e where e.user_id = u.id and e.status = 'completed')`,
-      courses_overdue: sql`(select count(*) from enrollments e where e.user_id = u.id and e.status in ('active','in_progress') and e.due_at < now())`,
+      courses_done: sql`(select count(*) from enrollments e where e.user_id = u.id and e.status = 'done' and e.cancelled_at is null)`,
+      courses_overdue: sql`(select count(*) from enrollments e where e.user_id = u.id and e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now())`,
     },
     filters: { location_id: sql`up.location_id`, position_id: sql`up.position_id`, status: sql`u.status`, hired_from: sql`u.hired_at`, hired_to: sql`u.hired_at` },
     tenantCol: sql`u.tenant_id`,
   },
   enrollments: {
     from: sql`enrollments e join users u on u.id = e.user_id join courses c on c.id = e.subject_id left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id`,
-    fields: { full_name: sql`u.full_name`, course: sql`c.title`, status: sql`e.status`, progress_pct: sql`e.progress_pct`, due_at: sql`e.due_at`, completed_at: sql`e.completed_at`, location: sql`l.name`, source: sql`e.source` },
+    // Пять статусов + признаки: overdue (due_at < now при незавершённом), cancelled_at (снято)
+    fields: { full_name: sql`u.full_name`, course: sql`c.title`, status: sql`e.status`, overdue: sql`(e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now())`, cancelled_at: sql`e.cancelled_at`, progress_pct: sql`e.progress_pct`, due_at: sql`e.due_at`, completed_at: sql`e.completed_at`, location: sql`l.name`, source: sql`e.source` },
     filters: { location_id: sql`up.location_id`, course_id: sql`e.subject_id`, status: sql`e.status`, due_from: sql`e.due_at`, due_to: sql`e.due_at` },
     tenantCol: sql`e.tenant_id`,
   },

@@ -412,11 +412,16 @@
     "action": {
       "start": "Почати",
       "continue": "Продовжити",
-      "review": "Переглянути"
+      "review": "Переглянути",
+      "retry": "Пройти ще раз"
     },
     "badge": {
       "expired": "Прострочено",
-      "completed": "Завершено"
+      "completed": "Завершено",
+      "overdue": "Прострочено",
+      "failed": "Не зараховано",
+      "due": "До {date}",
+      "planned": "Заплановано з {date}"
     },
     "searchCatalog": "Пошук курсу",
     "catalogEmpty": "У каталозі поки порожньо",
@@ -432,7 +437,17 @@
     "watchVideo": "Подивись відео до кінця",
     "checkAll": "Познач усі пункти",
     "offline": "Немає звʼязку. Прогрес збережеться і надішлеться пізніше",
-    "certificates": "Сертифікати"
+    "certificates": "Сертифікати",
+    "greeting": "Доброго ранку,",
+    "sections": "Розділи",
+    "metaCourse": "Курс · {n} елементів",
+    "state": {
+      "done": "Завершено",
+      "failed": "Не зараховано",
+      "autoClosed": "Закрито за терміном",
+      "progress": "{pct}% пройдено",
+      "notStarted": "Не розпочато"
+    }
   },
   "course": {
     "newTitle": "Назва нового курсу",
@@ -578,12 +593,13 @@
     "downloadPdf": "Завантажити PDF"
   },
   "enrollment": {
-    "scheduled": "Заплановано",
-    "not_started": "Не почато",
+    "not_assigned": "Не призначено",
+    "not_started": "Не розпочато",
+    "planned": "Заплановано",
     "in_progress": "В процесі",
-    "completed": "Завершено",
-    "failed": "Не склав",
-    "expired": "Прострочено",
+    "done": "Виконано",
+    "failed": "Провалено",
+    "overdue": "Протерміновано",
     "cancelled": "Знято"
   },
   "assign": {

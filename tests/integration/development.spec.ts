@@ -183,7 +183,7 @@ describe('docs/19 часть 2: матрица, курс → компетенц�
     await admin`update courses set published_version_id = ${ver!.id} where id = ${course!.id}`
     const [mod] = await admin`insert into modules (tenant_id, course_version_id, title, sort) values (${tenantId}, ${ver!.id}, 'М', 1) returning id`
     await admin`insert into lessons (tenant_id, module_id, title, sort, item_type, item_id) values (${tenantId}, ${mod!.id}, 'Підсумковий тест', 1, 'quiz', ${quiz!.id})`
-    const [enr] = await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${baristaId}, ${course!.id}, ${ver!.id}, 'self', 1, 'completed') returning id`
+    const [enr] = await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status) values (${tenantId}, ${baristaId}, ${course!.id}, ${ver!.id}, 'self', 1, 'done') returning id`
     try {
       expect(await onCourseCompletedCompetency(tenantId, baristaId, course!.id as string, enr!.id as string)).toBe(false)
       await admin`insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, passed, started_at, submitted_at) values (${tenantId}, ${quiz!.id}, ${baristaId}, 1, '{}', '{}', 'passed', true, now(), now())`

@@ -20,8 +20,10 @@ export const enrollments = pgTable('enrollments', {
   versionId: uuid('version_id').notNull().references(() => courseVersions.id),
   assignmentId: uuid('assignment_id'), // null при самозаписи (назначения — этап 4)
   source: text('source').notNull().default('assigned'), // assigned | self | repeat | import
+  // enrollment_status (docs/02, пять значений): not_assigned | not_started | in_progress | done | failed.
+  // «Заплановано» = starts_at > now(); «протерміновано» = due_at < now() при незавершённом;
+  // автозакрытие по сроку = failed + expired_at; снятие назначения = cancelled_at (статус остаётся).
   status: text('status').notNull().default('not_started'),
-  // scheduled | not_started | in_progress | completed | failed | expired | cancelled
   progressPct: numeric('progress_pct', { precision: 5, scale: 2 }).notNull().default('0'),
   requiredTotal: integer('required_total').notNull().default(0),
   requiredDone: integer('required_done').notNull().default(0),
@@ -34,12 +36,13 @@ export const enrollments = pgTable('enrollments', {
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
   score: numeric('score', { precision: 5, scale: 2 }),
   timeSpentSec: integer('time_spent_sec').notNull().default(0),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
   cancelledBy: uuid('cancelled_by').references(() => users.id),
   cancelReason: text('cancel_reason'),
 }, t => [
   unique().on(t.tenantId, t.userId, t.subjectId, t.versionId, t.assignmentId),
   index().on(t.tenantId, t.userId, t.status),
-  index().on(t.tenantId, t.dueAt).where(sql`${t.status} in ('not_started', 'in_progress')`),
+  index().on(t.tenantId, t.dueAt).where(sql`${t.status} in ('not_started', 'in_progress') and ${t.cancelledAt} is null`),
   index().on(t.tenantId, t.subjectId, t.status),
 ])
 

@@ -72,7 +72,9 @@ export const programEnrollments = pgTable('program_enrollments', {
   programId: uuid('program_id').notNull().references(() => programs.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   programVersion: integer('program_version').notNull().default(1),
-  status: text('status').notNull().default('not_started'), // not_started | in_progress | completed | failed | expired | cancelled
+  status: text('status').notNull().default('not_started'), // enrollment_status (docs/02): not_started | in_progress | done | failed; снятие — cancelled_at
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  requestedAt: timestamp('requested_at', { withTimezone: true }), // заявка через каталог: status = not_assigned до решения
   currentNodeId: uuid('current_node_id'),
   nodesState: jsonb('nodes_state').notNull().default('{}'), // {nodeId: {status, at, score, enrollmentId, via}}
   progressPct: numeric('progress_pct', { precision: 5, scale: 2 }).notNull().default('0'),

@@ -7,7 +7,7 @@ export const meetupSchema = z.object({
   startsAt: z.string().datetime({ offset: true }), endsAt: z.string().datetime({ offset: true }), timezone: z.string().optional(), locationId: z.string().uuid().nullable().optional(), room: z.string().max(120).nullable().optional(), address: z.string().max(300).nullable().optional(),
   trainerIds: z.array(z.string().uuid()).min(1, 'Оберіть тренера'), capacity: z.number().int().min(1, 'Від 1 до 500').max(500, 'Від 1 до 500').nullable().optional(), waitlistEnabled: z.boolean().optional(),
   enrollDeadlineHours: z.number().int().min(0).max(720).optional(), cancelDeadlineHours: z.number().int().min(0).max(720).optional(), attendanceMode: z.enum(['manual', 'qr', 'both']).optional(),
-  requiresFeedback: z.boolean().optional(), feedbackSurveyId: z.string().uuid().nullable().optional(), materials: z.array(z.string().uuid()).optional(), status: z.enum(['draft', 'planned']).optional(),
+  requiresFeedback: z.boolean().optional(), feedbackSurveyId: z.string().uuid().nullable().optional(), materials: z.array(z.string().uuid()).optional(), status: z.enum(['draft', 'planned']).optional(), coverKey: z.string().max(300).nullable().optional(), registrationRequired: z.boolean().optional(),
   webinar: z.object({ provider: z.enum(['zoom', 'meet', 'other']).optional(), joinUrl: z.string().url().nullable().optional(), hostUrl: z.string().url().nullable().optional(), recordUrl: z.string().url().nullable().optional(), recordAvailableUntil: z.string().datetime({ offset: true }).nullable().optional(), autoAttendance: z.boolean().optional(), minMinutesForAttendance: z.number().int().min(1).nullable().optional() }).optional(),
 })
 export default defineEventHandler(async (event) => {

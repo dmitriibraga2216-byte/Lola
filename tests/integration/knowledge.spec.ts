@@ -1,9 +1,9 @@
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-const { createArticle, updateArticle, search, revisions, blocksToText, linkArticle } = await import('../../server/services/knowledge')
+const { createArticle, updateArticle, search, revisions, blocksToText, linkArticle, feedback, confirmActual, reviewScan, knowledgeReport } = await import('../../server/services/knowledge')
 const { createSurvey, updateSurvey, mySurveys, respond, surveyReport, triggerCourseFeedback } = await import('../../server/services/surveys')
-const { createNews, listNews, getNews, ackNews, newsReaders } = await import('../../server/services/news')
+const { createNews, listNews, getNews, ackNews, newsReaders, trackView, publishScan } = await import('../../server/services/news')
 const { createWorkshop, submitWorkshop, reviewQueue, claim, grade, workshopForLearner, workshopSlaScan, addComment } = await import('../../server/services/workshops')
 const { createCourse, addModule, addLesson, publishCourse } = await import('../../server/services/courses')
 const { selfEnroll, enrollmentTree, openLesson, completeLesson } = await import('../../server/services/learning')
@@ -41,6 +41,7 @@ afterAll(async () => {
     await admin`delete from courses where id in ${admin(courseIds)}`
   }
   if (articleIds.length) await admin`delete from knowledge_articles where id in ${admin(articleIds)}`
+  await admin`delete from search_queries where tenant_id = ${tenantId} and query like 'kbtest%'`
   if (surveyIds.length) await admin`delete from surveys where id in ${admin(surveyIds)}`
   if (newsIds.length) await admin`delete from news where id in ${admin(newsIds)}`
   await admin.end()
@@ -84,6 +85,67 @@ describe('база знаний: поиск находит и статью, и �
     expect(hits[0]!.snippet.length).toBeGreaterThan(0)
 
     expect(await search(learner(), 'x')).toEqual([])
+  })
+
+  it('docs/21: пустой запрос попадает в журнал; статья не в аудитории не показывается даже заголовком', async () => {
+    const stamp = Date.now()
+    expect(await search(learner(), `kbtest-${stamp}-нічого`)).toEqual([])
+    const [q] = await admin`select results from search_queries where tenant_id = ${tenantId} and query = ${`kbtest-${stamp}-нічого`}`
+    expect(q!.results).toBe(0)
+    const [otherPos] = await admin`insert into positions (tenant_id, name, code) values (${tenantId}, ${`Кухар-kb-${stamp}`}, 'cook-kb') returning id`
+    const art = await createArticle(ctx(), { title: `kbtest секрет кухні ${stamp}`, body: text('<p>Тільки для кухні: kbtest секретний рецепт.</p>'), visibility: { scope: 'audience', audience: { rules: [{ type: 'position', ids: [otherPos!.id] }], match: 'any' } } })
+    articleIds.push(art.id)
+    await updateArticle(ctx(), art.id, { status: 'published' })
+    try {
+      const hits = await search(learner(), `kbtest секрет ${stamp}`)
+      expect(hits.some(h => h.id === art.id)).toBe(false)
+      const rep = await knowledgeReport(ctx())
+      expect(rep.emptyQueries.some(e => e.query === `kbtest-${stamp}-нічого`)).toBe(true)
+    }
+    finally { await admin`delete from positions where id = ${otherPos!.id}` }
+  })
+
+  it('docs/21 §5.2, §7.2, §13.2: «корисно/ні» считает голоса; review_at вчера → владельцу задача; через 30 дней — плашка', async () => {
+    const stamp = Date.now()
+    const art = await createArticle(ctx(), { title: `kbtest актуальність ${stamp}`, body: text('<p>Стаття для перевірки актуальності.</p>'), ownerId: mentorId, reviewAt: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10) })
+    articleIds.push(art.id)
+    await updateArticle(ctx(), art.id, { status: 'published' })
+    expect(await feedback(learner(), art.id, true)).toEqual({ helpful: 1, notHelpful: 0 })
+    expect(await feedback(learner(), art.id, false, 'Немає фото')).toEqual({ helpful: 0, notHelpful: 1 }) // повторный голос перезаписывает
+    expect(await reviewScan(tenantId)).toBeGreaterThanOrEqual(1)
+    const [n] = await admin`select count(*)::int as c from notifications where user_id = ${mentorId} and code = 'knowledge_review_due' and payload->>'articleId' = ${art.id}`
+    expect(n!.c).toBe(1)
+    expect(await reviewScan(tenantId)).toBe(0) // дедуп по дате
+    const { getArticle } = await import('../../server/services/knowledge')
+    expect((await getArticle(learner(), art.id))!.needsReview).toBe(false)
+    await admin`update knowledge_articles set review_at = current_date - 31 where id = ${art.id}`
+    expect((await getArticle(learner(), art.id))!.needsReview).toBe(true)
+    const c = await confirmActual({ tenantId, actorId: mentorId }, art.id)
+    expect(c!.reviewAt! > new Date().toISOString().slice(0, 10)).toBe(true)
+    expect((await getArticle(learner(), art.id))!.needsReview).toBe(false)
+  })
+
+  it('docs/21 §7.3 (Б.5): подтверждение только после 10 секунд и прокрутки; отложенная публикация', async () => {
+    const stamp = Date.now()
+    const n = await createNews(ctx(), { title: `kbtest ack ${stamp}`, body: text('<p>Обовʼязково</p>'), requiresAck: true, publish: true })
+    newsIds.push(n.id)
+    await getNews(learner(), n.id)
+    expect(await ackNews(learner(), n.id)).toMatchObject({ ok: false, code: 'too_fast' })
+    await trackView(learner(), n.id, { seconds: 12 })
+    expect(await ackNews(learner(), n.id)).toMatchObject({ ok: false, code: 'not_scrolled' })
+    await trackView(learner(), n.id, { seconds: 0, scrolledToEnd: true })
+    expect((await ackNews(learner(), n.id)).ok).toBe(true)
+
+    const later = await createNews(ctx(), { title: `kbtest later ${stamp}`, body: text('<p>Потім</p>'), publish: true, publishAt: new Date(Date.now() + 3_600_000).toISOString() })
+    newsIds.push(later.id)
+    expect(later.status).toBe('scheduled')
+    expect((await listNews(learner())).some(x => x.id === later.id)).toBe(false)
+    await admin`update news set publish_at = now() - interval '1 minute' where id = ${later.id}`
+    expect((await publishScan(tenantId)).published).toBeGreaterThanOrEqual(1)
+    expect((await listNews(learner())).some(x => x.id === later.id)).toBe(true)
+    await admin`update news set unpublish_at = now() - interval '1 minute' where id = ${later.id}`
+    expect((await publishScan(tenantId)).unpublished).toBeGreaterThanOrEqual(1)
+    expect((await listNews(learner())).some(x => x.id === later.id)).toBe(false)
   })
 
   it('версии: правка тела создаёт ревизию; привязка к позиции', async () => {
@@ -175,7 +237,7 @@ describe('новости', () => {
 
     const opened = await getNews(learner(), pinned.id)
     expect(opened!.ackedAt).toBeNull()
-    await ackNews(learner(), pinned.id)
+    await ackNews(learner(), pinned.id, { force: true })
     const readers = await newsReaders(ctx(), pinned.id)
     expect(readers.find(r => r.userId === learnerId)!.ackedAt).not.toBeNull()
     expect((await listNews(learner())).find(n => n.id === pinned.id)!.acked).toBe(true)

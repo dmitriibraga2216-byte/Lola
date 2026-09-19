@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
-import { knowledgeArticles, knowledgeLinks, knowledgeRevisions, resources } from '../db/schema'
+import { knowledgeArticles, knowledgeFeedback, knowledgeLinks, knowledgeRevisions, questions, resources, searchQueries } from '../db/schema'
+import { enqueueNotification } from './notifications'
+import { resolveAudience } from './audience'
+import type { Audience } from '../../shared/schemas/assignments'
 import { withTenant } from '../utils/withTenant'
+import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import { slugify } from './courses'
@@ -55,6 +59,9 @@ export async function listArticles(ctx: Ctx, filter: { status?: string, category
       id: knowledgeArticles.id, title: knowledgeArticles.title, slug: knowledgeArticles.slug, summary: knowledgeArticles.summary,
       status: knowledgeArticles.status, tags: knowledgeArticles.tags, categoryId: knowledgeArticles.categoryId,
       version: knowledgeArticles.version, viewCount: knowledgeArticles.viewCount, updatedAt: knowledgeArticles.updatedAt,
+      reviewAt: knowledgeArticles.reviewAt, reviewConfirmedAt: knowledgeArticles.reviewConfirmedAt, ownerId: knowledgeArticles.ownerId,
+      helpfulCount: knowledgeArticles.helpfulCount, notHelpfulCount: knowledgeArticles.notHelpfulCount,
+      needsReview: sql<boolean>`${knowledgeArticles.reviewAt} is not null and ${knowledgeArticles.reviewAt} < current_date - 30 and (${knowledgeArticles.reviewConfirmedAt} is null or ${knowledgeArticles.reviewConfirmedAt}::date < ${knowledgeArticles.reviewAt})`,
     }).from(knowledgeArticles)
       .where(and(
         isNull(knowledgeArticles.deletedAt),
@@ -75,12 +82,17 @@ export async function getArticle(ctx: Ctx, idOrSlug: string, opts: { countView?:
     if (!a) return null
     if (opts.countView) await tx.update(knowledgeArticles).set({ viewCount: a.viewCount + 1 }).where(eq(knowledgeArticles.id, a.id))
     const links = await tx.select().from(knowledgeLinks).where(eq(knowledgeLinks.articleId, a.id))
+    const [my] = await tx.select({ helpful: knowledgeFeedback.helpful }).from(knowledgeFeedback).where(and(eq(knowledgeFeedback.articleId, a.id), eq(knowledgeFeedback.userId, ctx.actorId)))
+    const related = a.relatedArticles.length ? await tx.select({ id: knowledgeArticles.id, title: knowledgeArticles.title, slug: knowledgeArticles.slug }).from(knowledgeArticles).where(and(sql`${knowledgeArticles.id} in ${a.relatedArticles}`, eq(knowledgeArticles.status, 'published'), isNull(knowledgeArticles.deletedAt))) : []
+    const courses = a.relatedCourses.length ? await tx.execute(sql`select id, title from courses where id in ${a.relatedCourses} and status = 'published' and deleted_at is null`) as unknown as { id: string, title: string }[] : []
+    const [owner] = a.ownerId ? await tx.execute(sql`select full_name from users where id = ${a.ownerId}::uuid`) as unknown as { full_name: string }[] : []
+    const needsReview = !!a.reviewAt && new Date(a.reviewAt) < new Date(Date.now() - 30 * 86_400_000) && (!a.reviewConfirmedAt || a.reviewConfirmedAt < new Date(a.reviewAt))
     const { embedding: _e, searchTsv: _t, ...safe } = a
-    return { ...safe, links }
+    return { ...safe, links, myFeedback: my?.helpful ?? null, related, relatedCourseItems: courses, ownerName: owner?.full_name ?? null, needsReview }
   })
 }
 
-export async function createArticle(ctx: Ctx, input: { title: string, summary?: string, body: ContentBlock[], categoryId?: string, tags?: string[], visibility?: unknown }) {
+export async function createArticle(ctx: Ctx, input: { title: string, summary?: string, body: ContentBlock[], categoryId?: string, tags?: string[], visibility?: unknown, ownerId?: string, reviewAt?: string | null, relatedCourses?: string[], relatedArticles?: string[], attachments?: { mediaId: string, name: string }[] }) {
   const body = sanitizeBody(input.body)
   const plainText = blocksToText(body)
   const vec = await embed(`${input.title}\n${plainText}`)
@@ -97,6 +109,8 @@ export async function createArticle(ctx: Ctx, input: { title: string, summary?: 
       visibility: input.visibility ?? { scope: 'tenant' },
       embedding: vec,
       updatedBy: ctx.actorId,
+      ownerId: input.ownerId ?? ctx.actorId, // docs/21 §6.1: «Хтось має відповідати за актуальність»
+      reviewAt: input.reviewAt ?? null, relatedCourses: input.relatedCourses ?? [], relatedArticles: input.relatedArticles ?? [], attachments: input.attachments ?? [],
     }).returning({ id: knowledgeArticles.id, slug: knowledgeArticles.slug })
     await tx.insert(knowledgeRevisions).values({ tenantId: ctx.tenantId, articleId: a!.id, version: 1, title: input.title, body, authorId: ctx.actorId })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'knowledge.create', entity: 'knowledge_article', entityId: a!.id, after: { title: input.title } })
@@ -104,7 +118,7 @@ export async function createArticle(ctx: Ctx, input: { title: string, summary?: 
   })
 }
 
-export async function updateArticle(ctx: Ctx, id: string, input: { title?: string, summary?: string, body?: ContentBlock[], categoryId?: string | null, tags?: string[], status?: string, comment?: string }) {
+export async function updateArticle(ctx: Ctx, id: string, input: { title?: string, summary?: string, body?: ContentBlock[], categoryId?: string | null, tags?: string[], status?: string, comment?: string, visibility?: unknown, ownerId?: string, reviewAt?: string | null, relatedCourses?: string[], relatedArticles?: string[], attachments?: { mediaId: string, name: string }[] }) {
   const body = input.body ? sanitizeBody(input.body) : undefined
   const plainText = body ? blocksToText(body) : undefined
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -121,6 +135,12 @@ export async function updateArticle(ctx: Ctx, id: string, input: { title?: strin
       ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
+      ...(input.ownerId !== undefined ? { ownerId: input.ownerId } : {}),
+      ...(input.reviewAt !== undefined ? { reviewAt: input.reviewAt } : {}),
+      ...(input.relatedCourses !== undefined ? { relatedCourses: input.relatedCourses } : {}),
+      ...(input.relatedArticles !== undefined ? { relatedArticles: input.relatedArticles } : {}),
+      ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
       ...(vec !== undefined ? { embedding: vec } : {}),
       version,
       updatedBy: ctx.actorId,
@@ -163,46 +183,62 @@ export function stem(word: string): string {
   return w
 }
 
-export interface SearchHit {
-  kind: 'article' | 'lesson'
-  id: string
-  title: string
-  snippet: string
-  score: number
+export interface SearchHit { kind: 'article' | 'lesson' | 'question', id: string, title: string, snippet: string, score: number, slug?: string }
+
+/** Статья доступна человеку по аудитории (docs/21 §7.1): visibility.scope=tenant — всем; иначе конструктор аудитории. */
+async function visibleArticleIds(tx: TenantTx, actorId: string, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set()
+  const rows = await tx.select({ id: knowledgeArticles.id, visibility: knowledgeArticles.visibility }).from(knowledgeArticles).where(sql`${knowledgeArticles.id} in ${ids}`)
+  const out = new Set<string>()
+  for (const r of rows) {
+    const v = r.visibility as { scope?: string, audience?: Audience }
+    if (!v || v.scope === 'tenant' || !v.audience) { out.add(r.id); continue }
+    const set = await resolveAudience(tx, v.audience)
+    if (set.has(actorId)) out.add(r.id)
+  }
+  return out
 }
 
 /**
- * Гибридный поиск (docs/03 §3.7): FTS по статьям и урокам + семантика по
- * embedding статей (если провайдер подключён). Выдача смешанная, по score.
- * Запрос нормализуется: каждое слово → префикс (риба темп → 'риба':* & 'темп':*).
+ * Поиск (docs/21 §5.2, §7.1): точное совпадение по заголовку ×3, полнотекст ×2, семантика ×1;
+ * источники — статья, урок, вопрос теста; недоступное по аудитории не показывается; пустые запросы — в журнал.
  */
 export async function search(ctx: Ctx, q: string, limit = 20): Promise<SearchHit[]> {
   const words = q.trim().split(/\s+/).filter(w => w.length >= 2).slice(0, 8)
   if (words.length === 0) return []
   const tsq = words.map(w => `${stem(w.replace(/[':&|!()]/g, ''))}:*`).join(' & ')
   const vec = await embed(q)
+  const like = `%${q.trim()}%`
 
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const articles = await tx.execute(sql`
-      select id, title, ts_headline('simple', plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
-             ts_rank(search_tsv, to_tsquery('simple', ${tsq})) as score
+      select id, title, slug, ts_headline('simple', plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
+             ts_rank(search_tsv, to_tsquery('simple', ${tsq})) as score, (title ilike ${like}) as title_hit
       from knowledge_articles
-      where status = 'published' and deleted_at is null and search_tsv @@ to_tsquery('simple', ${tsq})
-      order by score desc limit ${limit}
-    `) as unknown as { id: string, title: string, snippet: string, score: number }[]
+      where status = 'published' and deleted_at is null and (search_tsv @@ to_tsquery('simple', ${tsq}) or title ilike ${like})
+      order by title_hit desc, score desc limit ${limit}
+    `) as unknown as { id: string, title: string, slug: string, snippet: string, score: number, title_hit: boolean }[]
 
     const lessons = await tx.execute(sql`
       select r.id, r.title, ts_headline('simple', r.plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
-             ts_rank(r.search_tsv, to_tsquery('simple', ${tsq})) as score
+             ts_rank(r.search_tsv, to_tsquery('simple', ${tsq})) as score, (r.title ilike ${like}) as title_hit
       from resources r
-      where r.status = 'published' and r.deleted_at is null and r.search_tsv @@ to_tsquery('simple', ${tsq})
-      order by score desc limit ${limit}
-    `) as unknown as { id: string, title: string, snippet: string, score: number }[]
+      where r.status = 'published' and r.deleted_at is null and (r.search_tsv @@ to_tsquery('simple', ${tsq}) or r.title ilike ${like})
+      order by title_hit desc, score desc limit ${limit}
+    `) as unknown as { id: string, title: string, snippet: string, score: number, title_hit: boolean }[]
 
-    let semantic: { id: string, title: string, snippet: string, score: number }[] = []
+    // Вопросы тестов: текст из блоков stem (без FTS-индекса — ilike по извлечённому тексту)
+    const qrows = await tx.execute(sql`
+      select q.id, left(regexp_replace(coalesce(string_agg(b->>'html', ' ' order by 1), ''), '<[^>]+>', ' ', 'g'), 300) as text
+      from ${questions} q cross join lateral jsonb_array_elements(q.stem) b
+      where q.status = 'active' group by q.id
+      having string_agg(b->>'html', ' ') ilike ${like} limit ${limit}
+    `) as unknown as { id: string, text: string }[]
+
+    let semantic: { id: string, title: string, slug: string, snippet: string, score: number }[] = []
     if (vec) {
       semantic = await tx.execute(sql`
-        select id, title, left(plain_text, 160) as snippet, 1 - (embedding <=> ${`[${vec.join(',')}]`}::vector) as score
+        select id, title, slug, left(plain_text, 160) as snippet, 1 - (embedding <=> ${`[${vec.join(',')}]`}::vector) as score
         from knowledge_articles
         where status = 'published' and deleted_at is null and embedding is not null
         order by embedding <=> ${`[${vec.join(',')}]`}::vector limit ${limit}
@@ -211,15 +247,78 @@ export async function search(ctx: Ctx, q: string, limit = 20): Promise<SearchHit
     }
 
     const merged = new Map<string, SearchHit>()
-    for (const a of articles) merged.set(`article:${a.id}`, { kind: 'article', id: a.id, title: a.title, snippet: a.snippet, score: Number(a.score) })
-    for (const l of lessons) merged.set(`lesson:${l.id}`, { kind: 'lesson', id: l.id, title: l.title, snippet: l.snippet, score: Number(l.score) })
+    for (const a of articles) merged.set(`article:${a.id}`, { kind: 'article', id: a.id, slug: a.slug, title: a.title, snippet: a.snippet, score: (a.title_hit ? 3 : 0) + Number(a.score) * 2 })
+    for (const l of lessons) merged.set(`lesson:${l.id}`, { kind: 'lesson', id: l.id, title: l.title, snippet: l.snippet, score: (l.title_hit ? 3 : 0) + Number(l.score) * 2 })
+    for (const qq of qrows) merged.set(`question:${qq.id}`, { kind: 'question', id: qq.id, title: qq.text.slice(0, 120), snippet: qq.text, score: 1 })
     for (const s of semantic) {
       const key = `article:${s.id}`
       const existing = merged.get(key)
-      if (existing) existing.score += Number(s.score) * 0.5
-      else merged.set(key, { kind: 'article', id: s.id, title: s.title, snippet: s.snippet, score: Number(s.score) * 0.5 })
+      if (existing) existing.score += Number(s.score)
+      else merged.set(key, { kind: 'article', id: s.id, slug: s.slug, title: s.title, snippet: s.snippet, score: Number(s.score) })
     }
-    return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, limit)
+    // Недоступные по аудитории статьи — вон, даже заголовком (docs/21 §12)
+    const visible = await visibleArticleIds(tx, ctx.actorId, [...merged.values()].filter(h => h.kind === 'article').map(h => h.id))
+    const hits = [...merged.values()].filter(h => h.kind !== 'article' || visible.has(h.id)).sort((a, b) => b.score - a.score).slice(0, limit)
+    await tx.insert(searchQueries).values({ tenantId: ctx.tenantId, userId: ctx.actorId, query: q.trim().slice(0, 200), results: hits.length })
+    return hits
+  })
+}
+
+// ── Обратная связь и актуальность (docs/21 §5.2, §7.2) ────────────────
+
+export async function feedback(ctx: Ctx, articleId: string, helpful: boolean, comment?: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [a] = await tx.select({ id: knowledgeArticles.id }).from(knowledgeArticles).where(and(eq(knowledgeArticles.id, articleId), isNull(knowledgeArticles.deletedAt)))
+    if (!a) return null
+    await tx.insert(knowledgeFeedback).values({ tenantId: ctx.tenantId, articleId, userId: ctx.actorId, helpful, comment: comment ?? null })
+      .onConflictDoUpdate({ target: [knowledgeFeedback.tenantId, knowledgeFeedback.articleId, knowledgeFeedback.userId], set: { helpful, comment: comment ?? null, updatedAt: new Date() } })
+    const [c] = await tx.execute(sql`select count(*) filter (where helpful)::int as h, count(*) filter (where not helpful)::int as n from knowledge_feedback where article_id = ${articleId}::uuid`) as unknown as { h: number, n: number }[]
+    await tx.update(knowledgeArticles).set({ helpfulCount: c!.h, notHelpfulCount: c!.n }).where(eq(knowledgeArticles.id, articleId))
+    return { helpful: c!.h, notHelpful: c!.n }
+  })
+}
+
+/** «Підтвердити актуальність»: владелец/автор перечитал — следующий срок через 180 дней, если не задан иначе. */
+export async function confirmActual(ctx: Ctx, articleId: string, nextReviewAt?: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const next = nextReviewAt ?? new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10)
+    const [a] = await tx.update(knowledgeArticles).set({ reviewConfirmedAt: new Date(), reviewAt: next, updatedAt: new Date() }).where(and(eq(knowledgeArticles.id, articleId), isNull(knowledgeArticles.deletedAt))).returning({ id: knowledgeArticles.id, reviewAt: knowledgeArticles.reviewAt })
+    if (a) await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'knowledge.confirm_actual', entity: 'knowledge_article', entityId: articleId, after: { reviewAt: next } })
+    return a ?? null
+  })
+}
+
+/** Ежедневно (docs/21 §11 knowledge.review_scan): наступил review_at — владельцу задача; через 30 дней без подтверждения — плашка (считается на чтении). */
+export async function reviewScan(tenantId: string): Promise<number> {
+  return withTenant(tenantId, null, async (tx) => {
+    const rows = await tx.select({ id: knowledgeArticles.id, title: knowledgeArticles.title, ownerId: knowledgeArticles.ownerId, reviewAt: knowledgeArticles.reviewAt })
+      .from(knowledgeArticles)
+      .where(and(eq(knowledgeArticles.status, 'published'), isNull(knowledgeArticles.deletedAt), sql`${knowledgeArticles.reviewAt} <= current_date`, sql`(${knowledgeArticles.reviewConfirmedAt} is null or ${knowledgeArticles.reviewConfirmedAt}::date < ${knowledgeArticles.reviewAt})`))
+    let n = 0
+    for (const a of rows) {
+      if (!a.ownerId) continue
+      if (await enqueueNotification(tx, { tenantId, userId: a.ownerId, code: 'knowledge_review_due', payload: { title: a.title, articleId: a.id }, dedupKey: `kb_review:${a.id}:${a.reviewAt}` })) n++
+    }
+    return n
+  })
+}
+
+/** Автор уволился (docs/21 §12): владелец → тот, кто архивирует; статья помечается к проверке. */
+export async function reassignOwner(tx: TenantTx, tenantId: string, fromUserId: string, toUserId: string): Promise<number> {
+  const rows = await tx.update(knowledgeArticles).set({ ownerId: toUserId, reviewAt: sql`current_date - 31`, reviewConfirmedAt: null, updatedAt: new Date() })
+    .where(and(eq(knowledgeArticles.ownerId, fromUserId), isNull(knowledgeArticles.deletedAt))).returning({ id: knowledgeArticles.id })
+  void tenantId
+  return rows.length
+}
+
+/** Отчёт «База знань» (docs/21 §9): самые читаемые, с плохой обратной связью, просроченные, запросы без результата. */
+export async function knowledgeReport(ctx: Ctx) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const top = await tx.execute(sql`select id, title, slug, view_count, helpful_count, not_helpful_count from knowledge_articles where deleted_at is null and status = 'published' order by view_count desc limit 20`) as unknown as Record<string, unknown>[]
+    const poor = await tx.execute(sql`select id, title, slug, helpful_count, not_helpful_count from knowledge_articles where deleted_at is null and not_helpful_count > 0 and not_helpful_count >= helpful_count order by not_helpful_count desc limit 20`) as unknown as Record<string, unknown>[]
+    const overdue = await tx.execute(sql`select a.id, a.title, a.slug, a.review_at, u.full_name as owner from knowledge_articles a left join users u on u.id = a.owner_id where a.deleted_at is null and a.review_at < current_date and (a.review_confirmed_at is null or a.review_confirmed_at::date < a.review_at) order by a.review_at limit 50`) as unknown as Record<string, unknown>[]
+    const empty = await tx.execute(sql`select lower(query) as query, count(*)::int as times, max(created_at) as last_at from search_queries where results = 0 and created_at > now() - interval '90 days' group by 1 order by 2 desc, 3 desc limit 50`) as unknown as Record<string, unknown>[]
+    return { top, poor, overdue, emptyQueries: empty }
   })
 }
 

@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  boolean, customType, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
+  boolean, customType, date, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
@@ -34,10 +34,42 @@ export const knowledgeArticles = pgTable('knowledge_articles', {
   version: integer('version').notNull().default(1),
   updatedBy: uuid('updated_by').references(() => users.id),
   viewCount: integer('view_count').notNull().default(0),
+  // docs/21 §3.1: обратная связь, актуальность, владелец, связи
+  helpfulCount: integer('helpful_count').notNull().default(0),
+  notHelpfulCount: integer('not_helpful_count').notNull().default(0),
+  reviewAt: date('review_at'), // когда перечитать и подтвердить актуальность
+  reviewConfirmedAt: timestamp('review_confirmed_at', { withTimezone: true }),
+  ownerId: uuid('owner_id').references(() => users.id), // кто отвечает за актуальность
+  relatedCourses: uuid('related_courses').array().notNull().default(sql`'{}'::uuid[]`),
+  relatedArticles: uuid('related_articles').array().notNull().default(sql`'{}'::uuid[]`),
+  attachments: jsonb('attachments').notNull().default('[]'), // [{mediaId, name}]
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, t => [
   unique().on(t.tenantId, t.slug),
   index().on(t.tenantId, t.status),
+])
+
+/** «Чи було корисно?» (docs/21 §5.2): один голос на человека, с комментарием. */
+export const knowledgeFeedback = pgTable('knowledge_feedback', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  articleId: uuid('article_id').notNull().references(() => knowledgeArticles.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  helpful: boolean('helpful').notNull(),
+  comment: text('comment'),
+}, t => [
+  unique().on(t.tenantId, t.articleId, t.userId),
+])
+
+/** Журнал поисковых запросов (docs/21 §9, §13.6): запросы без результата — заявки на новые статьи. */
+export const searchQueries = pgTable('search_queries', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+  query: text('query').notNull(),
+  results: integer('results').notNull().default(0),
+}, t => [
+  index().on(t.tenantId, t.results, t.createdAt.desc()),
 ])
 
 export const knowledgeRevisions = pgTable('knowledge_revisions', {
@@ -105,6 +137,15 @@ export const news = pgTable('news', {
   requiresAck: boolean('requires_ack').notNull().default(false),
   kind: text('kind').notNull().default('news'), // news | announcement — объявление показывается модально при входе до подтверждения
   ackDueAt: timestamp('ack_due_at', { withTimezone: true }), // до какого срока объявление должно быть прочитано
+  // docs/21 §3.2–3.3
+  lead: text('lead'), // анонс ≤300
+  publishAt: timestamp('publish_at', { withTimezone: true }), // отложенная публикация (news.publish_scan)
+  unpublishAt: timestamp('unpublish_at', { withTimezone: true }), // снятие
+  commentsEnabled: boolean('comments_enabled').notNull().default(false),
+  showMode: text('show_mode').notNull().default('modal'), // modal | banner | both — для объявлений
+  priority: text('priority').notNull().default('normal'), // normal | important | critical
+  blockUntilAck: boolean('block_until_ack').notNull().default(false), // нельзя работать, пока не подтвердил (Б.6)
+  ackText: text('ack_text'), // текст кнопки, по умолчанию «Ознайомився»
   audience: jsonb('audience'), // null = все; иначе конструктор аудитории
   status: text('status').notNull().default('draft'), // draft | published | archived
   publishedAt: timestamp('published_at', { withTimezone: true }),
@@ -121,6 +162,8 @@ export const newsViews = pgTable('news_views', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   viewedAt: timestamp('viewed_at', { withTimezone: true }).notNull().defaultNow(),
   ackedAt: timestamp('acked_at', { withTimezone: true }),
+  secondsSpent: integer('seconds_spent').notNull().default(0), // подтверждение засчитывается после 10 с и прокрутки (Б.5)
+  scrolledToEnd: boolean('scrolled_to_end').notNull().default(false),
 }, t => [
   unique().on(t.tenantId, t.newsId, t.userId),
 ])

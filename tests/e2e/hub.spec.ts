@@ -21,6 +21,9 @@ test('11. Объявление с обязательным прочтением:
   // Навигация не спасает — модалка на всех страницах кабинета
   await page.goto('/learn/catalog')
   await expect(page.getByTestId('announcement-gate')).toBeVisible()
+  // Б.5: кнопка активна после 10 секунд и прокрутки до конца
+  await expect(page.getByTestId('announcement-ack')).toBeDisabled()
+  await expect(page.getByTestId('announcement-ack')).toBeEnabled({ timeout: 15_000 })
   await page.getByTestId('announcement-ack').click()
   await expect(page.getByTestId('announcement-gate')).toHaveCount(0)
   await page.reload()

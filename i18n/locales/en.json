@@ -81,7 +81,8 @@
       "matrix": "Competency matrix",
       "devReports": "Development reports",
       "strategic": "Strategic plans",
-      "devSettings": "Development settings"
+      "devSettings": "Development settings",
+      "kbReport": "Knowledge report"
     }
   },
   "people": {
@@ -704,7 +705,8 @@
     "nothing": "Nothing found. Try other words",
     "kind": {
       "article": "Article",
-      "lesson": "Lesson"
+      "lesson": "Lesson",
+      "question": "Quiz question"
     },
     "newTitle": "New article title",
     "views": "views",
@@ -712,7 +714,29 @@
     "summary": "Short summary",
     "tags": "Tags, comma separated",
     "unpublish": "Unpublish",
-    "revisions": "Revisions ({n})"
+    "revisions": "Revisions ({n})",
+    "helpfulQ": "Was this helpful?",
+    "yes": "Yes",
+    "no": "No",
+    "whatMissing": "What is missing?",
+    "thanks": "Thanks for the feedback",
+    "learnOnTopic": "Learn on this topic",
+    "related": "Related articles",
+    "owner": "Owner",
+    "reviewedAt": "Reviewed",
+    "reviewDue": "Review by",
+    "confirmActual": "Confirm up to date",
+    "needsReview": "Needs review: not confirmed for a long time",
+    "visibility": "Visible to",
+    "visAll": "Whole network",
+    "visAudience": "Selected positions / locations",
+    "attachments": "Attachments",
+    "report": "Knowledge report",
+    "mostRead": "Most read",
+    "poorFeedback": "Poor feedback",
+    "overdueReview": "Overdue review",
+    "emptyQueries": "Queries with no results",
+    "emptyQueriesHint": "Requests for new articles — last 90 days"
   },
   "news": {
     "title": "News",
@@ -747,7 +771,28 @@
     "viewedOnly": "viewed, not acknowledged",
     "announcement": "Announcement",
     "ackUntil": "Confirm by {at}",
-    "iRead": "I have read this"
+    "iRead": "I have read this",
+    "lead": "Lead (up to 300 chars)",
+    "publishAt": "Publish at",
+    "unpublishAt": "Unpublish at",
+    "commentsEnabled": "Comments",
+    "showMode": "Display mode",
+    "mode": {
+      "modal": "Modal",
+      "banner": "Top banner",
+      "both": "Modal + banner"
+    },
+    "priority": "Priority",
+    "prio": {
+      "normal": "normal",
+      "important": "important",
+      "critical": "critical"
+    },
+    "ackTextPh": "Button text (I have read)",
+    "blockUntilAck": "Block work until acknowledged",
+    "blockWarn": "People will not be able to use the system until they press the button",
+    "blockHint": "Important announcement: you can continue after acknowledging",
+    "open": "Open"
   },
   "survey": {
     "title": "Surveys",
@@ -1482,7 +1527,8 @@
     "subpages": "Subpages",
     "delete": "Delete branch",
     "deleteConfirm": "Delete the page with all subpages?",
-    "restore": "Restore"
+    "restore": "Restore",
+    "diff": "Changes"
   },
   "org": {
     "title": "Org structure",

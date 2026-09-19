@@ -22,7 +22,11 @@ async function load() {
   try { page.value = await api<Page>(`/wiki/${route.params.slug}`) } catch (err) { error.value = apiErrorOf(err).message }
 }
 onMounted(load)
-function startEdit() { if (!page.value) return; Object.assign(form, { title: page.value.title, body: JSON.parse(JSON.stringify(page.value.body)), comment: '', parentId: page.value.parentId ?? '', viewRoles: [...page.value.viewRoles], editRoles: [...page.value.editRoles], status: page.value.status }); editing.value = true }
+async function startEdit() {
+  if (!page.value) return
+  // Блокировка на время правки (docs/21 §5.5)
+  try { await api(`/wiki/${page.value.id}/lock`, { method: 'POST', body: {} }) } catch (err) { error.value = apiErrorOf(err).message; return }
+  Object.assign(form, { title: page.value.title, body: JSON.parse(JSON.stringify(page.value.body)), comment: '', parentId: page.value.parentId ?? '', viewRoles: [...page.value.viewRoles], editRoles: [...page.value.editRoles], status: page.value.status }); editing.value = true }
 async function save() {
   error.value = ''
   try {
@@ -32,7 +36,10 @@ async function save() {
     editing.value = false; notice.value = t('common.saved'); await load()
   } catch (err) { error.value = apiErrorOf(err).message }
 }
+function cancelEdit() { editing.value = false; if (page.value) api(`/wiki/${page.value.id}/lock`, { method: 'POST', body: { release: true } }).catch(() => null) }
 async function showHistory() { history.value = await api(`/wiki/${page.value!.id}/history`) }
+const diff = ref<{ from: number, to: number, lines: { op: 'same' | 'add' | 'del', text: string }[] } | null>(null)
+async function showDiff(v: number) { if (!page.value) return; diff.value = await api(`/wiki/${page.value.id}/diff`, { query: { from: v, to: page.value.version } }) }
 async function restore(v: number) { await api(`/wiki/${page.value!.id}/restore`, { method: 'POST', body: { version: v } }); history.value = null; await load() }
 async function remove() { if (!confirm(t('wiki.deleteConfirm'))) return; await api(`/wiki/${page.value!.id}`, { method: 'DELETE' }); router.push('/learn/wiki') }
 </script>
@@ -54,7 +61,7 @@ async function remove() { if (!confirm(t('wiki.deleteConfirm'))) return; await a
           <label class="check"><input v-model="form.status" type="checkbox" true-value="published" false-value="draft"> {{ t('wiki.published') }}</label>
         </details>
         <input v-if="!isNew" v-model="form.comment" class="field" :placeholder="t('wiki.changeComment')">
-        <div class="actions"><button class="chip" @click="isNew ? router.push('/learn/wiki') : (editing = false)">{{ t('common.cancel') }}</button><button class="primary" :disabled="form.title.length < 2" data-testid="wiki-save" @click="save">{{ t('common.save') }}</button></div>
+        <div class="actions"><button class="chip" @click="isNew ? router.push('/learn/wiki') : cancelEdit()">{{ t('common.cancel') }}</button><button class="primary" :disabled="form.title.length < 2" data-testid="wiki-save" @click="save">{{ t('common.save') }}</button></div>
       </div>
     </template>
     <template v-else-if="page">
@@ -74,7 +81,11 @@ async function remove() { if (!confirm(t('wiki.deleteConfirm'))) return; await a
       </section>
       <section v-if="history" class="card">
         <h2>{{ t('wiki.history') }}</h2>
-        <ul class="log"><li v-for="r in history" :key="r.id"><b>v{{ r.version }}</b> · {{ new Date(r.createdAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }} · {{ r.authorName ?? '—' }}<template v-if="r.comment"> — {{ r.comment }}</template> <button v-if="r.version !== page.version" class="chip" @click="restore(r.version)">{{ t('wiki.restore') }}</button></li></ul>
+        <ul class="log"><li v-for="r in history" :key="r.id"><b>v{{ r.version }}</b> · {{ new Date(r.createdAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }} · {{ r.authorName ?? '—' }}<template v-if="r.comment"> — {{ r.comment }}</template> <button v-if="r.version !== page.version" class="chip" @click="restore(r.version)">{{ t('wiki.restore') }}</button> <button v-if="r.version !== page.version" class="chip" @click="showDiff(r.version)">{{ t('wiki.diff') }}</button></li></ul>
+        <div v-if="diff" class="diff">
+          <p class="sub">v{{ diff.from }} → v{{ diff.to }}</p>
+          <p v-for="(l, i) in diff.lines" :key="i" :class="['dl', l.op]">{{ l.op === 'add' ? '+' : l.op === 'del' ? '−' : ' ' }} {{ l.text }}</p>
+        </div>
       </section>
     </template>
   </div>
@@ -102,4 +113,8 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .log { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 .notice { background: var(--color-teal); color: var(--color-teal-deep); padding: var(--space-3); border-radius: var(--radius-m); }
+.diff { margin-top: var(--space-2); font-size: var(--font-size-body-s); }
+.dl { margin: 0; padding: 2px var(--space-2); white-space: pre-wrap; }
+.dl.add { background: var(--color-teal); color: var(--color-teal-deep); }
+.dl.del { background: var(--color-coral); color: var(--color-coral-deep); text-decoration: line-through; }
 </style>

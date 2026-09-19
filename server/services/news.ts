@@ -16,6 +16,7 @@ export async function listNews(ctx: Ctx, opts: { all?: boolean } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select({
       id: news.id, title: news.title, coverKey: news.coverKey, isPinned: news.isPinned, requiresAck: news.requiresAck, kind: news.kind, ackDueAt: news.ackDueAt,
+      lead: news.lead, publishAt: news.publishAt, unpublishAt: news.unpublishAt, commentsEnabled: news.commentsEnabled, showMode: news.showMode, priority: news.priority, blockUntilAck: news.blockUntilAck, ackText: news.ackText,
       status: news.status, publishedAt: news.publishedAt, authorName: users.fullName, audience: news.audience, body: news.body,
       viewed: sql<boolean>`exists (select 1 from ${newsViews} v where v.news_id = ${news.id} and v.user_id = ${ctx.actorId}::uuid)`,
       acked: sql<boolean>`exists (select 1 from ${newsViews} v where v.news_id = ${news.id} and v.user_id = ${ctx.actorId}::uuid and v.acked_at is not null)`,
@@ -52,16 +53,43 @@ export async function getNews(ctx: Ctx, id: string) {
   })
 }
 
-export async function ackNews(ctx: Ctx, id: string) {
+/** Прогресс чтения (Б.5): секунды на странице и «долистал до кнопки» — копятся в news_views. */
+export async function trackView(ctx: Ctx, id: string, input: { seconds?: number, scrolledToEnd?: boolean }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [v] = await tx.insert(newsViews).values({ tenantId: ctx.tenantId, newsId: id, userId: ctx.actorId, ackedAt: new Date() })
-      .onConflictDoUpdate({ target: [newsViews.tenantId, newsViews.newsId, newsViews.userId], set: { ackedAt: new Date() } })
-      .returning()
+    const [v] = await tx.insert(newsViews).values({ tenantId: ctx.tenantId, newsId: id, userId: ctx.actorId, secondsSpent: Math.min(3600, input.seconds ?? 0), scrolledToEnd: input.scrolledToEnd ?? false })
+      .onConflictDoUpdate({ target: [newsViews.tenantId, newsViews.newsId, newsViews.userId], set: { secondsSpent: sql`least(3600, ${newsViews.secondsSpent} + ${Math.min(600, input.seconds ?? 0)})`, ...(input.scrolledToEnd ? { scrolledToEnd: true } : {}) } })
+      .returning({ secondsSpent: newsViews.secondsSpent, scrolledToEnd: newsViews.scrolledToEnd })
     return v!
   })
 }
 
-export async function createNews(ctx: Ctx, input: { title: string, body: ContentBlock[], coverKey?: string, isPinned?: boolean, requiresAck?: boolean, kind?: 'news' | 'announcement', ackDueAt?: string | null, audience?: Audience | null, publish?: boolean }) {
+export type AckResult = { ok: true, ackedAt: Date } | { ok: false, code: 'not_found' | 'too_fast' | 'not_scrolled' }
+
+/** Подтверждение засчитывается только после 10 секунд на странице и прокрутки до кнопки (docs/21 §7.3, Б.5). */
+export async function ackNews(ctx: Ctx, id: string, opts: { force?: boolean } = {}): Promise<AckResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [n] = await tx.select({ id: news.id, requiresAck: news.requiresAck }).from(news).where(and(eq(news.id, id), isNull(news.deletedAt)))
+    if (!n) return { ok: false as const, code: 'not_found' as const }
+    if (n.requiresAck && !opts.force) {
+      const [v] = await tx.select({ secondsSpent: newsViews.secondsSpent, scrolledToEnd: newsViews.scrolledToEnd }).from(newsViews).where(and(eq(newsViews.newsId, id), eq(newsViews.userId, ctx.actorId)))
+      if ((v?.secondsSpent ?? 0) < 10) return { ok: false as const, code: 'too_fast' as const }
+      if (!v?.scrolledToEnd) return { ok: false as const, code: 'not_scrolled' as const }
+    }
+    const [v] = await tx.insert(newsViews).values({ tenantId: ctx.tenantId, newsId: id, userId: ctx.actorId, ackedAt: new Date() })
+      .onConflictDoUpdate({ target: [newsViews.tenantId, newsViews.newsId, newsViews.userId], set: { ackedAt: new Date() } })
+      .returning()
+    return { ok: true as const, ackedAt: v!.ackedAt! }
+  })
+}
+
+export interface NewsExtra { lead?: string | null, publishAt?: string | null, unpublishAt?: string | null, commentsEnabled?: boolean, showMode?: 'modal' | 'banner' | 'both', priority?: 'normal' | 'important' | 'critical', blockUntilAck?: boolean, ackText?: string | null, categoryId?: string | null }
+const extra = (i: NewsExtra) => ({
+  ...(i.lead !== undefined ? { lead: i.lead } : {}), ...(i.publishAt !== undefined ? { publishAt: i.publishAt ? new Date(i.publishAt) : null } : {}), ...(i.unpublishAt !== undefined ? { unpublishAt: i.unpublishAt ? new Date(i.unpublishAt) : null } : {}),
+  ...(i.commentsEnabled !== undefined ? { commentsEnabled: i.commentsEnabled } : {}), ...(i.showMode !== undefined ? { showMode: i.showMode } : {}), ...(i.priority !== undefined ? { priority: i.priority } : {}),
+  ...(i.blockUntilAck !== undefined ? { blockUntilAck: i.blockUntilAck } : {}), ...(i.ackText !== undefined ? { ackText: i.ackText } : {}), ...(i.categoryId !== undefined ? { categoryId: i.categoryId } : {}),
+})
+
+export async function createNews(ctx: Ctx, input: { title: string, body: ContentBlock[], coverKey?: string, isPinned?: boolean, requiresAck?: boolean, kind?: 'news' | 'announcement', ackDueAt?: string | null, audience?: Audience | null, publish?: boolean } & NewsExtra) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [n] = await tx.insert(news).values({
       tenantId: ctx.tenantId,
@@ -73,16 +101,18 @@ export async function createNews(ctx: Ctx, input: { title: string, body: Content
       kind: input.kind ?? 'news',
       ackDueAt: input.ackDueAt ? new Date(input.ackDueAt) : null,
       audience: input.audience ?? null,
-      status: input.publish ? 'published' : 'draft',
-      publishedAt: input.publish ? new Date() : null,
+      // Отложенная публикация (docs/21 §3.2): publish_at в будущем → scheduled, publish_scan опубликует
+      status: input.publish ? (input.publishAt && new Date(input.publishAt) > new Date() ? 'scheduled' : 'published') : 'draft',
+      publishedAt: input.publish && !(input.publishAt && new Date(input.publishAt) > new Date()) ? new Date() : null,
       authorId: ctx.actorId,
+      ...extra(input),
     }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'news.create', entity: 'news', entityId: n!.id, after: { title: input.title } })
     return n!
   })
 }
 
-export async function updateNews(ctx: Ctx, id: string, input: Partial<{ title: string, body: ContentBlock[], isPinned: boolean, requiresAck: boolean, status: string, audience: Audience | null, kind: 'news' | 'announcement', ackDueAt: string | null }>) {
+export async function updateNews(ctx: Ctx, id: string, input: Partial<{ title: string, body: ContentBlock[], isPinned: boolean, requiresAck: boolean, status: string, audience: Audience | null, kind: 'news' | 'announcement', ackDueAt: string | null, coverKey: string | null }> & NewsExtra) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [before] = await tx.select().from(news).where(and(eq(news.id, id), isNull(news.deletedAt)))
     if (!before) return null
@@ -96,7 +126,9 @@ export async function updateNews(ctx: Ctx, id: string, input: Partial<{ title: s
       ...(input.kind !== undefined ? { kind: input.kind, ...(input.kind === 'announcement' ? { requiresAck: true } : {}) } : {}),
       ...(input.ackDueAt !== undefined ? { ackDueAt: input.ackDueAt ? new Date(input.ackDueAt) : null } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.coverKey !== undefined ? { coverKey: input.coverKey } : {}),
       ...(publishing ? { publishedAt: new Date() } : {}),
+      ...extra(input),
       updatedAt: new Date(),
     }).where(eq(news.id, id)).returning()
     return n!
@@ -115,9 +147,9 @@ export async function newsReaders(ctx: Ctx, id: string) {
 /** Объявления, которые надо показать модально при входе (docs/03 §3.22): опубликованы, требуют подтверждения, не подтверждены, человек в аудитории. */
 export async function pendingAnnouncements(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const rows = await tx.select({ id: news.id, title: news.title, body: news.body, ackDueAt: news.ackDueAt, audience: news.audience, publishedAt: news.publishedAt })
+    const rows = await tx.select({ id: news.id, title: news.title, body: news.body, ackDueAt: news.ackDueAt, audience: news.audience, publishedAt: news.publishedAt, showMode: news.showMode, priority: news.priority, blockUntilAck: news.blockUntilAck, ackText: news.ackText, requiresAck: news.requiresAck })
       .from(news)
-      .where(and(isNull(news.deletedAt), eq(news.status, 'published'), eq(news.kind, 'announcement'),
+      .where(and(isNull(news.deletedAt), eq(news.status, 'published'), eq(news.kind, 'announcement'), sql`(${news.unpublishAt} is null or ${news.unpublishAt} > now())`,
         sql`not exists (select 1 from ${newsViews} v where v.news_id = ${news.id} and v.user_id = ${ctx.actorId}::uuid and v.acked_at is not null)`))
       .orderBy(desc(news.publishedAt)).limit(10)
     const out = []
@@ -183,4 +215,15 @@ export async function announcementScan(tenantId: string): Promise<{ reminded: nu
     })
   }
   return out
+}
+
+/** news.publish_scan / announcement.activate_scan (docs/21 §11): по расписанию публикует и снимает. */
+export async function publishScan(tenantId: string): Promise<{ published: number, unpublished: number }> {
+  return withTenant(tenantId, null, async (tx) => {
+    const pub = await tx.update(news).set({ status: 'published', publishedAt: new Date(), updatedAt: new Date() })
+      .where(and(isNull(news.deletedAt), eq(news.status, 'scheduled'), sql`${news.publishAt} <= now()`)).returning({ id: news.id })
+    const unpub = await tx.update(news).set({ status: 'archived', updatedAt: new Date() })
+      .where(and(isNull(news.deletedAt), eq(news.status, 'published'), sql`${news.unpublishAt} is not null and ${news.unpublishAt} <= now()`)).returning({ id: news.id })
+    return { published: pub.length, unpublished: unpub.length }
+  })
 }

@@ -8,6 +8,7 @@ import { recordAudit } from './audit'
 import { expandAssignment } from './assignments'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
+import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { profileSchema, ruleSchema } from '../../shared/schemas/assignments'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -85,7 +86,7 @@ export async function applyProfile(ctx: Ctx, id: string): Promise<{ assignments:
         status: 'active',
         createdBy: ctx.actorId,
         profileId: id,
-        reminders: { enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7], channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true },
+        reminders: DEFAULT_REMINDERS,
       }).returning({ id: assignments.id })
       ids.push(a!.id)
     }
@@ -268,7 +269,8 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
                 audience: { rules: [{ type: 'user', ids: [userId] }], match: 'any', ruleId: rule.id },
                 startsAt: rule.assignDelayDays ? new Date(Date.now() + rule.assignDelayDays * 86_400_000) : new Date(),
                 dueMode: 'relative', dueDays: action.dueDays, isMandatory: true, autoSync: true, status: 'active', createdBy: null,
-                reminders: { enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7], channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true },
+                reminders: DEFAULT_REMINDERS,
+                automationRuleId: rule.id, onLeaveCondition: rule.onLeaveCondition, // Г-15.2: поведение при выходе из-под условия наследуется от правила
               }).returning({ id: assignments.id })
               aid = a!.id
             }

@@ -32,51 +32,168 @@ export const audienceSchema = z.object({
 export type Audience = z.infer<typeof audienceSchema>
 export type AudienceRule = z.infer<typeof audienceRuleSchema>
 
+/**
+ * Напоминания по заданию (docs/15 Г-15.1): список дней до срока, день срока, после срока —
+ * каждые N дней не больше M раз, эскалация руководителю; канал — по умолчанию человека.
+ */
 export const remindersSchema = z.object({
   enabled: z.boolean().default(true),
-  beforeDays: z.array(z.number().int().min(1).max(30)).max(5).default([3, 1]),
-  onDueDay: z.boolean().default(true),
-  afterDays: z.array(z.number().int().min(1).max(30)).max(5).default([1, 3, 7]),
-  channels: z.array(z.enum(['telegram', 'sms', 'email'])).min(1).default(['telegram']),
-  notifyManagerAfterDays: z.number().int().min(0).max(30).nullable().default(1),
+  beforeDueDays: z.array(z.number().int().min(1).max(30)).max(5).default([7, 3, 1]),
+  onDueDate: z.boolean().default(true),
+  afterDueEveryDays: z.number().int().min(1).max(30).nullable().default(3),
+  afterDueMaxCount: z.number().int().min(1).max(5).default(5),
+  escalateToManagerAfterDays: z.number().int().min(0).max(30).nullable().default(7),
+  channel: z.enum(['telegram', 'sms', 'email']).nullable().default(null),
   notifyOnAssign: z.boolean().default(true),
 })
+export type Reminders = z.infer<typeof remindersSchema>
+export const DEFAULT_REMINDERS: Reminders = remindersSchema.parse({})
 
-/** Параметры назначения (docs/15 §3.3, §14.3): общие для всех типов + тестовые. Состав по типу — paramsFor(). */
-export const assignmentParamsSchema = quizParamsSchema.partial().extend({
-  strictOrder: z.boolean().optional(),
-  allowEarlyFinish: z.boolean().optional(),
+// ── Параметры назначения: пять групп эталона (docs/15 §14.3, docs/02 §2.7) ─────────────
+// Загальне · Термін виконання · Результат · Нагороди · Метод призначення.
+// Состав «Загальне» зависит от типа контента; остальные четыре группы общие.
+
+const q = quizParamsSchema.shape
+
+/** Термін виконання */
+const deadlineGroup = {
   deadlineMode: z.enum(['unlimited', 'days_from_assign', 'calendar']).optional(), // «Термін завершення завдання»
-  webinarMinWatchPct: z.number().int().min(1).max(100).optional(), // docs/18 Г-18.2
+  timeLimitSec: q.timeLimitSec.optional(), // «Час проходження завдання» / «Час для проходження тесту»
+}
+/** Результат */
+const resultGroup = {
+  resultSource: q.resultSource.optional(), // «Результатом виконання завдання буде»
+  passScore: q.passScore.optional(), // «Поріг проходження» — перекрывает порог контента
+  fixResult: q.fixResult.optional(), // «Фіксувати результат завдання»
+  scaleId: q.scaleId.optional(), // «Перетворити результат за шкалою»
+}
+/** Нагороди */
+const rewardsGroup = {
+  badgeId: q.badgeId.optional(),
+  certificateId: q.certificateId.optional(),
+  points: q.points.optional(), // рейтинг
+  bonuses: q.bonuses.optional(), // магазин подарунків
+}
+/** Метод призначення — хранится колонками assignments (docs/02), а не в params */
+export const methodGroupSchema = z.object({
+  viaCatalog: z.boolean().optional(), // «Доступ через каталог навчання»
+  automationRuleId: z.string().uuid().nullable().optional(), // «Автоматизація → Правило автоматизації»
+  useInDevPlans: z.boolean().optional(), // «Використовувати в планах розвитку»
 })
-export type AssignmentParams = z.infer<typeof assignmentParamsSchema>
+export const METHOD_KEYS = Object.keys(methodGroupSchema.shape)
+/** «Інші параметри» группы «Загальне» — у всех типов */
+const otherGroup = {
+  allowComments: q.allowComments.optional(),
+  notifyOnResult: q.notifyOnResult.optional(),
+}
+const common = { ...deadlineGroup, ...resultGroup, ...rewardsGroup, ...otherGroup, ...methodGroupSchema.shape }
 
-/** Ключи, которые есть у назначения данного типа контента (docs/02 §2.7: у курса нет attempts и shuffle). */
-const COMMON_PARAM_KEYS = ['deadlineMode', 'timeLimitSec', 'passScore', 'resultSource', 'fixResult', 'scaleId', 'badgeId', 'certificateId', 'points', 'bonuses', 'allowComments', 'notifyOnResult'] as const
-const TEST_PARAM_KEYS = [
-  'attemptsAllowed', 'attemptCooldownMin', 'questionsMode', 'questionsCount', 'trainingMode', 'allowOtherPages',
-  'showErrorProtocol', 'hideCorrectInProtocol', 'protocolAfterLastAttempt', 'instantFeedback', 'manualNext', 'questionTimeLimit',
-  'shuffleQuestions', 'shuffleOptions', 'showAnswers', 'showScore', 'allowSkip', 'allowBack', 'requireAllAnswered', 'proctoring',
-] as const
-export const PARAM_KEYS_BY_CONTENT_TYPE: Record<typeof CONTENT_TYPES[number], readonly string[]> = {
-  course: [...COMMON_PARAM_KEYS, 'strictOrder', 'allowEarlyFinish'],
-  training_program: [...COMMON_PARAM_KEYS, 'strictOrder'],
-  resource: [...COMMON_PARAM_KEYS],
-  test: [...COMMON_PARAM_KEYS, ...TEST_PARAM_KEYS],
-  complex_test: [...COMMON_PARAM_KEYS, 'attemptsAllowed', 'attemptCooldownMin', 'showScore'],
-  workshop: [...COMMON_PARAM_KEYS, 'attemptsAllowed'],
-  poll: [...COMMON_PARAM_KEYS],
-  assessment: [...COMMON_PARAM_KEYS],
-  check_list: [...COMMON_PARAM_KEYS],
-  meetup: [...COMMON_PARAM_KEYS],
-  webinar: [...COMMON_PARAM_KEYS, 'webinarMinWatchPct'],
+/** «Загальне» теста: кількість питань, спроби, час, режим тренування, підгрупа «Питання» */
+const testGeneral = {
+  questionsMode: q.questionsMode.optional(), questionsCount: q.questionsCount.optional(),
+  attemptsAllowed: q.attemptsAllowed.optional(), attemptCooldownMin: q.attemptCooldownMin.optional(),
+  trainingMode: q.trainingMode.optional(), allowOtherPages: q.allowOtherPages.optional(),
+  showErrorProtocol: q.showErrorProtocol.optional(), hideCorrectInProtocol: q.hideCorrectInProtocol.optional(),
+  protocolAfterLastAttempt: q.protocolAfterLastAttempt.optional(),
+  shuffleQuestions: q.shuffleQuestions.optional(), shuffleOptions: q.shuffleOptions.optional(),
+  keepQuestionOrder: z.boolean().optional(), // «Дотримуватися послідовності питань»
+  allowSkip: q.allowSkip.optional(), allowBack: q.allowBack.optional(),
+  instantFeedback: q.instantFeedback.optional(), manualNext: q.manualNext.optional(),
+  questionTimeLimit: q.questionTimeLimit.optional(), showAnswers: q.showAnswers.optional(),
+  showScore: q.showScore.optional(), requireAllAnswered: q.requireAllAnswered.optional(),
+  proctoring: z.enum(['none', 'photo', 'webcam']).optional(),
 }
 
+/** Схема параметров по типу контента — одиннадцать вариантов, дискриминатор contentType. */
+export const taskParamsSchema = z.discriminatedUnion('contentType', [
+  z.object({ contentType: z.literal('course'), ...common, strictOrder: z.boolean().optional(), allowEarlyFinish: z.boolean().optional() }).strict(),
+  z.object({ contentType: z.literal('training_program'), ...common, strictOrder: z.boolean().optional() }).strict(),
+  z.object({ contentType: z.literal('resource'), ...common }).strict(),
+  z.object({ contentType: z.literal('test'), ...common, ...testGeneral }).strict(),
+  z.object({ contentType: z.literal('complex_test'), ...common, attemptsAllowed: q.attemptsAllowed.optional(), attemptCooldownMin: q.attemptCooldownMin.optional(), showScore: q.showScore.optional() }).strict(),
+  z.object({ contentType: z.literal('workshop'), ...common, attemptsAllowed: q.attemptsAllowed.optional() }).strict(),
+  z.object({ contentType: z.literal('poll'), ...common }).strict(),
+  z.object({ contentType: z.literal('assessment'), ...common }).strict(),
+  z.object({ contentType: z.literal('check_list'), ...common }).strict(),
+  z.object({ contentType: z.literal('meetup'), ...common }).strict(),
+  z.object({ contentType: z.literal('webinar'), ...common, webinarMinWatchPct: z.number().int().min(1).max(100).optional() }).strict(), // docs/18 Г-18.2
+])
+export type TaskParams = z.infer<typeof taskParamsSchema>
+
+/** Плоская схема хранения (assignments.params): объединение всех ключей; состав по типу — paramsFor(). */
+export const assignmentParamsSchema = z.object({ ...common, ...testGeneral, strictOrder: z.boolean().optional(), allowEarlyFinish: z.boolean().optional(), webinarMinWatchPct: z.number().int().min(1).max(100).optional() }).omit({ viaCatalog: true, automationRuleId: true, useInDevPlans: true })
+export type AssignmentParams = z.infer<typeof assignmentParamsSchema>
+
+/** Ключи params для типа контента — выводятся из union, а не дублируются руками. */
+export const PARAM_KEYS_BY_CONTENT_TYPE: Record<typeof CONTENT_TYPES[number], readonly string[]> = Object.fromEntries(
+  taskParamsSchema.options.map(o => [o.shape.contentType.value, Object.keys(o.shape).filter(k => k !== 'contentType' && !METHOD_KEYS.includes(k))]),
+) as unknown as Record<typeof CONTENT_TYPES[number], readonly string[]>
+
 /** Оставить в params только ключи, допустимые для типа контента. */
-export function paramsFor(contentType: typeof CONTENT_TYPES[number], params: AssignmentParams): AssignmentParams {
+export function paramsFor(contentType: typeof CONTENT_TYPES[number], params: Record<string, unknown>): AssignmentParams {
   const allowed = new Set<string>(PARAM_KEYS_BY_CONTENT_TYPE[contentType])
   return Object.fromEntries(Object.entries(params).filter(([k]) => allowed.has(k))) as AssignmentParams
 }
+
+/** Разбор PUT /tasks/:id/params: тип контента берётся из назначения, тело — параметры пяти групп. */
+export function parseTaskParams(contentType: typeof CONTENT_TYPES[number], body: unknown) {
+  return taskParamsSchema.safeParse({ ...(typeof body === 'object' && body ? body : {}), contentType })
+}
+
+/** Г-15.2: поведение при выходе человека из-под условия аудитории. */
+export const ON_LEAVE_CONDITIONS = ['keep', 'cancel_unstarted', 'cancel_all'] as const
+export type OnLeaveCondition = typeof ON_LEAVE_CONDITIONS[number]
+
+/** Конструктор аудитории на экране назначения (docs/15 §14.4): четыре измерения, у каждого «Всі, окрім». */
+export const audienceDimensionSchema = z.object({
+  dimension: z.enum(['city', 'position', 'org_unit', 'tag']),
+  mode: z.enum(['any', 'include', 'exclude']).default('any'),
+  values: z.array(z.string().min(1)).max(200).default([]), // uuid измерения или текст метки
+})
+export const audienceBuilderSchema = z.object({
+  dimensions: z.array(audienceDimensionSchema).max(4).default([]),
+})
+export type AudienceBuilder = z.infer<typeof audienceBuilderSchema>
+
+/** POST /tasks/:id/audience/assign — явный список людей или конструктор. */
+export const audienceAssignSchema = z.union([
+  z.object({ userIds: z.array(z.string().uuid()).min(1).max(5000) }),
+  z.object({ filter: audienceBuilderSchema }),
+])
+
+/** GET /tasks/:id/audience — вкладки и фильтры эталона. */
+export const audienceQuerySchema = z.object({
+  tab: z.enum(['all', 'assigned', 'unassigned']).default('all'),
+  q: z.string().max(100).optional(),
+  positionId: z.string().uuid().optional(),
+  cityId: z.string().uuid().optional(),
+  locationId: z.string().uuid().optional(),
+  orgUnitId: z.string().uuid().optional(),
+  tag: z.string().max(50).optional(),
+  positionLevelId: z.string().uuid().optional(),
+  via: z.enum(['manual', 'auto', 'catalog', 'trajectory', 'import', 'self', 'repeat']).optional(), // «Спосіб призначення»
+  registeredFrom: z.string().date().optional(),
+  registeredTo: z.string().date().optional(),
+  assignedFrom: z.string().date().optional(),
+  assignedTo: z.string().date().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(200),
+})
+
+/** Компетенции назначения (Г-15.3). */
+export const assignmentCompetenciesSchema = z.object({ competencyIds: z.array(z.string().uuid()).max(50) })
+
+/** «Додаткові параметри для завдань» (docs/15 §14.5): справочник и значения. */
+export const taskParameterSchema = z.object({
+  name: z.string().min(1).max(120),
+  kind: z.enum(['text', 'select', 'number']).default('text'),
+  options: z.array(z.string().min(1).max(120)).max(100).default([]),
+  isRequired: z.boolean().default(false),
+}).superRefine((p, ctx) => {
+  if (p.kind === 'select' && p.options.length === 0) ctx.addIssue({ code: 'custom', path: ['options'], message: 'Додайте варіанти для вибору' })
+})
+export const taskParameterValuesSchema = z.object({
+  values: z.record(z.string().uuid(), z.union([z.string().max(1000), z.number(), z.null()])),
+})
 
 export const assignmentCreateSchema = z.object({
   title: z.string().min(3).max(200).optional(),
@@ -96,6 +213,9 @@ export const assignmentCreateSchema = z.object({
   autoSync: z.boolean().default(true),
   tags: z.array(z.string().max(50)).max(20).default([]),
   status: z.enum(['draft', 'active']).default('active'),
+  onLeaveCondition: z.enum(ON_LEAVE_CONDITIONS).optional(), // по умолчанию keep (БД)
+  competencyIds: z.array(z.string().uuid()).max(50).optional(),
+  method: methodGroupSchema.optional(),
 }).superRefine((a, ctx) => {
   if (a.dueMode === 'absolute' && !a.dueAt) ctx.addIssue({ code: 'custom', path: ['dueAt'], message: 'Вкажіть дедлайн' })
   if (a.dueMode === 'absolute' && a.dueAt && a.startsAt && new Date(a.dueAt) <= new Date(a.startsAt)) {
@@ -110,6 +230,8 @@ export const assignmentUpdateSchema = z.object({
   params: assignmentParamsSchema.optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
   autoSync: z.boolean().optional(),
+  onLeaveCondition: z.enum(ON_LEAVE_CONDITIONS).optional(),
+  method: methodGroupSchema.optional(),
 })
 
 export const assignmentCancelSchema = z.object({
@@ -156,6 +278,7 @@ export const ruleSchema = z.object({
     daysBefore: z.number().int().min(1).max(90).optional(), // для certificate.expiring
   }).default({}),
   assignDelayDays: z.number().int().min(0).max(365).default(0),
+  onLeaveCondition: z.enum(ON_LEAVE_CONDITIONS).optional(), // Г-15.2, по умолчанию keep
   actions: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('assign_content'), subjectType: z.enum(['course', 'test']).default('course'), subjectId: z.string().uuid(), dueDays: z.number().int().min(1).max(365).default(14) }),
     z.object({ type: z.literal('notify_user'), code: z.string().max(50), text: z.string().max(500) }),

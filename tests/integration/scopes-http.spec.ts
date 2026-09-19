@@ -250,4 +250,77 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
     })
     expect(res.status).toBe(403)
   })
+
+  it('Spec 15 (docs/04 §4.9): /tasks — 11 типов контента, PUT params по типу, аудитория с CSV, чужой тенант — 404', async () => {
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      await admin`delete from otp_codes where phone = ${ADMIN_PHONE}`
+      const reqRes = await fetch(`${BASE}/api/v1/auth/otp/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: ADMIN_PHONE }) })
+      const { data } = await reqRes.json() as { data: { devCode: string } }
+      const verifyRes = await fetch(`${BASE}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: ADMIN_PHONE, code: data.devCode }) })
+      const jar = verifyRes.headers.getSetCookie().map(c => c.split(';')[0]!)
+      const cookie = jar.join('; ')
+      const csrf = jar.find(c => c.startsWith('lola_csrf='))!.split('=')[1]!
+      const headers = { 'cookie': cookie, 'x-csrf-token': csrf, 'Content-Type': 'application/json' }
+      const [t] = await admin`select id from tenants where slug = 'kappi'`
+      const [emp] = await admin`select id from users where tenant_id = ${t!.id} and phone = ${EMPLOYEE_PHONE}`
+
+      // employee не проходит
+      await admin`delete from rate_limits where key like ${'otp:%'}`
+      const empCookie = await login(EMPLOYEE_PHONE)
+      expect((await fetch(`${BASE}/api/v1/tasks`, { headers: { cookie: empCookie } })).status).toBe(403)
+
+      // «Обрати з існуючих» для всех 11 типов; неизвестный тип — 400
+      for (const type of ['course', 'training_program', 'resource', 'test', 'complex_test', 'workshop', 'poll', 'assessment', 'check_list', 'meetup', 'webinar']) {
+        expect((await fetch(`${BASE}/api/v1/tasks/content?type=${type}`, { headers })).status, type).toBe(200)
+      }
+      expect((await fetch(`${BASE}/api/v1/tasks/content?type=poll360`, { headers })).status).toBe(400)
+
+      // Назначение теста через /tasks; параметры по типу контента
+      const [quiz] = await admin`insert into quizzes (tenant_id, title, kind) values (${t!.id}, ${`HTTP тест ${Date.now()}`}, 'quiz') returning id`
+      const created = await fetch(`${BASE}/api/v1/tasks`, { method: 'POST', headers, body: JSON.stringify({ subjectType: 'test', subjectId: quiz!.id, audience: { rules: [{ type: 'user', ids: [emp!.id] }], match: 'any' }, dueMode: 'none', reminders: { notifyOnAssign: false } }) })
+      expect(created.status).toBe(200)
+      const { data: task } = await created.json() as { data: { assignmentId: string } }
+      const okParams = await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/params`, { method: 'PUT', headers, body: JSON.stringify({ questionsMode: 'one_per_group', attemptsAllowed: 2, passScore: 90, viaCatalog: true }) })
+      expect(okParams.status).toBe(200)
+      expect((await okParams.json() as { data: { params: { passScore: number }, method: { viaCatalog: boolean } } }).data).toMatchObject({ params: { passScore: 90, attemptsAllowed: 2 }, method: { viaCatalog: true } })
+      const badParams = await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/params`, { method: 'PUT', headers, body: JSON.stringify({ strictOrder: true }) })
+      expect(badParams.status).toBe(400) // ключ курса у теста
+      expect((await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/reminders`, { method: 'PUT', headers, body: JSON.stringify({ beforeDueDays: [5, 1] }) })).status).toBe(200)
+      const card = await (await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}`, { headers })).json() as { data: { content: { title: string } | null, assignedCount: number } }
+      expect(card.data.content?.title).toContain('HTTP тест')
+      expect(card.data.assignedCount).toBe(1)
+
+      // Аудитория: вкладка «Призначено», CSV-предпросмотр без применения, снятие
+      const aud = await (await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/audience?tab=assigned`, { headers })).json() as { data: { items: { userId: string, via: string }[] } }
+      expect(aud.data.items.find(i => i.userId === emp!.id)?.via).toBe('manual')
+      const form = new FormData()
+      form.set('file', new Blob([`phone\n${EMPLOYEE_PHONE}\n+380000000000\n`], { type: 'text/csv' }), 'people.csv')
+      const csv = await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/audience/import`, { method: 'POST', headers: { 'cookie': cookie, 'x-csrf-token': csrf }, body: form })
+      expect(csv.status).toBe(200)
+      expect((await csv.json() as { data: { stats: { alreadyAssigned: number, notFound: number } } }).data.stats).toMatchObject({ alreadyAssigned: 1, notFound: 1 })
+      expect((await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/audience/${emp!.id}`, { method: 'DELETE', headers })).status).toBe(200)
+      const aud2 = await (await fetch(`${BASE}/api/v1/tasks/${task.assignmentId}/audience?tab=assigned`, { headers })).json() as { data: { items: { userId: string }[] } }
+      expect(aud2.data.items.some(i => i.userId === emp!.id)).toBe(false)
+
+      // Баннер и справочник параметров
+      expect((await fetch(`${BASE}/api/v1/tasks/changed`, { headers })).status).toBe(200)
+      expect((await fetch(`${BASE}/api/v1/task-parameters`, { method: 'POST', headers, body: JSON.stringify({ name: `HTTP параметр ${Date.now()}`, kind: 'select', options: [] }) })).status).toBe(400) // select без вариантов
+
+      // Чужой тенант — 404, не 403 (CLAUDE.md п. 15)
+      const [other] = await admin`insert into tenants (slug, name) values ('test-isolation', 'Тест ізоляції') on conflict (slug) do update set name = excluded.name returning id`
+      const [fq] = await admin`insert into quizzes (tenant_id, title, kind) values (${other!.id}, 'Чужий тест', 'quiz') returning id`
+      const [fa] = await admin`insert into assignments (tenant_id, title, subject_type, subject_id, audience) values (${other!.id}, 'Чуже призначення', 'test', ${fq!.id}, '{"rules":[],"match":"any"}') returning id`
+      expect((await fetch(`${BASE}/api/v1/tasks/${fa!.id}`, { headers })).status).toBe(404)
+      expect((await fetch(`${BASE}/api/v1/tasks/${fa!.id}/params`, { method: 'PUT', headers, body: '{}' })).status).toBe(404)
+      expect((await fetch(`${BASE}/api/v1/tasks/${fa!.id}/audience`, { headers })).status).toBe(404)
+
+      await admin`delete from assignments where id in (${task.assignmentId}, ${fa!.id})`
+      await admin`delete from quizzes where id in (${quiz!.id}, ${fq!.id})`
+      await admin`delete from import_jobs where kind = 'task_audience' and tenant_id = ${t!.id}`
+    }
+    finally {
+      await admin.end()
+    }
+  })
 })

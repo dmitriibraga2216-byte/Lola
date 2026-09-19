@@ -1,9 +1,10 @@
 import { sql } from 'drizzle-orm'
 import {
-  boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
+  boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
+import { competencies } from './development'
 
 /**
  * Назначения (docs/15-assignments.md): центральная управляющая сущность —
@@ -36,9 +37,52 @@ export const assignments = pgTable('assignments', {
   profileId: uuid('profile_id'), // если создано профилем обучения
   stats: jsonb('stats').notNull().default(sql`'{}'::jsonb`), // {assigned, started, completed, overdue}
   lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+  // «Метод призначення» (docs/02 §2.7, docs/15 §14.3): три поля эталона
+  viaCatalog: boolean('via_catalog').notNull().default(false), // «Доступ через каталог навчання»
+  automationRuleId: uuid('automation_rule_id').references(() => automationRules.id, { onDelete: 'set null' }), // «Автоматизація → Правило автоматизації»
+  useInDevPlans: boolean('use_in_dev_plans').notNull().default(false), // «Використовувати в планах розвитку» (Г-15.3)
+  // Г-15.2: что делать, когда человек перестал отвечать условию аудитории — keep | cancel_unstarted | cancel_all
+  onLeaveCondition: text('on_leave_condition').notNull().default('keep'),
+  // §14.6: контент изменён после назначения — баннер «N завдань було змінено. Сповістити?»
+  contentChangedAt: timestamp('content_changed_at', { withTimezone: true }),
+  contentChangeNotifiedAt: timestamp('content_change_notified_at', { withTimezone: true }),
 }, t => [
   index().on(t.tenantId, t.status),
   index().on(t.tenantId, t.subjectId),
+])
+
+/** Компетенции назначения (Г-15.3, «Обрати компетенції» в шапке карточки): многие-ко-многим. */
+export const assignmentCompetencies = pgTable('assignment_competencies', {
+  tenantId: tenantId(),
+  assignmentId: uuid('assignment_id').notNull().references(() => assignments.id, { onDelete: 'cascade' }),
+  competencyId: uuid('competency_id').notNull().references(() => competencies.id, { onDelete: 'cascade' }),
+}, t => [
+  primaryKey({ columns: [t.assignmentId, t.competencyId] }),
+  index().on(t.tenantId),
+])
+
+/** «Додаткові параметри для завдань» (docs/15 §14.5, docs/02): справочник произвольных полей назначения тенанта. */
+export const taskParameters = pgTable('task_parameters', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull().default('text'), // text | select | number
+  options: jsonb('options').notNull().default(sql`'[]'::jsonb`), // варианты для select: string[]
+  isRequired: boolean('is_required').notNull().default(false),
+}, t => [
+  unique().on(t.tenantId, t.name),
+  index().on(t.tenantId),
+])
+
+/** Значение доп. параметра у конкретного назначения. */
+export const taskParameterValues = pgTable('task_parameter_values', {
+  tenantId: tenantId(),
+  taskId: uuid('task_id').notNull().references(() => assignments.id, { onDelete: 'cascade' }),
+  parameterId: uuid('parameter_id').notNull().references(() => taskParameters.id, { onDelete: 'cascade' }),
+  value: jsonb('value'),
+}, t => [
+  primaryKey({ columns: [t.taskId, t.parameterId] }),
+  index().on(t.tenantId),
 ])
 
 /** Профиль обучения должности (docs/15 §3.5): позиция → набор курсов со сроками. */
@@ -65,6 +109,7 @@ export const automationRules = pgTable('automation_rules', {
   conditions: jsonb('conditions').notNull().default(sql`'{}'::jsonb`), // {cityIds, positionIds, orgUnitIds, tags, *Invert} — «Всі, окрім» (docs/15 §3.6)
   actions: jsonb('actions').notNull().default(sql`'[]'::jsonb`), // может быть пустым: что назначать — задаёт программа, ссылающаяся на правило
   assignDelayDays: integer('assign_delay_days').notNull().default(0), // «Призначення через N днів»
+  onLeaveCondition: text('on_leave_condition').notNull().default('keep'), // Г-15.2: keep | cancel_unstarted | cancel_all — копируется в назначения правила
   isActive: boolean('is_active').notNull().default(true),
   runLimit: jsonb('run_limit').notNull().default(sql`'{"oncePerUser":true}'::jsonb`),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),

@@ -1,23 +1,31 @@
 <script setup lang="ts">
+import { CONTENT_TYPES } from '../../../../shared/enums'
+import type { ContentType } from '../../../../shared/enums'
+
+/**
+ * Создание назначения (docs/15 §5.2, §14.1): тип контента — из `?type=` меню «Додати призначення»
+ * (одиннадцать типов), контент — «Обрати з існуючих» по типу. Правила прохождения и напоминания
+ * задаются после создания на экране «Налаштування» карточки (пять групп, схема по типу).
+ */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
 
 const { t } = useI18n()
 const { api } = useApi()
+const route = useRoute()
 
 interface Ref { id: string, name: string }
-interface Course { id: string, title: string, status: string, estimatedMinutes: number | null }
+interface Content { id: string, title: string, summary: string | null }
 type RuleType = 'user' | 'position' | 'location' | 'org_unit' | 'role' | 'tag'
 interface Rule { type: RuleType, ids: string[], values: string[], codes: string[], locationIds: string[] }
 
-const courses = ref<Course[]>([])
-const quizzes = ref<{ id: string, title: string, status: string }[]>([])
-const complexTests = ref<{ id: string, title: string, isActive: boolean }[]>([])
+const contents = ref<Content[]>([])
 const refs = reactive<{ positions: Ref[], locations: Ref[], orgUnits: Ref[], roles: { code: string, name: string }[], tags: Ref[], people: Ref[] }>({
   positions: [], locations: [], orgUnits: [], roles: [], tags: [], people: [],
 })
 
+const initialType = (CONTENT_TYPES as readonly string[]).includes(String(route.query.type)) ? route.query.type as ContentType : 'course'
 const form = reactive({
-  subjectType: 'course' as 'course' | 'test' | 'complex_test',
+  subjectType: initialType as ContentType,
   subjectId: '',
   lockVersion: false,
   match: 'any' as 'any' | 'all',
@@ -30,30 +38,29 @@ const form = reactive({
   recurrenceMonths: 0,
   isMandatory: true,
   autoSync: true,
-  params: { passScore: 80, attemptsAllowed: 3, timeLimitMin: 0, showAnswers: 'after_attempt', strictOrder: true },
-  reminders: { beforeDays: '3,1', onDueDay: true, afterDays: '1,3,7', channels: ['telegram'] as string[], notifyManagerAfterDays: 1, notifyOnAssign: true },
+  onLeaveCondition: 'keep' as 'keep' | 'cancel_unstarted' | 'cancel_all',
 })
-const paramsTab = ref<'params' | 'reminders'>('params')
 const preview = ref<{ count: number, sample: { id: string, fullName: string }[] } | null>(null)
 const error = ref('')
 const busy = ref(false)
 
+async function loadContent() {
+  try { contents.value = await api<Content[]>('/tasks/content', { query: { type: form.subjectType } }) }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 onMounted(async () => {
   try {
-    const [c, q, cx, p, l, o, r, tg, ppl] = await Promise.all([
-      api<Course[]>('/courses'), api<{ id: string, title: string, status: string }[]>('/quizzes').catch(() => []),
-      api<{ id: string, title: string, isActive: boolean }[]>('/complex-tests').catch(() => []), api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/org-units'),
+    const [p, l, o, r, tg, ppl] = await Promise.all([
+      api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/org-units'),
       api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags'),
       api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).then(r => r.map(x => ({ id: x.id, name: x.fullName }))),
     ])
-    courses.value = c.filter(x => x.status === 'published')
-    quizzes.value = q.filter(x => x.status === 'published')
-    complexTests.value = cx.filter(x => x.isActive)
     Object.assign(refs, { positions: p, locations: l, orgUnits: o, roles: r, tags: tg, people: ppl })
   }
   catch (err) {
     error.value = apiErrorOf(err).message
   }
+  await loadContent()
 })
 
 function addRule(type: RuleType) {
@@ -92,17 +99,15 @@ watch(() => JSON.stringify([form.rules, form.match]), () => {
 }, { deep: true })
 
 const canSubmit = computed(() => !!form.subjectId && (preview.value?.count ?? 0) > 0 && !busy.value)
-const subjects = computed(() => form.subjectType === 'course' ? courses.value : form.subjectType === 'test' ? quizzes.value : complexTests.value)
-const courseTitle = computed(() => subjects.value.find(c => c.id === form.subjectId)?.title ?? '')
-watch(() => form.subjectType, () => { form.subjectId = '' })
+const courseTitle = computed(() => contents.value.find(c => c.id === form.subjectId)?.title ?? '')
+watch(() => form.subjectType, () => { form.subjectId = ''; loadContent() })
 
 async function submit() {
   if (!confirm(t('assign.confirm', { course: courseTitle.value, n: preview.value?.count ?? 0 }))) return
   busy.value = true
   error.value = ''
   try {
-    const parseDays = (s: string) => s.split(',').map(x => Number(x.trim())).filter(n => n > 0)
-    const r = await api<{ assignmentId: string }>('/assignments', {
+    const r = await api<{ assignmentId: string }>('/tasks', {
       method: 'POST',
       body: {
         subjectType: form.subjectType, subjectId: form.subjectId, lockVersion: form.lockVersion,
@@ -110,9 +115,7 @@ async function submit() {
         startsAt: form.startMode === 'date' && form.startsAt ? new Date(form.startsAt).toISOString() : null,
         dueMode: form.dueMode, dueAt: form.dueMode === 'absolute' && form.dueAt ? new Date(form.dueAt).toISOString() : null, dueDays: form.dueDays,
         recurrence: form.recurrenceMonths > 0 ? { everyMonths: form.recurrenceMonths } : null,
-        isMandatory: form.isMandatory, autoSync: form.autoSync,
-        params: { passScore: form.params.passScore, attemptsAllowed: form.params.attemptsAllowed, timeLimitSec: form.params.timeLimitMin > 0 ? form.params.timeLimitMin * 60 : null, showAnswers: form.params.showAnswers, strictOrder: form.params.strictOrder },
-        reminders: { beforeDays: parseDays(form.reminders.beforeDays), onDueDay: form.reminders.onDueDay, afterDays: parseDays(form.reminders.afterDays), channels: form.reminders.channels, notifyManagerAfterDays: form.reminders.notifyManagerAfterDays, notifyOnAssign: form.reminders.notifyOnAssign },
+        isMandatory: form.isMandatory, autoSync: form.autoSync, onLeaveCondition: form.onLeaveCondition,
         tags: [], status: 'active',
       },
     })
@@ -137,11 +140,11 @@ async function submit() {
     <section class="block">
       <h2>1. {{ t('assign.what') }}</h2>
       <div class="types" role="radiogroup">
-        <label v-for="ct in (['course', 'test', 'complex_test'] as const)" :key="ct" class="chip-radio"><input v-model="form.subjectType" type="radio" :value="ct"> {{ t(`contentType.${ct}`) }}</label>
+        <label v-for="ct in CONTENT_TYPES" :key="ct" class="chip-radio"><input v-model="form.subjectType" type="radio" :value="ct"> {{ t(`contentType.${ct}`) }}</label>
       </div>
       <select v-model="form.subjectId" data-testid="assign-subject">
         <option value="" disabled>{{ t('assign.pickSubject') }}</option>
-        <option v-for="c in subjects" :key="c.id" :value="c.id">{{ c.title }}</option>
+        <option v-for="c in contents" :key="c.id" :value="c.id">{{ c.title }}</option>
       </select>
       <label v-if="form.subjectType === 'course'" class="check"><input v-model="form.lockVersion" type="checkbox"> {{ t('assign.lockVersion') }}</label>
     </section>
@@ -211,39 +214,14 @@ async function submit() {
         <label>{{ t('assign.repeat') }} <input v-model.number="form.recurrenceMonths" type="number" min="0" max="120"></label>
         <label class="check"><input v-model="form.autoSync" type="checkbox"> {{ t('assign.autoSync') }}</label>
         <label class="check"><input v-model="form.isMandatory" type="checkbox"> {{ t('assign.mandatory') }}</label>
+        <label>{{ t('assign.onLeave.label') }}
+          <select v-model="form.onLeaveCondition"><option v-for="v in ['keep', 'cancel_unstarted', 'cancel_all']" :key="v" :value="v">{{ t(`assign.onLeave.${v}`) }}</option></select>
+        </label>
       </div>
     </section>
 
-    <!-- 4. Як проходити -->
-    <section class="block">
-      <h2>4. {{ t('assign.how') }}</h2>
-      <div class="tabs">
-        <button :class="['tab', { on: paramsTab === 'params' }]" @click="paramsTab = 'params'">{{ t('assign.tabParams') }}</button>
-        <button :class="['tab', { on: paramsTab === 'reminders' }]" @click="paramsTab = 'reminders'">{{ t('assign.tabReminders') }}</button>
-      </div>
-      <p v-if="paramsTab === 'params'" class="hint">{{ t('assign.rulesHere') }}</p>
-      <div v-if="paramsTab === 'params'" class="grid2">
-        <label>{{ t('quizAdmin.passScore') }} <input v-model.number="form.params.passScore" type="number" min="1" max="100"></label>
-        <label>{{ t('quizAdmin.attempts') }} <input v-model.number="form.params.attemptsAllowed" type="number" min="0" max="10"></label>
-        <label>{{ t('quizAdmin.timeLimit') }} <input v-model.number="form.params.timeLimitMin" type="number" min="0" max="240"></label>
-        <label>{{ t('quizAdmin.showAnswers') }}
-          <select v-model="form.params.showAnswers"><option value="never">never</option><option value="after_attempt">after_attempt</option><option value="after_pass">after_pass</option></select>
-        </label>
-        <label class="check"><input v-model="form.params.strictOrder" type="checkbox"> {{ t('assign.strictOrder') }}</label>
-      </div>
-      <div v-else class="grid2">
-        <label>{{ t('assign.beforeDays') }} <input v-model="form.reminders.beforeDays" placeholder="3,1"></label>
-        <label>{{ t('assign.afterDays') }} <input v-model="form.reminders.afterDays" placeholder="1,3,7"></label>
-        <label class="check"><input v-model="form.reminders.onDueDay" type="checkbox"> {{ t('assign.onDueDay') }}</label>
-        <label class="check"><input v-model="form.reminders.notifyOnAssign" type="checkbox"> {{ t('assign.notifyOnAssign') }}</label>
-        <label>{{ t('assign.notifyManager') }} <input v-model.number="form.reminders.notifyManagerAfterDays" type="number" min="0" max="30"></label>
-        <div class="check-group">
-          <label v-for="ch in ['telegram', 'sms', 'email']" :key="ch" class="check">
-            <input v-model="form.reminders.channels" type="checkbox" :value="ch"> {{ ch }}
-          </label>
-        </div>
-      </div>
-    </section>
+    <!-- 4. Як проходити — после создания, на экране «Налаштування» карточки (пять групп по типу контента) -->
+    <p class="hint">{{ t('assign.rulesHere') }}</p>
 
     <div class="actions">
       <button class="primary" :disabled="!canSubmit" @click="submit">{{ t('assign.submit') }}</button>

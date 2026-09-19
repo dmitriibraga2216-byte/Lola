@@ -20,6 +20,7 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   enrollment_overdue: 'Прострочено: «{{course}}»',
   enrollment_overdue_manager: 'Прострочено: {{name}} — «{{course}}»',
   enrollment_extended: 'Термін по «{{course}}» продовжено до {{due}}',
+  assignment_content_updated: 'Матеріал «{{title}}» оновлено — переглянь зміни', // docs/15 §14.6: тільки за командою адміністратора
   enrollment_completed_manager: '{{name}} завершив «{{course}}»{{#score}} — {{score}}%{{/score}}',
   attempt_passed: 'Тест «{{quiz}}» зараховано: {{score}}%',
   attempt_failed: 'Тест «{{quiz}}» не зараховано: {{score}}%. {{#left}}Залишилось спроб: {{left}}{{/left}}',

@@ -47,7 +47,8 @@
       "reviewWorkshops": "Workshop review",
       "knowledge": "Knowledge base",
       "news": "News",
-      "surveys": "Surveys"
+      "surveys": "Surveys",
+      "integrations": "Integrations"
     }
   },
   "people": {
@@ -612,5 +613,80 @@
       "pending": "Pending",
       "firstPass": "First-pass"
     }
+  },
+  "ops": {
+    "title": "Operator panel",
+    "password": "Password",
+    "newTenant": "New space",
+    "create": "Create",
+    "created": "Space “{slug}” created. The admin signs in by phone",
+    "createHint": "Creates: system roles, one location, one position, an admin. Login code arrives via SMS/Telegram once configured.",
+    "f": {
+      "name": "Company name",
+      "adminName": "Admin full name"
+    },
+    "suspend": "Suspend",
+    "activate": "Activate",
+    "impersonate": "Sign in as",
+    "pickUser": "Pick a user",
+    "reasonHint": "Reason (required, 10+ chars)",
+    "impWarn": "Logged in the tenant's security log. A permanent banner is shown in the UI.",
+    "enter": "Enter",
+    "col": {
+      "tenant": "Space",
+      "plan": "Plan",
+      "trial": "Trial until",
+      "users": "Active / total",
+      "completed": "Completed 30d",
+      "status": "Status"
+    },
+    "kpi": {
+      "tenants_active": "active spaces",
+      "trials_ending": "trials ending",
+      "users_active": "active people",
+      "dau": "today",
+      "wau": "this week",
+      "attempts_today": "quizzes today",
+      "notifications_queued": "queued",
+      "notifications_failed_24h": "notification failures 24h",
+      "webhooks_failed_24h": "webhook failures 24h",
+      "media": "media"
+    }
+  },
+  "integrations": {
+    "telegram": "Telegram",
+    "sms": "SMS",
+    "smtp": "E-mail (SMTP)",
+    "state": {
+      "not_configured": "Not configured",
+      "connected": "Working",
+      "failing": "Silent"
+    },
+    "lastOk": "updated {at}",
+    "notConfiguredHint": "Connect an account — fill in the keys below",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "disconnectConfirm": "Disconnect? Keys will be revoked.",
+    "webhooks": "Webhooks",
+    "events": "Events",
+    "delivered": "Delivered / failed",
+    "log": "Log",
+    "pause": "Pause",
+    "resume": "Enable",
+    "descr": "Description",
+    "addWebhook": "Add webhook",
+    "retry": "Retry",
+    "secretOnce": "Copy now — it will not be shown again:",
+    "apiTokens": "API tokens",
+    "apiHint": "For your HR system: POST /api/v1/sync/people with a Bearer token. 60 requests/min.",
+    "prefix": "Prefix",
+    "scopes": "Scopes",
+    "lastUsed": "Last used",
+    "revoke": "Revoke",
+    "revoked": "revoked",
+    "revokeConfirm": "Revoke token? The integration will stop.",
+    "tokenName": "Name (e.g. 1C)",
+    "expiresDays": "Valid days",
+    "createToken": "Create token"
   }
 }

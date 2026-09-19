@@ -1,6 +1,6 @@
 /** Гард: без сессии — на /login; с сессией /login не показываем. */
 export default defineNuxtRouteMiddleware(async (to) => {
-  const publicPages = new Set(['/login'])
+  const publicPages = new Set(['/login', '/ops'])
   const { me, loaded, fetchMe } = useAuth()
 
   if (!loaded.value) await fetchMe()

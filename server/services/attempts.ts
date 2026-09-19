@@ -258,6 +258,8 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
 
   if (status === 'passed') await onAttemptPassed(tx, ctx, attempt)
   if (status !== 'review') {
+    const { emitWebhook } = await import('./webhooks')
+    await emitWebhook(tx, ctx.tenantId, status === 'passed' ? 'attempt.passed' : 'attempt.failed', { attemptId: attempt.id, userId: attempt.userId, quizId: attempt.quizId, score: totals.score })
     const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
     const left = params.attemptsAllowed > 0 ? Math.max(0, params.attemptsAllowed - attempt.attemptNo) : null
     await enqueueNotification(tx, {

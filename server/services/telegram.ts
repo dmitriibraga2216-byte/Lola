@@ -13,7 +13,7 @@ import { logSecurity } from './securityLog'
  * автологин по ссылке. Обучение в чате не ведётся.
  */
 
-const API = () => `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
+const API = (token = process.env.TELEGRAM_BOT_TOKEN) => `https://api.telegram.org/bot${token}`
 const botEnabled = () => !!process.env.TELEGRAM_BOT_TOKEN
 
 export interface SendResult { ok: boolean, blocked?: boolean, error?: string }

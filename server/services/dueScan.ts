@@ -74,6 +74,8 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
           // Просрочка не блокирует доступ (docs/10 §7.5), но статус — expired
           await tx.update(enrollments).set({ status: 'expired', expiredAt: now, updatedAt: now }).where(eq(enrollments.id, e.id))
           await tx.insert(enrollmentEvents).values({ tenantId, enrollmentId: e.id, event: 'expired', payload: { dueAt: e.dueAt } })
+          const { emitWebhook } = await import('./webhooks')
+          await emitWebhook(tx, tenantId, 'assignment.overdue', { enrollmentId: e.id, userId: e.userId, courseId: e.subjectId, dueAt: e.dueAt })
           stats.expired++
         }
         if ((r.afterDays ?? [1, 3, 7]).includes(daysOver)) {

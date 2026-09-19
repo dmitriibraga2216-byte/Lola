@@ -5,6 +5,8 @@ import { dispatchNotifications, tenantsWithQueued } from '../services/notificati
 import { allActiveTenants, runDueScan } from '../services/dueScan'
 import { expandAssignment, syncAssignments } from '../services/assignments'
 import { workshopSlaScan } from '../services/workshops'
+import { deliverPending, tenantsWithPendingWebhooks } from '../services/webhooks'
+import { ensureFirstAdmin } from '../services/platform'
 
 /**
  * Воркер фоновых задач внутри процесса приложения (dev и старт).
@@ -13,6 +15,8 @@ import { workshopSlaScan } from '../services/workshops'
  */
 export default defineNitroPlugin(async () => {
   if (process.env.WORKER_ENABLED === '0') return
+
+  await ensureFirstAdmin().catch(err => console.error('ensureFirstAdmin', err))
 
   try {
     const boss = await getBoss()
@@ -48,6 +52,12 @@ export default defineNitroPlugin(async () => {
       for (const tenantId of await allActiveTenants()) {
         const s = await workshopSlaScan(tenantId)
         if (s.released || s.breached || s.expired) console.log(`[workshop.sla_scan] ${tenantId}:`, s)
+      }
+    })
+    await boss.work('webhook.deliver', async () => {
+      for (const tenantId of await tenantsWithPendingWebhooks()) {
+        const s = await deliverPending(tenantId)
+        if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)
       }
     })
     await boss.work<{ tenantId: string, assignmentId: string }>('assignment.expand', async (jobs) => {

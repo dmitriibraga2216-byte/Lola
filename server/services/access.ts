@@ -75,7 +75,15 @@ export async function getAccess(event: H3Event): Promise<Access | null> {
   const auth = event.context.auth as AuthContext | undefined
   if (!auth) return null
   if (event.context.access !== undefined) return event.context.access as Access | null
-  const access = await loadAccess(auth)
+  const tokenScopes = event.context.tokenScopes as string[] | undefined
+  let access: Access | null
+  if (tokenScopes) {
+    // API-токен: скоупы токена, область — весь тенант (docs/09 §9.6)
+    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes, scopeType: 'tenant', scopeId: null }] }
+  }
+  else {
+    access = await loadAccess(auth)
+  }
   event.context.access = access
   return access
 }

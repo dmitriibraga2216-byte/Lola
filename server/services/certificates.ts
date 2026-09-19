@@ -76,6 +76,8 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'certificate.issue', entity: 'certificate', entityId: cert.id, after: { number, enrollmentId } })
     const [c] = await tx.select({ title: courses.title }).from(courses).where(eq(courses.id, enr.subjectId))
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: enr.userId, code: 'certificate_issued', payload: { number, course: c?.title }, dedupKey: `cert_issued:${cert.id}` })
+    const { emitWebhook } = await import('./webhooks')
+    await emitWebhook(tx, ctx.tenantId, 'certificate.issued', { certificateId: cert.id, number, userId: enr.userId, courseId: enr.subjectId, validUntil })
     return { ok: true as const, certificateId: cert.id, number: cert.number, created: true }
   })
 }

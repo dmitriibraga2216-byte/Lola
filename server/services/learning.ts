@@ -420,6 +420,10 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       lessonId,
       progressPct,
     }, ctx.actorId)
+    if (courseCompleted) {
+      const { emitWebhook } = await import('./webhooks')
+      await emitWebhook(tx, ctx.tenantId, 'enrollment.completed', { enrollmentId, userId: ctx.actorId, courseId: enrollment.subjectId })
+    }
 
     return { ok: true as const, courseCompleted, progressPct }
   }).then(async (res) => {

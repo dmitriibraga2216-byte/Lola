@@ -1,9 +1,11 @@
 import ExcelJS from 'exceljs'
 import { sql } from 'drizzle-orm'
 import { withTenant } from '../utils/withTenant'
+import { scopeSql } from './access'
 
 interface Ctx { tenantId: string, actorId: string }
-interface Filter { from?: string, to?: string, locationId?: string, positionId?: string, courseId?: string }
+/** `scope` — область видимости (docs/22 §2): null — вся сеть, массив — только эти точки; уже сужена фильтром `locationId`. */
+interface Filter { from?: string, to?: string, locationId?: string, positionId?: string, courseId?: string, scope?: string[] | null }
 
 /**
  * Отчёты (docs/03 §3.9, docs/10 §9): цифры считаются на сервере, выгрузка
@@ -24,7 +26,7 @@ export async function readiness(ctx: Ctx, f: Filter = {}) {
       from users u
       join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       where u.status = 'active'
-        ${f.locationId ? sql`and up.location_id = ${f.locationId}` : sql``}
+        ${scopeSql(f.scope ?? null, sql`up.location_id`)}
         ${f.positionId ? sql`and up.position_id = ${f.positionId}` : sql``}
     ),
     mandatory as (
@@ -67,7 +69,8 @@ export async function readinessPeople(ctx: Ctx, locationId: string, positionId: 
 }
 
 /** Воронка курса: назначено → начали → завершили → сдали; по урокам — где отваливаются. */
-export async function courseFunnel(ctx: Ctx, courseId: string) {
+export async function courseFunnel(ctx: Ctx, courseId: string, scope: string[] | null = null) {
+  const inScope = scope === null ? sql`` : sql`and user_id in (select up.user_id from user_placements up where up.is_primary and up.ended_at is null ${scopeSql(scope, sql`up.location_id`)})`
   const [funnel] = await q(ctx, sql`
     select count(*)::int as enrolled,
            count(*) filter (where status in ('in_progress','completed','failed','expired') and started_at is not null)::int as started,
@@ -75,7 +78,7 @@ export async function courseFunnel(ctx: Ctx, courseId: string) {
            count(*) filter (where status = 'expired')::int as overdue,
            round(avg(progress_pct))::int as avg_progress,
            round(percentile_cont(0.5) within group (order by extract(epoch from (completed_at - started_at)) / 60))::int as median_minutes
-    from enrollments where subject_id = ${courseId} and status <> 'cancelled'
+    from enrollments where subject_id = ${courseId} and status <> 'cancelled' ${inScope}
   `)
   const lessons = await q(ctx, sql`
     select l.id, l.title, m.sort as module_sort, l.sort,
@@ -86,7 +89,7 @@ export async function courseFunnel(ctx: Ctx, courseId: string) {
     join course_versions cv on cv.id = c.published_version_id
     join modules m on m.course_version_id = cv.id
     join lessons l on l.module_id = m.id
-    left join lesson_progress lp on lp.lesson_id = l.id
+    left join lesson_progress lp on lp.lesson_id = l.id and lp.enrollment_id in (select id from enrollments where subject_id = ${courseId} ${inScope})
     where c.id = ${courseId}
     group by l.id, l.title, m.sort, l.sort order by m.sort, l.sort
   `)
@@ -106,7 +109,7 @@ export async function overdue(ctx: Ctx, f: Filter = {}) {
     left join locations l on l.id = up.location_id
     left join users mgr on mgr.id = l.manager_id
     where e.status = 'expired'
-      ${f.locationId ? sql`and up.location_id = ${f.locationId}` : sql``}
+      ${scopeSql(f.scope ?? null, sql`up.location_id`)}
       ${f.courseId ? sql`and e.subject_id = ${f.courseId}` : sql``}
     order by e.due_at
   `)
@@ -127,7 +130,7 @@ export async function attemptsReport(ctx: Ctx, f: Filter = {}) {
     where a.status <> 'in_progress'
       ${f.from ? sql`and a.started_at >= ${f.from}` : sql``}
       ${f.to ? sql`and a.started_at < ${f.to}::date + 1` : sql``}
-      ${f.locationId ? sql`and up.location_id = ${f.locationId}` : sql``}
+      ${scopeSql(f.scope ?? null, sql`up.location_id`)}
     order by a.started_at desc limit 1000
   `)
 }
@@ -135,19 +138,21 @@ export async function attemptsReport(ctx: Ctx, f: Filter = {}) {
 /** Активность: DAU/WAU, среднее время на урок, доля с телефона. */
 export async function activity(ctx: Ctx, f: Filter = {}) {
   const from = f.from ?? new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)
+  const scope = f.scope ?? null
+  const inScope = scope === null ? sql`` : sql`and user_id in (select up.user_id from user_placements up where up.is_primary and up.ended_at is null ${scopeSql(scope, sql`up.location_id`)})`
   const [summary] = await q(ctx, sql`
     select
-      (select count(distinct user_id)::int from sessions where created_at >= current_date) as dau,
-      (select count(distinct user_id)::int from sessions where created_at >= current_date - 7) as wau,
-      (select round(avg(seconds_spent))::int from lesson_progress where status = 'completed' and completed_at >= ${from}) as avg_lesson_seconds,
-      (select round(100.0 * count(*) filter (where device = 'mobile') / nullif(count(*), 0))::int from lesson_progress where first_opened_at >= ${from}) as mobile_pct,
-      (select count(*)::int from lesson_progress where completed_at >= ${from}) as lessons_completed,
-      (select count(*)::int from attempts where submitted_at >= ${from}) as attempts_submitted
+      (select count(distinct user_id)::int from sessions where created_at >= current_date ${inScope}) as dau,
+      (select count(distinct user_id)::int from sessions where created_at >= current_date - 7 ${inScope}) as wau,
+      (select round(avg(seconds_spent))::int from lesson_progress where status = 'completed' and completed_at >= ${from} ${inScope}) as avg_lesson_seconds,
+      (select round(100.0 * count(*) filter (where device = 'mobile') / nullif(count(*), 0))::int from lesson_progress where first_opened_at >= ${from} ${inScope}) as mobile_pct,
+      (select count(*)::int from lesson_progress where completed_at >= ${from} ${inScope}) as lessons_completed,
+      (select count(*)::int from attempts where submitted_at >= ${from} ${inScope}) as attempts_submitted
   `)
   const daily = await q(ctx, sql`
     select d::date as day,
-           (select count(distinct user_id)::int from sessions s where s.created_at::date = d::date) as active,
-           (select count(*)::int from lesson_progress lp where lp.completed_at::date = d::date) as lessons
+           (select count(distinct user_id)::int from sessions s where s.created_at::date = d::date ${inScope}) as active,
+           (select count(*)::int from lesson_progress lp where lp.completed_at::date = d::date ${inScope}) as lessons
     from generate_series(${from}::date, current_date, '1 day') d order by d
   `)
   return { summary, daily }
@@ -178,7 +183,9 @@ export async function mentors(ctx: Ctx, f: Filter = {}) {
     from attempt_answers aa
     join attempts a on a.id = aa.attempt_id
     join users r on r.id = aa.reviewed_by
+    left join user_placements up on up.user_id = r.id and up.is_primary and up.ended_at is null
     where aa.reviewed_by is not null
+      ${scopeSql(f.scope ?? null, sql`up.location_id`)}
       ${f.from ? sql`and aa.reviewed_at >= ${f.from}` : sql``}
       ${f.to ? sql`and aa.reviewed_at < ${f.to}::date + 1` : sql``}
     group by r.id, r.full_name order by reviews desc

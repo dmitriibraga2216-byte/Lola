@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { H3Event } from 'h3'
 import { roles, userRoles, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -98,4 +98,39 @@ export async function requireScope(event: H3Event, scope: Scope | string, area?:
     throw createError({ statusCode: 403, data: { code: 'forbidden', message: 'Немає доступу' } })
   }
   return access
+}
+
+/**
+ * Область видимости отчётов (docs/22 §2, §7.1): null — вся сеть (`report.tenant` или скоуп на весь тенант);
+ * иначе — точки, где у человека есть роль с этим скоупом (точка напрямую или через подразделение).
+ * Пустой массив — не видит ничего. Фильтр «точка» из запроса может только сузить (см. narrowScope).
+ */
+export async function reportScope(access: Access, scope: Scope | string = 'report.team'): Promise<string[] | null> {
+  if (can(access, 'report.tenant')) return null
+  const grants = access.grants.filter(g => g.scopes.includes(scope))
+  if (grants.some(g => g.scopeType === 'tenant')) return null
+  const locs = new Set(grants.filter(g => g.scopeType === 'location' && g.scopeId).map(g => g.scopeId!))
+  const units = grants.filter(g => g.scopeType === 'org_unit' && g.scopeId).map(g => g.scopeId!)
+  if (units.length) {
+    const rows = await withTenant(access.tenantId, access.userId, tx => tx.execute(sql`
+      select l.id from locations l join org_units u on u.id = l.org_unit_id
+      where u.path <@ any(array(select path from org_units where id in ${units}))
+    `)) as unknown as { id: string }[]
+    for (const r of rows) locs.add(r.id)
+  }
+  return [...locs]
+}
+
+/** Сужение области фильтром из запроса: точка вне области → пусто, а не расширение. */
+export function narrowScope(scope: string[] | null, requested?: string | null): string[] | null {
+  if (!requested) return scope
+  if (scope === null) return [requested]
+  return scope.includes(requested) ? [requested] : []
+}
+
+/** SQL-фрагмент `and <col> in (...)`; пустая область — `and false`. */
+export function scopeSql(scope: string[] | null, column: ReturnType<typeof sql>) {
+  if (scope === null) return sql``
+  if (scope.length === 0) return sql`and false`
+  return sql`and ${column} in (${sql.join(scope.map(id => sql`${id}::uuid`), sql`, `)})`
 }

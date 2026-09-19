@@ -401,6 +401,9 @@ export async function publishCourse(ctx: Ctx, courseId: string, changelog: strin
       updatedAt: new Date(),
     }).where(eq(courses.id, courseId))
 
+    // docs/15 §14.6: правка контента копится в баннер «N завдань було змінено», рассылка — по команде администратора
+    const { markContentChanged } = await import('./tasks')
+    await markContentChanged(tx, 'course', courseId)
     await recordAudit(tx, {
       tenantId: ctx.tenantId,
       actorId: ctx.actorId,

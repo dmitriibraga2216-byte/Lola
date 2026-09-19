@@ -9,6 +9,7 @@ import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { currentLevels } from './development'
 import { scopeSql } from './access'
+import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 
 interface Ctx { tenantId: string, actorId: string }
 interface Requirement { competencyId: string, requiredLevel: number, isCritical?: boolean }
@@ -202,7 +203,7 @@ export async function applyPositionProfile(ctx: Ctx, profileId: string): Promise
       const [a] = await tx.insert(assignments).values({
         tenantId: ctx.tenantId, title: `Профіль посади: обовʼязкове`, kind: 'auto', subjectType: item.subjectType, subjectId: item.subjectId, audience,
         dueMode: 'relative', dueDays: item.dueDays ?? 30, isMandatory: true, autoSync: true, status: 'active', createdBy: ctx.actorId,
-        reminders: { enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7], channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true },
+        reminders: DEFAULT_REMINDERS,
       }).returning({ id: assignments.id })
       ids.push(a!.id)
     }
@@ -337,7 +338,7 @@ export async function careerApproved(tx: TenantTx, ctx: Ctx, r: { id: string, us
     const [a] = await tx.insert(assignments).values({
       tenantId: ctx.tenantId, title: 'Карʼєрна заявка: обучение цільової посади', kind: 'career', subjectType: item.subjectType, subjectId: item.subjectId,
       audience: { rules: [{ type: 'user', ids: [r.userId] }], match: 'any' }, dueMode: 'relative', dueDays: item.dueDays ?? 30, isMandatory: true, autoSync: false, status: 'active', createdBy: ctx.actorId,
-      reminders: { enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7], channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true },
+      reminders: DEFAULT_REMINDERS,
     }).returning({ id: assignments.id })
     ids.push(a!.id)
   }

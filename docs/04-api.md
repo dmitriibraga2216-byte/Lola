@@ -163,8 +163,12 @@
 | POST | `/tasks/:id/audience/assign` | `{userIds[]}` или `{filter}` |
 | DELETE | `/tasks/:id/audience/:userId` | снятие назначения (статус `cancelled`, не удаление) |
 | POST | `/tasks/:id/audience/preview` | сколько человек попадёт под условие до применения |
-| POST | `/tasks/:id/audience/import` | CSV (`15` Г-15.4) → `importJobId` + предпросмотр |
+| POST | `/tasks/:id/audience/import` | CSV (`15` Г-15.4) → `jobId` + предпросмотр; применение — `POST /tasks/:id/audience/import/:jobId` |
 | GET | `/tasks/:id/results` | отчёт назначения (тот же экран, что отчёт по типу, `22` §13.7) |
+| GET/PUT | `/tasks/:id/competencies` | «Обрати компетенції» (`15` Г-15.3) |
+| GET/PUT | `/tasks/:id/parameters` | значения «Додаткових параметрів» назначения |
+| GET | `/tasks/content?type=` | «Обрати з існуючих»: назначаемый контент типа (`15` §14.2) |
+| GET | `/tasks/changed` | баннер «N завдань було змінено» (`15` §14.6); `POST /tasks/changed/notify` — разослать, `POST /tasks/changed/dismiss` — снять |
 | CRUD | `/task-parameters` | «Додаткові параметри для завдань»: текст, список, число |
 
 ## 4.10 Правила автоматизации и траектории

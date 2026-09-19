@@ -213,6 +213,8 @@ export async function setQuizQuestions(ctx: Ctx, quizId: string, items: {
       questionCount: items.length,
       updatedAt: new Date(),
     }).where(eq(quizzes.id, quizId)).returning()
+    const { markContentChanged } = await import('./tasks') // docs/15 §14.6: состав теста изменён → баннер в списке назначений
+    await markContentChanged(tx, 'test', quizId)
     return updated!
   })
 }

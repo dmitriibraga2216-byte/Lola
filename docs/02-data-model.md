@@ -359,7 +359,16 @@ create table assignments (                    -- «кому что назнач�
   due_days int,                               -- «кількість днів з моменту призначення»
   is_mandatory boolean not null default true,
   recurrence jsonb,                           -- {every: '12 months'} для переаттестации
-  created_by uuid references users(id)
+  created_by uuid references users(id),
+  on_leave_condition text not null default 'keep',  -- keep | cancel_unstarted | cancel_all (`15` Г-15.2) — как у правила [решение]
+  content_changed_at timestamptz,             -- контент изменён после назначения (`15` §14.6)
+  content_change_notified_at timestamptz      -- когда администратор разослал «матеріал оновлено» или снял баннер
+);
+create table assignment_competencies (        -- «Обрати компетенції» (`15` Г-15.3)
+  tenant_id uuid not null,
+  assignment_id uuid references assignments(id) on delete cascade,
+  competency_id uuid references competencies(id) on delete cascade,
+  primary key (assignment_id, competency_id)
 );
 ```
 
@@ -950,8 +959,9 @@ position_role_map(id, tenant_id, position_id, role_id, scope_type, scope_id,
 
 -- Дополнительные параметры назначений (`15` §14.5)
 task_parameters(id, tenant_id, name, kind text,    -- text | select | number
-                options jsonb, is_required boolean)
-task_parameter_values(task_id, parameter_id, value jsonb)
+                options jsonb, is_required boolean, unique (tenant_id, name))
+task_parameter_values(tenant_id, task_id, parameter_id, value jsonb,   -- tenant_id ради RLS (CLAUDE.md п. 1)
+                      primary key (task_id, parameter_id))
 
 -- Заявки: внешнее обучение и карьерное развитие сведены в одну таблицу (`19` Г-19.1)
 requests(

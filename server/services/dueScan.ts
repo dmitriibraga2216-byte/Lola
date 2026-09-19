@@ -4,6 +4,8 @@ import { assignments, courses, enrollmentEvents, enrollments, locations, tenants
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
+import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
+import type { Reminders } from '../../shared/schemas/assignments'
 
 /**
  * due.scan (docs/10 §7.4, §11; docs/15 §3.4): ежедневно — напоминания за N дней,
@@ -58,21 +60,23 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
     const autoCloseAfterDays = ((tenantRow?.settings ?? {}) as { learning?: { autoCloseAfterDays?: number } }).learning?.autoCloseAfterDays ?? 14
 
     for (const { e, courseTitle, reminders, fullName } of active) {
-      const r = (reminders ?? {}) as { enabled?: boolean, beforeDays?: number[], onDueDay?: boolean, afterDays?: number[], notifyManagerAfterDays?: number | null }
+      // Модель напоминаний Г-15.1: beforeDueDays[], onDueDate, afterDueEveryDays × afterDueMaxCount, escalateToManagerAfterDays
+      const r = { ...DEFAULT_REMINDERS, ...((reminders ?? {}) as Partial<Reminders>) }
       // Календарная разница дат: срок «вчера» = -1 даже если прошло 20 часов
       const dueDay = Date.UTC(e.dueAt!.getUTCFullYear(), e.dueAt!.getUTCMonth(), e.dueAt!.getUTCDate())
       const nowDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
       const daysLeft = Math.round((dueDay - nowDay) / 86_400_000)
       const payload = { course: courseTitle, due: e.dueAt!.toISOString(), enrollmentId: e.id, days: daysLeft, name: fullName }
+      const channel = r.channel ?? undefined // null = канал по умолчанию человека
 
       if (r.enabled === false) continue
 
       const open = e.status === 'not_started' || e.status === 'in_progress'
-      if (daysLeft > 0 && (r.beforeDays ?? [3, 1]).includes(daysLeft) && open) {
-        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_due_soon', payload, dedupKey: `due_soon:${e.id}:${today}` })) stats.remindered++
+      if (daysLeft > 0 && r.beforeDueDays.includes(daysLeft) && open) {
+        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_due_soon', channel, payload, dedupKey: `due_soon:${e.id}:${today}` })) stats.remindered++
       }
-      if (daysLeft === 0 && r.onDueDay !== false && open) {
-        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_due_today', payload, dedupKey: `due_today:${e.id}:${today}` })) stats.remindered++
+      if (daysLeft === 0 && r.onDueDate && open) {
+        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_due_today', channel, payload, dedupKey: `due_today:${e.id}:${today}` })) stats.remindered++
       }
       if (daysLeft < 0) {
         const daysOver = -daysLeft
@@ -87,14 +91,17 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
           await tx.insert(enrollmentEvents).values({ tenantId, enrollmentId: e.id, event: 'expired', payload: { dueAt: e.dueAt, autoClosedAfterDays: autoCloseAfterDays } })
           stats.expired++
         }
-        if (open && (r.afterDays ?? [1, 3, 7]).includes(daysOver)) {
-          if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_overdue', payload, dedupKey: `overdue:${e.id}:${today}` })) stats.remindered++
+        // После срока — каждые N дней, не больше M раз (после пятого вопрос решает руководитель, а не бот)
+        const every = r.afterDueEveryDays
+        if (open && every && daysOver % every === 0 && daysOver / every <= r.afterDueMaxCount) {
+          if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_overdue', channel, payload, dedupKey: `overdue:${e.id}:d${daysOver}` })) stats.remindered++
         }
-        const managerAfter = r.notifyManagerAfterDays ?? 1
-        if (managerAfter !== null && daysOver === managerAfter) {
+        // Эскалация руководителю — один раз на запись, когда просрочка достигла порога
+        const escalate = r.escalateToManagerAfterDays
+        if (escalate !== null && daysOver >= escalate) {
           const managerId = await managerOf(tx, e.userId)
           if (managerId && managerId !== e.userId) {
-            await enqueueNotification(tx, { tenantId, userId: managerId, code: 'enrollment_overdue_manager', payload, dedupKey: `overdue_mgr:${e.id}:${today}` })
+            await enqueueNotification(tx, { tenantId, userId: managerId, code: 'enrollment_overdue_manager', payload, dedupKey: `overdue_mgr:${e.id}` })
           }
         }
       }

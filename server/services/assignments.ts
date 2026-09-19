@@ -1,23 +1,19 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import type { z } from 'zod'
-import { assignments, complexTests, courses, enrollmentEvents, enrollments, lessons, modules, programs, quizzes, users } from '../db/schema'
+import { assignmentCompetencies, assignments, courses, enrollmentEvents, enrollments, lessons, modules, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
-import { paramsFor } from '../../shared/schemas/assignments'
+import { DEFAULT_REMINDERS, paramsFor } from '../../shared/schemas/assignments'
 import { deriveTaskState, overdueSql } from './enrollmentStatus'
+import { findContent } from './taskContent'
 import type { Audience, assignmentCreateSchema, assignmentUpdateSchema } from '../../shared/schemas/assignments'
 import type { ContentType } from '../../shared/enums'
 
 interface Ctx { tenantId: string, actorId: string }
-
-const DEFAULT_REMINDERS = {
-  enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7],
-  channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true,
-}
 
 const EXPAND_BATCH = 5000 // docs/15 §7.10: защита от лавины
 
@@ -40,6 +36,9 @@ export async function listAssignments(ctx: Ctx, filter: { status?: string, kind?
       createdAt: assignments.createdAt,
       createdBy: assignments.createdBy,
       authorName: users.fullName,
+      competenciesCount: sql<number>`(select count(*)::int from ${assignmentCompetencies} ac where ac.assignment_id = ${assignments.id})`,
+      useInDevPlans: assignments.useInDevPlans,
+      contentChanged: sql<boolean>`${assignments.contentChangedAt} is not null and (${assignments.contentChangeNotifiedAt} is null or ${assignments.contentChangeNotifiedAt} < ${assignments.contentChangedAt})`,
     })
       .from(assignments)
       .leftJoin(users, eq(users.id, assignments.createdBy))
@@ -65,29 +64,9 @@ export async function previewAudience(ctx: Ctx, audience: Audience, exclude?: Au
   })
 }
 
-/** Название контента по content_type (docs/02). Возвращает null, если контент не найден или не опубликован. */
-async function subjectTitle(tx: TenantTx, subjectType: string, subjectId: string): Promise<string | null> {
-  switch (subjectType) {
-    case 'training_program': {
-      const [p] = await tx.select({ title: programs.title, status: programs.status }).from(programs).where(eq(programs.id, subjectId))
-      return p?.status === 'published' ? p.title : null
-    }
-    case 'test': {
-      const [q] = await tx.select({ title: quizzes.title }).from(quizzes).where(and(eq(quizzes.id, subjectId), isNull(quizzes.deletedAt)))
-      return q?.title ?? null
-    }
-    case 'complex_test': {
-      const [c] = await tx.select({ title: complexTests.title }).from(complexTests).where(eq(complexTests.id, subjectId))
-      return c?.title ?? null
-    }
-    case 'course': {
-      const [c] = await tx.select({ title: courses.title, status: courses.status }).from(courses)
-        .where(and(eq(courses.id, subjectId), isNull(courses.deletedAt)))
-      return c?.status === 'published' ? c.title : null
-    }
-    default:
-      return null // остальные типы контента как назначаемые — spec-15-tasks (docs/30 §4, PR 6)
-  }
+/** Название контента по content_type (docs/02): одиннадцать типов, см. taskContent.ts. */
+async function subjectTitle(tx: TenantTx, subjectType: ContentType, subjectId: string): Promise<string | null> {
+  return (await findContent(tx, subjectType, subjectId))?.title ?? null
 }
 
 export type CreateResult
@@ -129,9 +108,16 @@ export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmen
       tags: input.tags,
       status: input.status,
       createdBy: ctx.actorId,
+      onLeaveCondition: input.onLeaveCondition ?? 'keep',
+      viaCatalog: input.method?.viaCatalog ?? false,
+      automationRuleId: input.method?.automationRuleId ?? null,
+      useInDevPlans: input.method?.useInDevPlans ?? false,
     }).returning({ id: assignments.id })
+    if (input.competencyIds?.length) {
+      await tx.insert(assignmentCompetencies).values(input.competencyIds.map(competencyId => ({ tenantId: ctx.tenantId, assignmentId: row!.id, competencyId }))).onConflictDoNothing()
+    }
 
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.create', entity: 'assignment', entityId: row!.id, after: { title, count } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.create', entity: 'assignment', entityId: row!.id, after: { title, count, subjectType: input.subjectType } })
     return { ok: true as const, assignmentId: row!.id }
   })
   if (!created.ok) return created
@@ -241,7 +227,11 @@ export async function syncAssignments(tenantId: string): Promise<number> {
       .where(and(eq(assignments.status, 'active'), eq(assignments.autoSync, true)))).map(r => r.id)
   })
   let total = 0
-  for (const id of ids) total += await expandAssignment(tenantId, id)
+  const { applyOnLeave } = await import('./tasks')
+  for (const id of ids) {
+    total += await expandAssignment(tenantId, id)
+    await applyOnLeave(tenantId, id) // Г-15.2: keep | cancel_unstarted | cancel_all
+  }
   return total
 }
 
@@ -274,9 +264,16 @@ export async function getAssignment(ctx: Ctx, id: string) {
     })
       .from(enrollments)
       .innerJoin(users, eq(users.id, enrollments.userId))
-      .where(and(eq(enrollments.assignmentId, id), isNull(enrollments.cancelledAt))) // снятые — во вкладке «Не призначено» (spec-15-tasks)
+      .where(and(eq(enrollments.assignmentId, id), isNull(enrollments.cancelledAt))) // снятые — во вкладке «Не призначено» экрана аудитории
       .orderBy(users.fullName)
-    return { ...a, people: people.map(p => ({ ...p, ...deriveTaskState(p) })) }
+    // Карточка из четырёх блоков (docs/15 §14.2): контент, сводка параметров, «Призначено N із M», компетенции
+    const content = await findContent(tx, a.subjectType as ContentType, a.subjectId)
+    const competencyIds = (await tx.select({ id: assignmentCompetencies.competencyId }).from(assignmentCompetencies).where(eq(assignmentCompetencies.assignmentId, id))).map(r => r.id)
+    const audienceCount = (await resolveAudience(tx, a.audience as Audience, a.exclude as Audience)).size
+    const [tot] = await tx.select({ total: sql<number>`count(*)::int` }).from(users).where(and(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false)))
+    const assignedCount = a.subjectType === 'course' || a.subjectType === 'training_program' ? Number((a.stats as { assigned?: number }).assigned ?? people.length) : audienceCount
+    const [author] = a.createdBy ? await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, a.createdBy)) : []
+    return { ...a, authorName: author?.fullName ?? null, content, competencyIds, assignedCount, audienceCount, peopleTotal: tot?.total ?? 0, people: people.map(p => ({ ...p, ...deriveTaskState(p) })) }
   })
 }
 
@@ -291,9 +288,13 @@ export async function updateAssignment(ctx: Ctx, id: string, input: z.infer<type
       ...(input.params !== undefined ? { params: paramsFor(before.subjectType as ContentType, { ...(before.params as object), ...input.params }) } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
       ...(input.autoSync !== undefined ? { autoSync: input.autoSync } : {}),
+      ...(input.onLeaveCondition !== undefined ? { onLeaveCondition: input.onLeaveCondition } : {}),
+      ...(input.method?.viaCatalog !== undefined ? { viaCatalog: input.method.viaCatalog } : {}),
+      ...(input.method?.automationRuleId !== undefined ? { automationRuleId: input.method.automationRuleId } : {}),
+      ...(input.method?.useInDevPlans !== undefined ? { useInDevPlans: input.method.useInDevPlans } : {}),
       updatedAt: new Date(),
     }).where(eq(assignments.id, id)).returning()
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.update', entity: 'assignment', entityId: id, before: { status: before.status }, after: { status: after!.status } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.update', entity: 'assignment', entityId: id, before: { status: before.status, onLeaveCondition: before.onLeaveCondition }, after: { status: after!.status, onLeaveCondition: after!.onLeaveCondition, changed: Object.keys(input) } })
     return { before, after: after! }
   })
   if (!updated) return null

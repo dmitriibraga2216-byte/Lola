@@ -12,4 +12,4 @@ docker image prune -f >/dev/null           # диск на песочнице 92
 for i in $(seq 1 60); do docker compose exec -T app curl -sf http://localhost:3000/health 2>/dev/null | grep -q '"status":"ok"' && break; sleep 2; done
 URL=$(docker compose logs tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
 echo "demo: $URL"
-echo "image: $(docker inspect --format '{{index .RepoDigests 0}}' "$(docker compose ps -q app)" 2>/dev/null || echo '?')"
+echo "image: $(docker image inspect --format '{{index .RepoDigests 0}}' "$(docker inspect --format '{{.Image}}' "$(docker compose ps -q app)")" 2>/dev/null || echo '?')"

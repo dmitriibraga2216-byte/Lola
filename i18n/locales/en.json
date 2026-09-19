@@ -72,7 +72,8 @@
       "complexTests": "Complex tests",
       "attendanceReport": "Attendance report",
       "reportBuilder": "Report builder",
-      "rules": "Automation rules"
+      "rules": "Automation rules",
+      "programs": "Programmes & trajectories"
     }
   },
   "people": {
@@ -1325,5 +1326,92 @@
     "delay": "Assign after, days",
     "oncePerUser": "once per user",
     "publish": "Publish"
+  },
+  "prog": {
+    "title": "My programmes",
+    "short": "Programmes",
+    "empty": "No programmes yet",
+    "catalog": "Programme catalogue",
+    "itemsN": "{n} steps",
+    "enroll": "Enrol",
+    "request": "Request",
+    "enrolled": "You are enrolled",
+    "requested": "Request sent to your manager",
+    "status": {
+      "not_started": "Not started",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "failed": "Failed",
+      "expired": "Expired",
+      "cancelled": "Cancelled",
+      "requested": "Requested"
+    },
+    "progressN": "{n} of {total} done",
+    "itemType": {
+      "course": "Course",
+      "resource": "Resource",
+      "quiz": "Quiz",
+      "workshop": "Workshop",
+      "survey": "Survey",
+      "meetup": "Meetup",
+      "webinar": "Webinar"
+    },
+    "optional": "optional",
+    "opensAfter": "Opens after “{title}”",
+    "start": "Start",
+    "retry": "Retry",
+    "continue": "Continue",
+    "mode": "Mode",
+    "modes": {
+      "linear": "Programme (linear)",
+      "graph": "Trajectory (graph)"
+    },
+    "items": "Items",
+    "assignMode": "Assignment mode",
+    "people": "Active / completed",
+    "assign": {
+      "manual": "Assigned manually",
+      "catalog_free": "Free access via catalogue",
+      "catalog_request": "Request via catalogue",
+      "automation": "Apply automation rule"
+    },
+    "report": "Report",
+    "duplicate": "Duplicate",
+    "new": "New programme",
+    "titlePh": "Title*",
+    "builder": "Builder",
+    "autoLayout": "Auto-layout",
+    "publish": "Publish",
+    "unpublish": "Unpublish",
+    "published": "Published",
+    "required": "required",
+    "dueDays": "due, days",
+    "canvasHint": "Drag blocks; click the teal port to start a link, another port to finish; click an arrow to delete",
+    "linkingFrom": "pick the target block",
+    "newEdgeCond": "New link condition",
+    "cond": {
+      "always": "always",
+      "passed": "passed",
+      "failed": "failed",
+      "score_gte": "score at least"
+    },
+    "titleOverride": "Custom title",
+    "removeBlock": "Remove block",
+    "pickContent": "Pick a course, quiz, workshop or meetup",
+    "addItem": "Add item",
+    "params": "Trajectory parameters",
+    "descPh": "Description",
+    "tagsPh": "Tags, comma-separated",
+    "dueDaysTotal": "Total due, days",
+    "validity": "Result validity, months",
+    "noAssignAfterFinish": "Do not reassign after completion",
+    "countPrior": "Count prior results",
+    "pickRule": "Pick a rule",
+    "createRule": "Create a new automation rule",
+    "updated": "Updated",
+    "reportLine": "Enrolled: {total} · completed: {completed}",
+    "funnel": "Funnel by step",
+    "reachedDone": "reached {r} · done {d}",
+    "currentStep": "Current step"
   }
 }

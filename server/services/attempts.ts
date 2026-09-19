@@ -288,7 +288,7 @@ async function onAttemptPassed(tx: TenantTx, ctx: Ctx, attempt: typeof attempts.
 }
 
 export type SubmitResult
-  = | { ok: true, status: string, score: number, passed: boolean | null, pendingManual: number }
+  = | { ok: true, status: string, score: number, passed: boolean | null, pendingManual: number, quizId?: string }
     | { ok: false, code: 'not_found' | 'locked' | 'incomplete', missing?: string[] }
 
 export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<SubmitResult> {
@@ -322,12 +322,17 @@ export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<Submit
         await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: m.user_id, code: 'review_needed', payload: { name: me?.fullName, quiz: quiz?.title }, dedupKey: `review_needed:${attemptId}:${m.user_id}` })
       }
     }
-    return { ok: true as const, status: t.status, score: t.score, passed: t.passed, pendingManual: t.pendingManual, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId }
+    return { ok: true as const, status: t.status, score: t.score, passed: t.passed, pendingManual: t.pendingManual, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, quizId: attempt.quizId }
   })
 
   // Пересчёт прогресса курса вне транзакции попытки (completeLesson открывает свою)
   if (result.ok && result.status === 'passed' && result.enrollmentId && result.lessonId) {
     await completeLesson(ctx, result.enrollmentId, result.lessonId).catch(() => {})
+  }
+  // Тест как узел программы/траектории (docs/17 §7.4): движение по графу
+  if (result.ok && result.quizId && (result.status === 'passed' || result.status === 'failed')) {
+    const quizId = result.quizId, passed = result.status === 'passed', score = result.score
+    import('./programs').then(p => p.onItemResult(ctx.tenantId, ctx.actorId, 'quiz', quizId, { passed, score })).catch(err => console.error('program quiz hook', err))
   }
   return result
 }

@@ -1,8 +1,6 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
-import {
-  assignments, courses, enrollmentEvents, enrollments, lessons, modules, quizzes, users,
-} from '../db/schema'
+import { assignments, courses, enrollmentEvents, enrollments, lessons, modules, programs, quizzes, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -64,6 +62,10 @@ export async function previewAudience(ctx: Ctx, audience: Audience, exclude?: Au
 }
 
 async function subjectTitle(tx: TenantTx, subjectType: string, subjectId: string): Promise<string | null> {
+  if (subjectType === 'program') {
+    const [p] = await tx.select({ title: programs.title, status: programs.status }).from(programs).where(eq(programs.id, subjectId))
+    return p?.status === 'published' ? p.title : null
+  }
   if (subjectType === 'quiz') {
     const [q] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, subjectId))
     return q?.title ?? null
@@ -131,6 +133,15 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
   return withTenant(tenantId, null, async (tx) => {
     const [a] = await tx.select().from(assignments).where(eq(assignments.id, assignmentId))
     if (!a || a.status !== 'active') return 0
+    // Программа/траектория (docs/17): раскрытие аудитории в program_enrollments
+    if (a.subjectType === 'program') {
+      const { enrollProgram } = await import('./programs')
+      const wanted = await resolveAudience(tx, a.audience as Audience, a.exclude as Audience)
+      let n = 0
+      for (const userId of wanted) { const r = await enrollProgram(tx, tenantId, a.subjectId, userId, { source: 'assignment', assignmentId, actorId: a.createdBy }); if (r.ok && r.created) n++ }
+      await tx.update(assignments).set({ stats: sql`jsonb_set(coalesce(${assignments.stats}, '{}'), '{assigned}', (select count(*) from program_enrollments e where e.assignment_id = ${assignmentId}::uuid)::text::jsonb)`, updatedAt: new Date() }).where(eq(assignments.id, assignmentId))
+      return n
+    }
     if (a.subjectType !== 'course') return 0 // назначения тестов — через курс-обёртку, R2
 
     const [course] = await tx.select().from(courses).where(and(eq(courses.id, a.subjectId), isNull(courses.deletedAt)))

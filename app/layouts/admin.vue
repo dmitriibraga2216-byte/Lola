@@ -14,6 +14,7 @@ const nav = computed(() => [
   { to: '/admin/assignments', label: t('admin.nav.assignments'), show: hasScope('assignment.create') },
   { to: '/admin/profiles', label: t('admin.nav.profiles'), show: hasScope('assignment.create') },
   { to: '/admin/rules', label: t('admin.nav.rules'), show: hasScope('settings.tenant') },
+  { to: '/admin/programs', label: t('admin.nav.programs'), show: hasScope('program.manage') },
   { to: '/admin/reports', label: t('admin.nav.reports'), show: hasScope('report.team') },
   { to: '/admin/development/team', label: t('admin.nav.teamGoals'), show: hasScope('development.team') },
   { to: '/admin/development/requests', label: t('admin.nav.requests'), show: hasScope('request.decide') },

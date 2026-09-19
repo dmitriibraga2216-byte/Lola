@@ -309,6 +309,8 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, m: typeof meetups.$inferSe
     const enrollmentId = r.enrollmentId, lessonId = r.lessonId
     setImmediate(() => completeLesson({ tenantId: ctx.tenantId, actorId: r.userId }, enrollmentId, lessonId).catch(() => {}))
   }
+  // Занятие как узел программы (docs/17 §7.4)
+  if (status === 'attended' || status === 'missed') setImmediate(() => import('./programs').then(p => p.onItemResult(ctx.tenantId, r.userId, m.kind === 'webinar' ? 'webinar' : 'meetup', m.id, { passed: status === 'attended' })).catch(() => {}))
 }
 
 export async function setAttendance(ctx: Ctx, meetupId: string, input: { userId: string, status: 'attended' | 'missed' | 'excused', reason?: string }) {

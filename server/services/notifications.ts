@@ -70,6 +70,12 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   announcement_reminder: 'Оголошення «{{title}}» чекає на підтвердження{{#due}} до {{due}}{{/due}}',
   announcement_overdue_manager: 'Не підтвердили оголошення «{{title}}»: {{names}}',
   scheduled_report: 'Звіт «{{name}}» готовий: {{rows}} рядків. {{url}}',
+  program_assigned: 'Вам призначено програму «{{title}}»{{#due}}. Термін: {{due}}{{/due}}',
+  program_node_unlocked: '«{{title}}»: відкрився наступний крок{{#step}} — {{step}}{{/step}}',
+  program_due_soon: 'Програма «{{title}}»: термін {{due}}',
+  program_completed: 'Програму «{{title}}» завершено',
+  program_stuck: 'Підопічний не рухається по програмі «{{title}}» 14 днів',
+  program_request: 'Заявка на програму «{{title}}» чекає рішення',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

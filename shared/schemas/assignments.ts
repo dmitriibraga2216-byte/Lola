@@ -45,7 +45,7 @@ export const assignmentParamsSchema = quizParamsSchema.partial().extend({
 
 export const assignmentCreateSchema = z.object({
   title: z.string().min(3).max(200).optional(),
-  subjectType: z.enum(['course', 'quiz']).default('course'),
+  subjectType: z.enum(['course', 'quiz', 'program']).default('course'),
   subjectId: z.string().uuid(),
   lockVersion: z.boolean().default(false),
   audience: audienceSchema.refine(a => a.rules.length > 0, 'Додайте хоча б одну умову'),

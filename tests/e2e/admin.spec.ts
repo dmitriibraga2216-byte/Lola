@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import postgres from 'postgres'
-import { ADMIN_PHONE, EMPLOYEE_PHONE, api, apiLogin, cleanupCourses, closeDb, loginViaUi, resetOtp } from './helpers'
+import { ADMIN_PHONE, EMPLOYEE_PHONE, api, apiLogin, cleanupCourses, loginViaUi, resetOtp } from './helpers'
 
 const PREFIX = 'E2E-admin '
 const admin = postgres(process.env.DATABASE_ADMIN_URL ?? 'postgres://lola:lola_dev@localhost:5432/lola', { max: 1, onnotice: () => {} })
@@ -9,8 +9,6 @@ test.beforeEach(resetOtp)
 test.afterAll(async () => {
   await cleanupCourses(PREFIX)
   await admin`delete from users where full_name like 'E2E Імпорт%'`
-  await admin.end()
-  await closeDb()
 })
 
 test('5. Методист создаёт курс из редактора и публикует за один сеанс', async ({ page }) => {
@@ -43,7 +41,7 @@ test('6. Назначение: конструктор аудитории пок�
   const course = await api<{ id: string }>(request, csrf, 'post', '/courses', { title: `${PREFIX}Призначення` })
   const mod = await api<{ id: string }>(request, csrf, 'post', `/courses/${course.id}/modules`, { title: 'Р' })
   await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'У', resource: { body: [{ id: 'b', type: 'text', html: '<p>x</p>' }] } })
-  await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'v1' })
+  await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'Перша версія' })
 
   await loginViaUi(page, ADMIN_PHONE)
   await page.goto('/admin/assignments/new')

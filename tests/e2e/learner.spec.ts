@@ -1,12 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { ADMIN_PHONE, EMPLOYEE_PHONE, MENTOR_PHONE, api, apiLogin, cleanupCourses, closeDb, loginViaUi, resetOtp } from './helpers'
+import { ADMIN_PHONE, EMPLOYEE_PHONE, MENTOR_PHONE, api, apiLogin, cleanupCourses, loginViaUi, resetOtp } from './helpers'
 
 const PREFIX = 'E2E '
 
 test.beforeEach(resetOtp)
 test.afterAll(async () => {
   await cleanupCourses(PREFIX)
-  await closeDb()
 })
 
 test('1. Вход по OTP за два экрана; неверный код показывает остаток попыток', async ({ page }) => {
@@ -76,7 +75,7 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
   const course = await api<{ id: string }>(request, csrf, 'post', '/courses', { title: `${PREFIX}Курс з тестом`, isCatalogVisible: true })
   const mod = await api<{ id: string }>(request, csrf, 'post', `/courses/${course.id}/modules`, { title: 'Р' })
   await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'Фінальний тест', itemType: 'quiz', quizId: quiz.id })
-  await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'v1' })
+  await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'Перша версія' })
 
   await loginViaUi(page, EMPLOYEE_PHONE)
   await page.goto('/learn/catalog')

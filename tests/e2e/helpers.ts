@@ -22,9 +22,6 @@ export async function cleanupCourses(titlePrefix: string) {
   await admin`delete from courses where id in ${admin(ids)}`
 }
 
-export async function closeDb() {
-  await admin.end()
-}
 
 /** Вход через UI: телефон → код (из ответа API при OTP_DEBUG=1) → главная. */
 export async function loginViaUi(page: Page, phone: string) {

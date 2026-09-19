@@ -87,6 +87,7 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   program_request: 'Заявка на програму «{{title}}» чекає рішення',
   // docs/16 §8
   user_invited: 'Вас запрошено до Lola. Посилання для входу: {{url}}',
+  knowledge_review_due: 'Статтю «{{title}}» час перечитати й підтвердити актуальність',
   user_role_granted: '{{#name}}{{name}}: {{/name}}видано роль «{{role}}»',
   user_blocked: 'Доступ для {{name}} заблоковано',
   people_inactive: '{{n}} люд. не заходили понад 30 днів — перевірте, чи не час архівувати',

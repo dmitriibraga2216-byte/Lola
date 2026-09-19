@@ -93,6 +93,52 @@ export async function createPage(ctx: Ctx, input: { title: string, body: Content
 }
 
 /** Правка: изменение title/body создаёт ревизию с комментарием; права/статус/порядок — без версии. */
+const LOCK_MS = 15 * 60_000
+
+/** Взять/продлить блокировку страницы на 15 минут; чужая активная — отказ с именем. */
+export async function lockPage(ctx: Ctx, id: string, release = false) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [p] = await tx.select({ lockedBy: wikiPages.lockedBy, lockedAt: wikiPages.lockedAt }).from(wikiPages).where(and(eq(wikiPages.id, id), isNull(wikiPages.deletedAt)))
+    if (!p) return null
+    if (release) { if (p.lockedBy === ctx.actorId) await tx.update(wikiPages).set({ lockedBy: null, lockedAt: null }).where(eq(wikiPages.id, id)); return { ok: true as const, lockedBy: null } }
+    if (p.lockedBy && p.lockedBy !== ctx.actorId && p.lockedAt && p.lockedAt.getTime() > Date.now() - LOCK_MS) {
+      const [u] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, p.lockedBy))
+      return { ok: false as const, lockedBy: p.lockedBy, lockedByName: u?.fullName ?? '', until: new Date(p.lockedAt.getTime() + LOCK_MS) }
+    }
+    await tx.update(wikiPages).set({ lockedBy: ctx.actorId, lockedAt: new Date() }).where(eq(wikiPages.id, id))
+    return { ok: true as const, lockedBy: ctx.actorId, until: new Date(Date.now() + LOCK_MS) }
+  })
+}
+
+/** Diff двух ревизий по строкам плоского текста (docs/21 §5.5): LCS, результат — строки с пометкой same/add/del. */
+export async function revisionDiff(ctx: Ctx, id: string, from: number, to: number) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const revs = await tx.select({ version: wikiRevisions.version, body: wikiRevisions.body }).from(wikiRevisions).where(and(eq(wikiRevisions.pageId, id), sql`${wikiRevisions.version} in (${from}, ${to})`))
+    const a = revs.find(r => r.version === from), b = revs.find(r => r.version === to)
+    if (!a || !b) return null
+    const la = blocksToLines(a.body as ContentBlock[]), lb = blocksToLines(b.body as ContentBlock[])
+    return { from, to, lines: lineDiff(la, lb) }
+  })
+}
+function blocksToLines(body: ContentBlock[]): string[] {
+  return body.map(bl => blocksToText([bl])).filter(Boolean)
+}
+function lineDiff(a: string[], b: string[]): { op: 'same' | 'add' | 'del', text: string }[] {
+  const n = a.length, m = b.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i]![j] = a[i] === b[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!)
+  const out: { op: 'same' | 'add' | 'del', text: string }[] = []
+  let i = 0, j = 0
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push({ op: 'same', text: a[i]! }); i++; j++ }
+    else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) { out.push({ op: 'del', text: a[i]! }); i++ }
+    else { out.push({ op: 'add', text: b[j]! }); j++ }
+  }
+  while (i < n) out.push({ op: 'del', text: a[i++]! })
+  while (j < m) out.push({ op: 'add', text: b[j++]! })
+  return out
+}
+
 export async function updatePage(ctx: Ctx, id: string, input: Partial<{ title: string, body: ContentBlock[], parentId: string | null, viewRoles: string[], editRoles: string[], status: string, sort: number, comment: string }>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [before] = await tx.select().from(wikiPages).where(and(eq(wikiPages.id, id), isNull(wikiPages.deletedAt)))
@@ -100,6 +146,8 @@ export async function updatePage(ctx: Ctx, id: string, input: Partial<{ title: s
     const all = await tx.select({ id: wikiPages.id, parentId: wikiPages.parentId, viewRoles: wikiPages.viewRoles, editRoles: wikiPages.editRoles }).from(wikiPages).where(isNull(wikiPages.deletedAt))
     if (!canEditPage(new Map(all.map(r => [r.id, r])), id, await roleCodesOf(tx, ctx.actorId))) return { forbidden: true as const }
     if (input.parentId === id) return { forbidden: true as const }
+    // Блокировка на время правки (docs/21 §5.5): чужой активный lock — отказ
+    if (before.lockedBy && before.lockedBy !== ctx.actorId && before.lockedAt && before.lockedAt.getTime() > Date.now() - LOCK_MS) return { locked: true as const, lockedBy: before.lockedBy }
     const contentChanged = (input.title !== undefined && input.title !== before.title) || input.body !== undefined
     const body = input.body !== undefined ? sanitizeBody(input.body) : (before.body as ContentBlock[])
     const version = contentChanged ? before.version + 1 : before.version
@@ -107,7 +155,7 @@ export async function updatePage(ctx: Ctx, id: string, input: Partial<{ title: s
       ...(input.title !== undefined ? { title: input.title } : {}), ...(input.body !== undefined ? { body, plainText: blocksToText(body) } : {}),
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}), ...(input.viewRoles !== undefined ? { viewRoles: input.viewRoles } : {}), ...(input.editRoles !== undefined ? { editRoles: input.editRoles } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}), ...(input.sort !== undefined ? { sort: input.sort } : {}),
-      version, updatedBy: ctx.actorId, updatedAt: new Date(),
+      version, updatedBy: ctx.actorId, updatedAt: new Date(), lockedBy: null, lockedAt: null,
     }).where(eq(wikiPages.id, id)).returning()
     if (contentChanged) await tx.insert(wikiRevisions).values({ tenantId: ctx.tenantId, pageId: id, version, title: p!.title, body, authorId: ctx.actorId, comment: input.comment ?? null })
     return p!

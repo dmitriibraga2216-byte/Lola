@@ -19,6 +19,8 @@ export const meetups = pgTable('meetups', {
   tenantId: tenantId(),
   kind: text('kind').notNull().default('meetup'), // meetup | webinar | event (корпоративное событие хаба)
   title: text('title').notNull(),
+  coverKey: text('cover_key'), // обложка события (docs/21 §3.4)
+  registrationRequired: boolean('registration_required').notNull().default(true), // событие без регистрации — просто в афише
   description: jsonb('description').notNull().default('[]'), // блоки
   courseId: uuid('course_id').references(() => courses.id),
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
@@ -60,6 +62,7 @@ export const meetupRegistrations = pgTable('meetup_registrations', {
   checkedInBy: uuid('checked_in_by').references(() => users.id),
   cancelReason: text('cancel_reason'),
   feedbackGiven: boolean('feedback_given').notNull().default(false),
+  guestsCount: integer('guests_count').notNull().default(0), // «+гости» на событие (docs/21 §3.4)
   enrollmentId: uuid('enrollment_id'),
   lessonId: uuid('lesson_id'),
 }, t => [

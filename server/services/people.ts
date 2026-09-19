@@ -433,6 +433,9 @@ export async function archivePerson(ctx: Ctx, userId: string, input: { reason: '
       cancelled = (await tx.update(enrollments).set({ status: 'cancelled', updatedAt: new Date() }).where(and(eq(enrollments.userId, userId), inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'overdue']))).returning({ id: enrollments.id })).length
     }
     await tx.delete(userRoles).where(eq(userRoles.userId, userId))
+    // docs/21 §12: статьи уволившегося владельца → тому, кто архивирует, с пометкой «потребує перевірки»
+    const { reassignOwner } = await import('./knowledge')
+    await reassignOwner(tx, ctx.tenantId, userId, ctx.actorId)
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.archive', entity: 'user', entityId: userId, after: { reason: input.reason, comment: input.comment ?? null, cancelled } })
     return { ok: true as const, cancelled }
   })

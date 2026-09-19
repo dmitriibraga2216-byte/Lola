@@ -30,6 +30,8 @@ export interface MeetupInput {
   requiresFeedback?: boolean
   feedbackSurveyId?: string | null
   materials?: string[]
+  coverKey?: string | null
+  registrationRequired?: boolean
   status?: 'draft' | 'planned'
   webinar?: { provider?: string, joinUrl?: string | null, hostUrl?: string | null, recordUrl?: string | null, recordAvailableUntil?: string | null, autoAttendance?: boolean, minMinutesForAttendance?: number | null }
 }
@@ -50,7 +52,7 @@ export async function createMeetup(ctx: Ctx, input: MeetupInput) {
       startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), timezone: timezone ?? 'Europe/Kyiv', locationId: input.locationId ?? null, room: input.room ?? null, address: input.address ?? null,
       trainerIds: input.trainerIds, capacity: input.capacity ?? null, waitlistEnabled: input.waitlistEnabled ?? true, enrollDeadlineHours: input.enrollDeadlineHours ?? 2, cancelDeadlineHours: input.cancelDeadlineHours ?? 24,
       attendanceMode: input.attendanceMode ?? 'manual', qrSecret: randomBytes(24).toString('base64url'), requiresFeedback: input.requiresFeedback ?? true, feedbackSurveyId: input.feedbackSurveyId ?? null,
-      materials: input.materials ?? [], status: input.status ?? 'planned', createdBy: ctx.actorId,
+      materials: input.materials ?? [], status: input.status ?? 'planned', createdBy: ctx.actorId, coverKey: input.coverKey ?? null, registrationRequired: input.registrationRequired ?? true,
     }).returning()
     if ((input.kind ?? 'meetup') === 'webinar') {
       const w = input.webinar ?? {}
@@ -78,7 +80,7 @@ export async function updateMeetup(ctx: Ctx, id: string, input: Partial<MeetupIn
     const [before] = await tx.select().from(meetups).where(eq(meetups.id, id))
     if (!before || before.status === 'finished' || before.status === 'cancelled') return null
     const patch: Record<string, unknown> = { updatedAt: new Date() }
-    for (const k of ['title', 'description', 'courseId', 'timezone', 'locationId', 'room', 'address', 'trainerIds', 'capacity', 'waitlistEnabled', 'enrollDeadlineHours', 'cancelDeadlineHours', 'attendanceMode', 'requiresFeedback', 'feedbackSurveyId', 'materials', 'status'] as const) {
+    for (const k of ['title', 'description', 'courseId', 'timezone', 'locationId', 'room', 'address', 'trainerIds', 'capacity', 'waitlistEnabled', 'enrollDeadlineHours', 'cancelDeadlineHours', 'attendanceMode', 'requiresFeedback', 'feedbackSurveyId', 'materials', 'status', 'coverKey', 'registrationRequired'] as const) {
       if (input[k] !== undefined) patch[k] = input[k]
     }
     if (input.startsAt) patch.startsAt = new Date(input.startsAt)
@@ -195,7 +197,7 @@ export async function getMeetup(ctx: Ctx, id: string, opts: { manage?: boolean }
 
 export type RegisterResult = { ok: true, status: 'registered' | 'waitlist', waitlistPosition?: number, conflict?: string } | { ok: false, code: 'not_found' | 'closed' | 'full' | 'already' }
 
-export async function register(ctx: Ctx, meetupId: string, userId: string, opts: { enrollmentId?: string, lessonId?: string } = {}): Promise<RegisterResult> {
+export async function register(ctx: Ctx, meetupId: string, userId: string, opts: { enrollmentId?: string, lessonId?: string, guestsCount?: number } = {}): Promise<RegisterResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(eq(meetups.id, meetupId))
     if (!m) return { ok: false as const, code: 'not_found' as const }
@@ -204,15 +206,17 @@ export async function register(ctx: Ctx, meetupId: string, userId: string, opts:
     if (byOther && !['planned', 'ongoing'].includes(m.status)) return { ok: false as const, code: 'closed' as const }
     const [existing] = await tx.select().from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, meetupId), eq(meetupRegistrations.userId, userId)))
     if (existing && !['cancelled'].includes(existing.status)) return { ok: false as const, code: 'already' as const }
-    const [cnt] = await tx.select({ n: sql<number>`count(*)::int` }).from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, meetupId), inArray(meetupRegistrations.status, ['registered', 'attended'])))
-    const hasSeat = m.capacity == null || cnt!.n < m.capacity
+    // Гости на событие (docs/21 §3.4) занимают места вместе с участником
+    const guests = m.kind === 'event' ? Math.max(0, Math.min(10, opts.guestsCount ?? 0)) : 0
+    const [cnt] = await tx.select({ n: sql<number>`coalesce(sum(1 + guests_count), 0)::int` }).from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, meetupId), inArray(meetupRegistrations.status, ['registered', 'attended'])))
+    const hasSeat = m.capacity == null || cnt!.n + guests < m.capacity
     if (!hasSeat && !m.waitlistEnabled) return { ok: false as const, code: 'full' as const }
     let waitlistPosition: number | undefined
     if (!hasSeat) {
       const [wl] = await tx.select({ n: sql<number>`coalesce(max(waitlist_position), 0)::int` }).from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, meetupId), eq(meetupRegistrations.status, 'waitlist')))
       waitlistPosition = wl!.n + 1
     }
-    const values = { status: hasSeat ? 'registered' : 'waitlist', registeredAt: new Date(), registeredBy: ctx.actorId, waitlistPosition: waitlistPosition ?? null, cancelReason: null, enrollmentId: opts.enrollmentId ?? null, lessonId: opts.lessonId ?? null, updatedAt: new Date() }
+    const values = { status: hasSeat ? 'registered' : 'waitlist', registeredAt: new Date(), registeredBy: ctx.actorId, waitlistPosition: waitlistPosition ?? null, cancelReason: null, enrollmentId: opts.enrollmentId ?? null, lessonId: opts.lessonId ?? null, guestsCount: guests, updatedAt: new Date() }
     if (existing) await tx.update(meetupRegistrations).set(values).where(eq(meetupRegistrations.id, existing.id))
     else await tx.insert(meetupRegistrations).values({ tenantId: ctx.tenantId, meetupId, userId, ...values })
     // Конфликт расписания (docs/18 §7.9): предупреждаем, не запрещаем

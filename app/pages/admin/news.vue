@@ -3,12 +3,13 @@ import type { ContentBlock } from '../../../shared/schemas/content'
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
 const { t } = useI18n()
 const { api } = useApi()
+const { hasScope } = useAuth()
 interface N { id: string, title: string, status: string, isPinned: boolean, requiresAck: boolean, kind: string, ackDueAt: string | null, publishedAt: string | null, views: number, acks: number }
 interface Report { total: number, acked: number, viewed: number, byLocation: { location: string, total: number, acked: number, pct: number }[], notAcked: { id: string, fullName: string, location: string | null, viewedAt: string | null }[], readers: { id: string, fullName: string, location: string | null, ackedAt: string }[] }
 const items = ref<N[]>([])
 const error = ref('')
 const notice = ref('')
-const form = reactive({ title: '', body: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], isPinned: false, requiresAck: false, kind: 'news', ackDueAt: '', locationIds: [] as string[] })
+const form = reactive({ title: '', body: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], isPinned: false, requiresAck: false, kind: 'news', ackDueAt: '', locationIds: [] as string[], lead: '', publishAt: '', unpublishAt: '', commentsEnabled: false, showMode: 'modal', priority: 'normal', blockUntilAck: false, ackText: '' })
 const locations = ref<{ id: string, name: string }[]>([])
 const report = ref<{ title: string, data: Report } | null>(null)
 const readers = ref<{ id: string, list: { fullName: string, viewedAt: string, ackedAt: string | null }[] } | null>(null)
@@ -18,8 +19,8 @@ onMounted(load)
 async function publish() {
   error.value = ''
   try {
-    await api('/news', { method: 'POST', body: { title: form.title, body: form.body, isPinned: form.isPinned, requiresAck: form.requiresAck, kind: form.kind, ackDueAt: form.ackDueAt ? new Date(form.ackDueAt).toISOString() : null, audience: form.locationIds.length ? { rules: [{ type: 'location', ids: form.locationIds }], match: 'any' } : null, publish: true } })
-    Object.assign(form, { title: '', body: [{ id: `b${Date.now()}`, type: 'text', html: '<p></p>' }], isPinned: false, requiresAck: false, kind: 'news', ackDueAt: '', locationIds: [] })
+    await api('/news', { method: 'POST', body: { title: form.title, body: form.body, isPinned: form.isPinned, requiresAck: form.requiresAck, kind: form.kind, ackDueAt: form.ackDueAt ? new Date(form.ackDueAt).toISOString() : null, audience: form.locationIds.length ? { rules: [{ type: 'location', ids: form.locationIds }], match: 'any' } : null, publish: true, lead: form.lead || null, publishAt: form.publishAt ? new Date(form.publishAt).toISOString() : null, unpublishAt: form.unpublishAt ? new Date(form.unpublishAt).toISOString() : null, commentsEnabled: form.commentsEnabled, showMode: form.showMode, priority: form.priority, blockUntilAck: form.blockUntilAck, ackText: form.ackText || null } })
+    Object.assign(form, { title: '', body: [{ id: `b${Date.now()}`, type: 'text', html: '<p></p>' }], isPinned: false, requiresAck: false, kind: 'news', ackDueAt: '', locationIds: [], lead: '', publishAt: '', unpublishAt: '', commentsEnabled: false, showMode: 'modal', priority: 'normal', blockUntilAck: false, ackText: '' })
     notice.value = t('news.published')
     await load()
   } catch (err) { error.value = apiErrorOf(err).message }
@@ -37,13 +38,28 @@ async function toggle(n: N, field: 'isPinned' | 'status') {
     <p v-if="notice" class="notice">{{ notice }}</p>
     <section class="card">
       <input v-model="form.title" class="field" :placeholder="t('news.newTitle')">
+      <input v-model="form.lead" class="field" :placeholder="t('news.lead')" maxlength="300">
       <BlockEditor v-model="form.body" />
+      <div class="row">
+        <label class="sub">{{ t('news.publishAt') }} <input v-model="form.publishAt" class="field" type="datetime-local"></label>
+        <label class="sub">{{ t('news.unpublishAt') }} <input v-model="form.unpublishAt" class="field" type="datetime-local"></label>
+        <label class="check"><input v-model="form.commentsEnabled" type="checkbox"> {{ t('news.commentsEnabled') }}</label>
+      </div>
       <div class="row"><span class="sub">{{ t('news.forLocations') }}:</span><label v-for="l in locations" :key="l.id" class="check"><input v-model="form.locationIds" type="checkbox" :value="l.id"> {{ l.name }}</label></div>
       <div class="row">
         <label class="check"><input v-model="form.isPinned" type="checkbox"> {{ t('news.pin') }}</label>
         <label class="check"><input v-model="form.requiresAck" type="checkbox"> {{ t('news.requireAck') }}</label>
         <select v-model="form.kind" class="field"><option value="news">{{ t('news.kind.news') }}</option><option value="announcement">{{ t('news.kind.announcement') }}</option></select>
         <label v-if="form.kind === 'announcement'" class="sub">{{ t('news.ackDue') }} <input v-model="form.ackDueAt" class="field" type="datetime-local"></label>
+      </div>
+      <div v-if="form.kind === 'announcement'" class="row">
+        <select v-model="form.showMode" class="field" :aria-label="t('news.showMode')"><option value="modal">{{ t('news.mode.modal') }}</option><option value="banner">{{ t('news.mode.banner') }}</option><option value="both">{{ t('news.mode.both') }}</option></select>
+        <select v-model="form.priority" class="field" :aria-label="t('news.priority')"><option value="normal">{{ t('news.prio.normal') }}</option><option value="important">{{ t('news.prio.important') }}</option><option value="critical">{{ t('news.prio.critical') }}</option></select>
+        <input v-model="form.ackText" class="field" :placeholder="t('news.ackTextPh')" maxlength="60">
+        <label v-if="hasScope('settings.tenant')" class="check"><input v-model="form.blockUntilAck" type="checkbox"> {{ t('news.blockUntilAck') }}</label>
+        <span v-if="form.blockUntilAck" class="sub warn">{{ t('news.blockWarn') }}</span>
+      </div>
+      <div class="row">
         <button class="primary" :disabled="form.title.trim().length < 3" @click="publish">{{ t('news.publish') }}</button>
       </div>
     </section>
@@ -106,4 +122,5 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .modal-backdrop { position: fixed; inset: 0; background: rgb(12 15 20 / 40%); display: grid; place-items: center; padding: var(--space-4); }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(420px, 100%); max-height: 80dvh; overflow: auto; }
 .modal ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.warn { color: var(--color-coral-ink); }
 </style>

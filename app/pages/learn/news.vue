@@ -5,7 +5,7 @@ definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
 
-interface N { id: string, title: string, body: ContentBlock[], isPinned: boolean, requiresAck: boolean, publishedAt: string | null, authorName: string | null, viewed: boolean, acked: boolean }
+interface N { id: string, title: string, body: ContentBlock[], isPinned: boolean, requiresAck: boolean, publishedAt: string | null, authorName: string | null, viewed: boolean, acked: boolean, lead: string | null, ackText: string | null }
 const items = ref<N[]>([])
 const open = ref<N | null>(null)
 const error = ref('')
@@ -16,15 +16,37 @@ async function load() {
 }
 onMounted(load)
 
+// Б.5: подтверждение засчитывается после 10 с на странице и прокрутки до кнопки — сервер проверяет
+const seconds = ref(0)
+const scrolled = ref(false)
+const ackError = ref('')
+let timer: ReturnType<typeof setInterval> | undefined
+const bodyEl = ref<HTMLElement | null>(null)
 async function show(n: N) {
-  open.value = n
+  open.value = n; seconds.value = 0; scrolled.value = false; ackError.value = ''
   await api(`/news/${n.id}`)
   n.viewed = true
+  clearInterval(timer)
+  timer = setInterval(async () => { seconds.value++; if (seconds.value % 5 === 0) await api(`/news/${n.id}/view`, { method: 'POST', body: { seconds: 5, scrolledToEnd: scrolled.value } }).catch(() => null) }, 1000)
+  await nextTick()
+  checkScroll()
 }
+function checkScroll() {
+  const el = bodyEl.value
+  if (!el) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 8) { if (!scrolled.value && open.value) { scrolled.value = true; api(`/news/${open.value.id}/view`, { method: 'POST', body: { seconds: 0, scrolledToEnd: true } }).catch(() => null) } }
+}
+function close() { clearInterval(timer); open.value = null }
+onUnmounted(() => clearInterval(timer))
 async function ack(n: N) {
-  await api(`/news/${n.id}/ack`, { method: 'POST' })
-  n.acked = true
-  open.value = null
+  ackError.value = ''
+  try {
+    await api(`/news/${n.id}/view`, { method: 'POST', body: { seconds: seconds.value % 5, scrolledToEnd: scrolled.value } })
+    await api(`/news/${n.id}/ack`, { method: 'POST' })
+    n.acked = true
+    close()
+  }
+  catch (err) { ackError.value = apiErrorOf(err).message }
 }
 const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk', { day: 'numeric', month: 'long' }) : ''
 </script>
@@ -39,6 +61,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk', { day
         <div class="row">
           <span v-if="n.isPinned" class="pin">📌</span>
           <span class="card-title">{{ n.title }}</span>
+          <p v-if="n.lead" class="sub lead">{{ n.lead }}</p>
           <span v-if="n.requiresAck && !n.acked" class="badge coral">{{ t('news.needAck') }}</span>
           <span v-else-if="n.acked" class="badge teal">✓</span>
         </div>
@@ -49,9 +72,10 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk', { day
     <div v-if="open" class="modal-backdrop" @click.self="!open.requiresAck || open.acked ? (open = null) : null">
       <div class="modal">
         <h2>{{ open.title }}</h2>
-        <LessonBlocks :blocks="open.body" :blocks-state="{}" readonly />
-        <button v-if="open.requiresAck && !open.acked" class="primary" @click="ack(open)">{{ t('news.ack') }}</button>
-        <button v-else class="ghost" @click="open = null">{{ t('news.close') }}</button>
+        <div ref="bodyEl" class="scroller" @scroll="checkScroll"><LessonBlocks :blocks="open.body" :blocks-state="{}" readonly /></div>
+        <p v-if="ackError" class="error" role="alert">{{ ackError }}</p>
+        <button v-if="open.requiresAck && !open.acked" class="primary" :disabled="seconds < 10 || !scrolled" @click="ack(open)">{{ open.ackText || t('news.ack') }}<span v-if="seconds < 10" class="sub"> · {{ 10 - seconds }}</span></button>
+        <button v-else class="ghost" @click="close">{{ t('news.close') }}</button>
       </div>
     </div>
   </div>
@@ -77,4 +101,6 @@ h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 .primary, .ghost { font: inherit; font-weight: 800; border: none; border-radius: var(--radius-pill); padding: var(--space-3) var(--space-5); cursor: pointer; }
 .primary { background: var(--color-sun); color: var(--color-ink); }
 .ghost { background: transparent; border: 1px solid var(--color-bg-line); color: var(--color-ink-muted); }
+.scroller { max-height: 55dvh; overflow: auto; }
+.error { color: var(--color-coral-ink); }
 </style>

@@ -25,6 +25,9 @@ export const wikiPages = pgTable('wiki_pages', {
   status: text('status').notNull().default('published'), // draft | published | archived
   version: integer('version').notNull().default(1),
   updatedBy: uuid('updated_by').references(() => users.id),
+  // Блокировка на время правки (docs/21 §5.5): 15 минут, продлевается при сохранении
+  lockedBy: uuid('locked_by').references(() => users.id),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, t => [
   unique().on(t.tenantId, t.slug),

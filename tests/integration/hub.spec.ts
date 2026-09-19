@@ -69,7 +69,7 @@ describe('этап 10: объявления (приёмка: доходит до
     expect(rep!.byLocation.find(x => x.location === 'Лазарева')).toMatchObject({ total: 2, acked: 0, pct: 0 })
 
     // Подтверждение
-    await nw.ackNews(ctx(a), n.id)
+    await nw.ackNews(ctx(a), n.id, { force: true })
     expect((await nw.pendingAnnouncements(ctx(a))).map(x => x.id)).not.toContain(n.id)
     rep = await nw.announcementReport(ctx(), n.id)
     expect(rep?.acked).toBe(1)
@@ -83,7 +83,7 @@ describe('этап 10: объявления (приёмка: доходит до
     const [esc] = await admin`select payload from notifications where user_id = ${adminId} and code = 'announcement_overdue_manager' and payload->>'title' = 'Нові правила відкриття зміни'`
     expect((esc!.payload as { names: string }).names).toContain('Зміна Б')
 
-    await nw.ackNews(ctx(b), n.id)
+    await nw.ackNews(ctx(b), n.id, { force: true })
     rep = await nw.announcementReport(ctx(), n.id)
     expect((rep?.byLocation ?? []).find(x => x.location === 'Лазарева')?.pct).toBe(100)
   })
@@ -128,6 +128,24 @@ describe('этап 10: wiki с историей и правами по ветк�
 })
 
 describe('этап 10: оргструктура и конструктор отчётов', () => {
+  it('docs/21 §5.5: блокировка страницы на время правки и diff между версиями', async () => {
+    const editor = await makePerson('Редактор Вікі', lazarevaId, 'author')
+    const other = await makePerson('Інший Автор', lazarevaId, 'author')
+    const p = await wk.createPage(ctx(editor), { title: `Замок ${Date.now()}`, body: text('<p>Перший абзац</p>') })
+    pageIds.push(p.id)
+    expect((await wk.lockPage(ctx(editor), p.id))!.ok).toBe(true)
+    const busy = await wk.lockPage(ctx(other), p.id)
+    expect(busy).toMatchObject({ ok: false, lockedBy: editor })
+    expect(await wk.updatePage(ctx(other), p.id, { body: text('<p>Чужа правка</p>') })).toMatchObject({ locked: true })
+    const saved = await wk.updatePage(ctx(editor), p.id, { body: [{ id: 'a', type: 'text', html: '<p>Перший абзац</p>' }, { id: 'b', type: 'text', html: '<p>Другий абзац</p>' }] })
+    expect((saved as { version: number }).version).toBe(2)
+    // После сохранения блокировка снята — другой может редактировать
+    expect((await wk.lockPage(ctx(other), p.id))!.ok).toBe(true)
+    const d = await wk.revisionDiff(ctx(other), p.id, 1, 2)
+    expect(d!.lines.some(l => l.op === 'add' && l.text.includes('Другий'))).toBe(true)
+    expect(d!.lines.some(l => l.op === 'same' && l.text.includes('Перший'))).toBe(true)
+  })
+
   it('публичное дерево содержит точки с людьми и руководителем', async () => {
     const t = await org.orgTree(ctx())
     const flat = JSON.stringify(t.units)

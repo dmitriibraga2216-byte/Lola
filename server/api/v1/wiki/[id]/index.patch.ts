@@ -10,5 +10,6 @@ export default defineEventHandler(async (event) => {
   const r = await updatePage({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data)
   if (!r) return apiError(event, 404, 'not_found', 'Сторінку не знайдено')
   if ('forbidden' in r) return apiError(event, 403, 'forbidden', 'Немає права редагувати цю гілку')
+  if ('locked' in r) return apiError(event, 409, 'wiki.locked', 'Сторінку зараз редагує інша людина — спробуйте за кілька хвилин')
   return apiData(r)
 })

@@ -1,6 +1,7 @@
 # Демо-стенд на маленькой машине (1 ГБ RAM): db + minio + одно приложение с воркером внутри
 # + быстрый туннель Cloudflare без аккаунта (URL *.trycloudflare.com меняется при перезапуске).
 # Запуск: ENV_FILE=./.env docker compose -f docker-compose.demo.yml up -d
+# Обновление: docker compose pull && docker compose up -d  (миграции накатывает сервис migrate)
 # Не для прода: SMS не шлётся, код входа показывается на экране (OTP_DEBUG=1).
 name: lola-demo
 
@@ -46,6 +47,17 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  # Миграции при каждом старте: одноразовый контейнер, приложение ждёт его завершения.
+  # Без этого обновление образа оставляет схему старой (так и случилось 19.09 — 0020–0025 не были накачены).
+  migrate:
+    image: ${APP_IMAGE:-ghcr.io/dmitriibraga2216-byte/lola:latest}
+    env_file: ${ENV_FILE:-./.env}
+    command: ["node", "--import", "tsx", "server/db/migrate.ts"]
+    depends_on:
+      db: { condition: service_healthy }
+    deploy:
+      resources: { limits: { memory: 256m } }
+
   app:
     image: ${APP_IMAGE:-ghcr.io/dmitriibraga2216-byte/lola:latest}
     restart: unless-stopped
@@ -59,6 +71,7 @@ services:
     depends_on:
       db: { condition: service_healthy }
       minio: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
       interval: 30s

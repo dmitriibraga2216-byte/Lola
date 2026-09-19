@@ -49,7 +49,7 @@ pnpm lint && pnpm typecheck
 | 11 | Интеграции | OAuth по docs/09 (state в БД, offline+consent, только зашифрованный refresh_token, статусы «не налаштовано / не підключено / працює / мовчить»): Google Calendar для занятий, Meet и Zoom для вебинаров, посещаемость из Zoom, импорт людей из Workspace, вход через Google |
 
 Развёртывание на своём железе — `docker/` и `Makefile` (см. [docs/26](docs/26-server-local.md), [docs/27](docs/27-gateway-public.md)).
-Демо-стенд на маленькой машине — `docker/docker-compose.demo.yml`: готовый образ `ghcr.io/dmitriibraga2216-byte/lola:latest` (собирается CI на `main`), воркер внутри приложения, код входа показывается на экране (`OTP_DEBUG=1`), наружу — быстрый туннель Cloudflare без аккаунта.
+Демо-стенд на маленькой машине — `docker/docker-compose.demo.yml`: готовый образ `ghcr.io/dmitriibraga2216-byte/lola:latest` (собирается CI на `main`), воркер внутри приложения, код входа показывается на экране (`OTP_DEBUG=1`), наружу — быстрый туннель Cloudflare без аккаунта. Обновление: `docker compose pull && docker compose up -d` — сервис `migrate` накатывает миграции перед стартом приложения.
 
 ## ТЗ
 
@@ -86,6 +86,8 @@ pnpm lint && pnpm typecheck
 | [28-implementation-notes.md](docs/28-implementation-notes.md) | решения по реализации, отступления от ТЗ и открытые вопросы к заказчику |
 | [29-audit-2026-09-19.md](docs/29-audit-2026-09-19.md) | аудит выполнения: что не сделано, принятые решения, добавленное сверх ТЗ |
 | [30-spec-delta-2026-09-19.md](docs/30-spec-delta-2026-09-19.md) | дельта финального пакета ТЗ к реализации и очередь доработок |
+| [31-mockups-map.md](docs/31-mockups-map.md) | мокапы 90 экранов (`docs/mockups/`) и карта соответствия экранам Lola |
+| [32-audit-2026-09-19-2.md](docs/32-audit-2026-09-19-2.md) | аудит №2: состояние по документам, список задач в порядке выполнения, решения |
 | [_conventions.md](docs/_conventions.md) | формат модульных документов и факты, снятые с эталона |
 
 Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

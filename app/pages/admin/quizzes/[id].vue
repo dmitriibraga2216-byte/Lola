@@ -15,7 +15,6 @@ interface Quiz {
   kind: string
   status: string
   selectionMode: string
-  params: Record<string, unknown>
   questionCount: number
   totalPoints: string
 }
@@ -33,11 +32,6 @@ const pool = ref<Question[]>([])
 const error = ref('')
 const notice = ref('')
 
-const params = reactive({
-  passScore: 80, attemptsAllowed: 3, attemptCooldownMin: 0, timeLimitMin: 0,
-  shuffleQuestions: true, shuffleOptions: true, showAnswers: 'after_attempt', allowSkip: true, allowBack: true, requireAllAnswered: false,
-})
-
 // Быстрая форма нового вопроса (single / multiple / number / text_short / text_long)
 const nq = reactive({
   kind: 'single', text: '', options: ['', '', ''], correct: [] as number[],
@@ -49,13 +43,6 @@ async function load() {
     const e = await api<{ quiz: Quiz, items: Item[] }>(`/quizzes/${quizId}`)
     quiz.value = e.quiz
     items.value = e.items
-    const p = e.quiz.params as Record<string, unknown>
-    Object.assign(params, {
-      passScore: p.passScore ?? 80, attemptsAllowed: p.attemptsAllowed ?? 3, attemptCooldownMin: p.attemptCooldownMin ?? 0,
-      timeLimitMin: p.timeLimitSec ? Math.round(Number(p.timeLimitSec) / 60) : 0,
-      shuffleQuestions: p.shuffleQuestions ?? true, shuffleOptions: p.shuffleOptions ?? true,
-      showAnswers: p.showAnswers ?? 'after_attempt', allowSkip: p.allowSkip ?? true, allowBack: p.allowBack ?? true, requireAllAnswered: p.requireAllAnswered ?? false,
-    })
     if (canEdit.value) {
       banks.value = await api<Bank[]>('/question-banks')
       if (!bankId.value && banks.value[0]) bankId.value = banks.value[0].id
@@ -127,27 +114,6 @@ async function createQuestion() {
     nq.correct = []
     await addFromPool(q)
     pool.value = await api<Question[]>('/questions', { query: { bankId: bankId.value } })
-  }
-  catch (err) {
-    error.value = apiErrorOf(err).message
-  }
-}
-
-async function saveSettings() {
-  error.value = ''
-  try {
-    await api(`/quizzes/${quizId}`, {
-      method: 'PATCH',
-      body: {
-        params: {
-          passScore: params.passScore, attemptsAllowed: params.attemptsAllowed, attemptCooldownMin: params.attemptCooldownMin,
-          timeLimitSec: params.timeLimitMin > 0 ? params.timeLimitMin * 60 : null,
-          shuffleQuestions: params.shuffleQuestions, shuffleOptions: params.shuffleOptions, showAnswers: params.showAnswers,
-          allowSkip: params.allowSkip, allowBack: params.allowBack, requireAllAnswered: params.requireAllAnswered,
-        },
-      },
-    })
-    notice.value = t('common.saved')
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -246,23 +212,8 @@ async function publish() {
     </div>
 
     <div v-else class="pane settings">
-      <label>{{ t('quizAdmin.passScore') }} <input v-model.number="params.passScore" type="number" min="1" max="100" :disabled="!canEdit"></label>
-      <label>{{ t('quizAdmin.attempts') }} <input v-model.number="params.attemptsAllowed" type="number" min="0" max="10" :disabled="!canEdit"></label>
-      <label>{{ t('quizAdmin.cooldown') }} <input v-model.number="params.attemptCooldownMin" type="number" min="0" max="1440" :disabled="!canEdit"></label>
-      <label>{{ t('quizAdmin.timeLimit') }} <input v-model.number="params.timeLimitMin" type="number" min="0" max="240" :disabled="!canEdit"></label>
-      <label>{{ t('quizAdmin.showAnswers') }}
-        <select v-model="params.showAnswers" :disabled="!canEdit">
-          <option value="never">never</option>
-          <option value="after_attempt">after_attempt</option>
-          <option value="after_pass">after_pass</option>
-        </select>
-      </label>
-      <label class="inline"><input v-model="params.shuffleQuestions" type="checkbox" :disabled="!canEdit"> {{ t('quizAdmin.shuffleQ') }}</label>
-      <label class="inline"><input v-model="params.shuffleOptions" type="checkbox" :disabled="!canEdit"> {{ t('quizAdmin.shuffleO') }}</label>
-      <label class="inline"><input v-model="params.allowSkip" type="checkbox" :disabled="!canEdit"> {{ t('quizAdmin.allowSkip') }}</label>
-      <label class="inline"><input v-model="params.allowBack" type="checkbox" :disabled="!canEdit"> {{ t('quizAdmin.allowBack') }}</label>
-      <label class="inline"><input v-model="params.requireAllAnswered" type="checkbox" :disabled="!canEdit"> {{ t('quizAdmin.requireAll') }}</label>
-      <button v-if="canEdit" class="primary" @click="saveSettings">{{ t('common.save') }}</button>
+      <p class="hint">{{ t('quizAdmin.rulesInTask') }}</p>
+      <NuxtLink to="/admin/assignments/new" class="link">{{ t('quizAdmin.goAssign') }}</NuxtLink>
     </div>
   </div>
   <p v-else-if="error" class="error">{{ error }}</p>

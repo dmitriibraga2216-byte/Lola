@@ -17,6 +17,7 @@ interface Lesson {
   isRequired: boolean
   minSeconds: number | null
   videoThresholdPct: number
+  passScorePct: string | number | null
   body: ContentBlock[]
 }
 interface Editor {
@@ -28,7 +29,7 @@ interface Check { code: string, label: string, ok: boolean }
 
 const editor = ref<Editor | null>(null)
 const selected = ref<Lesson | null>(null)
-const draft = reactive({ title: '', body: [] as ContentBlock[], isRequired: true, minSeconds: null as number | null })
+const draft = reactive({ title: '', body: [] as ContentBlock[], isRequired: true, minSeconds: null as number | null, passScorePct: null as number | null })
 const error = ref('')
 const notice = ref('')
 const savedAt = ref('')
@@ -68,6 +69,7 @@ function select(lesson: Lesson) {
   draft.body = JSON.parse(JSON.stringify(lesson.body))
   draft.isRequired = lesson.isRequired
   draft.minSeconds = lesson.minSeconds
+  draft.passScorePct = lesson.passScorePct == null ? null : Number(lesson.passScorePct)
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -75,7 +77,7 @@ function scheduleSave() {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(save, 1500)
 }
-watch(() => [draft.title, draft.body, draft.isRequired, draft.minSeconds], () => {
+watch(() => [draft.title, draft.body, draft.isRequired, draft.minSeconds, draft.passScorePct], () => {
   if (selected.value && canEdit.value) scheduleSave()
 }, { deep: true })
 
@@ -84,11 +86,11 @@ async function save() {
   try {
     await api(`/lessons/${selected.value.id}`, {
       method: 'PATCH',
-      body: { title: draft.title, body: draft.body, isRequired: draft.isRequired, minSeconds: draft.minSeconds },
+      body: { title: draft.title, body: draft.body, isRequired: draft.isRequired, minSeconds: draft.minSeconds, passScorePct: draft.passScorePct || null },
     })
     savedAt.value = new Date().toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })
     const lesson = editor.value?.modules.flatMap(m => m.lessons).find(l => l.id === selected.value!.id)
-    if (lesson) Object.assign(lesson, { title: draft.title, body: draft.body, isRequired: draft.isRequired, minSeconds: draft.minSeconds })
+    if (lesson) Object.assign(lesson, { title: draft.title, body: draft.body, isRequired: draft.isRequired, minSeconds: draft.minSeconds, passScorePct: draft.passScorePct })
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -240,6 +242,10 @@ async function publish() {
             <label class="inline">
               {{ t('course.minSeconds') }}
               <input v-model.number="draft.minSeconds" type="number" min="10" max="3600" :disabled="!canEdit" class="num">
+            </label>
+            <label v-if="selected.itemType === 'quiz'" class="inline" :title="t('course.passScoreHint')">
+              {{ t('course.passScorePct') }}
+              <input v-model.number="draft.passScorePct" type="number" min="1" max="100" :disabled="!canEdit" class="num" :placeholder="t('course.fromTask')">
             </label>
           </div>
           <div v-if="selected.itemType === 'quiz'" class="quiz-note">

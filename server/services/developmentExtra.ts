@@ -197,10 +197,10 @@ export async function applyPositionProfile(ctx: Ctx, profileId: string): Promise
     const audience = { rules: [{ type: 'position', ids: [p.positionId] }], match: 'any' }
     const ids: string[] = []
     for (const item of items) {
-      const [existing] = await tx.select({ id: assignments.id }).from(assignments).where(and(eq(assignments.subjectId, item.subjectId), eq(assignments.kind, 'position_profile'), sql`${assignments.status} <> 'archived'`, sql`${assignments.audience}::text = ${JSON.stringify(audience)}`))
+      const [existing] = await tx.select({ id: assignments.id }).from(assignments).where(and(eq(assignments.subjectId, item.subjectId), eq(assignments.kind, 'auto'), sql`${assignments.status} <> 'archived'`, sql`${assignments.audience}::text = ${JSON.stringify(audience)}`))
       if (existing) { ids.push(existing.id); continue }
       const [a] = await tx.insert(assignments).values({
-        tenantId: ctx.tenantId, title: `Профіль посади: обовʼязкове`, kind: 'position_profile', subjectType: item.subjectType, subjectId: item.subjectId, audience,
+        tenantId: ctx.tenantId, title: `Профіль посади: обовʼязкове`, kind: 'auto', subjectType: item.subjectType, subjectId: item.subjectId, audience,
         dueMode: 'relative', dueDays: item.dueDays ?? 30, isMandatory: true, autoSync: true, status: 'active', createdBy: ctx.actorId,
         reminders: { enabled: true, beforeDays: [3, 1], onDueDay: true, afterDays: [1, 3, 7], channels: ['telegram'], notifyManagerAfterDays: 1, notifyOnAssign: true },
       }).returning({ id: assignments.id })

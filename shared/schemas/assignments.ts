@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { quizParamsSchema } from './quizzes'
+import { CONTENT_TYPES } from '../enums'
 
 /** Конструктор аудитории (docs/15 §3.2). */
 export const audienceRuleSchema = z.discriminatedUnion('type', [
@@ -41,14 +42,45 @@ export const remindersSchema = z.object({
   notifyOnAssign: z.boolean().default(true),
 })
 
+/** Параметры назначения (docs/15 §3.3, §14.3): общие для всех типов + тестовые. Состав по типу — paramsFor(). */
 export const assignmentParamsSchema = quizParamsSchema.partial().extend({
   strictOrder: z.boolean().optional(),
   allowEarlyFinish: z.boolean().optional(),
+  deadlineMode: z.enum(['unlimited', 'days_from_assign', 'calendar']).optional(), // «Термін завершення завдання»
+  webinarMinWatchPct: z.number().int().min(1).max(100).optional(), // docs/18 Г-18.2
 })
+export type AssignmentParams = z.infer<typeof assignmentParamsSchema>
+
+/** Ключи, которые есть у назначения данного типа контента (docs/02 §2.7: у курса нет attempts и shuffle). */
+const COMMON_PARAM_KEYS = ['deadlineMode', 'timeLimitSec', 'passScore', 'resultSource', 'fixResult', 'scaleId', 'badgeId', 'certificateId', 'points', 'bonuses', 'allowComments', 'notifyOnResult'] as const
+const TEST_PARAM_KEYS = [
+  'attemptsAllowed', 'attemptCooldownMin', 'questionsMode', 'questionsCount', 'trainingMode', 'allowOtherPages',
+  'showErrorProtocol', 'hideCorrectInProtocol', 'protocolAfterLastAttempt', 'instantFeedback', 'manualNext', 'questionTimeLimit',
+  'shuffleQuestions', 'shuffleOptions', 'showAnswers', 'showScore', 'allowSkip', 'allowBack', 'requireAllAnswered', 'proctoring',
+] as const
+export const PARAM_KEYS_BY_CONTENT_TYPE: Record<typeof CONTENT_TYPES[number], readonly string[]> = {
+  course: [...COMMON_PARAM_KEYS, 'strictOrder', 'allowEarlyFinish'],
+  training_program: [...COMMON_PARAM_KEYS, 'strictOrder'],
+  resource: [...COMMON_PARAM_KEYS],
+  test: [...COMMON_PARAM_KEYS, ...TEST_PARAM_KEYS],
+  complex_test: [...COMMON_PARAM_KEYS, 'attemptsAllowed', 'attemptCooldownMin', 'showScore'],
+  workshop: [...COMMON_PARAM_KEYS, 'attemptsAllowed'],
+  poll: [...COMMON_PARAM_KEYS],
+  assessment: [...COMMON_PARAM_KEYS],
+  check_list: [...COMMON_PARAM_KEYS],
+  meetup: [...COMMON_PARAM_KEYS],
+  webinar: [...COMMON_PARAM_KEYS, 'webinarMinWatchPct'],
+}
+
+/** Оставить в params только ключи, допустимые для типа контента. */
+export function paramsFor(contentType: typeof CONTENT_TYPES[number], params: AssignmentParams): AssignmentParams {
+  const allowed = new Set<string>(PARAM_KEYS_BY_CONTENT_TYPE[contentType])
+  return Object.fromEntries(Object.entries(params).filter(([k]) => allowed.has(k))) as AssignmentParams
+}
 
 export const assignmentCreateSchema = z.object({
   title: z.string().min(3).max(200).optional(),
-  subjectType: z.enum(['course', 'quiz', 'program']).default('course'),
+  subjectType: z.enum(CONTENT_TYPES).default('course'),
   subjectId: z.string().uuid(),
   lockVersion: z.boolean().default(false),
   audience: audienceSchema.refine(a => a.rules.length > 0, 'Додайте хоча б одну умову'),
@@ -99,7 +131,7 @@ export const profileSchema = z.object({
     orgUnitIds: z.array(z.string().uuid()).default([]),
   }),
   items: z.array(z.object({
-    subjectType: z.enum(['course', 'quiz']).default('course'),
+    subjectType: z.enum(['course', 'test']).default('course'),
     subjectId: z.string().uuid(),
     dueDays: z.number().int().min(1).max(365).default(14),
     isMandatory: z.boolean().default(true),
@@ -125,7 +157,7 @@ export const ruleSchema = z.object({
   }).default({}),
   assignDelayDays: z.number().int().min(0).max(365).default(0),
   actions: z.array(z.discriminatedUnion('type', [
-    z.object({ type: z.literal('assign_content'), subjectType: z.enum(['course', 'quiz']).default('course'), subjectId: z.string().uuid(), dueDays: z.number().int().min(1).max(365).default(14) }),
+    z.object({ type: z.literal('assign_content'), subjectType: z.enum(['course', 'test']).default('course'), subjectId: z.string().uuid(), dueDays: z.number().int().min(1).max(365).default(14) }),
     z.object({ type: z.literal('notify_user'), code: z.string().max(50), text: z.string().max(500) }),
     z.object({ type: z.literal('notify_manager'), text: z.string().max(500) }),
     z.object({ type: z.literal('add_tag'), tag: z.string().max(50) }),

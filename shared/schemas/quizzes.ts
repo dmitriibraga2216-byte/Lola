@@ -78,6 +78,11 @@ export const bankSchema = z.object({
   categoryId: z.string().uuid().optional(),
 })
 
+/**
+ * Параметры прохождения теста (docs/12 §3.5 + docs/02 §2.7, группы эталона «Загальне ·
+ * Термін · Результат · Нагороди»). Живут в assignments.params, копируются в attempts.params
+ * при старте. У самого теста этих полей нет (CLAUDE.md п. 11).
+ */
 export const quizParamsSchema = z.object({
   passScore: z.number().min(1).max(100).default(80),
   attemptsAllowed: z.number().int().min(0).max(10).default(3),
@@ -90,6 +95,29 @@ export const quizParamsSchema = z.object({
   allowSkip: z.boolean().default(true),
   allowBack: z.boolean().default(true),
   requireAllAnswered: z.boolean().default(false),
+  // «Загальне» (docs/15 §14.3)
+  questionsMode: z.enum(['all', 'one_per_group', 'limited']).default('all'), // «Кількість питань»
+  questionsCount: z.number().int().min(1).max(200).nullable().default(null), // для limited
+  trainingMode: z.boolean().default(false), // «Режим тренування»
+  allowOtherPages: z.boolean().default(true), // «Дозволити відкриття інших сторінок порталу»
+  showErrorProtocol: z.boolean().default(true), // «Показати протокол помилок»
+  hideCorrectInProtocol: z.boolean().default(false), // «Приховати правильні відповіді з протоколу»
+  protocolAfterLastAttempt: z.boolean().default(false), // Г-12.4, наше: протокол лише після останньої спроби
+  instantFeedback: z.boolean().default(false), // «Показувати, чи правильно він дав відповідь»
+  manualNext: z.boolean().default(false), // «Перейти до наступного питання вручну»
+  questionTimeLimit: z.boolean().default(false), // использовать лимит на вопрос (docs/12 §3.5)
+  // «Результат»
+  resultSource: z.enum(['last', 'best']).default('last'), // «Результатом виконання буде»
+  fixResult: z.boolean().default(true), // «Фіксувати результат завдання»
+  scaleId: z.string().uuid().nullable().default(null), // «Перетворити результат за шкалою»
+  // «Нагороди»
+  badgeId: z.string().uuid().nullable().default(null),
+  certificateId: z.string().uuid().nullable().default(null),
+  points: z.number().int().min(0).max(10000).default(0), // рейтинг
+  bonuses: z.number().int().min(0).max(10000).default(0), // магазин подарунків
+  // «Інші параметри»
+  allowComments: z.boolean().default(true),
+  notifyOnResult: z.boolean().default(true),
 })
 
 export const quizSchema = z.object({
@@ -105,7 +133,6 @@ export const quizSchema = z.object({
     difficultyMax: z.number().int().min(1).max(5).optional(),
     count: z.number().int().min(1).max(100),
   })).optional(),
-  params: quizParamsSchema.partial().optional(),
   requiresOfflineConfirm: z.boolean().default(false),
 })
 

@@ -10,11 +10,14 @@ type RuleType = 'user' | 'position' | 'location' | 'org_unit' | 'role' | 'tag'
 interface Rule { type: RuleType, ids: string[], values: string[], codes: string[], locationIds: string[] }
 
 const courses = ref<Course[]>([])
+const quizzes = ref<{ id: string, title: string, status: string }[]>([])
+const complexTests = ref<{ id: string, title: string, isActive: boolean }[]>([])
 const refs = reactive<{ positions: Ref[], locations: Ref[], orgUnits: Ref[], roles: { code: string, name: string }[], tags: Ref[], people: Ref[] }>({
   positions: [], locations: [], orgUnits: [], roles: [], tags: [], people: [],
 })
 
 const form = reactive({
+  subjectType: 'course' as 'course' | 'test' | 'complex_test',
   subjectId: '',
   lockVersion: false,
   match: 'any' as 'any' | 'all',
@@ -37,12 +40,15 @@ const busy = ref(false)
 
 onMounted(async () => {
   try {
-    const [c, p, l, o, r, tg, ppl] = await Promise.all([
-      api<Course[]>('/courses'), api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/org-units'),
+    const [c, q, cx, p, l, o, r, tg, ppl] = await Promise.all([
+      api<Course[]>('/courses'), api<{ id: string, title: string, status: string }[]>('/quizzes').catch(() => []),
+      api<{ id: string, title: string, isActive: boolean }[]>('/complex-tests').catch(() => []), api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/org-units'),
       api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags'),
       api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).then(r => r.map(x => ({ id: x.id, name: x.fullName }))),
     ])
     courses.value = c.filter(x => x.status === 'published')
+    quizzes.value = q.filter(x => x.status === 'published')
+    complexTests.value = cx.filter(x => x.isActive)
     Object.assign(refs, { positions: p, locations: l, orgUnits: o, roles: r, tags: tg, people: ppl })
   }
   catch (err) {
@@ -86,7 +92,9 @@ watch(() => JSON.stringify([form.rules, form.match]), () => {
 }, { deep: true })
 
 const canSubmit = computed(() => !!form.subjectId && (preview.value?.count ?? 0) > 0 && !busy.value)
-const courseTitle = computed(() => courses.value.find(c => c.id === form.subjectId)?.title ?? '')
+const subjects = computed(() => form.subjectType === 'course' ? courses.value : form.subjectType === 'test' ? quizzes.value : complexTests.value)
+const courseTitle = computed(() => subjects.value.find(c => c.id === form.subjectId)?.title ?? '')
+watch(() => form.subjectType, () => { form.subjectId = '' })
 
 async function submit() {
   if (!confirm(t('assign.confirm', { course: courseTitle.value, n: preview.value?.count ?? 0 }))) return
@@ -97,7 +105,7 @@ async function submit() {
     const r = await api<{ assignmentId: string }>('/assignments', {
       method: 'POST',
       body: {
-        subjectType: 'course', subjectId: form.subjectId, lockVersion: form.lockVersion,
+        subjectType: form.subjectType, subjectId: form.subjectId, lockVersion: form.lockVersion,
         audience: audiencePayload(),
         startsAt: form.startMode === 'date' && form.startsAt ? new Date(form.startsAt).toISOString() : null,
         dueMode: form.dueMode, dueAt: form.dueMode === 'absolute' && form.dueAt ? new Date(form.dueAt).toISOString() : null, dueDays: form.dueDays,
@@ -128,11 +136,14 @@ async function submit() {
     <!-- 1. Що призначаємо -->
     <section class="block">
       <h2>1. {{ t('assign.what') }}</h2>
-      <select v-model="form.subjectId">
-        <option value="" disabled>{{ t('assign.pickCourse') }}</option>
-        <option v-for="c in courses" :key="c.id" :value="c.id">{{ c.title }}</option>
+      <div class="types" role="radiogroup">
+        <label v-for="ct in (['course', 'test', 'complex_test'] as const)" :key="ct" class="chip-radio"><input v-model="form.subjectType" type="radio" :value="ct"> {{ t(`contentType.${ct}`) }}</label>
+      </div>
+      <select v-model="form.subjectId" data-testid="assign-subject">
+        <option value="" disabled>{{ t('assign.pickSubject') }}</option>
+        <option v-for="c in subjects" :key="c.id" :value="c.id">{{ c.title }}</option>
       </select>
-      <label class="check"><input v-model="form.lockVersion" type="checkbox"> {{ t('assign.lockVersion') }}</label>
+      <label v-if="form.subjectType === 'course'" class="check"><input v-model="form.lockVersion" type="checkbox"> {{ t('assign.lockVersion') }}</label>
     </section>
 
     <!-- 2. Кому -->
@@ -210,6 +221,7 @@ async function submit() {
         <button :class="['tab', { on: paramsTab === 'params' }]" @click="paramsTab = 'params'">{{ t('assign.tabParams') }}</button>
         <button :class="['tab', { on: paramsTab === 'reminders' }]" @click="paramsTab = 'reminders'">{{ t('assign.tabReminders') }}</button>
       </div>
+      <p v-if="paramsTab === 'params'" class="hint">{{ t('assign.rulesHere') }}</p>
       <div v-if="paramsTab === 'params'" class="grid2">
         <label>{{ t('quizAdmin.passScore') }} <input v-model.number="form.params.passScore" type="number" min="1" max="100"></label>
         <label>{{ t('quizAdmin.attempts') }} <input v-model.number="form.params.attemptsAllowed" type="number" min="0" max="10"></label>
@@ -272,4 +284,8 @@ select[multiple] { min-height: 90px; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }
 @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } .rule, .rule:has(select + select) { grid-template-columns: 1fr; } }
+.types { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.chip-radio { display: inline-flex; align-items: center; gap: var(--space-1); border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); font-size: var(--font-size-body-s); cursor: pointer; }
+.chip-radio:has(input:checked) { background: var(--color-ink); color: var(--color-bg-soft); border-color: var(--color-ink); }
+.hint { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0 0 var(--space-2); }
 </style>

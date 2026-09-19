@@ -31,7 +31,9 @@ export const criteriaGroups = pgTable('criteria_groups', {
   description: text('description'),
   sort: integer('sort').notNull().default(0),
   weight: numeric('weight', { precision: 6, scale: 2 }).notNull().default('1'),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const criteria = pgTable('criteria', {
   ...baseColumns,
@@ -58,7 +60,9 @@ export const assessmentForms = pgTable('assessment_forms', {
   description: text('description'),
   groupIds: uuid('group_ids').array().notNull().default(sql`'{}'::uuid[]`),
   isActive: boolean('is_active').notNull().default(true),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const assessmentCycles = pgTable('assessment_cycles', {
   ...baseColumns,
@@ -110,6 +114,7 @@ export const assessmentAnswers = pgTable('assessment_answers', {
   comment: text('comment'),
   isNa: boolean('is_na').notNull().default(false),
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.taskId, t.criterionId),
 ])
 
@@ -128,7 +133,9 @@ export const checklists = pgTable('checklists', {
   requireSignature: boolean('require_signature').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const checklistRuns = pgTable('checklist_runs', {
   ...baseColumns,
@@ -185,5 +192,6 @@ export const mysteryLinks = pgTable('mystery_links', {
   runId: uuid('run_id').references(() => checklistRuns.id),
   createdBy: uuid('created_by').notNull().references(() => users.id),
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.tokenHash),
 ])

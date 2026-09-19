@@ -56,6 +56,7 @@ export const lessonCreateSchema = z.object({
   isRequired: z.boolean().default(true),
   minSeconds: z.number().int().min(10).max(3600).nullable().optional(),
   videoThresholdPct: z.number().int().min(50).max(100).default(90),
+  passScorePct: z.number().min(1).max(100).nullable().optional(), // порог теста в плане курса (docs/11 §14.1); назначение перекрывает
 }).refine(l => l.itemType === 'quiz' ? !!l.quizId : l.itemType === 'workshop' ? !!l.workshopId : !!l.resource, {
   message: 'Для уроку-тесту вкажіть quizId, для практикуму — workshopId, для матеріалу — resource',
 })
@@ -66,6 +67,7 @@ export const lessonUpdateSchema = z.object({
   isRequired: z.boolean().optional(),
   minSeconds: z.number().int().min(10).max(3600).nullable().optional(),
   videoThresholdPct: z.number().int().min(50).max(100).optional(),
+  passScorePct: z.number().min(1).max(100).nullable().optional(),
 })
 
 export const reorderSchema = z.object({

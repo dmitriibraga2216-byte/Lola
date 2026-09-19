@@ -1,4 +1,4 @@
-import { jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 
@@ -21,4 +21,6 @@ export const importJobs = pgTable('import_jobs', {
   rows: jsonb('rows').notNull().default('[]'), // разобранные строки с результатом валидации
   stats: jsonb('stats').notNull().default('{}'), // {total, create, update, skip, errors}
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])

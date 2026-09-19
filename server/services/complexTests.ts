@@ -3,6 +3,8 @@ import { attempts, complexTestAttempts, complexTests, quizzes } from '../db/sche
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { startAttempt } from './attempts'
+import { resolveComplexParams } from './taskParams'
+import type { QuizParams } from '../../shared/domain/grading'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -19,9 +21,10 @@ export async function listComplexTests(ctx: Ctx) {
   })
 }
 
-export async function upsertComplexTest(ctx: Ctx, input: { id?: string, title: string, parts: Part[], passScore: number, timeLimitSec?: number | null, sequential?: boolean, attemptsAllowed?: number, showPartsResult?: boolean, isActive?: boolean }) {
+/** Карточка комплексного теста — только состав (docs/12 §14.2); порог, лимит, попытки — в назначении. */
+export async function upsertComplexTest(ctx: Ctx, input: { id?: string, title: string, parts: Part[], sequential?: boolean, showPartsResult?: boolean, isActive?: boolean }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const values = { title: input.title, parts: input.parts, passScore: String(input.passScore), timeLimitSec: input.timeLimitSec ?? null, sequential: input.sequential ?? true, attemptsAllowed: input.attemptsAllowed ?? 1, showPartsResult: input.showPartsResult ?? true, isActive: input.isActive ?? true }
+    const values = { title: input.title, parts: input.parts, sequential: input.sequential ?? true, showPartsResult: input.showPartsResult ?? true, isActive: input.isActive ?? true }
     if (input.id) {
       const [r] = await tx.update(complexTests).set({ ...values, updatedAt: new Date() }).where(eq(complexTests.id, input.id)).returning()
       return r ?? null
@@ -40,8 +43,9 @@ export async function complexIntro(ctx: Ctx, id: string) {
     const qs = await tx.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(inArray(quizzes.id, parts.map(p => p.quizId)))
     const mine = await tx.select().from(complexTestAttempts).where(and(eq(complexTestAttempts.complexTestId, id), eq(complexTestAttempts.userId, ctx.actorId))).orderBy(desc(complexTestAttempts.attemptNo))
     const active = mine.find(a => a.status === 'in_progress') ?? null
+    const { params, source: paramsSource } = await resolveComplexParams(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, complexTestId: id })
     return {
-      id: ct.id, title: ct.title, passScore: Number(ct.passScore), timeLimitSec: ct.timeLimitSec, sequential: ct.sequential, attemptsAllowed: ct.attemptsAllowed, showPartsResult: ct.showPartsResult,
+      id: ct.id, title: ct.title, passScore: params.passScore, timeLimitSec: params.timeLimitSec, sequential: ct.sequential, attemptsAllowed: params.attemptsAllowed, showPartsResult: ct.showPartsResult, paramsSource,
       parts: parts.map((p, i) => ({ index: i + 1, quizId: p.quizId, title: qs.find(q => q.id === p.quizId)?.title ?? '?', weight: p.weight, minScore: p.minScore ?? null })),
       attemptsUsed: mine.filter(a => a.status !== 'in_progress').length, active: active ? { id: active.id, expiresAt: active.expiresAt, partsState: active.partsState } : null,
       last: mine.find(a => a.status !== 'in_progress') ?? null,
@@ -58,10 +62,11 @@ export async function startComplex(ctx: Ctx, id: string): Promise<StartComplexRe
     const prior = await tx.select().from(complexTestAttempts).where(and(eq(complexTestAttempts.complexTestId, id), eq(complexTestAttempts.userId, ctx.actorId)))
     const active = prior.find(a => a.status === 'in_progress')
     if (active) return { ok: false as const, code: 'in_progress' as const, attemptId: active.id }
-    if (ct.attemptsAllowed > 0 && prior.length >= ct.attemptsAllowed) return { ok: false as const, code: 'attempts_exhausted' as const }
+    const { params, assignmentId } = await resolveComplexParams(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, complexTestId: id })
+    if (params.attemptsAllowed > 0 && prior.length >= params.attemptsAllowed) return { ok: false as const, code: 'attempts_exhausted' as const }
     const partsState: PartState[] = (ct.parts as Part[]).map(p => ({ quizId: p.quizId, attemptId: null, score: null, status: 'pending' }))
-    const expiresAt = ct.timeLimitSec ? new Date(Date.now() + ct.timeLimitSec * 1000) : null
-    const [a] = await tx.insert(complexTestAttempts).values({ tenantId: ctx.tenantId, complexTestId: id, userId: ctx.actorId, attemptNo: prior.length + 1, partsState, expiresAt }).returning()
+    const expiresAt = params.timeLimitSec ? new Date(Date.now() + params.timeLimitSec * 1000) : null
+    const [a] = await tx.insert(complexTestAttempts).values({ tenantId: ctx.tenantId, complexTestId: id, userId: ctx.actorId, attemptNo: prior.length + 1, partsState, expiresAt, assignmentId, params }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'complex.start', entity: 'complex_test_attempt', entityId: a!.id })
     return { ok: true as const, attemptId: a!.id, partsState, expiresAt }
   })
@@ -104,6 +109,7 @@ export async function syncComplex(ctx: Ctx, complexAttemptId: string) {
     if (!a) return null
     const [ct] = await tx.select().from(complexTests).where(eq(complexTests.id, a.complexTestId))
     const parts = ct!.parts as Part[]
+    const passScore = (a.params as Partial<QuizParams>).passScore ?? 80 // копия параметров попытки, не назначения
     let ps = a.partsState as PartState[]
     const ids = ps.map(p => p.attemptId).filter((x): x is string => !!x)
     const rows = ids.length ? await tx.select({ id: attempts.id, status: attempts.status, score: attempts.score }).from(attempts).where(inArray(attempts.id, ids)) : []
@@ -136,14 +142,14 @@ export async function syncComplex(ctx: Ctx, complexAttemptId: string) {
         if (part.minScore != null && s < part.minScore) minFail = true
       }
       score = den ? Math.round((num / den) * 100) / 100 : 0
-      passed = !minFail && score >= Number(ct!.passScore)
+      passed = !minFail && score >= passScore
       status = expired && !allDone ? 'expired' : passed ? 'passed' : 'failed'
       await tx.update(complexTestAttempts).set({ partsState: ps, status, score: String(score), passed, finishedAt: new Date(), updatedAt: new Date() }).where(eq(complexTestAttempts.id, a.id))
     }
     else if (JSON.stringify(ps) !== JSON.stringify(a.partsState)) {
       await tx.update(complexTestAttempts).set({ partsState: ps, updatedAt: new Date() }).where(eq(complexTestAttempts.id, a.id))
     }
-    return { id: a.id, status, score, passed, partsState: ps, expiresAt: a.expiresAt, showPartsResult: ct!.showPartsResult, passScore: Number(ct!.passScore), parts: parts.map(p => ({ quizId: p.quizId, weight: p.weight, minScore: p.minScore ?? null })) }
+    return { id: a.id, status, score, passed, partsState: ps, expiresAt: a.expiresAt, showPartsResult: ct!.showPartsResult, passScore, parts: parts.map(p => ({ quizId: p.quizId, weight: p.weight, minScore: p.minScore ?? null })) }
   })
 }
 

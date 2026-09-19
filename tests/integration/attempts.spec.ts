@@ -7,6 +7,7 @@ const { startAttempt, getAttemptState, saveAnswer, submitAttempt, getAttemptResu
 const { createCourse, addModule, addLesson, publishCourse } = await import('../../server/services/courses')
 const { selfEnroll, enrollmentTree, openLesson, completeLesson } = await import('../../server/services/learning')
 const { issueForEnrollment, myCertificates, publicCertificate, revokeCertificate } = await import('../../server/services/certificates')
+const { assignWithParams } = await import('./_assign')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 
@@ -16,6 +17,7 @@ let mentorId: string
 let learnerId: string
 const courseIds: string[] = []
 const quizIds: string[] = []
+const assignmentIds: string[] = []
 
 beforeAll(async () => {
   const [t] = await admin`select id from tenants where slug = 'kappi'`
@@ -37,6 +39,7 @@ afterAll(async () => {
     await admin`delete from attempts where quiz_id in ${admin(quizIds)}`
     await admin`delete from quizzes where id in ${admin(quizIds)}`
   }
+  if (assignmentIds.length) await admin`delete from assignments where id in ${admin(assignmentIds)}`
   await admin`delete from question_banks where tenant_id = ${tenantId} and name like 'Тест-банк %'`
   await admin.end()
 })
@@ -72,9 +75,11 @@ describe('банк, тест, попытка со снапшотом', () => {
       answer: { criteria: ['Вибачення', 'Заміна'], reference: 'Вибачитись, замінити' }, isCritical: false, difficulty: 3, points: 2, partialCredit: true, negativeMarking: false, tags: [],
     })).id
 
-    const quiz = await createQuiz(author(), { title: 'Тест гарячого цеху', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false, params: { passScore: 60, attemptsAllowed: 2, shuffleQuestions: false, shuffleOptions: false } })
+    const quiz = await createQuiz(author(), { title: 'Тест гарячого цеху', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
     quizId = quiz.id
     quizIds.push(quizId)
+    // Правила — в назначении, не в тесте (CLAUDE.md п. 11)
+    assignmentIds.push(await assignWithParams(author(), 'test', quizId, { passScore: 60, attemptsAllowed: 2, shuffleQuestions: false, shuffleOptions: false }, [learnerId]))
     const updated = await setQuizQuestions(author(), quizId, [
       { questionId: qSingle, sort: 0 }, { questionId: qNumber, sort: 1 }, { questionId: qLong, sort: 2 },
     ])
@@ -212,7 +217,7 @@ describe('тест как урок курса → сертификат', () => {
       bankId: bank.id, kind: 'single', stem: stem('2+2?'), options: opts('a', 'b'),
       answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [],
     })
-    const quiz = await createQuiz(author(), { title: 'Фінальний тест', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false, params: { passScore: 100, attemptsAllowed: 3 } })
+    const quiz = await createQuiz(author(), { title: 'Фінальний тест', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
     quizId = quiz.id
     quizIds.push(quizId)
     await setQuizQuestions(author(), quizId, [{ questionId: q.id, sort: 0 }])
@@ -222,7 +227,8 @@ describe('тест как урок курса → сертификат', () => {
     courseIds.push(courseId)
     const mod = await addModule(author(), courseId, 'Розділ')
     await addLesson(author(), { moduleId: mod!.id, title: 'Матеріал', itemType: 'resource', resource: { body: stem('Читай') }, isRequired: true, videoThresholdPct: 90 })
-    const quizLesson = await addLesson(author(), { moduleId: mod!.id, title: 'Тест', itemType: 'quiz', quizId, isRequired: true, videoThresholdPct: 90 })
+    // Порог теста в плане курса (docs/11 §14.1); попытки — умолчания тенанта
+    const quizLesson = await addLesson(author(), { moduleId: mod!.id, title: 'Тест', itemType: 'quiz', quizId, isRequired: true, videoThresholdPct: 90, passScorePct: 100 })
     lessonQuizId = quizLesson!.id
     expect((await publishCourse(author(), courseId, 'v1')).ok).toBe(true)
 

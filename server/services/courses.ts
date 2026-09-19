@@ -162,6 +162,7 @@ export async function ensureDraftVersion(ctx: Ctx, courseId: string): Promise<st
           isRequired: l.isRequired,
           minSeconds: l.minSeconds,
           videoThresholdPct: l.videoThresholdPct,
+          passScorePct: l.passScorePct,
         })))
       }
     }
@@ -265,6 +266,7 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
       isRequired: input.isRequired,
       minSeconds: input.minSeconds ?? null,
       videoThresholdPct: input.videoThresholdPct,
+      passScorePct: input.itemType === 'quiz' && input.passScorePct != null ? String(input.passScorePct) : null,
     }).returning()
     return lesson!
   })
@@ -290,6 +292,7 @@ export async function updateLesson(ctx: Ctx, lessonId: string, input: z.infer<ty
       ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
       ...(input.minSeconds !== undefined ? { minSeconds: input.minSeconds } : {}),
       ...(input.videoThresholdPct !== undefined ? { videoThresholdPct: input.videoThresholdPct } : {}),
+      ...(input.passScorePct !== undefined && lesson.itemType === 'quiz' ? { passScorePct: input.passScorePct == null ? null : String(input.passScorePct) } : {}),
       updatedAt: new Date(),
     }).where(eq(lessons.id, lessonId)).returning()
 

@@ -2,17 +2,17 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'complextest.manage' })
 const { t } = useI18n()
 const { api } = useApi()
-interface CT { id: string, title: string, parts: { quizId: string, weight: number, minScore: number | null, title: string }[], passScore: string, timeLimitSec: number | null, sequential: boolean, attemptsAllowed: number, isActive: boolean }
+interface CT { id: string, title: string, parts: { quizId: string, weight: number, minScore: number | null, title: string }[], sequential: boolean, isActive: boolean }
 const items = ref<CT[]>([])
 const quizzes = ref<{ id: string, title: string }[]>([])
 const error = ref('')
 const notice = ref('')
-const form = reactive({ title: '', passScore: 70, timeLimitMin: 60 as number | null, sequential: true, attemptsAllowed: 1, showPartsResult: true, parts: [] as { quizId: string, weight: number, minScore: number | null }[] })
+const form = reactive({ title: '', sequential: true, showPartsResult: true, parts: [] as { quizId: string, weight: number, minScore: number | null }[] })
 async function load() { try { items.value = await api('/complex-tests'); quizzes.value = (await api<{ id: string, title: string, status: string }[]>('/quizzes')).filter(q => q.status !== 'archived') } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)
 async function save() {
   error.value = ''; notice.value = ''
-  try { await api('/complex-tests', { method: 'PUT', body: { title: form.title, passScore: form.passScore, timeLimitSec: form.timeLimitMin ? form.timeLimitMin * 60 : null, sequential: form.sequential, attemptsAllowed: form.attemptsAllowed, showPartsResult: form.showPartsResult, parts: form.parts } }); notice.value = t('common.saved'); form.title = ''; form.parts = []; await load() }
+  try { await api('/complex-tests', { method: 'PUT', body: { title: form.title, sequential: form.sequential, showPartsResult: form.showPartsResult, parts: form.parts } }); notice.value = t('common.saved'); form.title = ''; form.parts = []; await load() }
   catch (err) { error.value = apiErrorOf(err).message }
 }
 </script>
@@ -22,23 +22,20 @@ async function save() {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="notice">{{ notice }}</p>
     <table class="table">
-      <thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('cx.parts') }}</th><th>{{ t('cx.pass') }}</th><th /></tr></thead>
+      <thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('cx.parts') }}</th><th /></tr></thead>
       <tbody>
         <tr v-for="c in items" :key="c.id">
-          <td><b>{{ c.title }}</b><div class="sub">{{ c.sequential ? t('cx.sequential') : '' }}<template v-if="c.timeLimitSec"> · {{ Math.round(c.timeLimitSec / 60) }} хв</template> · {{ t('cx.attemptsN', { n: c.attemptsAllowed || '∞' }) }}</div></td>
+          <td><b>{{ c.title }}</b><div class="sub">{{ c.sequential ? t('cx.sequential') : '' }}</div></td>
           <td class="sub">{{ c.parts.map(p => `${p.title} ×${p.weight}${p.minScore != null ? ` (≥${p.minScore})` : ''}`).join(' → ') }}</td>
-          <td>{{ Number(c.passScore) }}%</td>
           <td><NuxtLink :to="`/learn/complex/${c.id}`" class="link">{{ t('cx.openLink') }}</NuxtLink></td>
         </tr>
       </tbody>
     </table>
     <section class="card">
       <h2>{{ t('cx.new') }}</h2>
+      <p class="sub">{{ t('cx.rulesInTask') }}</p>
       <div class="row">
         <input v-model="form.title" class="field grow" :placeholder="t('cx.titlePh')">
-        <label class="sub">{{ t('cx.pass') }} <input v-model.number="form.passScore" class="field short" type="number" min="1" max="100"></label>
-        <label class="sub">{{ t('cx.limitMin') }} <input v-model.number="form.timeLimitMin" class="field short" type="number" min="1"></label>
-        <label class="sub">{{ t('cx.attemptsLabel') }} <input v-model.number="form.attemptsAllowed" class="field short" type="number" min="0" max="20"></label>
         <label class="check"><input v-model="form.sequential" type="checkbox"> {{ t('cx.sequential') }}</label>
         <label class="check"><input v-model="form.showPartsResult" type="checkbox"> {{ t('cx.showParts') }}</label>
       </div>

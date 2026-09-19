@@ -5,6 +5,7 @@ const mt = await import('../../server/services/meetups')
 const ct = await import('../../server/services/complexTests')
 const { createBank, createQuestion, createQuiz, setQuizQuestions } = await import('../../server/services/questions')
 const { saveAnswer, submitAttempt, getAttemptState } = await import('../../server/services/attempts')
+const { assignWithParams } = await import('./_assign')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 
@@ -15,6 +16,7 @@ let posId: string
 const userIds: string[] = []
 const meetupIds: string[] = []
 const quizIds: string[] = []
+const assignmentIds: string[] = []
 const complexIds: string[] = []
 let bankId: string
 
@@ -40,6 +42,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (meetupIds.length) await admin`delete from meetups where id in ${admin(meetupIds)}`
   if (complexIds.length) await admin`delete from complex_tests where id in ${admin(complexIds)}`
+  if (assignmentIds.length) await admin`delete from assignments where id in ${admin(assignmentIds)}`
   if (quizIds.length) { await admin`delete from attempts where quiz_id in ${admin(quizIds)}`; await admin`delete from quizzes where id in ${admin(quizIds)}` }
   await admin`delete from questions where bank_id = ${bankId}`
   await admin`delete from question_banks where id = ${bankId}`
@@ -154,8 +157,9 @@ describe('этап 9: комплексные тесты (docs/18 §13.6)', () =>
     const q2 = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: `<p>${title} 2?</p>` }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [] })).id
     const q3 = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: `<p>${title} 3?</p>` }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [] })).id
     const q4 = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: `<p>${title} 4?</p>` }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [] })).id
-    const quiz = await createQuiz(ctx(), { title: `${title} ${Date.now()}`, kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false, params: { passScore, attemptsAllowed: 0, shuffleQuestions: false, shuffleOptions: false } })
+    const quiz = await createQuiz(ctx(), { title: `${title} ${Date.now()}`, kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
     quizIds.push(quiz.id)
+    assignmentIds.push(await assignWithParams(ctx(), 'test', quiz.id, { passScore, attemptsAllowed: 0, shuffleQuestions: false, shuffleOptions: false }))
     await setQuizQuestions(ctx(), quiz.id, [q1, q2, q3, q4].map((questionId, sort) => ({ questionId, sort })))
     return quiz.id
   }
@@ -170,8 +174,10 @@ describe('этап 9: комплексные тесты (docs/18 §13.6)', () =>
   it('три части, вторая с min_score=80: набрано 75 → провал независимо от общего балла; sequential блокирует третью до второй', async () => {
     const learner = ctx(await makePerson('Комплексний'))
     const [qa, qb, qc] = [await makeQuiz('Ч1', 50), await makeQuiz('Ч2', 50), await makeQuiz('Ч3', 50)]
-    const c = await ct.upsertComplexTest(ctx(), { title: `Комплекс ${Date.now()}`, parts: [{ quizId: qa, weight: 1 }, { quizId: qb, weight: 1, minScore: 80 }, { quizId: qc, weight: 1 }], passScore: 70, sequential: true, attemptsAllowed: 2, timeLimitSec: 3600 })
+    const c = await ct.upsertComplexTest(ctx(), { title: `Комплекс ${Date.now()}`, parts: [{ quizId: qa, weight: 1 }, { quizId: qb, weight: 1, minScore: 80 }, { quizId: qc, weight: 1 }], sequential: true })
     complexIds.push(c!.id)
+    // Порог, попытки и лимит — в назначении комплексного теста (CLAUDE.md п. 11)
+    assignmentIds.push(await assignWithParams(ctx(), 'complex_test', c!.id, { passScore: 70, attemptsAllowed: 2, timeLimitSec: 3600 }))
     const intro = await ct.complexIntro(learner, c!.id)
     expect(intro!.parts.length).toBe(3)
     const s = await ct.startComplex(learner, c!.id)

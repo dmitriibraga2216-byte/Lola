@@ -68,7 +68,9 @@ export const webhookEndpoints = pgTable('webhook_endpoints', {
   isActive: boolean('is_active').notNull().default(true),
   description: text('description'),
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   ...baseColumns,
@@ -98,7 +100,9 @@ export const apiTokens = pgTable('api_tokens', {
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Учёт SMS на тенанта (docs/06 §6.4: счётчик отправок, лимит в настройках). */
 export const smsUsage = pgTable('sms_usage', {
@@ -120,5 +124,6 @@ export const oauthStates = pgTable('oauth_states', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.stateHash),
 ])

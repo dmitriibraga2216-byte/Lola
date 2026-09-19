@@ -8,10 +8,11 @@ const { startAttempt, saveAnswer, submitAttempt, getAttemptState } = await impor
 const { completeLesson, openLesson, enrollmentTree } = await import('../../server/services/learning')
 const { createRule, runRules, listRules, deleteRule } = await import('../../server/services/automation')
 const { withTenant } = await import('../../server/utils/withTenant')
+const { assignWithParams } = await import('./_assign')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 let tenantId: string, adminId: string, lazarevaId: string, posId: string, bankId: string
-const userIds: string[] = [], courseIds: string[] = [], quizIds: string[] = [], programIds: string[] = [], ruleIds: string[] = []
+const userIds: string[] = [], courseIds: string[] = [], quizIds: string[] = [], programIds: string[] = [], ruleIds: string[] = [], assignmentIds: string[] = []
 const ctx = (actorId = adminId) => ({ tenantId, actorId })
 
 async function makePerson(name: string) {
@@ -43,8 +44,9 @@ async function passCourse(userId: string, courseId: string) {
 }
 async function makeQuiz(passScore = 50) {
   const q = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: '<p>?</p>' }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [] })).id
-  const quiz = await createQuiz(ctx(), { title: `Тест ${Date.now()}`, kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false, params: { passScore, attemptsAllowed: 0, shuffleQuestions: false, shuffleOptions: false } })
+  const quiz = await createQuiz(ctx(), { title: `Тест ${Date.now()}`, kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
   quizIds.push(quiz.id)
+  assignmentIds.push(await assignWithParams(ctx(), 'test', quiz.id, { passScore, attemptsAllowed: 0, shuffleQuestions: false, shuffleOptions: false }))
   await setQuizQuestions(ctx(), quiz.id, [{ questionId: q, sort: 0 }])
   await admin`update quizzes set status = 'published' where id = ${quiz.id}`
   return quiz.id
@@ -70,6 +72,7 @@ afterAll(async () => {
   if (programIds.length) await admin`delete from programs where id in ${admin(programIds)}`
   if (ruleIds.length) await admin`delete from automation_rules where id in ${admin(ruleIds)}`
   if (userIds.length) { await admin`delete from notifications where user_id in ${admin(userIds)}`; await admin`delete from attempts where user_id in ${admin(userIds)}`; await admin`delete from certificates where user_id in ${admin(userIds)}`; await admin`delete from enrollments where user_id in ${admin(userIds)}`; await admin`delete from users where id in ${admin(userIds)}` }
+  if (assignmentIds.length) await admin`delete from assignments where id in ${admin(assignmentIds)}`
   if (quizIds.length) { await admin`delete from attempts where quiz_id in ${admin(quizIds)}`; await admin`delete from quizzes where id in ${admin(quizIds)}` }
   await admin`delete from questions where bank_id = ${bankId}`; await admin`delete from question_banks where id = ${bankId}`
   if (courseIds.length) { await admin`delete from enrollments where subject_id in ${admin(courseIds)}`; await admin`delete from resources where id in (select l.item_id from lessons l join modules m on m.id = l.module_id join course_versions v on v.id = m.course_version_id where l.item_type = 'resource' and v.course_id in ${admin(courseIds)})`; await admin`delete from courses where id in ${admin(courseIds)}` }

@@ -1,12 +1,14 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
-import { assignments, courses, enrollmentEvents, enrollments, lessons, modules, programs, quizzes, users } from '../db/schema'
+import { assignments, complexTests, courses, enrollmentEvents, enrollments, lessons, modules, programs, quizzes, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
+import { paramsFor } from '../../shared/schemas/assignments'
 import type { Audience, assignmentCreateSchema, assignmentUpdateSchema } from '../../shared/schemas/assignments'
+import type { ContentType } from '../../shared/enums'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -61,18 +63,29 @@ export async function previewAudience(ctx: Ctx, audience: Audience, exclude?: Au
   })
 }
 
+/** Название контента по content_type (docs/02). Возвращает null, если контент не найден или не опубликован. */
 async function subjectTitle(tx: TenantTx, subjectType: string, subjectId: string): Promise<string | null> {
-  if (subjectType === 'program') {
-    const [p] = await tx.select({ title: programs.title, status: programs.status }).from(programs).where(eq(programs.id, subjectId))
-    return p?.status === 'published' ? p.title : null
+  switch (subjectType) {
+    case 'training_program': {
+      const [p] = await tx.select({ title: programs.title, status: programs.status }).from(programs).where(eq(programs.id, subjectId))
+      return p?.status === 'published' ? p.title : null
+    }
+    case 'test': {
+      const [q] = await tx.select({ title: quizzes.title }).from(quizzes).where(and(eq(quizzes.id, subjectId), isNull(quizzes.deletedAt)))
+      return q?.title ?? null
+    }
+    case 'complex_test': {
+      const [c] = await tx.select({ title: complexTests.title }).from(complexTests).where(eq(complexTests.id, subjectId))
+      return c?.title ?? null
+    }
+    case 'course': {
+      const [c] = await tx.select({ title: courses.title, status: courses.status }).from(courses)
+        .where(and(eq(courses.id, subjectId), isNull(courses.deletedAt)))
+      return c?.status === 'published' ? c.title : null
+    }
+    default:
+      return null // остальные типы контента как назначаемые — spec-15-tasks (docs/30 §4, PR 6)
   }
-  if (subjectType === 'quiz') {
-    const [q] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, subjectId))
-    return q?.title ?? null
-  }
-  const [c] = await tx.select({ title: courses.title, status: courses.status }).from(courses)
-    .where(and(eq(courses.id, subjectId), isNull(courses.deletedAt)))
-  return c?.status === 'published' ? c.title : null
 }
 
 export type CreateResult
@@ -108,7 +121,7 @@ export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmen
       dueDays: input.dueMode === 'relative' ? input.dueDays : null,
       isMandatory: input.isMandatory,
       recurrence: input.recurrence ?? null,
-      params: input.params ?? {},
+      params: paramsFor(input.subjectType, input.params ?? {}),
       reminders: { ...DEFAULT_REMINDERS, ...(input.reminders ?? {}) },
       autoSync: input.autoSync,
       tags: input.tags,
@@ -134,7 +147,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
     const [a] = await tx.select().from(assignments).where(eq(assignments.id, assignmentId))
     if (!a || a.status !== 'active') return 0
     // Программа/траектория (docs/17): раскрытие аудитории в program_enrollments
-    if (a.subjectType === 'program') {
+    if (a.subjectType === 'training_program') {
       const { enrollProgram } = await import('./programs')
       const wanted = await resolveAudience(tx, a.audience as Audience, a.exclude as Audience)
       let n = 0
@@ -142,7 +155,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
       await tx.update(assignments).set({ stats: sql`jsonb_set(coalesce(${assignments.stats}, '{}'), '{assigned}', (select count(*) from program_enrollments e where e.assignment_id = ${assignmentId}::uuid)::text::jsonb)`, updatedAt: new Date() }).where(eq(assignments.id, assignmentId))
       return n
     }
-    if (a.subjectType !== 'course') return 0 // назначения тестов — через курс-обёртку, R2
+    if (a.subjectType !== 'course') return 0 // тест и комплексный тест: записи не создаются, правила берутся при старте попытки (taskParams.ts)
 
     const [course] = await tx.select().from(courses).where(and(eq(courses.id, a.subjectId), isNull(courses.deletedAt)))
     if (!course?.publishedVersionId || course.status !== 'published') return 0
@@ -154,7 +167,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
     const have = new Set(existing.map(e => e.userId))
 
     // Профиль (docs/15 §7.11): уже пройденные с действующим результатом не назначаются заново
-    const alreadyValid = a.kind === 'profile'
+    const alreadyValid = a.profileId
       ? new Set((await tx.select({ userId: enrollments.userId }).from(enrollments).where(and(
           eq(enrollments.subjectId, a.subjectId),
           eq(enrollments.status, 'completed'),
@@ -269,7 +282,7 @@ export async function updateAssignment(ctx: Ctx, id: string, input: z.infer<type
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.reminders !== undefined ? { reminders: { ...(before.reminders as object), ...input.reminders } } : {}),
-      ...(input.params !== undefined ? { params: { ...(before.params as object), ...input.params } } : {}),
+      ...(input.params !== undefined ? { params: paramsFor(before.subjectType as ContentType, { ...(before.params as object), ...input.params }) } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
       ...(input.autoSync !== undefined ? { autoSync: input.autoSync } : {}),
       updatedAt: new Date(),

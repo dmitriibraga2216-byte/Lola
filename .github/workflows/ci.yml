@@ -30,6 +30,11 @@ jobs:
       PLATFORM_DATABASE_URL: postgres://platform_admin:platform_admin_dev@localhost:5432/lola
       ENCRYPTION_KEY: ci-encryption-key
       SESSION_SECRET: ci-session-secret
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: lola-media
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
 
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +56,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # MinIO для тестов S3 (PDF сертификата, медиа): у образа quay нет команды по умолчанию, поэтому не через services
+      - name: MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
+
       - name: Migrate
         run: pnpm db:migrate
 
@@ -67,7 +78,7 @@ jobs:
       - name: Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: E2E (8 сценариев docs/06 §6.10)
+      - name: E2E (docs/06 §6.10 + сценарии этапов 8–10)
         run: pnpm test:e2e
         env:
           CI: "1"

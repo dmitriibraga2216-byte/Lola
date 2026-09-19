@@ -143,7 +143,9 @@ export const goalStatusLog = pgTable('goal_status_log', {
   toStatus: text('to_status').notNull(),
   actorId: uuid('actor_id').references(() => users.id),
   comment: text('comment'),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const goalComments = pgTable('goal_comments', {
   ...baseColumns,
@@ -151,7 +153,9 @@ export const goalComments = pgTable('goal_comments', {
   goalId: uuid('goal_id').notNull().references(() => developmentGoals.id, { onDelete: 'cascade' }),
   authorId: uuid('author_id').notNull().references(() => users.id),
   body: text('body').notNull(),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const externalTrainingRequests = pgTable('external_training_requests', {
   ...baseColumns,
@@ -185,7 +189,9 @@ export const careerRequests = pgTable('career_requests', {
   approvals: jsonb('approvals').notNull().default('[]'),
   assessmentId: uuid('assessment_id'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Стратегические планы обучения (docs/19 §3.8): период, подразделение, цели, бюджет, KPI. */
 export const strategicPlans = pgTable('strategic_plans', {

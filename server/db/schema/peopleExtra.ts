@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 
@@ -26,6 +26,7 @@ export const functionalChiefs = pgTable('functional_chiefs', {
   kind: text('kind').notNull().default('functional'), // line | functional
   scope: text('scope'), // по точке, подразделению, направлению — текстом
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.userId, t.chiefId, t.kind),
 ])
 
@@ -35,4 +36,6 @@ export const userNotes = pgTable('user_notes', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   authorId: uuid('author_id').references(() => users.id),
   body: text('body').notNull(),
-})
+}, t => [
+  index().on(t.tenantId),
+])

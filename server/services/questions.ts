@@ -6,7 +6,6 @@ import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import type { ContentBlock } from '../../shared/schemas/content'
 import type { bankSchema, questionSchema, questionUpdateSchema, quizSchema, quizUpdateSchema } from '../../shared/schemas/quizzes'
-import { DEFAULT_QUIZ_PARAMS } from '../../shared/domain/grading'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -127,7 +126,6 @@ export async function createQuiz(ctx: Ctx, input: z.infer<typeof quizSchema>) {
       authorIds: [ctx.actorId],
       selectionMode: input.selectionMode,
       randomRules: input.randomRules ?? null,
-      params: { ...DEFAULT_QUIZ_PARAMS, ...(input.params ?? {}) },
       requiresOfflineConfirm: input.requiresOfflineConfirm,
     }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'quiz.create', entity: 'quiz', entityId: quiz!.id })
@@ -146,7 +144,6 @@ export async function updateQuiz(ctx: Ctx, id: string, input: z.infer<typeof qui
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
       ...(input.selectionMode !== undefined ? { selectionMode: input.selectionMode } : {}),
       ...(input.randomRules !== undefined ? { randomRules: input.randomRules } : {}),
-      ...(input.params !== undefined ? { params: { ...(before.params as object), ...input.params } } : {}),
       ...(input.requiresOfflineConfirm !== undefined ? { requiresOfflineConfirm: input.requiresOfflineConfirm } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       updatedAt: new Date(),

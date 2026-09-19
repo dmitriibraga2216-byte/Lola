@@ -44,6 +44,7 @@ export const wikiRevisions = pgTable('wiki_revisions', {
   authorId: uuid('author_id').references(() => users.id),
   comment: text('comment'),
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.pageId, t.version),
 ])
 
@@ -60,7 +61,9 @@ export const savedReports = pgTable('saved_reports', {
   format: text('format').notNull().default('xlsx'), // xlsx | csv (docs/22 §6)
   sort: text('sort'), // поле сортировки
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Фоновые выгрузки (docs/22 §7.3, §13.3): > 5000 строк — задача, ссылка уведомлением, живёт 24 часа. */
 export const reportExports = pgTable('report_exports', {

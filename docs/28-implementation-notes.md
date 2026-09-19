@@ -137,6 +137,14 @@
 - `00` «wiki не делаем» против уже сделанного (PR #23) → модуль остаётся в коде, по умолчанию выключен флагом модуля; форум/чат/рабочие задачи не делаются.
 - `04`: новые пути (`/content`, `/tasks`, `/me`, `/enrollments/:id/items`) вводятся алиасами к существующим, старые снимаются одним PR в конце R1.
 
+### Паритет 1 — правила прохождения только в назначении (CLAUDE.md п. 11, 13)
+- Из контента удалены `quizzes.params`, `complex_tests.pass_score/time_limit_sec/attempts_allowed`. Правила читаются `server/services/taskParams.ts`: запись → её назначение (порог теста в плане курса `lessons.pass_score_pct` перекрывает порог только для этого элемента) → активное назначение этого контента, в аудиторию которого входит человек (новейшее) → умолчания тенанта `tenants.settings.learning.quizDefaults` поверх `DEFAULT_QUIZ_PARAMS`. Копия — в `attempts.params` и `complex_test_attempts.params`, плюс `assignment_id` для отчёта по назначению.
+- `assignments.subject_type` принимает одиннадцать `content_type` из docs/02 (`quiz`→`test`, `program`→`training_program`), `assignments.kind` — пять `task_type` (`profile`/`position_profile`→`auto`, источник хранится в `profile_id`). Оба закреплены CHECK-ограничениями; `shared/enums.ts` — единственный источник значений, тест `schema-parity.spec.ts` сверяет его с блоком перечислений docs/02 буквально.
+- `assignments.params`: словарь docs/15 §3.3 + ключи эталона docs/02 §2.7 (`questionsMode`, `resultSource`, `trainingMode`, награды, …) в camelCase; состав по типу контента — `PARAM_KEYS_BY_CONTENT_TYPE`, лишние ключи отбрасывает `paramsFor()`. Новые ключи пока только хранятся; поведение (`one_per_group`, `resultSource=best`, награды) — в PR 6–7 очереди docs/30.
+- Исключения теста «нет `attempts|pass_score|due_at|time_limit` в контенте»: `lessons.pass_score_pct` (docs/02 §2.4), `questions.time_limit_sec` (docs/12 §3.2), анкеты (docs/08 §12.8) и долг `news.ack_due_at` до PR spec-21-notices.
+- Каждой таблице с `tenant_id` добавлен индекс по `tenant_id` (37 таблиц не имели) — docs/25 §15.
+- Назначения тестов и комплексных тестов записи (`enrollments`) не создают: правила берутся при старте попытки; аудитория и «Мої завдання» для них — PR spec-15-tasks.
+
 ## 28.3 Переменные окружения, добавленные после docs/26
 
 `APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`,

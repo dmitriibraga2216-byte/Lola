@@ -3,11 +3,12 @@ import {
   attemptAnswers, attempts, lessonProgress, lessons, questions, quizQuestions, quizzes, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { resolveQuizParams } from './taskParams'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import {
-  DEFAULT_QUIZ_PARAMS, MANUAL_KINDS, computeTotals, gradeAnswer, stripAnswers,
+  MANUAL_KINDS, computeTotals, gradeAnswer, stripAnswers,
   type GradeResult, type QuizParams, type SnapshotQuestion,
 } from '../../shared/domain/grading'
 import { completeLesson } from './learning'
@@ -98,7 +99,8 @@ export async function startAttempt(ctx: Ctx, quizId: string, opts: { enrollmentI
     const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, quizId), isNull(quizzes.deletedAt)))
     if (!quiz) return { ok: false as const, code: 'not_found' as const }
 
-    const params: QuizParams = { ...DEFAULT_QUIZ_PARAMS, ...(quiz.params as Partial<QuizParams>) }
+    // Правила — из назначения, не из теста (CLAUDE.md п. 11)
+    const { params, assignmentId } = await resolveQuizParams(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, quizId, enrollmentId: opts.enrollmentId, lessonId: opts.lessonId })
 
     const prior = await tx.select().from(attempts)
       .where(and(
@@ -131,6 +133,7 @@ export async function startAttempt(ctx: Ctx, quizId: string, opts: { enrollmentI
       quizId,
       enrollmentId: opts.enrollmentId ?? null,
       lessonId: opts.lessonId ?? null,
+      assignmentId,
       userId: ctx.actorId,
       attemptNo: (last?.attemptNo ?? 0) + 1,
       snapshot: built.snapshot,
@@ -551,7 +554,7 @@ export async function quizIntro(ctx: Ctx, quizId: string, enrollmentId?: string)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, quizId), isNull(quizzes.deletedAt)))
     if (!quiz) return null
-    const params: QuizParams = { ...DEFAULT_QUIZ_PARAMS, ...(quiz.params as Partial<QuizParams>) }
+    const { params, source: paramsSource } = await resolveQuizParams(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, quizId, enrollmentId })
     const prior = await tx.select({ id: attempts.id, status: attempts.status, attemptNo: attempts.attemptNo, passed: attempts.passed })
       .from(attempts)
       .where(and(
@@ -575,6 +578,7 @@ export async function quizIntro(ctx: Ctx, quizId: string, enrollmentId?: string)
       attemptsAllowed: params.attemptsAllowed,
       attemptsUsed: used,
       attemptsLeft: params.attemptsAllowed === 0 ? null : Math.max(0, params.attemptsAllowed - used),
+      paramsSource,
       activeAttemptId: active?.id ?? null,
       lastPassed: prior.some(a => a.passed === true),
       history: prior,

@@ -91,7 +91,9 @@ export const sessions = pgTable('sessions', {
   impersonatedBy: uuid('impersonated_by').references(() => users.id),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** tenant_id nullable: код запрашивается до выбора пространства. RLS настроен с учётом null. */
 export const otpCodes = pgTable('otp_codes', {
@@ -104,6 +106,7 @@ export const otpCodes = pgTable('otp_codes', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
 }, t => [
+  index().on(t.tenantId),
   index().on(t.phone, t.expiresAt.desc()),
 ])
 
@@ -115,4 +118,6 @@ export const invitations = pgTable('invitations', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])

@@ -15,8 +15,8 @@ export const assignments = pgTable('assignments', {
   ...baseColumns,
   tenantId: tenantId(),
   title: text('title').notNull(),
-  kind: text('kind').notNull().default('manual'), // manual | auto | catalog | trajectory | profile
-  subjectType: text('subject_type').notNull().default('course'), // course | quiz
+  kind: text('kind').notNull().default('manual'), // task_type (docs/02): manual | auto | catalog | trajectory | archive
+  subjectType: text('subject_type').notNull().default('course'), // content_type (docs/02): course | training_program | resource | test | complex_test | workshop | poll | assessment | check_list | meetup | webinar
   subjectId: uuid('subject_id').notNull(),
   subjectVersionId: uuid('subject_version_id'), // зафиксированная версия или null = текущая
   audience: jsonb('audience').notNull(), // {rules: [...], match: 'any'|'all'} — docs/15 §3.2
@@ -51,7 +51,9 @@ export const learningProfiles = pgTable('learning_profiles', {
   appliesToExisting: boolean('applies_to_existing').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   lastAppliedAt: timestamp('last_applied_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Правила автоматизации (docs/15 §3.6): триггер → условия → действия. */
 export const automationRules = pgTable('automation_rules', {
@@ -67,7 +69,9 @@ export const automationRules = pgTable('automation_rules', {
   runLimit: jsonb('run_limit').notNull().default(sql`'{"oncePerUser":true}'::jsonb`),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
   stats: jsonb('stats').notNull().default(sql`'{}'::jsonb`),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const automationRuns = pgTable('automation_runs', {
   ...baseColumns,
@@ -114,7 +118,9 @@ export const notificationTemplateVersions = pgTable('notification_template_versi
   subject: text('subject'),
   body: text('body').notNull(),
   authorId: uuid('author_id').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Настройки человека (docs/23 §3.3): по каждому коду — включено и канал; обязательные не отключаются. */
 export const userNotificationPrefs = pgTable('user_notification_prefs', {
@@ -166,4 +172,6 @@ export const telegramTokens = pgTable('telegram_tokens', {
   tokenHash: text('token_hash').notNull().unique(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])

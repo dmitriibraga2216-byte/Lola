@@ -51,7 +51,9 @@ export const enrollmentEvents = pgTable('enrollment_events', {
   // created | started | progress | completed | failed | expired | extended | cancelled | reset
   payload: jsonb('payload').notNull().default('{}'),
   actorId: uuid('actor_id'), // null — системное событие
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const lessonProgress = pgTable('lesson_progress', {
   ...baseColumns,

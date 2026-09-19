@@ -18,7 +18,8 @@ interface Row {
   stats: { assigned?: number, started?: number, completed?: number, overdue?: number }
 }
 
-const tab = ref<'all' | 'manual' | 'auto' | 'profile' | 'archived'>('all')
+// Вкладки эталона (task_type, docs/02): manual | auto | catalog | trajectory | archive
+const tab = ref<'all' | 'manual' | 'auto' | 'catalog' | 'trajectory' | 'archived'>('all')
 const items = ref<Row[]>([])
 const error = ref('')
 
@@ -48,7 +49,7 @@ function due(r: Row) {
       <NuxtLink to="/admin/assignments/new" class="primary">{{ t('assign.new') }}</NuxtLink>
     </header>
     <div class="tabs">
-      <button v-for="k in (['all', 'manual', 'auto', 'profile', 'archived'] as const)" :key="k" :class="['tab', { on: tab === k }]" @click="tab = k">
+      <button v-for="k in (['all', 'manual', 'auto', 'catalog', 'trajectory', 'archived'] as const)" :key="k" :class="['tab', { on: tab === k }]" @click="tab = k">
         {{ t(`assign.tab.${k}`) }}
       </button>
     </div>

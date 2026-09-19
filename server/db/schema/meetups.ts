@@ -82,7 +82,9 @@ export const webinars = pgTable('webinars', {
   externalMeetingId: text('external_meeting_id'), // id встречи у провайдера (Zoom / Meet)
   autoAttendance: boolean('auto_attendance').notNull().default(false),
   minMinutesForAttendance: integer('min_minutes_for_attendance'), // null = 70% длительности
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const webinarParticipations = pgTable('webinar_participations', {
   ...baseColumns,
@@ -95,6 +97,7 @@ export const webinarParticipations = pgTable('webinar_participations', {
   attended: boolean('attended').notNull().default(false),
   source: text('source').notNull().default('manual'), // provider | manual
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.webinarId, t.userId),
 ])
 
@@ -103,14 +106,14 @@ export const complexTests = pgTable('complex_tests', {
   tenantId: tenantId(),
   title: text('title').notNull(),
   parts: jsonb('parts').notNull(), // [{quizId, weight, isRequired, minScore}]
-  passScore: numeric('pass_score', { precision: 5, scale: 2 }).notNull().default('70'),
-  timeLimitSec: integer('time_limit_sec'),
+  // Порог, лимит времени и попытки — в назначении (assignments.params, docs/15 §14.3), не в контенте.
   sequential: boolean('sequential').notNull().default(true),
-  attemptsAllowed: integer('attempts_allowed').notNull().default(1),
   showPartsResult: boolean('show_parts_result').notNull().default(true),
   isActive: boolean('is_active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const complexTestAttempts = pgTable('complex_test_attempts', {
   ...baseColumns,
@@ -118,6 +121,8 @@ export const complexTestAttempts = pgTable('complex_test_attempts', {
   complexTestId: uuid('complex_test_id').notNull().references(() => complexTests.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   attemptNo: integer('attempt_no').notNull().default(1),
+  assignmentId: uuid('assignment_id'), // назначение, из которого взяты params
+  params: jsonb('params').notNull().default(sql`'{}'::jsonb`), // копия параметров назначения на момент старта (passScore, timeLimitSec, attemptsAllowed)
   partsState: jsonb('parts_state').notNull().default('[]'), // [{quizId, attemptId, score, status}]
   status: text('status').notNull().default('in_progress'), // in_progress | passed | failed | expired
   score: numeric('score', { precision: 5, scale: 2 }),

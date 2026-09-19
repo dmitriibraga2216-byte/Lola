@@ -463,7 +463,10 @@
     "openQuiz": "Open quiz",
     "workshopLesson": "This is a workshop lesson. Task and criteria live in Workshops.",
     "closesCompetency": "Course closes a competency",
-    "closesCompetencyHint": "The level is credited once the course final quiz is passed"
+    "closesCompetencyHint": "The level is credited once the course final quiz is passed",
+    "passScorePct": "Pass score, %",
+    "passScoreHint": "Threshold only for this test in the course plan. The threshold on the task (assignment) takes precedence.",
+    "fromTask": "from task"
   },
   "blocks": {
     "heading": "Heading",
@@ -541,7 +544,9 @@
     "shuffleO": "Shuffle options",
     "allowSkip": "Allow skip",
     "allowBack": "Allow going back",
-    "requireAll": "Require all answered"
+    "requireAll": "Require all answered",
+    "rulesInTask": "Passing rules — attempts, pass score, time limit, answer display — are set on the task (assignment), not on the test. One test can be assigned to different audiences with different rules.",
+    "goAssign": "Create a task with this test"
   },
   "review": {
     "title": "Review queue",
@@ -590,15 +595,16 @@
       "all": "All",
       "manual": "Manual",
       "auto": "Automatic",
-      "profile": "By profile",
-      "archived": "Archive"
+      "archived": "Archive",
+      "catalog": "Catalog",
+      "trajectory": "Trajectory"
     },
     "kind": {
       "manual": "manual",
       "auto": "automatic",
-      "catalog": "catalog",
-      "trajectory": "trajectory",
-      "profile": "profile"
+      "catalog": "via catalog",
+      "trajectory": "by trajectory",
+      "archive": "archive"
     },
     "status": {
       "draft": "Draft",
@@ -675,7 +681,9 @@
     "remindAll": "Remind all",
     "reminded": "Reminded {n} people",
     "archive": "Archive",
-    "archiveConfirm": "Archive? Auto-sync stops, history stays"
+    "archiveConfirm": "Archive? Auto-sync stops, history stays",
+    "pickSubject": "Pick what to assign",
+    "rulesHere": "These rules apply only to this task. The test or course itself holds no passing rules."
   },
   "profiles": {
     "hint": "Position profile: a person lands on a position → the course set is assigned automatically.",
@@ -1627,7 +1635,8 @@
     "attemptsCol": "Attempts",
     "avg": "Avg",
     "failedCol": "Failed",
-    "partWord": "part"
+    "partWord": "part",
+    "rulesInTask": "Pass score, time limit and attempts are set on the task (assignment), not on the test."
   },
   "wiki": {
     "title": "Wiki",
@@ -1950,5 +1959,18 @@
     },
     "reportTitle": "Waves × locations: average score and number of checks",
     "externalRun": "Checked by a mystery shopper via a one-time link"
+  },
+  "contentType": {
+    "course": "Course",
+    "training_program": "Training program",
+    "resource": "Resource",
+    "test": "Test",
+    "complex_test": "Complex test",
+    "workshop": "Workshop",
+    "poll": "Poll",
+    "assessment": "Assessment",
+    "check_list": "Checklist",
+    "meetup": "Meetup",
+    "webinar": "Webinar"
   }
 }

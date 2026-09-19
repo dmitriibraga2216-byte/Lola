@@ -81,7 +81,9 @@ export const knowledgeRevisions = pgTable('knowledge_revisions', {
   body: jsonb('body').notNull(),
   authorId: uuid('author_id').references(() => users.id),
   comment: text('comment'),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Привязка статьи к уроку («читати далі») и к позиции (подборка для роли). */
 export const knowledgeLinks = pgTable('knowledge_links', {
@@ -109,7 +111,9 @@ export const surveys = pgTable('surveys', {
   closesAt: timestamp('closes_at', { withTimezone: true }),
   triggerCourseId: uuid('trigger_course_id'), // course_feedback: автозапуск после курса
   createdBy: uuid('created_by').references(() => users.id),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const surveyResponses = pgTable('survey_responses', {
   ...baseColumns,
@@ -191,7 +195,9 @@ export const workshops = pgTable('workshops', {
   status: text('status').notNull().default('draft'),
   authorIds: uuid('author_ids').array().notNull().default(sql`'{}'::uuid[]`),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const workshopSubmissions = pgTable('workshop_submissions', {
   ...baseColumns,
@@ -231,4 +237,6 @@ export const workshopComments = pgTable('workshop_comments', {
   body: text('body').notNull(),
   isInternal: boolean('is_internal').notNull().default(false),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])

@@ -62,6 +62,7 @@ export const programEdges = pgTable('program_edges', {
   condition: jsonb('condition').notNull().default('{"type":"always"}'), // always | passed | failed | score_gte | position_is
   sort: integer('sort').notNull().default(0),
 }, t => [
+  index().on(t.tenantId),
   unique().on(t.fromNodeId, t.toNodeId),
 ])
 

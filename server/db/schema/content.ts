@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import {
-  boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
+  boolean, numeric, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
@@ -18,7 +18,9 @@ export const courseCategories = pgTable('course_categories', {
   parentId: uuid('parent_id').references((): AnyPgColumn => courseCategories.id),
   name: text('name').notNull(),
   sort: integer('sort').notNull().default(0),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 /** Материал — единица контента (статья из блоков; file/video/link — через media). */
 export const resources = pgTable('resources', {
@@ -89,7 +91,9 @@ export const modules = pgTable('modules', {
   courseVersionId: uuid('course_version_id').notNull().references(() => courseVersions.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   sort: integer('sort').notNull(),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const lessons = pgTable('lessons', {
   ...baseColumns,
@@ -103,6 +107,7 @@ export const lessons = pgTable('lessons', {
   minSeconds: integer('min_seconds'),
   videoThresholdPct: integer('video_threshold_pct').notNull().default(90),
   availableFrom: timestamp('available_from', { withTimezone: true }),
+  passScorePct: numeric('pass_score_pct', { precision: 5, scale: 2 }), // «Поріг проходження, %» у теста в плане курса (docs/11 §14.1); назначение перекрывает
 }, t => [
   index().on(t.tenantId, t.moduleId, t.sort),
 ])

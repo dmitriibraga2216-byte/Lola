@@ -73,7 +73,7 @@ export async function applyProfile(ctx: Ctx, id: string): Promise<{ assignments:
       const [a] = await tx.insert(assignments).values({
         tenantId: ctx.tenantId,
         title: `${p.name}: профіль`,
-        kind: 'profile',
+        kind: 'auto', // task_type: профиль — разновидность автоматического назначения; источник — profileId
         subjectType: item.subjectType,
         subjectId: item.subjectId,
         audience,

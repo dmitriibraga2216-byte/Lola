@@ -201,7 +201,10 @@ export function computeTotals(
   return { score, maxScore: round2(maxScore), earned: round2(earned), passed, criticalFailed, pendingManual }
 }
 
-/** Параметры прохождения по умолчанию (docs/12 §3.5). */
+/**
+ * Эффективные параметры прохождения теста (docs/12 §3.5, docs/15 §14.3). Берутся из назначения
+ * (assignments.params), никогда из теста; копия живёт в attempts.params.
+ */
 export interface QuizParams {
   passScore: number
   attemptsAllowed: number // 0 = без ограничения
@@ -214,6 +217,25 @@ export interface QuizParams {
   allowSkip: boolean
   allowBack: boolean
   requireAllAnswered: boolean
+  questionsMode: 'all' | 'one_per_group' | 'limited'
+  questionsCount: number | null
+  trainingMode: boolean
+  allowOtherPages: boolean
+  showErrorProtocol: boolean
+  hideCorrectInProtocol: boolean
+  protocolAfterLastAttempt: boolean
+  instantFeedback: boolean
+  manualNext: boolean
+  questionTimeLimit: boolean
+  resultSource: 'last' | 'best'
+  fixResult: boolean
+  scaleId: string | null
+  badgeId: string | null
+  certificateId: string | null
+  points: number
+  bonuses: number
+  allowComments: boolean
+  notifyOnResult: boolean
 }
 
 export const DEFAULT_QUIZ_PARAMS: QuizParams = {
@@ -228,6 +250,25 @@ export const DEFAULT_QUIZ_PARAMS: QuizParams = {
   allowSkip: true,
   allowBack: true,
   requireAllAnswered: false,
+  questionsMode: 'all',
+  questionsCount: null,
+  trainingMode: false,
+  allowOtherPages: true,
+  showErrorProtocol: true,
+  hideCorrectInProtocol: false,
+  protocolAfterLastAttempt: false,
+  instantFeedback: false,
+  manualNext: false,
+  questionTimeLimit: false,
+  resultSource: 'last',
+  fixResult: true,
+  scaleId: null,
+  badgeId: null,
+  certificateId: null,
+  points: 0,
+  bonuses: 0,
+  allowComments: true,
+  notifyOnResult: true,
 }
 
 /** Убирает эталоны и разбор из вопроса для выдачи ученику до завершения. */

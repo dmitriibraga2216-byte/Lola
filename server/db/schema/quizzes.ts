@@ -9,8 +9,8 @@ import { enrollments } from './learning'
 
 /**
  * Тесты (docs/12-tests-questions.md): банк вопросов, тест как состав,
- * параметры прохождения — в назначении (на этапе 3, до назначений, — в уроке
- * через lesson_quiz_params, см. lessons.quiz_params), попытка со снапшотом.
+ * параметры прохождения — только в назначении (docs/15 §14.3), попытка со снапшотом
+ * и копией параметров.
  */
 
 export const questionBanks = pgTable('question_banks', {
@@ -20,7 +20,9 @@ export const questionBanks = pgTable('question_banks', {
   categoryId: uuid('category_id').references(() => courseCategories.id),
   description: text('description'),
   isShared: boolean('is_shared').notNull().default(true),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const questions = pgTable('questions', {
   ...baseColumns,
@@ -58,17 +60,16 @@ export const quizzes = pgTable('quizzes', {
   authorIds: uuid('author_ids').array().notNull().default(sql`'{}'::uuid[]`),
   selectionMode: text('selection_mode').notNull().default('fixed'), // fixed | random
   randomRules: jsonb('random_rules'), // [{bankId, tags?, difficulty?, count}]
-  /**
-   * Параметры прохождения по умолчанию (docs/12 §3.5). По ТЗ живут в назначении;
-   * до этапа 4 берутся отсюда, назначение потом переопределяет.
-   */
-  params: jsonb('params').notNull().default(sql`'{}'::jsonb`),
+  // Правил прохождения здесь нет (CLAUDE.md п. 11): попытки, порог, таймер — в assignments.params,
+  // порог теста внутри плана курса — lessons.pass_score_pct.
   requiresOfflineConfirm: boolean('requires_offline_confirm').notNull().default(false),
   status: text('status').notNull().default('draft'), // draft | published | archived
   totalPoints: numeric('total_points', { precision: 7, scale: 2 }).notNull().default('0'),
   questionCount: integer('question_count').notNull().default(0),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-})
+}, t => [
+  index().on(t.tenantId),
+])
 
 export const quizQuestions = pgTable('quiz_questions', {
   ...baseColumns,
@@ -88,10 +89,11 @@ export const attempts = pgTable('attempts', {
   quizId: uuid('quiz_id').notNull().references(() => quizzes.id),
   enrollmentId: uuid('enrollment_id').references(() => enrollments.id, { onDelete: 'cascade' }),
   lessonId: uuid('lesson_id'),
+  assignmentId: uuid('assignment_id'), // назначение, из которого взяты params (null — умолчания тенанта)
   userId: uuid('user_id').notNull().references(() => users.id),
   attemptNo: integer('attempt_no').notNull(),
   snapshot: jsonb('snapshot').notNull(), // вопросы + эталоны на момент старта, не меняется
-  params: jsonb('params').notNull(), // копия параметров на момент старта
+  params: jsonb('params').notNull(), // копия параметров назначения на момент старта, не меняется
   status: text('status').notNull().default('in_progress'),
   // in_progress | submitted | review | passed | failed | expired | annulled
   score: numeric('score', { precision: 5, scale: 2 }),

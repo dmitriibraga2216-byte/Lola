@@ -19,8 +19,10 @@ const impFor = ref<Tenant | null>(null)
 const impUsers = ref<{ id: string, fullName: string, phone: string | null, status: string }[]>([])
 const impForm = reactive({ userId: '', reason: '' })
 
+// Нетипизированный вызов: типизированные роуты Nitro при сотнях эндпоинтов дают TS2589
+const rawFetch = $fetch as unknown as <T>(url: string, opts?: unknown) => Promise<T>
 async function ops<T>(path: string, opts: Record<string, unknown> = {}): Promise<T> {
-  const res = await $fetch<{ data: T }>(`/api/v1/platform${path}`, opts as never)
+  const res = await rawFetch<{ data: T }>(`/api/v1/platform${path}`, opts)
   return res.data
 }
 

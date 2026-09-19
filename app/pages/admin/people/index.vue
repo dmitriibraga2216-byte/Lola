@@ -2,6 +2,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope' })
 
 const { t } = useI18n()
+const { apiRaw } = useApi()
 
 
 interface PersonRow {
@@ -27,7 +28,7 @@ async function load(reset = true) {
   loading.value = true
   error.value = ''
   try {
-    const res = await $fetch<{ data: PersonRow[], meta: { cursor: string | null } }>('/api/v1/people', {
+    const res = await apiRaw<{ data: PersonRow[], meta: { cursor: string | null } }>('/people', {
       query: {
         tab: tab.value,
         ...(q.value ? { q: q.value } : {}),

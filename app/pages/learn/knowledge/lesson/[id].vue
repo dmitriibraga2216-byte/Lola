@@ -4,13 +4,13 @@ import type { ContentBlock } from '../../../../../shared/schemas/content'
 
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
+const { api } = useApi()
 const id = useRoute().params.id as string
 const res = ref<{ title: string, body: ContentBlock[] } | null>(null)
 const error = ref('')
 onMounted(async () => {
   try {
-    const r = await $fetch<{ data: { title: string, body: ContentBlock[] } }>(`/api/v1/knowledge/resource/${id}`)
-    res.value = r.data
+    res.value = await api<{ title: string, body: ContentBlock[] }>(`/knowledge/resource/${id}`)
   }
   catch (err) { error.value = apiErrorOf(err).message }
 })

@@ -6,7 +6,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: ContentBlock[]): void }>(
 
 const { t } = useI18n()
 const { api } = useApi()
-const csrf = useCookie('lola_csrf')
+
 
 const uploadingFor = ref('')
 const uploadError = ref('')
@@ -66,10 +66,7 @@ async function upload(index: number, e: Event) {
     })
     const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     if (!put.ok) throw new Error('upload failed')
-    await $fetch(`/api/v1/media/${mediaId}/complete`, {
-      method: 'POST',
-      headers: csrf.value ? { 'x-csrf-token': csrf.value } : {},
-    })
+    await api(`/media/${mediaId}/complete`, { method: 'POST' })
     const block = props.modelValue[index]!
     update(index, { mediaId, ...(block.type === 'file' ? { name: file.name } : {}) } as Partial<ContentBlock>)
   }

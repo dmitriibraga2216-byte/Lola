@@ -24,7 +24,12 @@
     "resend": "Resend code",
     "resendIn": "Resend available in {s}s",
     "codeInvalidLeft": "Wrong code. {n} attempts left",
-    "chooseSpace": "Choose a space"
+    "chooseSpace": "Choose a space",
+    "google": "Sign in with Google",
+    "errors": {
+      "google_no_user": "This Google account is not linked to any employee",
+      "oauth": "Google sign-in failed. Try again or use your phone"
+    }
   },
   "home": {
     "signedInAs": "Signed in as {name}",
@@ -693,7 +698,8 @@
     "state": {
       "not_configured": "Not configured",
       "connected": "Working",
-      "failing": "Silent"
+      "failing": "Silent",
+      "not_connected": "Not connected"
     },
     "lastOk": "updated {at}",
     "notConfiguredHint": "Connect an account — fill in the keys below",
@@ -720,7 +726,26 @@
     "revokeConfirm": "Revoke token? The integration will stop.",
     "tokenName": "Name (e.g. 1C)",
     "expiresDays": "Valid days",
-    "createToken": "Create token"
+    "createToken": "Create token",
+    "google": "Google Workspace",
+    "zoom": "Zoom",
+    "oauthNotConfigured": "Integration is not configured. Contact the Lola administrator",
+    "oauthNotConnected": "Connect an account",
+    "connecting": "Connecting…",
+    "reconnect": "Reconnect",
+    "connectedAs": "Connected as {account}, updated {at}",
+    "silentSince": "Integration not responding since {at}",
+    "googleUses": "Calendar for meetups, Meet for webinars, people import from Workspace, Google sign-in",
+    "zoomUses": "Meetings for webinars and attendance from the Zoom report",
+    "wsImport": "Import people from Google Workspace",
+    "wsDomain": "Domain (optional)",
+    "wsPosition": "Default position",
+    "wsOrgUnit": "Default org unit",
+    "wsLocation": "Default location",
+    "wsPreview": "Preview",
+    "wsApply": "Import",
+    "wsResult": "Fetched {n} people",
+    "wsErrors": "with errors"
   },
   "dev": {
     "title": "My development",

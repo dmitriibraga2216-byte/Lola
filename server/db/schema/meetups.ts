@@ -39,6 +39,7 @@ export const meetups = pgTable('meetups', {
   materials: uuid('materials').array().notNull().default(sql`'{}'::uuid[]`),
   status: text('status').notNull().default('planned'), // draft | planned | ongoing | finished | cancelled
   cancelReason: text('cancel_reason'),
+  externalEventId: text('external_event_id'), // событие в Google Calendar тенанта (docs/09 §9.1)
   createdBy: uuid('created_by').references(() => users.id),
 }, t => [
   index().on(t.tenantId, t.startsAt),
@@ -75,6 +76,7 @@ export const webinars = pgTable('webinars', {
   hostUrl: text('host_url'),
   recordUrl: text('record_url'),
   recordAvailableUntil: timestamp('record_available_until', { withTimezone: true }),
+  externalMeetingId: text('external_meeting_id'), // id встречи у провайдера (Zoom / Meet)
   autoAttendance: boolean('auto_attendance').notNull().default(false),
   minMinutesForAttendance: integer('min_minutes_for_attendance'), // null = 70% длительности
 })

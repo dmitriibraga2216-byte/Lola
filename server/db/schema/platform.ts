@@ -108,3 +108,17 @@ export const smsUsage = pgTable('sms_usage', {
 }, t => [
   unique().on(t.tenantId, t.month),
 ])
+
+/** Одноразовые state для OAuth (docs/09 §9.2): в БД, а не в памяти — переживает рестарт и второй воркер. */
+export const oauthStates = pgTable('oauth_states', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  provider: text('provider').notNull(),
+  stateHash: text('state_hash').notNull(),
+  purpose: text('purpose').notNull().default('connect'), // connect | signin
+  createdBy: uuid('created_by'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+}, t => [
+  unique().on(t.stateHash),
+])

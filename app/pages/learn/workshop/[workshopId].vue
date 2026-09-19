@@ -9,7 +9,6 @@ const route = useRoute()
 const workshopId = route.params.workshopId as string
 const enrollmentId = (route.query.enrollmentId as string) || undefined
 const lessonId = (route.query.lessonId as string) || undefined
-const csrf = useCookie('lola_csrf')
 
 interface Criterion { id: string, text: string, isCritical: boolean }
 interface Sub { id: string, status: string, attemptNo: number, body: { text?: string }, files: { mediaId: string, name: string, kind: string, bytes: number }[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null }
@@ -62,7 +61,7 @@ async function addFile(e: Event) {
   try {
     const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename: file.name, mime: file.type, bytes: file.size } })
     await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
-    await $fetch(`/api/v1/media/${mediaId}/complete`, { method: 'POST', headers: csrf.value ? { 'x-csrf-token': csrf.value } : {} })
+    await api(`/media/${mediaId}/complete`, { method: 'POST' })
     files.value.push({ mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: file.size })
   }
   catch (err) {

@@ -136,12 +136,12 @@ describe('сессии', () => {
 
 describe('скоупы: employee не имеет доступа к админке', () => {
   it('у admin есть settings.tenant и people.view, у employee — нет', async () => {
-    const adminAccess = await loadAccess({ sessionId: 'x', tenantId, userId, impersonatedBy: null })
+    const adminAccess = await loadAccess({ sessionId: 'x', tenantId, userId, impersonatedBy: null, activeRoleId: null })
     expect(adminAccess).not.toBeNull()
     expect(can(adminAccess!, 'settings.tenant')).toBe(true)
     expect(can(adminAccess!, 'people.view')).toBe(true)
 
-    const empAccess = await loadAccess({ sessionId: 'x', tenantId, userId: employeeId, impersonatedBy: null })
+    const empAccess = await loadAccess({ sessionId: 'x', tenantId, userId: employeeId, impersonatedBy: null, activeRoleId: null })
     expect(empAccess).not.toBeNull()
     expect(can(empAccess!, 'settings.tenant')).toBe(false)
     expect(can(empAccess!, 'people.view')).toBe(false)

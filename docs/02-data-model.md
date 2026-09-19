@@ -125,6 +125,9 @@ create table user_roles (
   role_id uuid not null references roles(id),
   scope_type text not null,                   -- tenant | org_unit | location
   scope_id uuid,                              -- null для tenant
+  valid_until timestamptz,                    -- срок действия (`16` §6.2, `29` Б.15): null — бессрочно; истёкшая роль прав не даёт, снимается ежедневно
+  reason text,                                -- причина назначения — для аудита
+  is_org_derived boolean not null default false, -- выдана правилом position_role_map; пересобирается при смене должности
   unique (tenant_id, user_id, role_id, scope_type, scope_id)
 );
 
@@ -136,6 +139,7 @@ create table sessions (
   user_agent text,
   ip inet,
   impersonated_by uuid references users(id),
+  active_role_id uuid references roles(id),   -- активная роль сессии (`01` §1.9.2): права по ней, переключение без выхода
   expires_at timestamptz not null,
   revoked_at timestamptz
 );
@@ -584,6 +588,8 @@ create table audit_log (
   id bigserial primary key,
   tenant_id uuid not null,
   actor_id uuid,
+  actor_role_id uuid,                          -- активная роль актора в момент действия (`01` §1.9.2)
+  actor_roles text[],                          -- коды всех действующих ролей актора — кто на самом деле мог это сделать
   action text not null,                        -- course.publish, user.archive, attempt.grade
   entity text not null,
   entity_id uuid,
@@ -933,8 +939,11 @@ automation_rule_dimensions(
   value_ids uuid[]
 )
 
--- Правило «должность → роль» (`01` §1.9.1): роли в сети раздаются не руками
-position_role_map(tenant_id, position_id, role_id, scope_type, scope_id)
+-- Правило «должность → роль» (`01` §1.9.1): роли в сети раздаются не руками.
+-- scope_id null при scope_type location | org_unit — «точка/подразделение размещения»;
+-- применяется при смене должности и импорте, выданная роль помечена user_roles.is_org_derived
+position_role_map(id, tenant_id, position_id, role_id, scope_type, scope_id,
+                  unique (tenant_id, position_id, role_id, scope_type, scope_id))
 
 -- Группа вопросов внутри теста — см. §2.6
 -- Разделы и элементы плана курса — см. §2.4

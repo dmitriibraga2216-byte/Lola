@@ -61,6 +61,7 @@ export default defineNitroPlugin(async () => {
       const { weeklyDigest } = await import('../services/reportsExtra')
       const { retentionScan } = await import('../services/logs')
       const { expireExports } = await import('../services/reportExports')
+      const { expireRoles } = await import('../services/positionRoleMap')
       const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
@@ -71,13 +72,14 @@ export default defineNitroPlugin(async () => {
         const digest = monday ? await weeklyDigest(tenantId) : 0 // docs/22 §10 digest.weekly
         const retention = await retentionScan(tenantId) // docs/22 §10 logs.retention
         const expired = await expireExports(tenantId)
+        const rolesExpired = await expireRoles(tenantId) // 29 Б.15: снятие роли по сроку
         const g = await goalDueScan(tenantId)
         const a = await assessmentScan(tenantId)
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
         const an = await announcementScan(tenantId)
         const pr = await programScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired })
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired, rolesExpired })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync

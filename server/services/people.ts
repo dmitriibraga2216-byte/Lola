@@ -9,6 +9,7 @@ import { enqueueNotification } from './notifications'
 import { recordAudit } from './audit'
 import { scopeSql } from './access'
 import { hashToken } from './session'
+import { applyPositionRoles } from './positionRoleMap'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
 
@@ -145,10 +146,15 @@ export async function getPerson(ctx: Ctx, id: string) {
       name: roles.name,
       scopeType: userRoles.scopeType,
       scopeId: userRoles.scopeId,
+      validUntil: userRoles.validUntil,
+      reason: userRoles.reason,
+      isOrgDerived: userRoles.isOrgDerived,
+      createdAt: userRoles.createdAt,
     })
       .from(userRoles)
       .innerJoin(roles, eq(roles.id, userRoles.roleId))
       .where(eq(userRoles.userId, id))
+      .orderBy(desc(userRoles.createdAt))
 
     const sessionRows = await tx.select({
       id: sessions.id,
@@ -179,7 +185,7 @@ export function splitName(input: { fullName?: string, lastName?: string | null, 
 
 /** Последнего администратора нельзя заблокировать, архивировать или лишить роли (docs/16 §7.6). */
 export async function isLastAdmin(tx: TenantTx, userId: string): Promise<boolean> {
-  const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users u on u.id = ur.user_id where r.code = 'admin' and ur.scope_type = 'tenant' and u.status in ('active','invited') and not u.is_blocked`) as unknown as { user_id: string }[]
+  const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users u on u.id = ur.user_id where r.code = 'admin' and ur.scope_type = 'tenant' and (ur.valid_until is null or ur.valid_until > now()) and u.status in ('active','invited') and not u.is_blocked`) as unknown as { user_id: string }[]
   const ids = new Set(admins.map(a => a.user_id))
   return ids.has(userId) && ids.size === 1
 }
@@ -355,6 +361,8 @@ export async function addPlacement(ctx: Ctx, userId: string, input: {
       entityId: userId,
       after: input,
     })
+    // docs/01 §1.9.3: правило «должность → роль» применяется при смене должности
+    if (input.isPrimary) await applyPositionRoles(tx, ctx, userId)
     return placement!
   }).then(async (placement) => {
     // Новый человек на позиции → профили/правила/автосинхронизация (docs/15 §7.2, §7.6)
@@ -364,33 +372,52 @@ export async function addPlacement(ctx: Ctx, userId: string, input: {
   })
 }
 
+/**
+ * Назначение роли (docs/16 §6.2): роль, область, срок (бессрочно или до даты), причина — для аудита.
+ * Повторное назначение той же роли в той же области — редактирование срока и причины
+ * (роль, выданная правилом «должность → роль», при этом становится ручной).
+ */
 export async function assignRole(ctx: Ctx, userId: string, input: {
   roleCode: string
   scopeType: 'tenant' | 'org_unit' | 'location'
   scopeId?: string | null
+  validUntil?: string | null
+  reason?: string | null
 }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [role] = await tx.select().from(roles).where(eq(roles.code, input.roleCode))
     if (!role) return null
 
+    const scopeId = input.scopeType === 'tenant' ? null : (input.scopeId ?? null)
+    const validUntil = input.validUntil ? new Date(`${input.validUntil}T23:59:59.999Z`) : null
+    const reason = input.reason?.trim() || null
+    const [prev] = await tx.select({ id: userRoles.id, validUntil: userRoles.validUntil, reason: userRoles.reason, isOrgDerived: userRoles.isOrgDerived })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, role.id), eq(userRoles.scopeType, input.scopeType), scopeId ? eq(userRoles.scopeId, scopeId) : isNull(userRoles.scopeId)))
     const [assigned] = await tx.insert(userRoles).values({
       tenantId: ctx.tenantId,
       userId,
       roleId: role.id,
       scopeType: input.scopeType,
-      scopeId: input.scopeType === 'tenant' ? null : (input.scopeId ?? null),
-    }).onConflictDoNothing().returning()
+      scopeId,
+      validUntil,
+      reason,
+    }).onConflictDoUpdate({
+      target: [userRoles.tenantId, userRoles.userId, userRoles.roleId, userRoles.scopeType, userRoles.scopeId],
+      set: { validUntil, reason, isOrgDerived: false, updatedAt: new Date() },
+    }).returning()
 
     await recordAudit(tx, {
       tenantId: ctx.tenantId,
       actorId: ctx.actorId,
-      action: 'role.assign',
+      action: prev ? 'role.update' : 'role.assign',
       entity: 'user',
       entityId: userId,
-      after: input,
+      before: prev ? { roleCode: input.roleCode, scopeType: input.scopeType, scopeId, validUntil: prev.validUntil, reason: prev.reason, isOrgDerived: prev.isOrgDerived } : null,
+      after: { roleCode: input.roleCode, scopeType: input.scopeType, scopeId, validUntil, reason },
     })
     // docs/16 §8: человеку — о новой роли (кроме базовой employee при создании)
-    if (assigned && input.roleCode !== 'employee' && userId !== ctx.actorId) {
+    if (assigned && !prev && input.roleCode !== 'employee' && userId !== ctx.actorId) {
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId, code: 'user_role_granted', payload: { role: role.name }, dedupKey: `role_granted:${userId}:${role.id}:${Date.now()}` })
     }
     return assigned ?? role
@@ -545,14 +572,15 @@ export async function inactiveScan(tenantId: string): Promise<number> {
 }
 
 /** Снятие роли (docs/16 §6.2): последнего администратора не лишить. */
-export async function removeRole(ctx: Ctx, userId: string, roleCode: string): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'last_admin' }> {
+export async function removeRole(ctx: Ctx, userId: string, roleCode: string, reason?: string | null): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'last_admin' }> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [role] = await tx.select({ id: roles.id }).from(roles).where(eq(roles.code, roleCode))
     if (!role) return { ok: false as const, code: 'not_found' as const }
     if (roleCode === 'admin' && await isLastAdmin(tx, userId)) return { ok: false as const, code: 'last_admin' as const }
-    const rows = await tx.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, role.id))).returning({ id: userRoles.id })
+    const rows = await tx.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, role.id)))
+      .returning({ scopeType: userRoles.scopeType, scopeId: userRoles.scopeId, validUntil: userRoles.validUntil, reason: userRoles.reason, isOrgDerived: userRoles.isOrgDerived })
     if (!rows.length) return { ok: false as const, code: 'not_found' as const }
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'role.revoke', entity: 'user', entityId: userId, before: { roleCode } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'role.revoke', entity: 'user', entityId: userId, before: { roleCode, grants: rows }, after: { reason: reason?.trim() || null } })
     return { ok: true as const }
   })
 }

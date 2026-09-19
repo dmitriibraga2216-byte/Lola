@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
     if (!r.ok) {
       throw createError({ statusCode: r.code === 'rate_limited' ? 429 : 401, data: { code: r.code === 'rate_limited' ? 'rate_limited' : 'auth_required', message: r.code === 'rate_limited' ? 'Ліміт 60 запитів на хвилину' : 'Невірний токен' } })
     }
-    event.context.auth = { sessionId: `token:${r.auth.tokenId}`, tenantId: r.auth.tenantId, userId: r.auth.actorId ?? '', impersonatedBy: null }
+    event.context.auth = { sessionId: `token:${r.auth.tokenId}`, tenantId: r.auth.tenantId, userId: r.auth.actorId ?? '', impersonatedBy: null, activeRoleId: null }
     event.context.tokenScopes = r.auth.scopes
     return
   }

@@ -1,13 +1,15 @@
 import { eq, sql } from 'drizzle-orm'
 import type { H3Event } from 'h3'
-import { roles, userRoles, users } from '../db/schema'
+import { users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { Scope } from '../../shared/domain/roles'
 import type { AuthContext } from './session'
+import { effectiveRoles, resolveActiveRole } from './activeRole'
 
 /**
  * Проверка прав (docs/01-roles.md §1.1): права выдаются скоупами,
  * роль назначена в области видимости (tenant | org_unit | location).
+ * Права считаются по активной роли сессии, а не по объединению всех ролей (docs/01 §1.9.2).
  */
 
 export interface RoleGrant {
@@ -16,10 +18,21 @@ export interface RoleGrant {
   scopeId: string | null
 }
 
+export interface RoleRef {
+  id: string
+  code: string
+  name: string
+}
+
 export interface Access {
   userId: string
   tenantId: string
+  /** Области активной роли (у API-токена — весь тенант со скоупами токена) */
   grants: RoleGrant[]
+  /** Активная роль сессии; null — у API-токена и у человека без ролей */
+  activeRole: RoleRef | null
+  /** Все действующие роли — для переключателя и аудита */
+  roles: RoleRef[]
 }
 
 export async function loadAccess(auth: AuthContext): Promise<Access | null> {
@@ -28,23 +41,15 @@ export async function loadAccess(auth: AuthContext): Promise<Access | null> {
       .from(users).where(eq(users.id, auth.userId))
     if (!user || user.status !== 'active' || user.isBlocked) return null
 
-    const rows = await tx.select({
-      scopes: roles.scopes,
-      scopeType: userRoles.scopeType,
-      scopeId: userRoles.scopeId,
-    })
-      .from(userRoles)
-      .innerJoin(roles, eq(roles.id, userRoles.roleId))
-      .where(eq(userRoles.userId, auth.userId))
+    const list = await effectiveRoles(tx, auth.userId)
+    const active = await resolveActiveRole(tx, auth, list)
 
     return {
       userId: auth.userId,
       tenantId: auth.tenantId,
-      grants: rows.map(r => ({
-        scopes: r.scopes,
-        scopeType: r.scopeType as RoleGrant['scopeType'],
-        scopeId: r.scopeId,
-      })),
+      grants: active ? active.grants.map(g => ({ scopes: active.scopes, scopeType: g.scopeType, scopeId: g.scopeId })) : [],
+      activeRole: active ? { id: active.id, code: active.code, name: active.name } : null,
+      roles: list.map(r => ({ id: r.id, code: r.code, name: r.name })),
     }
   })
 }
@@ -79,7 +84,7 @@ export async function getAccess(event: H3Event): Promise<Access | null> {
   let access: Access | null
   if (tokenScopes) {
     // API-токен: скоупы токена, область — весь тенант (docs/09 §9.6)
-    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes, scopeType: 'tenant', scopeId: null }] }
+    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes, scopeType: 'tenant', scopeId: null }], activeRole: null, roles: [] }
   }
   else {
     access = await loadAccess(auth)

@@ -14,7 +14,7 @@ interface Person {
   status: string, isBlocked: boolean, isHidden: boolean, tags: string[], cityId: string | null, hiredAt: string | null, positionSince: string | null
   externalId: string | null, comment: string | null, locale: string | null, lastSeenAt: string | null, createdAt: string, telegramChatId: string | null
   placements: { id: string, isPrimary: boolean, startedAt: string, endedAt: string | null, locationName: string, positionName: string, locationId: string, positionId: string }[]
-  roles: { id: string, code: string, name: string, scopeType: string, scopeId: string | null }[]
+  roles: { id: string, code: string, name: string, scopeType: string, scopeId: string | null, validUntil: string | null, reason: string | null, isOrgDerived: boolean, createdAt: string }[]
   sessions: { id: string, createdAt: string, updatedAt?: string, userAgent: string | null, ip: string | null, revokedAt: string | null }[]
 }
 interface Ref { id: string, name: string }
@@ -32,7 +32,13 @@ watch(tab, v => router.replace({ query: { ...route.query, tab: v, edit: undefine
 
 const refsData = reactive<{ locations: Ref[], positions: Ref[], levels: Ref[], units: { id: string, name: string }[], roles: { code: string, name: string }[] }>({ locations: [], positions: [], levels: [], units: [], roles: [] })
 const placementForm = reactive({ locationId: '', positionId: '', positionLevelId: '' })
-const roleForm = reactive({ roleCode: '', scopeType: 'location' as 'tenant' | 'location' | 'org_unit', scopeId: '' })
+const roleForm = reactive({ roleCode: '', scopeType: 'location' as 'tenant' | 'location' | 'org_unit', scopeId: '', validUntil: '', reason: '' })
+// Снятие роли — с причиной в аудит (docs/16 §6.2): маленькая строка подтверждения под ролью
+const revoking = reactive({ code: '', reason: '' })
+const roleExpired = (r: { validUntil: string | null }) => !!r.validUntil && new Date(r.validUntil).getTime() < Date.now()
+function editRole(r: Person['roles'][number]) {
+  Object.assign(roleForm, { roleCode: r.code, scopeType: r.scopeType, scopeId: r.scopeId ?? '', validUntil: r.validUntil ? r.validUntil.slice(0, 10) : '', reason: r.reason ?? '' })
+}
 
 const learning = ref<{ enrollments: Record<string, unknown>[], attempts: Record<string, unknown>[], certificates: Record<string, unknown>[], assessments: Record<string, unknown>[] } | null>(null)
 const activity = ref<Record<string, unknown>[]>([])
@@ -88,8 +94,14 @@ const closeAll = () => act(() => api(`/people/${id}/sessions`, { method: 'DELETE
 const closeOne = (sid: string) => act(() => api(`/people/${id}/sessions/${sid}`, { method: 'DELETE' }), t('person.sessionsClosed'))
 const resetTelegram = () => act(() => api(`/people/${id}/reset-telegram`, { method: 'POST' }), t('person.telegramReset'))
 const addPlacementAction = () => act(() => api(`/people/${id}/placements`, { method: 'POST', body: { ...placementForm, positionLevelId: placementForm.positionLevelId || null, isPrimary: true } }), t('common.saved'))
-const assignRoleAction = () => act(() => api(`/people/${id}/roles`, { method: 'POST', body: { roleCode: roleForm.roleCode, scopeType: roleForm.scopeType, scopeId: roleForm.scopeType === 'tenant' ? null : roleForm.scopeId || null } }), t('common.saved'))
-const removeRoleAction = (code: string) => act(() => api(`/people/${id}/roles/${code}`, { method: 'DELETE' }), t('common.saved'))
+const assignRoleAction = () => act(async () => {
+  await api(`/people/${id}/roles`, { method: 'POST', body: { roleCode: roleForm.roleCode, scopeType: roleForm.scopeType, scopeId: roleForm.scopeType === 'tenant' ? null : roleForm.scopeId || null, validUntil: roleForm.validUntil || null, reason: roleForm.reason || null } })
+  Object.assign(roleForm, { roleCode: '', validUntil: '', reason: '' })
+}, t('common.saved'))
+const removeRoleAction = (code: string) => act(async () => {
+  await api(`/people/${id}/roles/${code}`, { method: 'DELETE', query: revoking.reason ? { reason: revoking.reason } : {} })
+  Object.assign(revoking, { code: '', reason: '' })
+}, t('common.saved'))
 
 const showArchive = ref(false)
 const archiveForm = reactive({ reason: 'dismissal', comment: '', date: '', closeSessions: true, cancelLearning: true })
@@ -204,17 +216,30 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       </div>
     </section>
 
-    <!-- Ролі -->
+    <!-- Ролі (мокап PersonCard: список ролей, у производной — подпись «Видана автоматично…», срок и причина — docs/16 §6.2) -->
     <section v-else-if="tab === 'roles'" class="panel card">
       <ul class="list">
         <li v-for="r in person.roles" :key="r.id" class="role-row">
-          <b>{{ r.name }}</b>
-          <span class="sub">{{ r.scopeType === 'tenant' ? t('person.wholeTenant') : r.scopeType === 'location' ? (refsData.locations.find(l => l.id === r.scopeId)?.name ?? t('person.location')) : t('person.orgUnitScope') }}</span>
-          <button v-if="hasScope('role.assign')" class="btn small" :disabled="busy" @click="removeRoleAction(r.code)">{{ t('person.removeRole') }}</button>
+          <div class="role-main">
+            <b>{{ r.name }}</b>
+            <span class="sub">{{ r.scopeType === 'tenant' ? t('person.wholeTenant') : r.scopeType === 'location' ? (refsData.locations.find(l => l.id === r.scopeId)?.name ?? t('person.location')) : t('person.orgUnitScope') }}</span>
+            <span :class="['badge', roleExpired(r) ? 'coral' : r.validUntil ? 'sun' : 'muted']">{{ roleExpired(r) ? t('person.validExpired') : r.validUntil ? `${t('person.validUntil')} ${fmt(r.validUntil)}` : t('person.validForever') }}</span>
+            <span v-if="r.isOrgDerived" class="badge teal">{{ t('person.roleDerived') }}</span>
+            <small class="sub">{{ t('person.roleSince', { date: fmt(r.createdAt) }) }}<template v-if="r.reason && !r.isOrgDerived"> · {{ r.reason }}</template></small>
+          </div>
+          <div v-if="hasScope('role.assign')" class="role-actions">
+            <button class="btn small" :disabled="busy" @click="editRole(r)">{{ t('person.editRole') }}</button>
+            <button v-if="revoking.code !== r.code" class="btn small" :disabled="busy" @click="Object.assign(revoking, { code: r.code, reason: '' })">{{ t('person.removeRole') }}</button>
+          </div>
+          <form v-if="revoking.code === r.code" class="revoke" @submit.prevent="removeRoleAction(r.code)">
+            <input v-model="revoking.reason" type="text" maxlength="500" :placeholder="t('person.revokeReason')" :aria-label="t('person.revokeReason')">
+            <button type="submit" class="btn small primary" :disabled="busy">{{ t('person.confirmRevoke') }}</button>
+            <button type="button" class="btn small" @click="revoking.code = ''">{{ t('common.cancel') }}</button>
+          </form>
         </li>
         <li v-if="person.roles.length === 0" class="sub">—</li>
       </ul>
-      <div v-if="hasScope('role.assign')" class="form-row">
+      <form v-if="hasScope('role.assign')" class="form-row" @submit.prevent="assignRoleAction">
         <select v-model="roleForm.roleCode" :aria-label="t('person.role')"><option value="" disabled>{{ t('person.role') }}</option><option v-for="r in refsData.roles" :key="r.code" :value="r.code">{{ r.name }}</option></select>
         <select v-model="roleForm.scopeType" :aria-label="t('person.scope')">
           <option value="location">{{ t('person.location') }}</option>
@@ -223,8 +248,10 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
         </select>
         <select v-if="roleForm.scopeType === 'location'" v-model="roleForm.scopeId" :aria-label="t('person.location')"><option value="" disabled>{{ t('person.location') }}</option><option v-for="l in refsData.locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>
         <select v-if="roleForm.scopeType === 'org_unit'" v-model="roleForm.scopeId" :aria-label="t('person.orgUnitScope')"><option value="" disabled>{{ t('person.orgUnitScope') }}</option><option v-for="u in refsData.units" :key="u.id" :value="u.id">{{ u.name }}</option></select>
-        <button class="btn primary" :disabled="!roleForm.roleCode || busy" @click="assignRoleAction">{{ t('person.addRole') }}</button>
-      </div>
+        <label class="field"><span>{{ t('person.validUntil') }}</span><input v-model="roleForm.validUntil" type="date"></label>
+        <label class="field grow"><span>{{ t('person.reason') }}</span><input v-model="roleForm.reason" type="text" maxlength="500" :placeholder="t('person.reasonHint')"></label>
+        <button type="submit" class="btn primary" :disabled="!roleForm.roleCode || busy">{{ t('person.addRole') }}</button>
+      </form>
     </section>
 
     <!-- Навчання -->
@@ -328,7 +355,13 @@ dl { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--s
 dt { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
 dd { margin: 0; overflow-wrap: anywhere; }
 .list { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
-.role-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.role-row { display: grid; gap: var(--space-2); }
+.role-main { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.role-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.revoke { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.revoke input { flex: 1 1 160px; min-width: 0; }
+.field { display: grid; gap: 2px; font-size: 12px; font-weight: 700; color: var(--color-ink-muted); }
+.field.grow { flex: 1 1 200px; min-width: 0; }
 .ended { opacity: 0.5; }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
 .note { margin: 0; white-space: pre-wrap; }

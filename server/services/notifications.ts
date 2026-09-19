@@ -152,9 +152,20 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
         }
       }
       else {
-        // sms / email — провайдеры подключаются в этапе 6; пока журналируем как skipped
-        await tx.update(notifications).set({ status: 'skipped', renderedText: text, error: `channel ${n.channel} not configured`, updatedAt: new Date() }).where(eq(notifications.id, n.id))
-        stats.skipped++
+        const { sendViaChannel } = await import('./channels')
+        const res = await sendViaChannel(tenantId, n.channel as 'sms' | 'email', { userId: n.userId, text, subject: n.code })
+        if (res.ok) {
+          await tx.update(notifications).set({ status: 'sent', renderedText: text, sentAt: new Date(), updatedAt: new Date() }).where(eq(notifications.id, n.id))
+          stats.sent++
+        }
+        else if (res.skipped) {
+          await tx.update(notifications).set({ status: 'skipped', renderedText: text, error: res.error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
+          stats.skipped++
+        }
+        else {
+          await tx.update(notifications).set({ status: 'failed', renderedText: text, error: res.error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
+          stats.failed++
+        }
       }
     }
   })

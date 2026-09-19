@@ -27,6 +27,7 @@
     "@nuxtjs/i18n": "^9.1.1",
     "drizzle-orm": "^0.38.3",
     "exceljs": "^4.4.0",
+    "nodemailer": "^10.0.10",
     "nuxt": "^3.15.1",
     "pg-boss": "^12.33.2",
     "postgres": "^3.4.5",
@@ -38,6 +39,7 @@
   "devDependencies": {
     "@nuxt/eslint": "^0.7.4",
     "@types/node": "^26.6.1",
+    "@types/nodemailer": "^8.0.2",
     "@types/sanitize-html": "^2.16.1",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.1",

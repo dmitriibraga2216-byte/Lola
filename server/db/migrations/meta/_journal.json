@@ -64,6 +64,13 @@
       "when": 1789776916685,
       "tag": "0008_worried_vindicator",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789778054483,
+      "tag": "0009_shocking_whizzer",
+      "breakpoints": true
     }
   ]
 }

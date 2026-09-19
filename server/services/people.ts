@@ -175,6 +175,8 @@ export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
       entityId: person!.id,
       after: { fullName: person!.fullName, phone: person!.phone },
     })
+    const { emitWebhook } = await import('./webhooks')
+    await emitWebhook(tx, ctx.tenantId, 'user.created', { userId: person!.id, fullName: person!.fullName, externalId: person!.externalId })
     return person!
   })
 }

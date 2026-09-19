@@ -18,6 +18,7 @@ const nav = computed(() => [
   { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import') },
   { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },
   { to: '/admin/journals', label: t('admin.nav.journals'), show: hasScope('audit.view') },
+  { to: '/admin/settings/integrations', label: t('admin.nav.integrations'), show: hasScope('settings.integrations') },
 ].filter(i => i.show))
 </script>
 

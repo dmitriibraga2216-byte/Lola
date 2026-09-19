@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const impersonated = useCookie('lola_impersonated')
 const route = useRoute()
-const isPublic = computed(() => route.path.startsWith('/login') || route.path.startsWith('/ops') || route.path.startsWith('/c/'))
+const isPublic = computed(() => route.path.startsWith('/login') || route.path.startsWith('/ops') || route.path.startsWith('/c/') || route.path.startsWith('/m/'))
 </script>
 
 <template>

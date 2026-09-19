@@ -149,8 +149,41 @@ export const checklistRuns = pgTable('checklist_runs', {
   signatureMediaId: uuid('signature_media_id'),
   geo: jsonb('geo'),
   device: text('device'),
+  // Тайный покупатель (docs/20 §7.8, Б.2): прогон по одноразовой ссылке, привязан к волне
+  waveId: uuid('wave_id'),
+  isExternal: boolean('is_external').notNull().default(false),
 }, t => [
   index().on(t.tenantId, t.checklistId, t.startedAt.desc()),
   index().on(t.tenantId, t.locationId),
   index().on(t.tenantId, t.observerId, t.status),
+])
+
+/** Волны тайного покупателя (docs/20 §9): результаты видны руководителю сети до публикации. */
+export const mysteryWaves = pgTable('mystery_waves', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  checklistId: uuid('checklist_id').notNull().references(() => checklists.id),
+  title: text('title').notNull(),
+  startsAt: date('starts_at').notNull(),
+  endsAt: date('ends_at').notNull(),
+  status: text('status').notNull().default('active'), // active | published | closed
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  createdBy: uuid('created_by').references(() => users.id),
+}, t => [
+  index().on(t.tenantId, t.status),
+])
+
+/** Одноразовая ссылка тайного покупателя: без входа, 24 часа, на одну точку и волну (Б.2). */
+export const mysteryLinks = pgTable('mystery_links', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  waveId: uuid('wave_id').notNull().references(() => mysteryWaves.id, { onDelete: 'cascade' }),
+  locationId: uuid('location_id').notNull().references(() => locations.id),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  runId: uuid('run_id').references(() => checklistRuns.id),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+}, t => [
+  unique().on(t.tokenHash),
 ])

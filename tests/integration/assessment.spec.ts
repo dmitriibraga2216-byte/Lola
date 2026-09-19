@@ -215,4 +215,52 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
     expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 'p', value: 5 }] })).toMatchObject({ ok: false, code: 'photo_required', itemIds: ['p'] })
     expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 'p', value: 5, photoMediaIds: [crypto.randomUUID()] }] })).toMatchObject({ ok: true })
   })
+
+  it('Б.1: подпись проверяемого обязательна при require_signature', async () => {
+    const c = await cl.upsertChecklist(ctx(), { title: `Підпис ${Date.now()}`, kind: 'observation', items: [{ id: 's', text: 'Форма', scaleId, weight: 1 }], scoring: 'percent', passScore: 50, criticalFailRule: 'none', whoCanRun: { roles: ['manager'] }, subjectKind: 'user', requireSignature: true })
+    checklistIds.push(c!.id)
+    const run = await cl.startRun(ctx(), c!.id, { locationId: lazarevaId })
+    expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 's', value: 5 }] })).toMatchObject({ ok: false, code: 'signature_required' })
+    const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${tenantId}, ${`sig-${Date.now()}.png`}, 'signature.png', 'image', 'image/png', 100, 'ready', ${adminId}) returning id`
+    try {
+      expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 's', value: 5 }], signatureMediaId: m!.id as string })).toMatchObject({ ok: true })
+      const r = await cl.getRun(ctx(), run!.id)
+      expect(r!.signatureMediaId).toBe(m!.id)
+    }
+    finally { await admin`delete from checklist_runs where id = ${run!.id}`; await admin`delete from media_assets where id = ${m!.id}` }
+  })
+
+  it('Б.2: тайный покупатель — волна, одноразовая ссылка без входа, результат скрыт до публикации, отчёт по волнам', async () => {
+    const my = await import('../../server/services/mystery')
+    const c = await cl.upsertChecklist(ctx(), { title: `Таємний ${Date.now()}`, kind: 'mystery', items: [{ id: 'a', text: 'Привітання', scaleId, weight: 1 }, { id: 'b', text: 'Чистота', scaleId, weight: 1 }], scoring: 'percent', passScore: 80, criticalFailRule: 'none', whoCanRun: { roles: ['admin'] }, subjectKind: 'location' })
+    checklistIds.push(c!.id)
+    expect(await my.createWave(ctx(), { checklistId: checklistIds[0]!, title: 'Не той тип', startsAt: '2026-09-01', endsAt: '2026-09-30' })).toBeNull()
+    const w = await my.createWave(ctx(), { checklistId: c!.id, title: `Хвиля ${Date.now()}`, startsAt: '2026-09-01', endsAt: '2026-09-30' })
+    expect(w!.status).toBe('active')
+    const link = await my.createLink(ctx(), { waveId: w!.id, locationId: lazarevaId })
+    expect(link!.token.length).toBeGreaterThan(20)
+    // Форма без входа: чек-лист и точка, без людей
+    const form = await my.publicForm(link!.token)
+    expect(form.ok).toBe(true)
+    if (form.ok) expect(form.form.checklist.items.length).toBe(2)
+    expect(await my.publicSubmit(link!.token, { answers: [{ itemId: 'a', value: 5 }] })).toMatchObject({ ok: false, code: 'incomplete' })
+    const sub = await my.publicSubmit(link!.token, { answers: [{ itemId: 'a', value: 5 }, { itemId: 'b', value: 4 }] })
+    expect(sub).toMatchObject({ ok: true, score: 90, passed: true })
+    // Одноразовость
+    expect(await my.publicForm(link!.token)).toMatchObject({ ok: false, code: 'used' })
+    expect(await my.publicForm('nope')).toMatchObject({ ok: false, code: 'not_found' })
+    const [run] = await admin`select id, is_external, wave_id, observer_id from checklist_runs where wave_id = ${w!.id}`
+    expect(run).toMatchObject({ is_external: true, observer_id: adminId })
+    // До публикации — только report.tenant; руководитель точки не видит
+    expect(await cl.getRun(ctx(), run!.id as string)).toBeNull()
+    expect((await cl.checklistReport(ctx(), { checklistId: c!.id })).runs.length).toBe(0)
+    expect((await cl.checklistReport(ctx(), { checklistId: c!.id, canSeeUnpublished: true })).runs.length).toBe(1)
+    expect((await my.mysteryReport(ctx(), { canSeeUnpublished: false })).waves.some(x => x.id === w!.id)).toBe(false)
+    await my.setWaveStatus(ctx(), w!.id, 'published')
+    expect(await cl.getRun(ctx(), run!.id as string)).not.toBeNull()
+    const rep = await my.mysteryReport(ctx(), { canSeeUnpublished: false })
+    expect(rep.waves.some(x => x.id === w!.id)).toBe(true)
+    expect(rep.cells[`${w!.id}:${lazarevaId}`]).toMatchObject({ avg: 90, runs: 1, passed: 1 })
+    await admin`delete from mystery_waves where id = ${w!.id}`
+  })
 })

@@ -1290,7 +1290,12 @@
     "topFailed": "Most failed items",
     "byWeek": "By location & week",
     "date": "Date",
-    "observer": "Observer"
+    "observer": "Observer",
+    "requireSignature": "Signature of the person checked",
+    "signature": "Signature",
+    "signatureHint": "Ask the employee to sign with a finger",
+    "signatureClear": "Clear",
+    "na": "N/A"
   },
   "mt": {
     "title": "Schedule",
@@ -1747,5 +1752,35 @@
     "archived": "Archived",
     "lastSeen": "Last active",
     "name": "Name"
+  },
+  "mystery": {
+    "title": "Mystery shopper",
+    "thanks": "Thank you!",
+    "thanksHint": "Answers saved. This link no longer works.",
+    "hint": "Rate every item. Your answers are anonymous to the location staff.",
+    "send": "Send",
+    "waves": "Mystery shopper: waves",
+    "wavesHint": "A wave groups checks over a period. Links are one-time and live 24 hours; results are visible only to network management until the wave is published.",
+    "waveTitle": "Wave title",
+    "newWave": "Wave",
+    "noChecklists": "Create a mystery-shopper checklist first",
+    "wave": "Wave",
+    "linksDone": "Filled / links",
+    "links": "Links",
+    "publish": "Publish",
+    "close": "Close",
+    "makeLink": "Create link",
+    "copy": "Copy",
+    "copied": "Copied",
+    "linkOnce": "The link is shown once — save it",
+    "expires": "Valid until",
+    "used": "Used",
+    "status": {
+      "active": "active",
+      "published": "published",
+      "closed": "closed"
+    },
+    "reportTitle": "Waves × locations: average score and number of checks",
+    "externalRun": "Checked by a mystery shopper via a one-time link"
   }
 }

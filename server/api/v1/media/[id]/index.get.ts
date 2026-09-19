@@ -12,6 +12,8 @@ export default defineEventHandler(async (event) => {
   if (!media || media.deletedAt) return apiError(event, 404, 'not_found', 'Файл не знайдено')
 
   const variants = media.variants as Record<string, string>
+  // ?redirect=1 — для <img src>: 302 на подписанную ссылку (фото чек-листов, подпись)
+  if (getQuery(event).redirect) return sendRedirect(event, await signedReadUrl((getQuery(event).variant && variants[String(getQuery(event).variant)]) || media.key), 302)
   const urls: Record<string, string> = { original: await signedReadUrl(media.key) }
   for (const [w, key] of Object.entries(variants)) urls[w] = await signedReadUrl(key)
   if (media.posterKey) urls.poster = await signedReadUrl(media.posterKey)

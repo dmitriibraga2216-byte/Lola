@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "^0.7.4",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.1",
     "@types/nodemailer": "^8.0.2",
     "@types/sanitize-html": "^2.16.1",

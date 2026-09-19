@@ -35,7 +35,7 @@ onMounted(async () => {
   run.value = offline.load(key) ?? { key, runId: null, checklistId, locationId: route.query.locationId ? String(route.query.locationId) : undefined, startedAt: new Date().toISOString(), answers: {}, actionPlan: [], pendingFinish: false }
   for (const it of cl.value.items) run.value.answers[it.id] ??= { value: null, comment: '', isNa: false, photos: [] }
   offline.save(run.value)
-  try { people.value = (await api<{ id: string, fullName: string }[]>('/people?limit=200')).map(p => ({ id: p.id, fullName: p.fullName })) } catch { people.value = me.value ? [{ id: me.value.user.id, fullName: me.value.user.fullName }] : [] }
+  try { people.value = (await api<{ id: string, fullName: string }[]>('/people?limit=100')).map(p => ({ id: p.id, fullName: p.fullName })) } catch { people.value = me.value ? [{ id: me.value.user.id, fullName: me.value.user.fullName }] : [] }
 })
 const groups = computed(() => { const m = new Map<string, Item[]>(); for (const it of cl.value?.items ?? []) { const g = it.group || ''; m.set(g, [...(m.get(g) ?? []), it]) } return [...m] })
 const scaleOf = (it: Item) => cl.value?.scales.find(s => s.id === it.scaleId)

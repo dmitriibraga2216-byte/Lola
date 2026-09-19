@@ -55,6 +55,17 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   checklist_critical_failed: 'Критичний провал чек-листа «{{title}}» на точці {{location}}',
   action_item_due: 'План дій: «{{text}}» — до {{due}}',
   action_item_overdue: 'Прострочено: «{{text}}» (термін {{due}})',
+  meetup_registered: 'Ви записані: «{{title}}», {{starts}}',
+  meetup_waitlisted: '«{{title}}»: місць немає, ви в черзі{{#position}} ({{position}}-й){{/position}}',
+  meetup_seat_freed: '«{{title}}»: місце звільнилось, ви в списку. {{starts}}',
+  meetup_reminder_day: 'Завтра: «{{title}}», {{starts}}{{#room}}, {{room}}{{/room}}',
+  meetup_reminder_hour: 'Скоро починається: «{{title}}», {{starts}}',
+  meetup_cancelled: 'Заняття «{{title}}» скасовано: {{reason}}{{#alternative}}. Альтернатива: {{alternative}}{{/alternative}}',
+  meetup_changed: 'Змінилось заняття «{{title}}»: тепер {{starts}}',
+  meetup_missed: 'Ви пропустили заняття «{{title}}»',
+  meetup_missed_manager: 'Не прийшли на «{{title}}»: {{names}}',
+  meetup_feedback_request: 'Оцініть заняття «{{title}}»',
+  webinar_record_ready: 'Запис вебінару «{{title}}» доступний',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

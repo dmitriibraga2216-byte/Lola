@@ -56,6 +56,15 @@ export default defineNitroPlugin(async () => {
         if (n) console.log(`[assignment.sync] ${tenantId}: +${n}`)
       }
     })
+    // Занятия (docs/18 §11): статусы planned→ongoing→finished, неявки, напоминания за сутки/час
+    await boss.work('meetup.scan', async () => {
+      const { reminderScan, statusScan } = await import('../services/meetups')
+      for (const tenantId of await allActiveTenants()) {
+        const s = await statusScan(tenantId)
+        const r = await reminderScan(tenantId)
+        if (s.started || s.finished || r) console.log(`[meetup.scan] ${tenantId}:`, { ...s, reminded: r })
+      }
+    })
     await boss.work('workshop.sla_scan', async () => {
       for (const tenantId of await allActiveTenants()) {
         const s = await workshopSlaScan(tenantId)

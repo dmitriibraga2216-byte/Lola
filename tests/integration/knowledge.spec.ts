@@ -37,6 +37,7 @@ afterAll(async () => {
   if (courseIds.length) {
     await admin`delete from certificates where course_id in ${admin(courseIds)}`
     await admin`delete from enrollments where subject_id in ${admin(courseIds)}`
+    await admin`delete from resources where id in (select l.item_id from lessons l join modules m on m.id = l.module_id join course_versions v on v.id = m.course_version_id where l.item_type = 'resource' and v.course_id in ${admin(courseIds)})`
     await admin`delete from courses where id in ${admin(courseIds)}`
   }
   if (articleIds.length) await admin`delete from knowledge_articles where id in ${admin(articleIds)}`

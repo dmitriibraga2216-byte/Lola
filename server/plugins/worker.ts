@@ -4,6 +4,7 @@ import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/atte
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
 import { allActiveTenants, runDueScan } from '../services/dueScan'
 import { expandAssignment, syncAssignments } from '../services/assignments'
+import { workshopSlaScan } from '../services/workshops'
 
 /**
  * Воркер фоновых задач внутри процесса приложения (dev и старт).
@@ -41,6 +42,12 @@ export default defineNitroPlugin(async () => {
       for (const tenantId of await allActiveTenants()) {
         const n = await syncAssignments(tenantId)
         if (n) console.log(`[assignment.sync] ${tenantId}: +${n}`)
+      }
+    })
+    await boss.work('workshop.sla_scan', async () => {
+      for (const tenantId of await allActiveTenants()) {
+        const s = await workshopSlaScan(tenantId)
+        if (s.released || s.breached || s.expired) console.log(`[workshop.sla_scan] ${tenantId}:`, s)
       }
     })
     await boss.work<{ tenantId: string, assignmentId: string }>('assignment.expand', async (jobs) => {

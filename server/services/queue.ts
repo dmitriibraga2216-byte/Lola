@@ -20,11 +20,13 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('due.scan', { retryLimit: 3, expireInSeconds: 900 })
       await b.createQueue('assignment.sync', { retryLimit: 3, expireInSeconds: 900 })
       await b.createQueue('assignment.expand', { retryLimit: 5, retryBackoff: true, expireInSeconds: 900 })
+      await b.createQueue('workshop.sla_scan', { retryLimit: 3, expireInSeconds: 600 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
       await b.schedule('due.scan', '0 8 * * *', {}, { singletonKey: 'due.scan', tz: 'Europe/Kyiv' })
       await b.schedule('assignment.sync', '0 * * * *', {}, { singletonKey: 'assignment.sync' })
+      await b.schedule('workshop.sla_scan', '*/5 * * * *', {}, { singletonKey: 'workshop.sla_scan' })
       return b
     })
   }

@@ -1,0 +1,87 @@
+<script setup lang="ts">
+import type { ContentBlock } from '../../../shared/schemas/content'
+definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
+const { t } = useI18n()
+const { api } = useApi()
+interface N { id: string, title: string, status: string, isPinned: boolean, requiresAck: boolean, publishedAt: string | null, views: number, acks: number }
+const items = ref<N[]>([])
+const error = ref('')
+const notice = ref('')
+const form = reactive({ title: '', body: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], isPinned: false, requiresAck: false })
+const readers = ref<{ id: string, list: { fullName: string, viewedAt: string, ackedAt: string | null }[] } | null>(null)
+async function load() { try { items.value = await api<N[]>('/news', { query: { all: '1' } }) } catch (err) { error.value = apiErrorOf(err).message } }
+onMounted(load)
+async function publish() {
+  error.value = ''
+  try {
+    await api('/news', { method: 'POST', body: { ...form, publish: true } })
+    Object.assign(form, { title: '', body: [{ id: `b${Date.now()}`, type: 'text', html: '<p></p>' }], isPinned: false, requiresAck: false })
+    notice.value = t('news.published')
+    await load()
+  } catch (err) { error.value = apiErrorOf(err).message }
+}
+async function showReaders(n: N) { readers.value = { id: n.id, list: await api(`/news/${n.id}/readers`) } }
+async function toggle(n: N, field: 'isPinned' | 'status') {
+  await api(`/news/${n.id}`, { method: 'PATCH', body: field === 'isPinned' ? { isPinned: !n.isPinned } : { status: n.status === 'published' ? 'archived' : 'published' } })
+  await load()
+}
+</script>
+<template>
+  <div>
+    <h1>{{ t('admin.nav.news') }}</h1>
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="notice" class="notice">{{ notice }}</p>
+    <section class="card">
+      <input v-model="form.title" class="field" :placeholder="t('news.newTitle')">
+      <BlockEditor v-model="form.body" />
+      <div class="row">
+        <label class="check"><input v-model="form.isPinned" type="checkbox"> {{ t('news.pin') }}</label>
+        <label class="check"><input v-model="form.requiresAck" type="checkbox"> {{ t('news.requireAck') }}</label>
+        <button class="primary" :disabled="form.title.trim().length < 3" @click="publish">{{ t('news.publish') }}</button>
+      </div>
+    </section>
+    <table class="table">
+      <thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('news.col.date') }}</th><th>{{ t('news.col.views') }}</th><th>{{ t('news.col.acks') }}</th><th /></tr></thead>
+      <tbody>
+        <tr v-for="n in items" :key="n.id">
+          <td><span v-if="n.isPinned">📌 </span><b>{{ n.title }}</b><span v-if="n.status !== 'published'" class="sub"> · {{ t(`course.status.${n.status}`) }}</span></td>
+          <td class="sub">{{ n.publishedAt ? new Date(n.publishedAt).toLocaleDateString('uk') : '—' }}</td>
+          <td>{{ n.views }}</td>
+          <td>{{ n.requiresAck ? n.acks : '—' }}</td>
+          <td class="acts">
+            <button class="chip" @click="showReaders(n)">{{ t('news.readers') }}</button>
+            <button class="chip" @click="toggle(n, 'isPinned')">{{ n.isPinned ? t('news.unpin') : t('news.pin') }}</button>
+            <button class="chip" @click="toggle(n, 'status')">{{ n.status === 'published' ? t('news.archive') : t('news.publish') }}</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div v-if="readers" class="modal-backdrop" @click.self="readers = null">
+      <div class="modal">
+        <h2>{{ t('news.readers') }}</h2>
+        <ul><li v-for="r in readers.list" :key="r.fullName">{{ r.ackedAt ? '✓' : '·' }} {{ r.fullName }} <span class="sub">{{ new Date(r.viewedAt).toLocaleString('uk') }}</span></li><li v-if="!readers.list.length" class="sub">—</li></ul>
+      </div>
+    </div>
+  </div>
+</template>
+<style scoped>
+h1 { margin: 0 0 var(--space-4); font-weight: 900; }
+h2 { margin: 0 0 var(--space-3); font-weight: 800; }
+.card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); margin-bottom: var(--space-4); }
+.field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
+.row { display: flex; gap: var(--space-4); align-items: center; }
+.check { display: flex; gap: var(--space-2); align-items: center; font-size: var(--font-size-body-s); }
+.primary { margin-left: auto; font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
+.primary:disabled { opacity: 0.5; }
+.table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }
+th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); }
+td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft); }
+.acts { display: flex; gap: var(--space-1); }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: 2px var(--space-2); cursor: pointer; }
+.sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
+.error { color: var(--color-coral-ink); }
+.notice { color: var(--color-teal-ink); }
+.modal-backdrop { position: fixed; inset: 0; background: rgb(12 15 20 / 40%); display: grid; place-items: center; padding: var(--space-4); }
+.modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(420px, 100%); max-height: 80dvh; overflow: auto; }
+.modal ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+</style>

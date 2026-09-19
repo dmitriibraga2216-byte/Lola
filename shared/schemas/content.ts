@@ -45,16 +45,17 @@ export const moduleCreateSchema = z.object({
 export const lessonCreateSchema = z.object({
   moduleId: z.string().uuid(),
   title: z.string().min(1).max(200),
-  itemType: z.enum(['resource', 'quiz']).default('resource'), // workshop — этап 5
+  itemType: z.enum(['resource', 'quiz', 'workshop']).default('resource'),
   resource: z.object({
     body: bodySchema,
   }).optional(),
   quizId: z.string().uuid().optional(),
+  workshopId: z.string().uuid().optional(),
   isRequired: z.boolean().default(true),
   minSeconds: z.number().int().min(10).max(3600).nullable().optional(),
   videoThresholdPct: z.number().int().min(50).max(100).default(90),
-}).refine(l => l.itemType === 'quiz' ? !!l.quizId : !!l.resource, {
-  message: 'Для уроку-тесту вкажіть quizId, для матеріалу — resource',
+}).refine(l => l.itemType === 'quiz' ? !!l.quizId : l.itemType === 'workshop' ? !!l.workshopId : !!l.resource, {
+  message: 'Для уроку-тесту вкажіть quizId, для практикуму — workshopId, для матеріалу — resource',
 })
 
 export const lessonUpdateSchema = z.object({

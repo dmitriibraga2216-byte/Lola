@@ -349,6 +349,9 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
         // Урок-тест закрывается зачётом попытки (attempts.ts → onAttemptPassed), не кнопкой
         return { ok: false as const, code: 'conditions_not_met' as const, reasons: ['Складіть тест'] }
       }
+      if (lesson.itemType === 'workshop') {
+        return { ok: false as const, code: 'conditions_not_met' as const, reasons: ['Здайте практикум'] }
+      }
       if (lesson.minSeconds && progress.secondsSpent < lesson.minSeconds) {
         reasons.push(`Ще ${lesson.minSeconds - progress.secondsSpent} секунд`)
       }
@@ -427,6 +430,10 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       const { runRules } = await import('./automation')
       const [e] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select({ courseId: enrollments.subjectId }).from(enrollments).where(eq(enrollments.id, enrollmentId)))
       runRules(ctx.tenantId, 'course.completed', ctx.actorId, { courseId: e?.courseId, enrollmentId }).catch(err => console.error('rules course.completed', err))
+      if (e) {
+        const { triggerCourseFeedback } = await import('./surveys')
+        triggerCourseFeedback(ctx.tenantId, ctx.actorId, e.courseId, enrollmentId).catch(err => console.error('survey trigger', err))
+      }
     }
     return res
   })

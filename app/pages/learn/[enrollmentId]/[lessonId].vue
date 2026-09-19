@@ -83,6 +83,10 @@ onMounted(async () => {
       await navigateTo(`/learn/quiz/${opened.lesson.itemId}?enrollmentId=${enrollmentId}&lessonId=${lessonId}`, { replace: true })
       return
     }
+    if (opened.lesson.itemType === 'workshop') {
+      await navigateTo(`/learn/workshop/${opened.lesson.itemId}?enrollmentId=${enrollmentId}&lessonId=${lessonId}`, { replace: true })
+      return
+    }
     data.value = opened
     tree.value = treeRes
     secondsSpent.value = opened.progress.secondsSpent

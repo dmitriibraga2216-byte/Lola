@@ -5,7 +5,12 @@ const { me, hasScope, logout } = useAuth()
 const nav = computed(() => [
   { to: '/admin/courses', label: t('admin.nav.courses'), show: hasScope('course.view') },
   { to: '/admin/quizzes', label: t('admin.nav.quizzes'), show: hasScope('course.view') },
+  { to: '/admin/workshops', label: t('admin.nav.workshops'), show: hasScope('course.view') },
   { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue') },
+  { to: '/admin/review-workshops', label: t('admin.nav.reviewWorkshops'), show: hasScope('review.queue') },
+  { to: '/admin/knowledge', label: t('admin.nav.knowledge'), show: hasScope('knowledge.manage') },
+  { to: '/admin/news', label: t('admin.nav.news'), show: hasScope('knowledge.manage') },
+  { to: '/admin/surveys', label: t('admin.nav.surveys'), show: hasScope('survey.manage') },
   { to: '/admin/assignments', label: t('admin.nav.assignments'), show: hasScope('assignment.create') },
   { to: '/admin/profiles', label: t('admin.nav.profiles'), show: hasScope('assignment.create') },
   { to: '/admin/reports', label: t('admin.nav.reports'), show: hasScope('report.team') },

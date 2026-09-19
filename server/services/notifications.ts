@@ -26,6 +26,15 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   certificate_issued: 'Сертифікат {{number}} за «{{course}}» видано',
   weekly_digest: 'Тижневий підсумок по точці: завершено {{completed}}, прострочено {{overdue}}, нових {{assigned}}',
   telegram_linked: 'Telegram підключено. Сюди приходитимуть нагадування про навчання.',
+  survey_invite: 'Коротке опитування «{{survey}}» — 1 хвилина',
+  workshop_assigned: 'Практикум «{{title}}». Здати до {{due}}',
+  workshop_submitted: '{{name}} здав «{{title}}». Перевірити',
+  workshop_accepted: 'Практикум «{{title}}» зараховано',
+  workshop_rework: 'Практикум «{{title}}»: потрібно доопрацювати. {{comment}}',
+  workshop_rejected: 'Практикум «{{title}}» не зараховано. {{comment}}',
+  workshop_sla_breach: 'Перевірка «{{title}}» висить {{hours}} год',
+  workshop_comment: 'Новий коментар до практикуму «{{title}}»',
+  news_published: 'Новина: {{title}}',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

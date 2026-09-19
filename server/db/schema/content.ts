@@ -29,6 +29,7 @@ export const resources = pgTable('resources', {
   kind: text('kind').notNull().default('article'), // article | file | video | link
   summary: text('summary'),
   body: jsonb('body').notNull().default('[]'), // блоки, docs/11 §3.3
+  plainText: text('plain_text').notNull().default(''), // извлечённый текст для FTS
   mediaId: uuid('media_id'),
   externalUrl: text('external_url'),
   categoryId: uuid('category_id').references(() => courseCategories.id),

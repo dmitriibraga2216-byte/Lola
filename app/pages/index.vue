@@ -17,6 +17,10 @@ async function linkTelegram() {
       <p class="who">{{ t('home.signedInAs', { name: me.user.fullName }) }}</p>
       <p class="who muted">{{ t('home.space', { name: me.tenant.name }) }}</p>
       <NuxtLink to="/learn" class="admin-link">{{ t('home.learnLink') }}</NuxtLink>
+      <div class="links-row">
+        <NuxtLink to="/learn/certificates" class="small-link">{{ t('learner.certificates') }}</NuxtLink>
+        <NuxtLink to="/learn/surveys" class="small-link">{{ t('survey.title') }}</NuxtLink>
+      </div>
       <button class="admin-link ghost tg" @click="linkTelegram">{{ t('home.linkTelegram') }}</button>
       <p v-if="tgLink" class="tg-hint">
         <a v-if="tgLink.url" :href="tgLink.url" target="_blank" rel="noopener">{{ t('home.openTelegram') }}</a>
@@ -70,6 +74,18 @@ p {
   padding: var(--space-2) var(--space-5);
   text-decoration: none;
   justify-self: center;
+}
+
+.links-row {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+}
+
+.small-link {
+  color: var(--color-teal-ink);
+  font-weight: 700;
+  font-size: var(--font-size-body-s);
 }
 
 .tg {

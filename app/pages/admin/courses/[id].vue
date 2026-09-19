@@ -39,6 +39,7 @@ const busy = ref(false)
 const newModuleTitle = ref('')
 const newLessonTitle = reactive<Record<string, string>>({})
 const quizList = ref<{ id: string, title: string }[]>([])
+const workshopList = ref<{ id: string, title: string }[]>([])
 const newLessonQuiz = reactive<Record<string, string>>({})
 
 const canEdit = computed(() => hasScope('course.edit'))
@@ -48,6 +49,7 @@ async function load() {
     editor.value = await api<Editor>(`/courses/${courseId}`)
     if (quizList.value.length === 0) {
       quizList.value = (await api<{ id: string, title: string, status: string }[]>('/quizzes')).filter(q => q.status === 'published')
+      workshopList.value = (await api<{ id: string, title: string, status: string }[]>('/workshops')).filter(w => w.status === 'published')
     }
     if (selected.value) {
       const fresh = editor.value.modules.flatMap(m => m.lessons).find(l => l.id === selected.value!.id)
@@ -103,12 +105,15 @@ async function addModule() {
 async function addLesson(moduleId: string) {
   const title = newLessonTitle[moduleId]?.trim()
   if (!title) return
-  const quizId = newLessonQuiz[moduleId]
+  const pick = newLessonQuiz[moduleId] ?? ''
+  const [kind, itemId] = pick.includes(':') ? pick.split(':') : ['', '']
   const lesson = await api<Lesson>(`/courses/${courseId}/lessons`, {
     method: 'POST',
-    body: quizId
-      ? { moduleId, title, itemType: 'quiz', quizId }
-      : { moduleId, title, resource: { body: [{ id: `b_${Date.now()}`, type: 'text', html: '<p></p>' }] } },
+    body: kind === 'quiz'
+      ? { moduleId, title, itemType: 'quiz', quizId: itemId }
+      : kind === 'workshop'
+        ? { moduleId, title, itemType: 'workshop', workshopId: itemId }
+        : { moduleId, title, resource: { body: [{ id: `b_${Date.now()}`, type: 'text', html: '<p></p>' }] } },
   })
   newLessonQuiz[moduleId] = ''
   newLessonTitle[moduleId] = ''
@@ -191,7 +196,8 @@ async function publish() {
             <input v-model="newLessonTitle[mod.id]" :placeholder="t('course.newLesson')" @keyup.enter="addLesson(mod.id)">
             <select v-model="newLessonQuiz[mod.id]" :title="t('course.asQuiz')">
               <option value="">{{ t('course.material') }}</option>
-              <option v-for="q in quizList" :key="q.id" :value="q.id">? {{ q.title }}</option>
+              <option v-for="q in quizList" :key="q.id" :value="`quiz:${q.id}`">? {{ q.title }}</option>
+              <option v-for="w in workshopList" :key="w.id" :value="`workshop:${w.id}`">✎ {{ w.title }}</option>
             </select>
             <button class="chip" @click="addLesson(mod.id)">+</button>
           </div>
@@ -222,6 +228,10 @@ async function publish() {
           <div v-if="selected.itemType === 'quiz'" class="quiz-note">
             {{ t('course.quizLesson') }}
             <NuxtLink :to="`/admin/quizzes/${selected.itemId}`">{{ t('course.openQuiz') }} →</NuxtLink>
+          </div>
+          <div v-else-if="selected.itemType === 'workshop'" class="quiz-note">
+            {{ t('course.workshopLesson') }}
+            <NuxtLink to="/admin/workshops">{{ t('admin.nav.workshops') }} →</NuxtLink>
           </div>
           <BlockEditor v-else-if="canEdit" v-model="draft.body" />
           <LessonBlocks v-else :blocks="draft.body" :blocks-state="{}" readonly />

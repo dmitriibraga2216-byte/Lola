@@ -90,6 +90,7 @@ h1 {
   margin-left: auto;
   display: flex;
   gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 input {
@@ -99,7 +100,8 @@ input {
   padding: var(--space-2) var(--space-4);
   background: var(--color-bg-soft);
   color: var(--color-ink);
-  min-width: 240px;
+  min-width: 0;
+  flex: 1 1 200px;
 }
 
 .primary {

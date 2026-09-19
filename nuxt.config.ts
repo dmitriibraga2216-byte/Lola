@@ -4,7 +4,19 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   modules: ['@nuxtjs/i18n', '@nuxt/eslint'],
 
-  css: ['~/assets/tokens.css'],
+  css: ['~/assets/tokens.css', '~/assets/ui.css'],
+
+  app: {
+    head: {
+      htmlAttrs: { lang: 'uk' },
+      link: [
+        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+        // Бренд-бук: Nunito, заголовки 900
+        { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap' },
+      ],
+    },
+  },
 
   i18n: {
     strategy: 'no_prefix',
@@ -32,6 +44,7 @@ export default defineNuxtConfig({
     },
     public: {
       defaultTenant: 'kappi', // NUXT_PUBLIC_DEFAULT_TENANT — простір для входу через Google без ?tenant=
+      supportContact: '', // NUXT_PUBLIC_SUPPORT_CONTACT — e-mail поддержки в подвале входа (до настроек тенанта, docs/24 §3.1)
     },
   },
 

@@ -34,8 +34,8 @@ export async function loginViaUi(page: Page, phone: string) {
   await page.getByRole('button', { name: /Отримати код/ }).click()
   const res = await responsePromise
   const { data } = await res.json() as { data: { devCode: string } }
-  await page.getByPlaceholder('······').fill(data.devCode)
-  await page.getByRole('button', { name: /Увійти/ }).click()
+  // Шесть ячеек кода — один скрытый input; шесть цифр отправляются сами
+  await page.getByLabel('Введіть код').fill(data.devCode)
   await page.waitForURL(u => !u.pathname.startsWith('/login'))
 }
 

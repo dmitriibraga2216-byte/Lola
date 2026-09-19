@@ -24,7 +24,7 @@ const byGroup = (g: string) => prefs.value.filter(p => p.group === g)
 </script>
 <template>
   <div>
-    <NuxtLink to="/" class="back">← {{ t('learner.nav.profile') }}</NuxtLink>
+    <NuxtLink to="/learn/profile" class="back">← {{ t('learner.nav.profile') }}</NuxtLink>
     <h1>{{ t('notif.title') }}</h1>
     <p class="sub">{{ t('notif.hint') }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>

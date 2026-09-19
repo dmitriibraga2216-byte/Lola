@@ -44,59 +44,50 @@ function due(r: Row) {
 
 <template>
   <div>
-    <header class="head">
-      <h1>{{ t('admin.nav.assignments') }}</h1>
-      <NuxtLink to="/admin/assignments/new" class="primary">{{ t('assign.new') }}</NuxtLink>
-    </header>
-    <div class="tabs">
-      <button v-for="k in (['all', 'manual', 'auto', 'catalog', 'trajectory', 'archived'] as const)" :key="k" :class="['tab', { on: tab === k }]" @click="tab = k">
-        {{ t(`assign.tab.${k}`) }}
+    <PageHeader :title="t('assign.title')" :crumbs="[{ label: t('admin.section.learning') }]">
+      <template #actions>
+        <NuxtLink to="/admin/assignments/new" class="btn primary">{{ t('assign.new') }}</NuxtLink>
+      </template>
+    </PageHeader>
+    <div class="chips" role="tablist">
+      <button v-for="k in (['all', 'manual', 'auto', 'catalog', 'trajectory', 'archived'] as const)" :key="k" role="tab" :aria-selected="tab === k" :class="['chip', { on: tab === k }]" @click="tab = k">
+        {{ t(`assign.tab.${k}`) }}<template v-if="k === 'all' && items.length"> · {{ items.length }}</template>
       </button>
     </div>
-    <p v-if="error" class="error">{{ error }}</p>
-    <table class="table">
-      <thead>
-        <tr>
-          <th>{{ t('assign.col.title') }}</th><th>{{ t('assign.col.kind') }}</th><th>{{ t('assign.col.author') }}</th>
-          <th>{{ t('assign.col.due') }}</th><th>{{ t('assign.col.people') }}</th><th>{{ t('assign.col.progress') }}</th><th>{{ t('assign.col.status') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="r in items" :key="r.id" class="row" @click="navigateTo(`/admin/assignments/${r.id}`)">
-          <td><b>{{ r.title }}</b><span v-if="r.isMandatory" class="sub"> · {{ t('assign.mandatory') }}</span></td>
-          <td>{{ t(`assign.kind.${r.kind}`) }}</td>
-          <td class="sub">{{ r.authorName || '—' }}</td>
-          <td>{{ due(r) }}</td>
-          <td>{{ r.stats.assigned ?? 0 }}</td>
-          <td>
-            <span class="teal">{{ r.stats.completed ?? 0 }}</span> / <span class="coral">{{ r.stats.overdue ?? 0 }}</span>
-          </td>
-          <td><span :class="['badge', r.status]">{{ t(`assign.status.${r.status}`) }}</span></td>
-        </tr>
-        <tr v-if="items.length === 0"><td colspan="7" class="empty">{{ t('assign.empty') }}</td></tr>
-      </tbody>
-    </table>
+    <p v-if="error" class="error-text">{{ error }}</p>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{ t('assign.col.title') }}</th><th>{{ t('assign.col.kind') }}</th><th>{{ t('assign.col.author') }}</th>
+            <th>{{ t('assign.col.created') }}</th><th>{{ t('assign.col.due') }}</th><th>{{ t('assign.col.people') }}</th><th>{{ t('assign.col.status') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in items" :key="r.id" class="row" @click="navigateTo(`/admin/assignments/${r.id}`)">
+            <td><b>{{ r.title }}</b><span v-if="r.isMandatory" class="sub">{{ t('assign.mandatory') }}</span></td>
+            <td>{{ t(`assign.kind.${r.kind}`) }}</td>
+            <td class="muted">{{ r.authorName || '—' }}</td>
+            <td class="muted">{{ new Date(r.createdAt).toLocaleDateString('uk') }}</td>
+            <td>{{ due(r) }}</td>
+            <td class="num">{{ r.stats.assigned ?? 0 }}<span class="sub"><span class="teal">{{ r.stats.completed ?? 0 }}</span> · <span class="coral">{{ r.stats.overdue ?? 0 }}</span></span></td>
+            <td><span :class="['badge upper', r.status]">{{ t(`assign.status.${r.status}`) }}</span></td>
+          </tr>
+          <tr v-if="items.length === 0"><td colspan="7" class="empty">{{ t('assign.empty') }}</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.head { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-4); }
-h1 { margin: 0; font-weight: 900; }
-.primary { margin-left: auto; font-weight: 800; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); text-decoration: none; }
-.tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); flex-wrap: wrap; }
-.tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
-.tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
-.table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }
-th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); }
-td { padding: var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft); }
+.chips { margin-bottom: var(--space-3); }
 .row { cursor: pointer; }
-.row:hover { background: var(--color-bg); }
-.sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
+.row:hover td { background: var(--color-bg-line-soft); }
 .teal { color: var(--color-teal-ink); font-weight: 700; }
 .coral { color: var(--color-coral-ink); font-weight: 700; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
-.badge.active { background: var(--color-teal); color: var(--color-teal-deep); }
-.badge.paused { background: var(--color-sun); color: var(--color-sun-ink); }
+.badge.active { background: var(--color-sun); color: var(--color-sun-ink); }
+.badge.paused { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
+.badge.archived { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .empty { color: var(--color-ink-faint); text-align: center; padding: var(--space-6); }
-.error { color: var(--color-coral-ink); }
 </style>

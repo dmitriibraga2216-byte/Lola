@@ -17,12 +17,10 @@ test('1. Вход по OTP за два экрана; неверный код п�
   const { data } = await (await responsePromise).json() as { data: { devCode: string } }
   await expect(page.getByText(/Код надіслали/)).toBeVisible()
 
-  await page.getByPlaceholder('······').fill(data.devCode === '000000' ? '000001' : '000000')
-  await page.getByRole('button', { name: /Увійти/ }).click()
+  await page.getByLabel('Введіть код').fill(data.devCode === '000000' ? '000001' : '000000')
   await expect(page.getByText(/Код невірний. Залишилось 4/)).toBeVisible()
 
-  await page.getByPlaceholder('······').fill(data.devCode)
-  await page.getByRole('button', { name: /Увійти/ }).click()
+  await page.getByLabel('Введіть код').fill(data.devCode)
   await expect(page).toHaveURL(/\/$/)
   await expect(page.getByText(/Ви увійшли як/)).toBeVisible()
 })

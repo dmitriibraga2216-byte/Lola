@@ -1,5 +1,5 @@
 export interface Me {
-  user: { id: string, fullName: string, phone: string | null, email: string | null, locale: string | null, status: string }
+  user: { id: string, fullName: string, phone: string | null, email: string | null, locale: string | null, status: string, roles: { code: string, name: string }[], position: string | null, location: string | null }
   tenant: { id: string, slug: string, name: string, locale: string, timezone: string }
   scopes: string[]
   impersonated: boolean
@@ -35,5 +35,8 @@ export function useAuth() {
     return me.value?.scopes.includes(scope) ?? false
   }
 
-  return { me, loaded, fetchMe, logout, hasScope }
+  /** Инициалы для аватара: «Ткаченко Аліна» → «ТА». */
+  const initials = computed(() => (me.value?.user.fullName ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join(''))
+
+  return { me, loaded, fetchMe, logout, hasScope, initials }
 }

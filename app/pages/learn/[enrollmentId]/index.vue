@@ -26,7 +26,7 @@ onMounted(async () => {
 })
 
 function icon(status: string, itemType: string) {
-  return status === 'completed' ? '✓' : status === 'locked' ? '🔒' : itemType === 'quiz' ? '?' : '›'
+  return status === 'completed' ? '✓' : status === 'locked' ? '🔒' : itemType === 'quiz' ? '?' : itemType === 'workshop' ? '✎' : '›'
 }
 </script>
 

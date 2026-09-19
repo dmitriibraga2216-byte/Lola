@@ -42,7 +42,12 @@
       "review": "Review queue",
       "assignments": "Assignments",
       "profiles": "Learning profiles",
-      "reports": "Reports"
+      "reports": "Reports",
+      "workshops": "Workshops",
+      "reviewWorkshops": "Workshop review",
+      "knowledge": "Knowledge base",
+      "news": "News",
+      "surveys": "Surveys"
     }
   },
   "people": {
@@ -199,7 +204,8 @@
     "asQuiz": "Lesson type",
     "material": "Material",
     "quizLesson": "This is a quiz lesson. Questions and settings live in the quiz editor.",
-    "openQuiz": "Open quiz"
+    "openQuiz": "Open quiz",
+    "workshopLesson": "This is a workshop lesson. Task and criteria live in Workshops."
   },
   "blocks": {
     "heading": "Heading",
@@ -472,6 +478,139 @@
       "avg_hours": "Hours to reply",
       "accept_pct": "% accepted",
       "sla_breaches": "SLA breaches"
+    }
+  },
+  "kb": {
+    "title": "Knowledge base",
+    "short": "Guide",
+    "searchHint": "e.g. fish temperature",
+    "nothing": "Nothing found. Try other words",
+    "kind": {
+      "article": "Article",
+      "lesson": "Lesson"
+    },
+    "newTitle": "New article title",
+    "views": "views",
+    "empty": "No articles yet",
+    "summary": "Short summary",
+    "tags": "Tags, comma separated",
+    "unpublish": "Unpublish",
+    "revisions": "Revisions ({n})"
+  },
+  "news": {
+    "title": "News",
+    "short": "News",
+    "empty": "No news yet",
+    "needAck": "Acknowledge",
+    "ack": "Acknowledged",
+    "close": "Close",
+    "newTitle": "News title",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "requireAck": "Require acknowledgement",
+    "publish": "Publish",
+    "archive": "Archive",
+    "published": "Published",
+    "readers": "Readers",
+    "col": {
+      "date": "Date",
+      "views": "Views",
+      "acks": "Acked"
+    }
+  },
+  "survey": {
+    "title": "Surveys",
+    "empty": "No surveys yet",
+    "questions": "questions",
+    "anonymous": "anonymous",
+    "yes": "Yes",
+    "no": "No",
+    "send": "Send",
+    "thanks": "Thanks for your answers",
+    "responses": "responses",
+    "report": "Report",
+    "close": "Close",
+    "new": "New survey",
+    "titleHint": "Survey title",
+    "questionHint": "Question text",
+    "optionsHint": "Options, comma separated",
+    "question": "Question",
+    "choice": "Choice",
+    "createActivate": "Create & activate",
+    "kind": {
+      "survey": "Survey",
+      "course_feedback": "Course feedback",
+      "poll": "Poll"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "closed": "Closed"
+    },
+    "hiddenThreshold": "Anonymous data shown from {n} responses",
+    "avg": "Average"
+  },
+  "workshop": {
+    "reviewTitle": "Workshop review",
+    "task": "Task",
+    "criteria": "Criteria",
+    "critical": "critical",
+    "critComment": "Comment on criterion",
+    "needAll": "All criteria must pass",
+    "toRework": "Send for rework",
+    "skip": "Skip",
+    "attemptN": "attempt {n}",
+    "overdueH": "{n}h overdue",
+    "leftH": "{n}h",
+    "history": "Submission history ({n})",
+    "onReview": "Under review",
+    "reviewBy": "A mentor will review by {at}",
+    "rework": "Needs rework",
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "textHint": "Describe what you did",
+    "minChars": "At least {n} characters",
+    "maxFiles": "Up to {n} files",
+    "tooBig": "File larger than {n} MB",
+    "addFile": "Add photo or file",
+    "takePhoto": "Take a photo",
+    "comments": "Comments",
+    "commentHint": "Write to your mentor…",
+    "saveDraft": "Save draft",
+    "submit": "Submit for review",
+    "status": {
+      "draft": "draft",
+      "submitted": "submitted",
+      "in_review": "in review",
+      "rework": "rework",
+      "accepted": "accepted",
+      "rejected": "rejected",
+      "expired": "expired",
+      "annulled": "annulled"
+    },
+    "decided": {
+      "accepted": "Accepted. Next one",
+      "rework": "Sent for rework. Next one",
+      "rejected": "Rejected. Next one"
+    },
+    "empty": "No workshops yet",
+    "new": "New workshop",
+    "titleHint": "e.g. Photograph the assembled set",
+    "cameraOnly": "camera only",
+    "criterionHint": "Criterion, e.g. Temperature 0…+4 visible",
+    "criterion": "Criterion",
+    "reviewer": "Reviewer",
+    "rev": {
+      "location_mentor": "location mentors",
+      "any_mentor": "any mentor",
+      "author": "authors"
+    },
+    "maxReworks": "Reworks",
+    "col": {
+      "kinds": "Format",
+      "criteria": "Criteria",
+      "pending": "Pending",
+      "firstPass": "First-pass"
     }
   }
 }

@@ -7,6 +7,7 @@ import {
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
+import { blocksToText } from './knowledge'
 import type {
   ContentBlock, courseCreateSchema, courseUpdateSchema, lessonCreateSchema, lessonUpdateSchema,
 } from '../../shared/schemas/content'
@@ -231,13 +232,18 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
     if (input.itemType === 'quiz') {
       itemId = input.quizId!
     }
+    else if (input.itemType === 'workshop') {
+      itemId = input.workshopId!
+    }
     else {
+      const cleanBody = sanitizeBody(input.resource!.body as ContentBlock[])
       const [resource] = await tx.insert(resources).values({
         tenantId: ctx.tenantId,
         title: input.title,
         slug: `${slugify(input.title)}-${randomUUID().slice(0, 6)}`,
         kind: 'article',
-        body: sanitizeBody(input.resource!.body as ContentBlock[]),
+        body: cleanBody,
+        plainText: blocksToText(cleanBody),
         authorIds: [ctx.actorId],
         status: 'published',
       }).returning({ id: resources.id })
@@ -266,8 +272,10 @@ export async function updateLesson(ctx: Ctx, lessonId: string, input: z.infer<ty
     if (!lesson) return null
 
     if (input.body !== undefined && lesson.itemType === 'resource') {
+      const cleanBody = sanitizeBody(input.body as ContentBlock[])
       await tx.update(resources).set({
-        body: sanitizeBody(input.body as ContentBlock[]),
+        body: cleanBody,
+        plainText: blocksToText(cleanBody),
         version: (await tx.select({ v: resources.version }).from(resources).where(eq(resources.id, lesson.itemId)))[0]!.v + 1,
         updatedAt: new Date(),
       }).where(eq(resources.id, lesson.itemId))

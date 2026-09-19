@@ -45,7 +45,7 @@ export function describeEntities() {
 export interface ReportSpec { entity: Entity, fields: string[], filters?: Record<string, unknown>, groupBy?: string | null }
 
 /** Выполнение: при groupBy — количество строк и средние по числовым полям в группе. */
-export async function runReport(ctx: Ctx, spec: ReportSpec, limit = 2000): Promise<Record<string, unknown>[]> {
+export async function runReport(ctx: Ctx, spec: ReportSpec, limit = 2000, scope: string[] | null = null): Promise<Record<string, unknown>[]> {
   const ent = ENTITIES[spec.entity]
   if (!ent) return []
   const fields = spec.fields.filter(f => f in ent.fields)
@@ -59,6 +59,8 @@ export async function runReport(ctx: Ctx, spec: ReportSpec, limit = 2000): Promi
     else if (Array.isArray(v)) where.push(sql`${col}::text in (${sql.join(v.map(x => sql`${String(x)}`), sql`, `)})`)
     else where.push(sql`${col}::text = ${String(v)}`)
   }
+  // Область видимости (docs/22 §7.1): применяется до фильтров, расширить параметром нельзя
+  if (scope !== null) where.push(scope.length ? sql`up.location_id in (${sql.join(scope.map(id => sql`${id}::uuid`), sql`, `)})` : sql`false`)
   const whereSql = where.length ? sql`where ${sql.join(where, sql` and `)}` : sql``
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const F = ent.fields as Record<string, ReturnType<typeof sql>>
@@ -96,10 +98,10 @@ export async function deleteSaved(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => (await tx.delete(savedReports).where(eq(savedReports.id, id)).returning({ id: savedReports.id })).length > 0)
 }
 
-export async function savedToXlsx(ctx: Ctx, id: string): Promise<{ name: string, buffer: Buffer } | null> {
+export async function savedToXlsx(ctx: Ctx, id: string, scope: string[] | null = null): Promise<{ name: string, buffer: Buffer } | null> {
   const [r] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select().from(savedReports).where(eq(savedReports.id, id)))
   if (!r) return null
-  const rows = await runReport(ctx, { entity: r.entity as Entity, fields: r.fields, filters: r.filters as Record<string, unknown>, groupBy: r.groupBy })
+  const rows = await runReport(ctx, { entity: r.entity as Entity, fields: r.fields, filters: r.filters as Record<string, unknown>, groupBy: r.groupBy }, 2000, scope)
   return { name: r.name, buffer: await toXlsx(r.name, rows as never) }
 }
 

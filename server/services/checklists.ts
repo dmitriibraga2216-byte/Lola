@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { checklistRuns, checklists, locations, ratingScales, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { scopeSql } from './access'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
@@ -208,12 +209,12 @@ export async function addAction(ctx: Ctx, runId: string, item: { text: string, r
 
 // ── Отчёты (docs/20 §9) ─────────────────────────────────────────────────
 
-export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: string, locationId?: string, checklistId?: string } = {}) {
+export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: string, locationId?: string, checklistId?: string, scope?: string[] | null } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const where = sql`r.status = 'finished'
       ${filter.from ? sql`and r.started_at >= ${filter.from}::date` : sql``}
       ${filter.to ? sql`and r.started_at < (${filter.to}::date + 1)` : sql``}
-      ${filter.locationId ? sql`and r.location_id = ${filter.locationId}::uuid` : sql``}
+      ${scopeSql(filter.scope ?? null, sql`r.location_id`)}
       ${filter.checklistId ? sql`and r.checklist_id = ${filter.checklistId}::uuid` : sql``}`
     const runs = await tx.execute(sql`
       select r.id, r.started_at, r.finished_at, r.score, r.passed, r.critical_failed, r.action_plan, c.title, c.kind, l.name as location, u.full_name as observer
@@ -246,14 +247,14 @@ export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: st
 }
 
 /** Дисциплина проверок (docs/20 §9): сколько раз чек-лист с частотой проведён на точке за неделю против нормы. */
-export async function disciplineReport(ctx: Ctx) {
+export async function disciplineReport(ctx: Ctx, scope: string[] | null = null) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.execute(sql`
       select * from (
         select c.title as checklist, l.id as location_id, l.name as location, (c.frequency->>'timesPerWeek')::int as norm,
                (select count(*)::int from checklist_runs r where r.checklist_id = c.id and r.location_id = l.id and r.status = 'finished' and r.started_at >= date_trunc('week', now())) as done
         from checklists c cross join locations l
-        where c.is_active and c.frequency is not null and c.subject_kind = 'location'
+        where c.is_active and c.frequency is not null and c.subject_kind = 'location' ${scopeSql(scope, sql`l.id`)}
       ) x order by (done < norm) desc, location, checklist
     `) as unknown as Promise<{ checklist: string, location_id: string, location: string, norm: number, done: number }[]>
   })
@@ -298,7 +299,7 @@ export async function actionDueScan(tenantId: string): Promise<number> {
   })
 }
 
-export async function assessmentReport(ctx: Ctx, filter: { cycleId?: string, locationId?: string } = {}) {
+export async function assessmentReport(ctx: Ctx, filter: { cycleId?: string, locationId?: string, scope?: string[] | null } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     // По человеку: средние self/manager/peer и расхождение self−manager по анкете в целом
     return tx.execute(sql`
@@ -317,7 +318,7 @@ export async function assessmentReport(ctx: Ctx, filter: { cycleId?: string, loc
              round(max(case when s.rater_kind = 'self' then s.avg_value end) - max(case when s.rater_kind = 'manager' then s.avg_value end), 2) as gap
       from sub s join users u on u.id = s.subject_user_id join assessment_cycles c on c.id = s.cycle_id
       left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
-      where true ${filter.locationId ? sql`and up.location_id = ${filter.locationId}::uuid` : sql``}
+      where true ${scopeSql(filter.scope ?? null, sql`up.location_id`)}
       group by 1, 2, 3 order by 1, 2 limit 500
     `) as unknown as Promise<Record<string, unknown>[]>
   })

@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { locations, meetupRegistrations, meetups, userPlacements, users, webinarParticipations, webinars } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { scopeSql } from './access'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
@@ -412,9 +413,12 @@ export function toIcs(m: { id: string, title: string, startsAt: Date, endsAt: Da
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Lola LMS//UK', 'BEGIN:VEVENT', `UID:${m.id}@lola`, `DTSTAMP:${fmt(new Date())}`, `DTSTART:${fmt(m.startsAt)}`, `DTEND:${fmt(m.endsAt)}`, `SUMMARY:${m.title.replace(/[,;]/g, ' ')}`, where ? `LOCATION:${where.replace(/[,;]/g, ' ')}` : '', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean).join('\r\n')
 }
 
-export async function attendanceReport(ctx: Ctx, filter: { from?: string, to?: string } = {}) {
+export async function attendanceReport(ctx: Ctx, filter: { from?: string, to?: string, scope?: string[] | null } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const where = sql`m.status in ('finished','ongoing','cancelled') ${filter.from ? sql`and m.starts_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and m.starts_at < (${filter.to}::date + 1)` : sql``}`
+    // Область видимости: занятие на точке или без точки (вебинары сети) — по участникам этих точек
+    const scope = filter.scope ?? null
+    const scoped = scope === null ? sql`` : sql`and (m.location_id in (select x from unnest(array[${sql.join(scope.length ? scope.map(i => sql`${i}::uuid`) : [sql`null::uuid`], sql`, `)}]) x) or (m.location_id is null and exists (select 1 from meetup_registrations rr join user_placements up on up.user_id = rr.user_id and up.is_primary and up.ended_at is null where rr.meetup_id = m.id ${scopeSql(scope, sql`up.location_id`)})))`
+    const where = sql`m.status in ('finished','ongoing','cancelled') ${filter.from ? sql`and m.starts_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and m.starts_at < (${filter.to}::date + 1)` : sql``} ${scoped}`
     const meetupsRows = await tx.execute(sql`
       select m.id, m.kind, m.title, m.starts_at, m.status, m.trainer_ids,
              (select count(*)::int from meetup_registrations r where r.meetup_id = m.id and r.status in ('registered','attended','missed','excused')) as registered,

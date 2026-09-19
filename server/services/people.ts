@@ -7,6 +7,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { recordAudit } from './audit'
+import { scopeSql } from './access'
 import { hashToken } from './session'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
@@ -556,7 +557,7 @@ export async function removeRole(ctx: Ctx, userId: string, roleCode: string): Pr
 // ── Отчёты (docs/16 §9) ─────────────────────────────────────────────────
 
 /** Штат по точкам на дату: размещения с историей — переведённый в прошлом месяце показан там, где работал тогда (§13.2). */
-export async function staffingReport(ctx: Ctx, asOf?: string) {
+export async function staffingReport(ctx: Ctx, asOf?: string, scope: string[] | null = null) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const d = asOf ?? new Date().toISOString().slice(0, 10)
     return tx.execute(sql`
@@ -566,6 +567,7 @@ export async function staffingReport(ctx: Ctx, asOf?: string) {
       from user_placements up join users u on u.id = up.user_id join locations l on l.id = up.location_id join positions p on p.id = up.position_id
       where up.is_primary and up.started_at <= ${d}::date and (up.ended_at is null or up.ended_at > ${d}::date)
         and u.status <> 'archived' and not u.is_hidden and (u.archived_at is null or u.archived_at > ${d}::date)
+        ${scopeSql(scope, sql`up.location_id`)}
       group by 1, 2 order by 1, 2
     `) as unknown as Promise<{ location: string, position: string, people: number, newcomers: number, avg_tenure_days: number }[]>
   })
@@ -579,7 +581,7 @@ export async function placementAt(ctx: Ctx, userId: string, date: string) {
   })
 }
 
-export async function turnoverReport(ctx: Ctx, from: string, to: string) {
+export async function turnoverReport(ctx: Ctx, from: string, to: string, scope: string[] | null = null) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.execute(sql`
       select l.name as location, p.name as position, count(*)::int as archived
@@ -587,18 +589,20 @@ export async function turnoverReport(ctx: Ctx, from: string, to: string) {
       join locations l on l.id = up.location_id join positions p on p.id = up.position_id
       where u.status = 'archived' and u.archived_at >= ${from}::date and u.archived_at < (${to}::date + 1)
         and up.ended_at = (select max(ended_at) from user_placements x where x.user_id = u.id)
+        ${scopeSql(scope, sql`up.location_id`)}
       group by 1, 2 order by 3 desc
     `) as unknown as Promise<{ location: string, position: string, archived: number }[]>
   })
 }
 
-export async function inactiveReport(ctx: Ctx, days = 30) {
+export async function inactiveReport(ctx: Ctx, days = 30, scope: string[] | null = null) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.execute(sql`
       select u.id, u.full_name, u.last_seen_at, l.name as location, p.name as position
       from users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
       where u.status = 'active' and coalesce(u.last_seen_at, u.created_at) < now() - (${days} || ' days')::interval
+        ${scopeSql(scope, sql`up.location_id`)}
       order by u.last_seen_at nulls first limit 500
     `) as unknown as Promise<Record<string, unknown>[]>
   })

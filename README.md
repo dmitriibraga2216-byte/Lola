@@ -49,7 +49,7 @@ pnpm lint && pnpm typecheck
 | 11 | Интеграции | OAuth по docs/09 (state в БД, offline+consent, только зашифрованный refresh_token, статусы «не налаштовано / не підключено / працює / мовчить»): Google Calendar для занятий, Meet и Zoom для вебинаров, посещаемость из Zoom, импорт людей из Workspace, вход через Google |
 
 Развёртывание на своём железе — `docker/` и `Makefile` (см. [docs/26](docs/26-server-local.md), [docs/27](docs/27-gateway-public.md)).
-Демо-стенд на маленькой машине — `docker/docker-compose.demo.yml`: готовый образ `ghcr.io/dmitriibraga2216-byte/lola:latest` (собирается CI на `main`), воркер внутри приложения, код входа показывается на экране (`OTP_DEBUG=1`), наружу — быстрый туннель Cloudflare без аккаунта. Обновление: `docker compose pull && docker compose up -d` — сервис `migrate` накатывает миграции перед стартом приложения.
+Демо-стенд на маленькой машине — `docker/docker-compose.demo.yml`: готовый образ `ghcr.io/dmitriibraga2216-byte/lola:latest` (собирается CI на `main`), воркер внутри приложения, код входа показывается на экране (`OTP_DEBUG=1`), наружу — быстрый туннель Cloudflare без аккаунта. Обновление: автоматически из CI после зелёного `main` (job `deploy-demo`, секреты `DEMO_SSH_*`), вручную — `ssh cappi-bot 'bash -s' < scripts/deploy-demo.sh`; сервис `migrate` накатывает миграции перед стартом приложения. Ссылка на стенд — в summary job'а `deploy-demo`.
 
 ## ТЗ
 

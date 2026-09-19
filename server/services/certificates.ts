@@ -78,6 +78,8 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: enr.userId, code: 'certificate_issued', payload: { number, course: c?.title }, dedupKey: `cert_issued:${cert.id}` })
     const { emitWebhook } = await import('./webhooks')
     await emitWebhook(tx, ctx.tenantId, 'certificate.issued', { certificateId: cert.id, number, userId: enr.userId, courseId: enr.subjectId, validUntil })
+    // PDF — фоновой задачей; в тестах/без воркера отрендерится лениво при первом скачивании
+    import('./queue').then(q => q.enqueueCertificatePdf(ctx.tenantId, cert.id)).catch(() => {})
     return { ok: true as const, certificateId: cert.id, number: cert.number, created: true }
   })
 }

@@ -270,6 +270,20 @@ describe('тест как урок курса → сертификат', () => {
     expect(count).toBe(1)
   })
 
+  it('PDF: рендер в S3 идемпотентен, ссылка подписанная, чужой и отозванный не отдаются (docs/14 §7.5, §13.7)', async () => {
+    const { pdfUrl, renderAndStore } = await import('../../server/services/certificatePdf')
+    const mine = await myCertificates(learner())
+    const cert = mine.find(c => c.courseTitle?.startsWith('Курс із тестом'))!
+    const first = await renderAndStore(tenantId, cert.id)
+    expect(first).toMatchObject({ created: true })
+    expect(first!.key).toMatch(/^t\/.+\/certificates\/LO-\d{4}-\d{6}\.pdf$/)
+    expect(await renderAndStore(tenantId, cert.id)).toMatchObject({ key: first!.key, created: false })
+    const own = await pdfUrl(learner(), cert.id, { manage: false })
+    expect('url' in own && own.url).toMatch(/X-Amz-Signature/)
+    expect(await pdfUrl(mentor(), cert.id, { manage: false })).toEqual({ error: 'forbidden' })
+    expect('url' in (await pdfUrl(mentor(), cert.id, { manage: true }))).toBe(true)
+  })
+
   it('публичная проверка по токену без входа; отзыв меняет статус', async () => {
     const mine = await myCertificates(learner())
     const cert = mine.find(c => c.courseTitle?.startsWith('Курс із тестом'))!
@@ -282,5 +296,7 @@ describe('тест как урок курса → сертификат', () => {
 
     await revokeCertificate(author(), cert.id, 'Помилка при видачі')
     expect((await publicCertificate(cert.publicToken))!.revoked_at).not.toBeNull()
+    const { pdfUrl } = await import('../../server/services/certificatePdf')
+    expect(await pdfUrl(learner(), cert.id, { manage: false })).toEqual({ error: 'revoked' })
   })
 })

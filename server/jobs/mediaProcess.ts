@@ -69,8 +69,8 @@ export async function processMedia(job: MediaProcessJob): Promise<void> {
     }
 
     if (media.kind === 'video' && hasFfmpeg()) {
-      // Полное перекодирование появится с выделенным воркером (docs/26);
-      // здесь — постер первой секунды, сам файл отдаётся как загружен.
+      // Постер первой секунды + перекодирование в H.264 720p mp4 с faststart (docs/11 §3.6, docs/06):
+      // оригинал остаётся, плеер берёт вариант «720», если он есть.
       const url = await import('../services/media').then(m => m.signedReadUrl(media.key))
       const poster = spawnSync('ffmpeg', [
         '-ss', '1', '-i', url, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1',
@@ -87,10 +87,37 @@ export async function processMedia(job: MediaProcessJob): Promise<void> {
         }))
       }
 
+      const variants: Record<string, string> = { ...(media.variants as Record<string, string>) }
+      if (process.env.VIDEO_TRANSCODE !== '0') {
+        const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
+        const { tmpdir } = await import('node:os')
+        const { join } = await import('node:path')
+        const dir = mkdtempSync(join(tmpdir(), 'lola-video-'))
+        try {
+          const out = join(dir, 'out.mp4')
+          const enc = spawnSync('ffmpeg', [
+            '-y', '-i', url, '-vf', 'scale=-2:min(720\\,ih)', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26', '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', out,
+          ], { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: 30 * 60_000 })
+          if (enc.status === 0) {
+            const key720 = media.key.replace(/\.[a-z0-9]+$/i, '.720.mp4')
+            await s3().send(new PutObjectCommand({ Bucket: S3_BUCKET(), Key: key720, Body: readFileSync(out), ContentType: 'video/mp4' }))
+            variants['720'] = key720
+          }
+          else {
+            console.warn('[media.process] transcode failed:', String(enc.stderr).slice(-400))
+          }
+        }
+        finally {
+          rmSync(dir, { recursive: true, force: true })
+        }
+      }
+
       await withTenant(job.tenantId, null, async (tx) => {
         await tx.update(mediaAssets).set({
           status: 'ready',
           posterKey,
+          variants,
           updatedAt: new Date(),
         }).where(eq(mediaAssets.id, job.mediaId))
       })

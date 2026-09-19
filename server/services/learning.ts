@@ -3,6 +3,7 @@ import {
   courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons, modules, resources,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
 
@@ -415,6 +416,7 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       lastActivityAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(enrollments.id, enrollmentId))
+    if (courseCompleted && enrollment.status !== 'completed') business.inc({ event: 'course_completed' })
 
     await logEvent(tx, ctx.tenantId, enrollmentId, courseCompleted ? 'completed' : 'progress', {
       lessonId,

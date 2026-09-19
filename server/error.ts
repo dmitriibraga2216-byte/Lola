@@ -1,5 +1,6 @@
 import type { NitroErrorHandler } from 'nitropack'
 import { randomUUID } from 'node:crypto'
+import * as Sentry from '@sentry/node'
 
 /**
  * Единый формат ошибок API (docs/04-api.md §4.1): { error: { code, message, details? } }.
@@ -19,8 +20,11 @@ const handler: NitroErrorHandler = (error, event) => {
 
   let body: Record<string, unknown>
   if (status >= 500) {
-    const traceId = randomUUID()
-    console.error(`[${traceId}]`, error)
+    const traceId = (event.context.traceId as string | undefined) ?? randomUUID()
+    const auth = event.context.auth as { tenantId?: string, userId?: string } | undefined
+    // Структурный лог с trace_id/tenant_id/user_id (docs/06 §6.7)
+    console.error(JSON.stringify({ level: 'error', trace_id: traceId, tenant_id: auth?.tenantId ?? null, user_id: auth?.userId ?? null, path: event.path, message: error.message, stack: error.stack?.split('\n').slice(0, 6).join(' | ') }))
+    if (process.env.SENTRY_DSN) Sentry.captureException(error, { tags: { trace_id: traceId, tenant_id: auth?.tenantId ?? 'none' }, user: auth?.userId ? { id: auth.userId } : undefined })
     body = { error: { code: 'internal', message: 'Щось пішло не так', details: { traceId } } }
   }
   else {

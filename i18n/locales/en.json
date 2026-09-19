@@ -335,7 +335,8 @@
     "score": "Score",
     "open": "Open",
     "share": "Share",
-    "copied": "Copied"
+    "copied": "Copied",
+    "downloadPdf": "Download PDF"
   },
   "enrollment": {
     "scheduled": "Scheduled",

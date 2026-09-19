@@ -2,6 +2,7 @@ import { and, eq, lte, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { notificationTemplates, notifications, tenants, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { sendTelegram } from './telegram'
 
@@ -173,6 +174,7 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
         if (res.ok) {
           await tx.update(notifications).set({ status: 'sent', renderedText: text, sentAt: new Date(), updatedAt: new Date() }).where(eq(notifications.id, n.id))
           stats.sent++
+          business.inc({ event: 'notification_sent' })
         }
         else if (res.blocked) {
           // Бот заблокирован (docs/06 §6.4): помечаем, канал далее — SMS
@@ -183,6 +185,8 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
         else {
           await tx.update(notifications).set({ status: 'failed', renderedText: text, error: res.error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
           stats.failed++
+          business.inc({ event: 'notification_failed' })
+          business.inc({ event: 'telegram_error' })
         }
       }
       else {

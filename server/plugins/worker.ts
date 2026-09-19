@@ -38,10 +38,16 @@ export default defineNitroPlugin(async () => {
     })
     await boss.work('due.scan', async () => {
       const { goalDueScan } = await import('../services/development')
+      const { assessmentScan } = await import('../services/assessment')
+      const { actionDueScan, frequencyScan } = await import('../services/checklists')
+      const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
         const g = await goalDueScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g })
+        const a = await assessmentScan(tenantId)
+        const ai = await actionDueScan(tenantId)
+        const cf = monday ? await frequencyScan(tenantId) : 0
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf })
       }
     })
     await boss.work('assignment.sync', async () => {

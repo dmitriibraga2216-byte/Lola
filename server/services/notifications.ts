@@ -45,6 +45,16 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   request_step: 'Заявку «{{title}}» погоджено на цьому етапі',
   request_approved: 'Заявку «{{title}}» схвалено. {{comment}}',
   request_rejected: 'Заявку «{{title}}» відхилено. {{comment}}',
+  assessment_task_assigned: 'Оцінка «{{title}}»: заповніть анкету до {{due}}',
+  assessment_due_soon: 'Оцінка «{{title}}»: анкета ще не заповнена, термін {{due}}',
+  assessment_not_submitted: 'Оцінка «{{title}}»: {{name}} не заповнив анкету',
+  assessment_cycle_finished: 'Цикл оцінки «{{title}}» завершено: {{subjects}} осіб',
+  assessment_results_ready: 'Результати оцінки «{{title}}» готові',
+  checklist_due: 'Чек-лист «{{title}}» на точці {{location}}: проведено {{done}} з {{norm}} за тиждень',
+  checklist_failed: 'Чек-лист «{{title}}» на точці {{location}} не пройдено: {{score}}%',
+  checklist_critical_failed: 'Критичний провал чек-листа «{{title}}» на точці {{location}}',
+  action_item_due: 'План дій: «{{text}}» — до {{due}}',
+  action_item_overdue: 'Прострочено: «{{text}}» (термін {{due}})',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

@@ -24,7 +24,9 @@ export const locations = pgTable('locations', {
   timezone: text('timezone').notNull().default('Europe/Kyiv'),
   managerId: uuid('manager_id').references((): AnyPgColumn => users.id),
   isActive: boolean('is_active').notNull().default(true),
-})
+}, t => [
+  unique().on(t.tenantId, t.name),
+])
 
 export const positions = pgTable('positions', {
   ...baseColumns,

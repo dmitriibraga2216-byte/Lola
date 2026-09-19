@@ -2,7 +2,12 @@
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
-const { me } = useAuth()
+const { me, hasScope } = useAuth()
+const sections = computed(() => [
+  { to: '/learn/knowledge', label: t('kb.short') }, { to: '/learn/news', label: t('news.short') }, { to: '/learn/development', label: t('dev.short') },
+  { to: '/learn/assessment', label: t('assess.short') }, { to: '/learn/certificates', label: t('learner.certificates') }, { to: '/learn/surveys', label: t('survey.short') },
+  ...(hasScope('checklist.run') ? [{ to: '/learn/checklists', label: t('cl.short') }] : []),
+])
 const { api } = useApi()
 
 interface Card {
@@ -69,6 +74,10 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
       {{ t('learner.counter', { n: items.length, deadlines: withDeadline }) }}
     </p>
 
+    <nav class="sections">
+      <NuxtLink v-for="sct in sections" :key="sct.to" :to="sct.to" class="section">{{ sct.label }}</NuxtLink>
+    </nav>
+
     <div class="tabs">
       <button
         v-for="option in (['active', 'overdue', 'done'] as const)"
@@ -127,6 +136,9 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
   margin: var(--space-1) 0 var(--space-4);
   color: var(--color-ink-muted);
 }
+
+.sections { display: flex; gap: var(--space-1); overflow-x: auto; margin-bottom: var(--space-3); padding-bottom: 2px; }
+.section { white-space: nowrap; font-weight: 700; font-size: var(--font-size-body-s); color: var(--color-ink); text-decoration: none; background: var(--color-bg-soft); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-3); }
 
 .tabs {
   display: flex;

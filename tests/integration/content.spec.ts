@@ -185,7 +185,7 @@ describe('курс: создание → публикация → прохожд
 
   it('курс completed при 3 обязательных из 4; необязательный остаётся доступен', async () => {
     const tree = await enrollmentTree(learner(), enrollmentId)
-    expect(tree!.enrollment.status).toBe('completed')
+    expect(tree!.enrollment.status).toBe('done')
     expect(tree!.modules[0]!.lessons[3]!.status).toBe('available')
 
     const done = await myLearning(learner(), 'done')

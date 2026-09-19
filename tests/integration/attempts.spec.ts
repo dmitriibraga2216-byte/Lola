@@ -255,7 +255,7 @@ describe('тест как урок курса → сертификат', () => {
     expect(s.ok && s.status).toBe('passed')
 
     const after = await enrollmentTree(learner(), enrollmentId)
-    expect(after!.enrollment.status).toBe('completed')
+    expect(after!.enrollment.status).toBe('done')
     expect(after!.modules[0]!.lessons[1]!.status).toBe('completed')
   })
 

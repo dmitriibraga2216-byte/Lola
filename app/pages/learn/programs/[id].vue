@@ -22,7 +22,7 @@ const fmt = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString
     <p v-if="error" class="error">{{ error }}</p>
     <template v-if="l">
       <h1>{{ l.program.title }}</h1>
-      <p class="sub">{{ t('prog.progressN', { n: l.done, total: l.total }) }}<template v-if="l.enrollment.dueAt"> · {{ t('dev.due') }} {{ fmt(l.enrollment.dueAt) }}</template><template v-if="l.enrollment.status === 'completed'"> · ✓ {{ t('prog.status.completed') }} {{ fmt(l.enrollment.completedAt) }}</template></p>
+      <p class="sub">{{ t('prog.progressN', { n: l.done, total: l.total }) }}<template v-if="l.enrollment.dueAt"> · {{ t('dev.due') }} {{ fmt(l.enrollment.dueAt) }}</template><template v-if="l.enrollment.status === 'done'"> · ✓ {{ t('prog.status.completed') }} {{ fmt(l.enrollment.completedAt) }}</template></p>
       <p v-if="l.program.description" class="text">{{ l.program.description }}</p>
       <ol class="ladder">
         <li v-for="(s, i) in l.steps" :key="s.id" :class="['step', s.state.status]" :data-testid="`step-${s.id}`">

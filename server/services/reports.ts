@@ -32,11 +32,11 @@ export async function readiness(ctx: Ctx, f: Filter = {}) {
     mandatory as (
       select e.user_id,
              count(*) filter (where a.is_mandatory) as total,
-             count(*) filter (where a.is_mandatory and e.status = 'completed'
+             count(*) filter (where a.is_mandatory and e.status = 'done'
                               and (e.valid_until is null or e.valid_until > now())) as done
       from enrollments e
       join assignments a on a.id = e.assignment_id
-      where e.status not in ('cancelled')
+      where e.cancelled_at is null
       group by e.user_id
     )
     select l.id as location_id, l.name as location, p.id as position_id, p.name as position,
@@ -57,11 +57,11 @@ export async function readinessPeople(ctx: Ctx, locationId: string, positionId: 
   return q(ctx, sql`
     select u.id, u.full_name,
            count(e.id) filter (where a.is_mandatory)::int as mandatory,
-           count(e.id) filter (where a.is_mandatory and e.status = 'completed')::int as done,
-           count(e.id) filter (where a.is_mandatory and e.status = 'expired')::int as overdue
+           count(e.id) filter (where a.is_mandatory and e.status = 'done')::int as done,
+           count(e.id) filter (where a.is_mandatory and e.status in ('not_started','in_progress') and e.due_at < now())::int as overdue
     from users u
     join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
-    left join enrollments e on e.user_id = u.id and e.status <> 'cancelled'
+    left join enrollments e on e.user_id = u.id and e.cancelled_at is null
     left join assignments a on a.id = e.assignment_id
     where u.status = 'active' and up.location_id = ${locationId} and up.position_id = ${positionId}
     group by u.id, u.full_name order by u.full_name
@@ -73,12 +73,12 @@ export async function courseFunnel(ctx: Ctx, courseId: string, scope: string[] |
   const inScope = scope === null ? sql`` : sql`and user_id in (select up.user_id from user_placements up where up.is_primary and up.ended_at is null ${scopeSql(scope, sql`up.location_id`)})`
   const [funnel] = await q(ctx, sql`
     select count(*)::int as enrolled,
-           count(*) filter (where status in ('in_progress','completed','failed','expired') and started_at is not null)::int as started,
-           count(*) filter (where status = 'completed')::int as completed,
-           count(*) filter (where status = 'expired')::int as overdue,
+           count(*) filter (where status in ('in_progress','done','failed') and started_at is not null)::int as started,
+           count(*) filter (where status = 'done')::int as completed,
+           count(*) filter (where status in ('not_started','in_progress') and due_at < now())::int as overdue,
            round(avg(progress_pct))::int as avg_progress,
            round(percentile_cont(0.5) within group (order by extract(epoch from (completed_at - started_at)) / 60))::int as median_minutes
-    from enrollments where subject_id = ${courseId} and status <> 'cancelled' ${inScope}
+    from enrollments where subject_id = ${courseId} and cancelled_at is null ${inScope}
   `)
   const lessons = await q(ctx, sql`
     select l.id, l.title, m.sort as module_sort, l.sort,
@@ -108,7 +108,7 @@ export async function overdue(ctx: Ctx, f: Filter = {}) {
     left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
     left join locations l on l.id = up.location_id
     left join users mgr on mgr.id = l.manager_id
-    where e.status = 'expired'
+    where e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now()
       ${scopeSql(f.scope ?? null, sql`up.location_id`)}
       ${f.courseId ? sql`and e.subject_id = ${f.courseId}` : sql``}
     order by e.due_at

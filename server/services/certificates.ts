@@ -34,7 +34,7 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [enr] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId))
     if (!enr) return { ok: false as const, code: 'not_found' as const }
-    if (enr.status !== 'completed') return { ok: false as const, code: 'not_completed' as const }
+    if (enr.status !== 'done') return { ok: false as const, code: 'not_completed' as const }
 
     const existing = await tx.select({ id: certificates.id, number: certificates.number }).from(certificates)
       .where(and(

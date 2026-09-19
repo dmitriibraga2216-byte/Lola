@@ -127,13 +127,18 @@ describe('3. Перечисления из docs/02', () => {
   it('ограничения в БД совпадают с перечислениями', async () => {
     const checks = await admin`
       select conname, pg_get_constraintdef(oid) as def from pg_constraint
-      where contype = 'c' and conname in ('assignments_subject_type_content_type', 'assignments_kind_task_type')`
+      where contype = 'c' and conname in ('assignments_subject_type_content_type', 'assignments_kind_task_type', 'enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status')`
     const defOf = (n: string) => checks.find(c => c.conname === n)?.def as string | undefined
     const valuesIn = (def: string) => [...def.matchAll(/'([a-z_]+)'::text/g)].map(m => m[1]!)
     expect(defOf('assignments_subject_type_content_type')).toBeDefined()
     expect(valuesIn(defOf('assignments_subject_type_content_type')!)).toEqual([...ENUMS.content_type!])
     expect(defOf('assignments_kind_task_type')).toBeDefined()
     expect(valuesIn(defOf('assignments_kind_task_type')!)).toEqual([...ENUMS.task_type!])
+    // Пять статусов прохождения (CLAUDE.md п. 12) — и у записей на курс, и у записей на программу
+    for (const c of ['enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status']) {
+      expect(defOf(c), c).toBeDefined()
+      expect(valuesIn(defOf(c)!)).toEqual([...ENUMS.enrollment_status!])
+    }
   })
 })
 

@@ -138,9 +138,9 @@ describe('назначения: аудитория, раскрытие, идем
     if (!r.ok) expect(r.code).toBe('empty_audience')
   })
 
-  it('продление срока переводит expired обратно в in_progress и пишет событие', async () => {
+  it('продление срока открывает автозакрытую (failed + expired_at) запись заново и пишет событие', async () => {
     const [e] = await admin`select id from enrollments where assignment_id = ${assignmentId} and user_id = ${personA}`
-    await admin`update enrollments set status = 'expired', due_at = now() - interval '2 days' where id = ${e!.id}`
+    await admin`update enrollments set status = 'failed', expired_at = now(), started_at = now() - interval '5 days', due_at = now() - interval '2 days' where id = ${e!.id}`
     const newDue = new Date(Date.now() + 10 * 86_400_000).toISOString()
     const r = await extendEnrollment(ctx(), e!.id as string, { dueAt: newDue, reason: 'Був у відпустці', notify: true })
     expect(r!.status).toBe('in_progress')
@@ -148,7 +148,7 @@ describe('назначения: аудитория, раскрытие, идем
     expect(ev).toBeDefined()
   })
 
-  it('отмена: not_started удаляются, начатые доучиваются (keepStarted)', async () => {
+  it('отмена: not_started снимаются (cancelled_at, не удаление), начатые доучиваются (keepStarted)', async () => {
     const [b] = await admin`select id from enrollments where assignment_id = ${assignmentId} and user_id = ${personB}`
     await admin`update enrollments set status = 'in_progress', started_at = now() where id = ${b!.id}`
     const r = await cancelAssignment(ctx(), assignmentId, { reason: 'Призначено помилково', keepStarted: true })
@@ -157,6 +157,8 @@ describe('назначения: аудитория, раскрытие, идем
     const a = await getAssignment(ctx(), assignmentId)
     expect(a!.status).toBe('archived')
     expect(a!.people.length).toBe(2) // A (in_progress после продления) и B
+    const [{ n }] = await admin<[{ n: number }]>`select count(*)::int as n from enrollments where assignment_id = ${assignmentId} and cancelled_at is not null`
+    expect(n).toBe(1) // personC — снято, строка осталась
   })
 })
 
@@ -186,12 +188,21 @@ describe('due.scan: напоминания, просрочка, руководи
     const [{ n }] = await admin<[{ n: number }]>`select count(*)::int as n from notifications where code = 'enrollment_due_soon' and payload->>'enrollmentId' = ${enrollmentId}`
     expect(n).toBe(1)
 
-    // Сдвигаем срок на вчера
+    // Сдвигаем срок на вчера: статус не меняется (пять статусов), просрочка — признак due_at < now()
     await admin`update enrollments set due_at = now() - interval '1 day' where id = ${enrollmentId}`
     const s2 = await runDueScan(tenantId)
-    expect(s2.expired).toBe(1)
-    const [e] = await admin`select status from enrollments where id = ${enrollmentId}`
-    expect(e!.status).toBe('expired')
+    expect(s2.expired).toBe(0)
+    const [e] = await admin`select status, expired_at from enrollments where id = ${enrollmentId}`
+    expect(e!.status).toBe('not_started')
+    expect(e!.expired_at).toBeNull()
+    // Через 14 дней просрочки — автозакрытие: failed + expired_at
+    await admin`update enrollments set due_at = now() - interval '15 days' where id = ${enrollmentId}`
+    expect((await runDueScan(tenantId)).expired).toBe(1)
+    const [e2] = await admin`select status, expired_at from enrollments where id = ${enrollmentId}`
+    expect(e2!.status).toBe('failed')
+    expect(e2!.expired_at).not.toBeNull()
+    // Возвращаем в «просрочено, но открыто» для отчёта ниже
+    await admin`update enrollments set status = 'not_started', expired_at = null, due_at = now() - interval '1 day' where id = ${enrollmentId}`
     const [mgr] = await admin`select id from notifications where code = 'enrollment_overdue_manager' and user_id = ${adminId} and payload->>'enrollmentId' = ${enrollmentId}`
     expect(mgr).toBeDefined()
   })
@@ -229,7 +240,7 @@ describe('профиль обучения и правила автоматиза
     const veteran = await makePerson('Ветеран', baristaPosId, lazarevaId)
     // Ветеран уже прошёл c1 с действующим результатом
     const [v] = await admin`select published_version_id from courses where id = ${c1}`
-    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, status, completed_at, valid_until) values (${tenantId}, ${veteran}, ${c1}, ${v!.published_version_id}, 'self', 'completed', now(), now() + interval '6 months')`
+    await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, status, completed_at, valid_until) values (${tenantId}, ${veteran}, ${c1}, ${v!.published_version_id}, 'self', 'done', now(), now() + interval '6 months')`
 
     const preview = await previewProfile(ctx(), p.id)
     expect(preview!.items).toBe(2)
@@ -290,8 +301,8 @@ describe('отчёт готовности сходится с ручной пр�
       with ppl as (select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
                    where u.status = 'active' and up.location_id = ${lazarevaId} and up.position_id = ${baristaPosId}),
       m as (select e.user_id, count(*) filter (where a.is_mandatory) total,
-                   count(*) filter (where a.is_mandatory and e.status = 'completed' and (e.valid_until is null or e.valid_until > now())) done
-            from enrollments e join assignments a on a.id = e.assignment_id where e.status <> 'cancelled' group by e.user_id)
+                   count(*) filter (where a.is_mandatory and e.status = 'done' and (e.valid_until is null or e.valid_until > now())) done
+            from enrollments e join assignments a on a.id = e.assignment_id where e.cancelled_at is null group by e.user_id)
       select count(*)::int as people, count(*) filter (where coalesce(m.total,0) = 0 or m.done = m.total)::int as ready
       from ppl left join m on m.user_id = ppl.id`
     expect(Number(cell!.people)).toBe(people)

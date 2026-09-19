@@ -54,11 +54,11 @@ export async function progress(ctx: Ctx, f: Period & { subject?: Subject, subjec
                    (a.is_mandatory) as is_mandatory,
                    exists (select 1 from attempts at where at.enrollment_id = e.id and at.attempt_no = 1 and at.passed) as passed_first
             from enrollments e join courses c on c.id = e.subject_id left join assignments a on a.id = e.assignment_id
-            where e.subject_type = 'course' and e.status <> 'cancelled' and e.created_at >= ${from}::date and e.created_at < (${to}::date + 1)
+            where e.subject_type = 'course' and e.cancelled_at is null and e.created_at >= ${from}::date and e.created_at < (${to}::date + 1)
               ${f.subjectId ? sql`and e.subject_id = ${f.subjectId}::uuid` : sql``} ${f.mandatoryOnly ? sql`and a.is_mandatory` : sql``}`
       : sql`select pe.user_id, pe.program_id as subject_id, p.title, pe.status, pe.progress_pct, null::numeric as score, pe.due_at, pe.started_at, pe.completed_at, pe.created_at, true as is_mandatory, false as passed_first
             from program_enrollments pe join programs p on p.id = pe.program_id
-            where pe.status <> 'cancelled' and pe.created_at >= ${from}::date and pe.created_at < (${to}::date + 1) ${f.subjectId ? sql`and pe.program_id = ${f.subjectId}::uuid` : sql``}`))
+            where pe.cancelled_at is null and pe.created_at >= ${from}::date and pe.created_at < (${to}::date + 1) ${f.subjectId ? sql`and pe.program_id = ${f.subjectId}::uuid` : sql``}`))
   }
   else if (subject === 'quiz') {
     rows = await q(ctx, people(sql`select a.user_id, a.quiz_id as subject_id, qz.title, a.status, null::int as progress_pct, a.score, null::date as due_at, a.started_at, a.submitted_at as completed_at, a.created_at, false as is_mandatory,
@@ -79,12 +79,12 @@ export async function progress(ctx: Ctx, f: Period & { subject?: Subject, subjec
                                 where r.created_at >= ${from}::date and r.created_at < (${to}::date + 1) ${f.subjectId ? sql`and r.meetup_id = ${f.subjectId}::uuid` : sql``}`))
   }
   else {
-    rows = await q(ctx, people(sql`select sr.user_id, sr.survey_id as subject_id, sv.title, 'completed' as status, 100 as progress_pct, null::numeric as score, sv.closes_at::date as due_at, sr.created_at as started_at, sr.submitted_at as completed_at, sr.created_at, false as is_mandatory, true as passed_first
+    rows = await q(ctx, people(sql`select sr.user_id, sr.survey_id as subject_id, sv.title, 'done' as status, 100 as progress_pct, null::numeric as score, sv.closes_at::date as due_at, sr.created_at as started_at, sr.submitted_at as completed_at, sr.created_at, false as is_mandatory, true as passed_first
                                 from survey_responses sr join surveys sv on sv.id = sr.survey_id
                                 where sr.user_id is not null and sr.created_at >= ${from}::date and sr.created_at < (${to}::date + 1) ${f.subjectId ? sql`and sr.survey_id = ${f.subjectId}::uuid` : sql``}`))
   }
-  const started = rows.filter(r => r.started_at || ['in_progress', 'completed', 'failed', 'expired', 'submitted', 'passed', 'attended', 'reviewed'].includes(String(r.status)))
-  const completed = rows.filter(r => ['completed', 'passed', 'attended', 'reviewed'].includes(String(r.status)) || r.completed_at)
+  const started = rows.filter(r => r.started_at || ['in_progress', 'done', 'failed', 'submitted', 'passed', 'attended', 'reviewed'].includes(String(r.status)))
+  const completed = rows.filter(r => ['done', 'passed', 'attended', 'reviewed'].includes(String(r.status)) || r.completed_at)
   const funnel = { assigned: rows.length, started: started.length, completed: completed.length, passedFirst: rows.filter(r => r.passed_first === true).length }
   // Разрез «по контенту»: что проходят хуже всего
   const byContent = new Map<string, { subjectId: string, title: string, assigned: number, completed: number }>()
@@ -105,15 +105,15 @@ export async function content(ctx: Ctx, f: Period = {}) {
   const rows = await q(ctx, sql`
     select c.id, c.title, c.updated_at, u.full_name as owner,
            count(e.id)::int as assigned,
-           count(e.id) filter (where e.status = 'completed')::int as completed,
-           round(100.0 * count(e.id) filter (where e.status = 'completed') / nullif(count(e.id), 0))::int as completion_pct,
-           round(avg(e.time_spent_sec) filter (where e.status = 'completed') / 60)::int as avg_minutes,
+           count(e.id) filter (where e.status = 'done')::int as completed,
+           round(100.0 * count(e.id) filter (where e.status = 'done') / nullif(count(e.id), 0))::int as completion_pct,
+           round(avg(e.time_spent_sec) filter (where e.status = 'done') / 60)::int as avg_minutes,
            (select round(avg((r.answers->0->>'value')::numeric), 1) from survey_responses r join surveys s on s.id = r.survey_id where s.kind = 'course_feedback' and s.trigger_course_id = c.id) as rating,
            (select l.title from lessons l join modules m on m.id = l.module_id join lesson_progress lp on lp.lesson_id = l.id
               where m.course_version_id = c.published_version_id and lp.status <> 'completed' group by l.id, l.title, m.sort, l.sort order by count(*) desc, m.sort, l.sort limit 1) as dropoff_lesson
     from courses c
     left join users u on u.id = c.created_by
-    left join enrollments e on e.subject_id = c.id and e.subject_type = 'course' and e.status <> 'cancelled'
+    left join enrollments e on e.subject_id = c.id and e.subject_type = 'course' and e.cancelled_at is null
       ${f.scope ? sql`and e.user_id in (select up.user_id from user_placements up where up.is_primary and up.ended_at is null ${inScope(f.scope)})` : sql``}
     where c.deleted_at is null and c.status = 'published'
     group by c.id, c.title, c.updated_at, u.full_name order by completion_pct nulls last, assigned desc limit 300
@@ -171,8 +171,8 @@ export async function tiles(ctx: Ctx, report: string, f: Period = {}) {
   const one = async (a: string, b: string) => {
     const [r] = await q(ctx, sql`
       select
-        (select count(*)::int from enrollments e left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where e.status = 'completed' and e.completed_at >= ${a}::date and e.completed_at < (${b}::date + 1) ${inScope(scope)}) as completed,
-        (select count(*)::int from enrollments e left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where e.status = 'expired' and e.due_at >= ${a}::date and e.due_at < (${b}::date + 1) ${inScope(scope)}) as overdue,
+        (select count(*)::int from enrollments e left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where e.status = 'done' and e.cancelled_at is null and e.completed_at >= ${a}::date and e.completed_at < (${b}::date + 1) ${inScope(scope)}) as completed,
+        (select count(*)::int from enrollments e left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now() and e.due_at >= ${a}::date and e.due_at < (${b}::date + 1) ${inScope(scope)}) as overdue,
         (select count(*)::int from attempts at left join user_placements up on up.user_id = at.user_id and up.is_primary and up.ended_at is null where at.submitted_at >= ${a}::date and at.submitted_at < (${b}::date + 1) ${inScope(scope)}) as attempts,
         (select count(*)::int from attempts at left join user_placements up on up.user_id = at.user_id and up.is_primary and up.ended_at is null where at.passed and at.attempt_no = 1 and at.submitted_at >= ${a}::date and at.submitted_at < (${b}::date + 1) ${inScope(scope)}) as passed_first,
         (select count(distinct s.user_id)::int from sessions s ${scope === null ? sql`` : sql`join user_placements up on up.user_id = s.user_id and up.is_primary and up.ended_at is null`} where s.created_at >= ${a}::date and s.created_at < (${b}::date + 1) ${inScope(scope)}) as active
@@ -183,7 +183,7 @@ export async function tiles(ctx: Ctx, report: string, f: Period = {}) {
   const [snap] = await q(ctx, sql`
     select (select count(*)::int from users u where u.status = 'active' and not u.is_hidden) as people,
            (select count(*)::int from certificates c where c.revoked_at is null and c.valid_until between now() and now() + interval '30 days') as certs_expiring,
-           (select count(distinct e.user_id)::int from enrollments e join assignments a on a.id = e.assignment_id left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where a.is_mandatory and e.status in ('expired','overdue','in_progress','not_started','scheduled') ${inScope(scope)}) as not_ready
+           (select count(distinct e.user_id)::int from enrollments e join assignments a on a.id = e.assignment_id left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where a.is_mandatory and e.cancelled_at is null and e.status in ('in_progress','not_started','failed') ${inScope(scope)}) as not_ready
   `)
   const cmp = (k: string) => ({ value: Number(cur[k] ?? 0), prev: Number(before[k] ?? 0), delta: Number(cur[k] ?? 0) - Number(before[k] ?? 0) })
   const byReport: Record<string, Record<string, unknown>> = {
@@ -219,8 +219,8 @@ export async function weeklyDigest(tenantId: string): Promise<number> {
     for (const m of managers) {
       const [s] = await tx.execute(sql`
         select
-          (select count(*)::int from enrollments e join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where up.location_id = ${m.location_id}::uuid and e.status = 'completed' and e.completed_at >= current_date - 7) as completed,
-          (select count(*)::int from enrollments e join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where up.location_id = ${m.location_id}::uuid and e.status = 'expired') as overdue,
+          (select count(*)::int from enrollments e join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where up.location_id = ${m.location_id}::uuid and e.status = 'done' and e.cancelled_at is null and e.completed_at >= current_date - 7) as completed,
+          (select count(*)::int from enrollments e join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where up.location_id = ${m.location_id}::uuid and e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now()) as overdue,
           (select count(*)::int from enrollments e join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where up.location_id = ${m.location_id}::uuid and e.created_at >= current_date - 7) as assigned
       `) as unknown as { completed: number, overdue: number, assigned: number }[]
       if (await enqueueNotification(tx, { tenantId, userId: m.manager_id, code: 'weekly_digest', payload: { location: m.name, completed: s!.completed, overdue: s!.overdue, assigned: s!.assigned }, dedupKey: `digest:${m.location_id}:${week}` })) n++

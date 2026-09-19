@@ -39,11 +39,11 @@ function icon(status: string, itemType: string) {
     </div>
     <p class="meta">
       {{ t('learner.progressOf', { done: tree.enrollment.requiredDone, total: tree.enrollment.requiredTotal }) }}
-      <span v-if="tree.enrollment.status === 'completed'" class="badge teal">{{ t('learner.badge.completed') }}</span>
+      <span v-if="tree.enrollment.status === 'done'" class="badge teal">{{ t('learner.badge.completed') }}</span>
     </p>
 
     <NuxtLink
-      v-if="tree.resumeLessonId && tree.enrollment.status !== 'completed'"
+      v-if="tree.resumeLessonId && tree.enrollment.status !== 'done'"
       :to="`/learn/${enrollmentId}/${tree.resumeLessonId}`"
       class="primary"
     >

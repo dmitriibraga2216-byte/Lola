@@ -180,7 +180,7 @@ describe('программы и траектории (docs/17 §13)', () => {
     // Прохождение единственного курса завершает программу
     await passCourse(u, c1)
     const [pe] = await admin`select status, progress_pct from program_enrollments where program_id = ${p.id} and user_id = ${u}`
-    expect(pe).toMatchObject({ status: 'completed' })
+    expect(pe).toMatchObject({ status: 'done' })
     expect(Number(pe!.progress_pct)).toBe(100)
     const [n] = await admin`select count(*)::int as c from notifications where user_id = ${u} and code = 'program_completed'`
     expect(n!.c).toBe(1)

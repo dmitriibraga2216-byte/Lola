@@ -7,7 +7,7 @@ const { hasScope } = useAuth()
 const route = useRoute()
 const id = route.params.id as string
 
-interface Person { enrollmentId: string, userId: string, fullName: string, status: string, progressPct: string, dueAt: string | null, completedAt: string | null, lastActivityAt: string | null }
+interface Person { enrollmentId: string, userId: string, fullName: string, status: string, overdue: boolean, planned: boolean, cancelled: boolean, autoClosed: boolean, progressPct: string, dueAt: string | null, completedAt: string | null, lastActivityAt: string | null }
 interface A {
   id: string, title: string, kind: string, status: string, isMandatory: boolean, dueMode: string, dueAt: string | null, dueDays: number | null,
   autoSync: boolean, createdAt: string, lastSyncAt: string | null,
@@ -32,8 +32,10 @@ async function load() {
 }
 onMounted(load)
 
-const people = computed(() => (a.value?.people ?? []).filter(p => !statusFilter.value || p.status === statusFilter.value))
-const started = computed(() => (a.value?.people ?? []).filter(p => ['in_progress', 'failed', 'expired'].includes(p.status)).length)
+// Пять статусов + признаки (overdue, planned, cancelled) — docs/02 enrollment_status
+const stateOf = (p: { status: string, overdue?: boolean, cancelled?: boolean, planned?: boolean }) => p.cancelled ? 'cancelled' : p.overdue ? 'overdue' : p.planned ? 'planned' : p.status
+const people = computed(() => (a.value?.people ?? []).filter(p => !statusFilter.value || stateOf(p) === statusFilter.value))
+const started = computed(() => (a.value?.people ?? []).filter(p => !p.cancelled && ['in_progress', 'failed'].includes(p.status)).length)
 
 async function setStatus(status: string) {
   await api(`/assignments/${id}`, { method: 'PATCH', body: { status } })
@@ -100,7 +102,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '�
     <div class="filter">
       <select v-model="statusFilter">
         <option value="">{{ t('assign.allStatuses') }}</option>
-        <option v-for="s in ['not_started', 'in_progress', 'completed', 'expired', 'failed', 'cancelled']" :key="s" :value="s">{{ t(`enrollment.${s}`) }}</option>
+        <option v-for="s in ['not_started', 'planned', 'in_progress', 'overdue', 'done', 'failed', 'cancelled']" :key="s" :value="s">{{ t(`enrollment.${s}`) }}</option>
       </select>
       <span class="sub">{{ t('assign.autoSyncState', { on: a.autoSync ? '✓' : '—', at: fmt(a.lastSyncAt) }) }}</span>
     </div>
@@ -110,11 +112,11 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '�
       <tbody>
         <tr v-for="p in people" :key="p.enrollmentId">
           <td><NuxtLink :to="`/admin/people/${p.userId}`" class="link">{{ p.fullName }}</NuxtLink></td>
-          <td><span :class="['badge', p.status]">{{ t(`enrollment.${p.status}`) }}</span></td>
+          <td><span :class="['badge', stateOf(p)]">{{ t(`enrollment.${stateOf(p)}`) }}</span></td>
           <td>{{ Number(p.progressPct) }}</td>
-          <td :class="{ coral: p.status === 'expired' }">{{ fmt(p.dueAt) }}</td>
+          <td :class="{ coral: p.overdue }">{{ fmt(p.dueAt) }}</td>
           <td class="sub">{{ fmt(p.lastActivityAt) }}</td>
-          <td><button v-if="p.status !== 'completed' && p.status !== 'cancelled'" class="chip" @click="extendFor = p; extendForm.dueAt = ''; extendForm.reason = ''">{{ t('assign.extend') }}</button></td>
+          <td><button v-if="p.status !== 'done' && !p.cancelled" class="chip" @click="extendFor = p; extendForm.dueAt = ''; extendForm.reason = ''">{{ t('assign.extend') }}</button></td>
         </tr>
       </tbody>
     </table>
@@ -156,9 +158,9 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .primary:disabled { opacity: 0.5; }
 .badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
-.badge.active, .badge.completed { background: var(--color-teal); color: var(--color-teal-deep); }
+.badge.active, .badge.done { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.paused, .badge.in_progress { background: var(--color-sun); color: var(--color-sun-ink); }
-.badge.expired, .badge.failed { background: var(--color-coral); color: var(--color-coral-deep); }
+.badge.overdue, .badge.failed { background: var(--color-coral); color: var(--color-coral-deep); }
 .coral { color: var(--color-coral-ink); font-weight: 700; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }

@@ -6,6 +6,8 @@ import { withTenant } from '../utils/withTenant'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
+import { TASK_GROUPS, deriveTaskState, notCancelled, taskGroupWhere } from './enrollmentStatus'
+import type { TaskGroup } from './enrollmentStatus'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -13,20 +15,17 @@ async function logEvent(tx: TenantTx, tenantId: string, enrollmentId: string, ev
   await tx.insert(enrollmentEvents).values({ tenantId, enrollmentId, event, payload, actorId })
 }
 
-/** «Моє навчання»: карточки записей с курсом и прогрессом (docs/10 §5.1). */
-export async function myLearning(ctx: Ctx, tab: 'active' | 'overdue' | 'done') {
+/** «Мої завдання»: пять групп эталона (docs/04 §4.4, docs/10 Г-10.3) — new | planned | failed | overdue | done. */
+export async function myLearning(ctx: Ctx, group: TaskGroup) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const statusFilter = tab === 'done'
-      ? inArray(enrollments.status, ['completed'])
-      : tab === 'overdue'
-        ? inArray(enrollments.status, ['expired'])
-        : inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'failed'])
-
     const rows = await tx.select({
       id: enrollments.id,
       status: enrollments.status,
       progressPct: enrollments.progressPct,
       dueAt: enrollments.dueAt,
+      startsAt: enrollments.startsAt,
+      expiredAt: enrollments.expiredAt,
+      cancelledAt: enrollments.cancelledAt,
       source: enrollments.source,
       completedAt: enrollments.completedAt,
       courseId: courses.id,
@@ -39,15 +38,28 @@ export async function myLearning(ctx: Ctx, tab: 'active' | 'overdue' | 'done') {
     })
       .from(enrollments)
       .innerJoin(courses, eq(courses.id, enrollments.subjectId))
-      .where(and(eq(enrollments.userId, ctx.actorId), statusFilter))
+      .where(and(eq(enrollments.userId, ctx.actorId), taskGroupWhere(group)))
 
+    const derived = rows.map(r => ({ ...r, ...deriveTaskState(r) }))
     // Сортировка docs/10 §5.1: просроченные → ближайший дедлайн → начатые → новые
-    const weight = (r: typeof rows[number]) =>
-      r.status === 'expired' ? 0 : r.dueAt ? 1 : r.status === 'in_progress' ? 2 : 3
-    rows.sort((a, b) => weight(a) - weight(b)
+    const weight = (r: typeof derived[number]) =>
+      r.overdue ? 0 : r.dueAt ? 1 : r.status === 'in_progress' ? 2 : 3
+    derived.sort((a, b) => weight(a) - weight(b)
       || (a.dueAt && b.dueAt ? +new Date(a.dueAt) - +new Date(b.dueAt) : 0)
       || +new Date(b.createdAt) - +new Date(a.createdAt))
-    return rows
+    return derived
+  })
+}
+
+/** Счётчики пяти групп для шапки «Мої завдання». */
+export async function myTaskCounts(ctx: Ctx): Promise<Record<TaskGroup, number>> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const out = { new: 0, planned: 0, failed: 0, overdue: 0, done: 0 } as Record<TaskGroup, number>
+    for (const g of TASK_GROUPS) {
+      const [r] = await tx.select({ n: sql<number>`count(*)::int` }).from(enrollments).where(and(eq(enrollments.userId, ctx.actorId), taskGroupWhere(g)))
+      out[g] = r?.n ?? 0
+    }
+    return out
   })
 }
 
@@ -65,10 +77,7 @@ export async function catalog(ctx: Ctx, q?: string) {
 
     const mine = await tx.select({ subjectId: enrollments.subjectId, id: enrollments.id })
       .from(enrollments)
-      .where(and(
-        eq(enrollments.userId, ctx.actorId),
-        inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'completed', 'failed']),
-      ))
+      .where(and(eq(enrollments.userId, ctx.actorId), notCancelled()))
     const mineByCourse = new Map(mine.map(m => [m.subjectId, m.id]))
 
     return rows.map(c => ({
@@ -105,11 +114,7 @@ export async function selfEnroll(ctx: Ctx, courseId: string): Promise<EnrollResu
     if (!course.isCatalogVisible) return { ok: false as const, code: 'catalog_hidden' as const }
 
     const existing = await tx.select({ id: enrollments.id }).from(enrollments)
-      .where(and(
-        eq(enrollments.userId, ctx.actorId),
-        eq(enrollments.subjectId, courseId),
-        inArray(enrollments.status, ['scheduled', 'not_started', 'in_progress', 'completed', 'failed']),
-      ))
+      .where(and(eq(enrollments.userId, ctx.actorId), eq(enrollments.subjectId, courseId), notCancelled()))
     if (existing.length > 0) return { ok: false as const, code: 'exists' as const }
 
     const requiredTotal = await countRequired(tx, course.publishedVersionId)
@@ -245,7 +250,7 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
       : await tx.select().from(lessonProgress)
           .where(and(eq(lessonProgress.enrollmentId, enrollmentId), eq(lessonProgress.lessonId, lessonId)))
 
-    if (enrollment.status === 'not_started' || enrollment.status === 'scheduled') {
+    if (enrollment.status === 'not_started') {
       await tx.update(enrollments).set({
         status: 'in_progress',
         startedAt: enrollment.startedAt ?? now,
@@ -410,13 +415,13 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       requiredTotal,
       requiredDone,
       progressPct: String(progressPct),
-      ...(courseCompleted && enrollment.status !== 'completed'
-        ? { status: 'completed', completedAt: new Date() }
+      ...(courseCompleted && enrollment.status !== 'done'
+        ? { status: 'done', completedAt: new Date() }
         : {}),
       lastActivityAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(enrollments.id, enrollmentId))
-    if (courseCompleted && enrollment.status !== 'completed') business.inc({ event: 'course_completed' })
+    if (courseCompleted && enrollment.status !== 'done') business.inc({ event: 'course_completed' })
 
     await logEvent(tx, ctx.tenantId, enrollmentId, courseCompleted ? 'completed' : 'progress', {
       lessonId,

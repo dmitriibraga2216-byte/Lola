@@ -340,7 +340,7 @@ describe('практикум: сдача → захват → доработка
     expect(acc.ok).toBe(true)
     const tree = await enrollmentTree(learner(), enrollmentId)
     expect(tree!.modules[0]!.lessons[0]!.status).toBe('completed')
-    expect(tree!.enrollment.status).toBe('completed')
+    expect(tree!.enrollment.status).toBe('done')
 
     await addComment(mentor(), submissionId, 'Гарна робота')
     const [c] = await admin`select id from notifications where code = 'workshop_comment' and user_id = ${learnerId}`

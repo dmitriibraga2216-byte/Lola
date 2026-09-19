@@ -43,7 +43,7 @@ async function passCourse(userId: string, courseId: string) {
   return enr!.id as string
 }
 async function makeQuiz(passScore = 50) {
-  const q = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: '<p>?</p>' }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [] })).id
+  const q = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: '<p>?</p>' }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [] })).id
   const quiz = await createQuiz(ctx(), { title: `Тест ${Date.now()}`, kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
   quizIds.push(quiz.id)
   assignmentIds.push(await assignWithParams(ctx(), 'test', quiz.id, { passScore, attemptsAllowed: 0, shuffleQuestions: false, shuffleOptions: false }))

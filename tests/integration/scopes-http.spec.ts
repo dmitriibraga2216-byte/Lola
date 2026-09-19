@@ -323,4 +323,111 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
       await admin.end()
     }
   })
+
+  it('Spec 12 (docs/04 §4.6–4.8): группы, импорт из банка, очередь ответов с фильтрами, запросы попыток, пересчёт, чужой тенант — 404', async () => {
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      await admin`delete from otp_codes where phone in (${ADMIN_PHONE}, ${EMPLOYEE_PHONE}, ${CHEF_PHONE})`
+      const session = async (phone: string) => {
+        await admin`delete from rate_limits where key like ${'otp:%'}`
+        const reqRes = await fetch(`${BASE}/api/v1/auth/otp/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) })
+        const { data } = await reqRes.json() as { data: { devCode: string } }
+        const verifyRes = await fetch(`${BASE}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, code: data.devCode }) })
+        const jar = verifyRes.headers.getSetCookie().map(c => c.split(';')[0]!)
+        const csrf = jar.find(c => c.startsWith('lola_csrf='))!.split('=')[1]!
+        return { 'cookie': jar.join('; '), 'x-csrf-token': csrf, 'Content-Type': 'application/json' }
+      }
+      const headers = await session(ADMIN_PHONE)
+      const [t] = await admin`select id from tenants where slug = 'kappi'`
+      const [emp] = await admin`select id from users where tenant_id = ${t!.id} and phone = ${EMPLOYEE_PHONE}`
+      const stamp = Date.now()
+
+      // Банк, тест, группа, вопрос в группе с grader_hint
+      const bank = await (await fetch(`${BASE}/api/v1/question-banks`, { method: 'POST', headers, body: JSON.stringify({ name: `HTTP банк ${stamp}` }) })).json() as { data: { id: string } }
+      const quiz = await (await fetch(`${BASE}/api/v1/quizzes`, { method: 'POST', headers, body: JSON.stringify({ title: `HTTP спека 12 ${stamp}` }) })).json() as { data: { id: string } }
+      const group = await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/question-groups`, { method: 'POST', headers, body: JSON.stringify({ title: 'Каса' }) })
+      expect(group.status).toBe(200)
+      const { data: g } = await group.json() as { data: { id: string } }
+      const q = await fetch(`${BASE}/api/v1/questions`, { method: 'POST', headers, body: JSON.stringify({
+        bankId: bank.data.id, kind: 'free', questionGroupId: g.id, stem: [{ id: 's', type: 'text', html: '<p>Дії при розбіжності каси?</p>' }],
+        graderHint: 'Достатньо двох із трьох', attachFiles: true, tags: ['каса'], points: 2,
+      }) })
+      expect(q.status).toBe(200)
+      const { data: question } = await q.json() as { data: { id: string, questionGroupId: string, scoringMethod: string } }
+      expect(question).toMatchObject({ questionGroupId: g.id, scoringMethod: 'formula' })
+      // Неизвестный код типа — 400 (коды только из docs/02)
+      expect((await fetch(`${BASE}/api/v1/questions`, { method: 'POST', headers, body: JSON.stringify({ bankId: bank.data.id, kind: 'text_long', stem: [{ id: 's', type: 'text', html: '<p>x</p>' }] }) })).status).toBe(400)
+      // Ссылка из банка
+      const imp = await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/questions/import`, { method: 'POST', headers, body: JSON.stringify({ mode: 'link', questionIds: [question.id] }) })
+      expect(imp.status).toBe(200)
+      expect((await (await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/question-groups`, { headers })).json() as { data: unknown[] }).data.length).toBe(1)
+      expect((await fetch(`${BASE}/api/v1/quizzes/${quiz.data.id}`, { method: 'PATCH', headers, body: JSON.stringify({ status: 'published' }) })).status).toBe(200)
+      // Назначение с одной попыткой
+      const task = await (await fetch(`${BASE}/api/v1/tasks`, { method: 'POST', headers, body: JSON.stringify({ subjectType: 'test', subjectId: quiz.data.id, audience: { rules: [{ type: 'user', ids: [emp!.id] }], match: 'any' }, dueMode: 'none', reminders: { notifyOnAssign: false }, params: { attemptsAllowed: 1, passScore: 50 } }) })).json() as { data: { assignmentId: string } }
+
+      // Ученик: попытка через /tests/:id/attempts, файл к ответу, отправка, запрос ещё одной попытки
+      const empHeaders = await session(EMPLOYEE_PHONE)
+      const start = await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/attempts`, { method: 'POST', headers: empHeaders, body: '{}' })
+      expect(start.status).toBe(200)
+      const { data: att } = await start.json() as { data: { attemptId: string } }
+      const state = await (await fetch(`${BASE}/api/v1/attempts/${att.attemptId}`, { headers: empHeaders })).json() as { data: unknown }
+      expect(JSON.stringify(state)).not.toContain('Достатньо двох') // grader_hint ученику не отдаётся
+      expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/answers/${question.id}`, { method: 'PUT', headers: empHeaders, body: JSON.stringify({ answer: { text: 'Скласти акт' } }) })).status).toBe(200)
+      const [media] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${t!.id}, ${`t/${t!.id}/http-${stamp}.png`}, 'photo.png', 'image', 'image/png', 10, 'ready', ${emp!.id}) returning id`
+      expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/answers/${question.id}/files`, { method: 'POST', headers: empHeaders, body: JSON.stringify({ mediaId: media!.id, name: 'photo.png', kind: 'photo', bytes: 10 }) })).status).toBe(200)
+      expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/submit`, { method: 'POST', headers: empHeaders })).status).toBe(200)
+      expect((await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/attempt-requests`, { method: 'POST', headers: empHeaders, body: JSON.stringify({ reason: 'коротко' }) })).status).toBe(400)
+      const req = await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/attempt-requests`, { method: 'POST', headers: empHeaders, body: JSON.stringify({ reason: 'Впав інтернет на точці, не встиг' }) })
+      expect(req.status).toBe(200)
+      const { data: request } = await req.json() as { data: { id: string } }
+      expect((await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/attempt-requests`, { method: 'POST', headers: empHeaders, body: JSON.stringify({ reason: 'Ще раз прошу спробу' }) })).status).toBe(409)
+      // Ученик не видит очередь и не решает запросы
+      expect((await fetch(`${BASE}/api/v1/review/answers`, { headers: empHeaders })).status).toBe(403)
+      expect((await fetch(`${BASE}/api/v1/attempt-requests`, { headers: empHeaders })).status).toBe(403)
+
+      // Наставник: очередь ответов по метке, подсказка видна, зачёт; запрос — «Дати спробу»
+      const chef = await session(CHEF_PHONE)
+      const queue = await (await fetch(`${BASE}/api/v1/review/answers?checked=unchecked&tags=каса&outsideCourses=true`, { headers: chef })).json() as { data: { answerId: string, attemptId: string, question: { graderHint: string }, files: unknown[] }[] }
+      const item = queue.data.find(i => i.attemptId === att.attemptId)
+      expect(item?.question.graderHint).toBe('Достатньо двох із трьох')
+      expect(item?.files.length).toBe(1)
+      const otherTag = await (await fetch(`${BASE}/api/v1/review/answers?checked=unchecked&tags=бар`, { headers: chef })).json() as { data: { attemptId: string }[] }
+      expect(otherTag.data.some(i => i.attemptId === att.attemptId)).toBe(false)
+      expect((await fetch(`${BASE}/api/v1/review/answers/${item!.answerId}/grade`, { method: 'POST', headers: chef, body: JSON.stringify({ isCorrect: true, score: 2 }) })).status).toBe(200)
+      const pending = await (await fetch(`${BASE}/api/v1/attempt-requests`, { headers: chef })).json() as { data: { id: string, status: string, attemptsUsed: number }[] }
+      expect(pending.data.find(r => r.id === request.id)).toMatchObject({ status: 'pending', attemptsUsed: 1 })
+      expect((await fetch(`${BASE}/api/v1/attempt-requests/${request.id}/decide`, { method: 'POST', headers: chef, body: JSON.stringify({ approved: true, comment: 'Добре' }) })).status).toBe(200)
+      expect((await fetch(`${BASE}/api/v1/attempt-requests/${request.id}/decide`, { method: 'POST', headers: chef, body: JSON.stringify({ approved: false }) })).status).toBe(409)
+      // Лишняя попытка сверх лимита назначения
+      expect((await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/attempts`, { method: 'POST', headers: empHeaders, body: '{}' })).status).toBe(200)
+
+      // «Перерахувати»: методист, по попытке и по тесту; наставнику без question.manage — 403
+      expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/recalculate`, { method: 'POST', headers: chef, body: '{}' })).status).toBe(403)
+      const rc = await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/recalculate`, { method: 'POST', headers, body: JSON.stringify({ comment: 'Перевірка ключа' }) })
+      expect(rc.status).toBe(200)
+      expect((await rc.json() as { data: { after: { status: string } } }).data.after.status).toBe('passed')
+      expect((await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/recalculate`, { method: 'POST', headers, body: '{}' })).status).toBe(200)
+      const results = await (await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/results`, { headers })).json() as { data: { reason: string }[] }
+      expect(results.data.map(r => r.reason)).toEqual(['submit', 'review', 'recalculate', 'recalculate'])
+
+      // Чужой тенант — 404, не 403 (CLAUDE.md п. 15)
+      const [other] = await admin`insert into tenants (slug, name) values ('test-isolation', 'Тест ізоляції') on conflict (slug) do update set name = excluded.name returning id`
+      const [fq] = await admin`insert into quizzes (tenant_id, title, kind) values (${other!.id}, 'Чужий тест', 'quiz') returning id`
+      const [fg] = await admin`insert into question_groups (tenant_id, quiz_id, title) values (${other!.id}, ${fq!.id}, 'Чужа група') returning id`
+      expect((await fetch(`${BASE}/api/v1/tests/${fq!.id}/question-groups`, { headers })).status).toBe(404)
+      expect((await fetch(`${BASE}/api/v1/question-groups/${fg!.id}`, { method: 'PATCH', headers, body: JSON.stringify({ title: 'x' }) })).status).toBe(404)
+      expect((await fetch(`${BASE}/api/v1/tests/${fq!.id}/recalculate`, { method: 'POST', headers, body: '{}' })).status).toBe(404)
+      expect((await fetch(`${BASE}/api/v1/questions`, { method: 'POST', headers, body: JSON.stringify({ bankId: bank.data.id, kind: 'single', questionGroupId: fg!.id, stem: [{ id: 's', type: 'text', html: '<p>x</p>' }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' } }) })).status).toBe(404)
+
+      await admin`delete from attempt_requests where quiz_id = ${quiz.data.id}`
+      await admin`delete from attempts where quiz_id = ${quiz.data.id}`
+      await admin`delete from assignments where id = ${task.data.assignmentId}`
+      await admin`delete from quizzes where id in (${quiz.data.id}, ${fq!.id})`
+      await admin`delete from question_banks where id = ${bank.data.id}`
+      await admin`delete from media_assets where id = ${media!.id}`
+    }
+    finally {
+      await admin.end()
+    }
+  })
 })

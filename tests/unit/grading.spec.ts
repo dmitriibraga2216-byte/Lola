@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeTotals, gradeAnswer, type SnapshotQuestion } from '../../shared/domain/grading'
+import { computeTotals, gradeAnswer, scoringMethodOf, type SnapshotQuestion } from '../../shared/domain/grading'
 
 const base = (over: Partial<SnapshotQuestion>): SnapshotQuestion => ({
   id: 'q',
@@ -11,7 +11,7 @@ const base = (over: Partial<SnapshotQuestion>): SnapshotQuestion => ({
   explanation: null,
   points: 1,
   isCritical: false,
-  partialCredit: true,
+  scoringMethod: 'formula',
   negativeMarking: false,
   ...over,
 })
@@ -25,27 +25,27 @@ describe('gradeAnswer', () => {
   })
 
   it('multiple с частичным баллом: 3 верных из 4 + 1 лишний → points × (3−1)/4 при negativeMarking', () => {
-    const q = base({ kind: 'multiple', points: 4, negativeMarking: true, answer: { correctIds: ['a', 'b', 'c', 'd'] } })
+    const q = base({ kind: 'multi', points: 4, negativeMarking: true, answer: { correctIds: ['a', 'b', 'c', 'd'] } })
     const r = gradeAnswer(q, { optionIds: ['a', 'b', 'c', 'x'] })
     expect(r.isCorrect).toBe(false)
     expect(r.score).toBe(2) // 4 × (3−1)/4
   })
 
   it('multiple без штрафа: лишний не вычитается; requireExact — всё или ничего', () => {
-    const q = base({ kind: 'multiple', points: 4, answer: { correctIds: ['a', 'b', 'c', 'd'] } })
+    const q = base({ kind: 'multi', points: 4, answer: { correctIds: ['a', 'b', 'c', 'd'] } })
     expect(gradeAnswer(q, { optionIds: ['a', 'b', 'c', 'x'] }).score).toBe(3)
-    const exact = base({ kind: 'multiple', points: 4, requireExact: true, answer: { correctIds: ['a', 'b'] } })
+    const exact = base({ kind: 'multi', points: 4, requireExact: true, answer: { correctIds: ['a', 'b'] } })
     expect(gradeAnswer(exact, { optionIds: ['a'] }).score).toBe(0)
     expect(gradeAnswer(exact, { optionIds: ['a', 'b'] }).score).toBe(4)
   })
 
   it('multiple: балл не меньше 0', () => {
-    const q = base({ kind: 'multiple', points: 2, negativeMarking: true, answer: { correctIds: ['a'] } })
+    const q = base({ kind: 'multi', points: 2, negativeMarking: true, answer: { correctIds: ['a'] } })
     expect(gradeAnswer(q, { optionIds: ['x', 'y', 'z'] }).score).toBe(0)
   })
 
   it('order: частичный балл по парам', () => {
-    const q = base({ kind: 'order', points: 3, answer: { order: ['a', 'b', 'c'] } })
+    const q = base({ kind: 'ordering', points: 3, answer: { order: ['a', 'b', 'c'] } })
     expect(gradeAnswer(q, { order: ['a', 'b', 'c'] })).toMatchObject({ isCorrect: true, score: 3 })
     // b,a,c: пары (a,b) нет, (a,c) есть, (b,c) есть → 2/3
     expect(gradeAnswer(q, { order: ['b', 'a', 'c'] }).score).toBe(2)
@@ -53,8 +53,35 @@ describe('gradeAnswer', () => {
   })
 
   it('match: доля верных пар', () => {
-    const q = base({ kind: 'match', points: 2, answer: { pairs: [{ leftId: 'l1', rightId: 'r1' }, { leftId: 'l2', rightId: 'r2' }] } })
+    const q = base({ kind: 'comparison', points: 2, answer: { pairs: [{ leftId: 'l1', rightId: 'r1' }, { leftId: 'l2', rightId: 'r2' }] } })
     expect(gradeAnswer(q, { pairs: [{ leftId: 'l1', rightId: 'r1' }, { leftId: 'l2', rightId: 'r9' }] }).score).toBe(1)
+  })
+
+  it('classification: частка вірних елементів, all_or_nothing — всё или ничего', () => {
+    const q = base({ kind: 'classification', points: 4, answer: { placements: [{ itemId: 'p', groupId: 'hot' }, { itemId: 's', groupId: 'cold' }, { itemId: 'i', groupId: 'cold' }, { itemId: 'b', groupId: 'hot' }] } })
+    expect(gradeAnswer(q, { placements: [{ itemId: 'p', groupId: 'hot' }, { itemId: 's', groupId: 'cold' }, { itemId: 'i', groupId: 'hot' }, { itemId: 'b', groupId: 'hot' }] })).toMatchObject({ isCorrect: false, score: 3 })
+    expect(gradeAnswer({ ...q, scoringMethod: 'all_or_nothing' }, { placements: [{ itemId: 'p', groupId: 'hot' }, { itemId: 's', groupId: 'cold' }, { itemId: 'i', groupId: 'hot' }] }).score).toBe(0)
+    expect(gradeAnswer(q, { placements: [{ itemId: 'p', groupId: 'hot' }, { itemId: 's', groupId: 'cold' }, { itemId: 'i', groupId: 'cold' }, { itemId: 'b', groupId: 'hot' }] })).toMatchObject({ isCorrect: true, score: 4 })
+  })
+
+  it('answer_by_map: области в долях, точка попадает в область; лишняя область снимает балл при штрафе', () => {
+    const q = base({
+      kind: 'answer_by_map', points: 2,
+      options: { imageMediaId: 'm', areas: [{ id: 'r', shape: 'rect', x: 0, y: 0, w: 0.5, h: 0.5 }, { id: 'c', shape: 'circle', cx: 0.75, cy: 0.75, r: 0.2 }] },
+      answer: { areaIds: ['c'] },
+    })
+    expect(gradeAnswer(q, { points: [{ x: 0.7, y: 0.7 }] })).toMatchObject({ isCorrect: true, score: 2 })
+    expect(gradeAnswer(q, { points: [{ x: 0.1, y: 0.1 }] })).toMatchObject({ isCorrect: false, score: 0 })
+    expect(gradeAnswer(q, { areaIds: ['c', 'r'] })).toMatchObject({ isCorrect: false, score: 2 }) // без штрафа лишняя не вычитается
+    expect(gradeAnswer({ ...q, negativeMarking: true }, { areaIds: ['c', 'r'] }).score).toBe(0)
+    expect(gradeAnswer({ ...q, scoringMethod: 'all_or_nothing' }, { areaIds: ['c', 'r'] }).score).toBe(0)
+  })
+
+  it('scoringMethodOf: старые снимки с partialCredit', () => {
+    expect(scoringMethodOf({ partialCredit: false })).toBe('all_or_nothing')
+    expect(scoringMethodOf({ partialCredit: true })).toBe('formula')
+    expect(scoringMethodOf({ scoringMethod: 'all_or_nothing', partialCredit: true })).toBe('all_or_nothing')
+    expect(scoringMethodOf({ requireExact: true, scoringMethod: 'formula' })).toBe('all_or_nothing')
   })
 
   it('number: допуск абсолютный и процентный, запятая как разделитель', () => {
@@ -76,8 +103,8 @@ describe('gradeAnswer', () => {
     expect(gradeAnswer(strict, { text: 'так' }).isCorrect).toBe(false)
   })
 
-  it('text_long и file — ручная проверка', () => {
-    expect(gradeAnswer(base({ kind: 'text_long' }), { text: 'довга відповідь' })).toMatchObject({ isCorrect: null, auto: false })
+  it('free и file — ручная проверка', () => {
+    expect(gradeAnswer(base({ kind: 'free' }), { text: 'довга відповідь' })).toMatchObject({ isCorrect: null, auto: false })
     expect(gradeAnswer(base({ kind: 'file' }), { mediaIds: ['x'] })).toMatchObject({ isCorrect: null, auto: false })
   })
 })
@@ -107,7 +134,7 @@ describe('computeTotals', () => {
   })
 
   it('есть ручные непроверенные → passed = null', () => {
-    const withManual = [...qs, base({ id: 'd', kind: 'text_long', points: 1 })]
+    const withManual = [...qs, base({ id: 'd', kind: 'free', points: 1 })]
     const answers = new Map(withManual.map(q => [q.id, gradeAnswer(q, { optionId: 'x', text: 'x' })]))
     const t = computeTotals(withManual, answers, 80)
     expect(t.pendingManual).toBe(1)

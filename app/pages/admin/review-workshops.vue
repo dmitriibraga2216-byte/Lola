@@ -17,6 +17,7 @@ interface Card {
 }
 
 const queue = ref<Item[]>([])
+const answersCount = ref(0)
 const card = ref<Card | null>(null)
 const results = ref<Record<string, { passed: boolean, comment: string }>>({})
 const comment = ref('')
@@ -28,6 +29,8 @@ const mediaUrls = ref<Record<string, string>>({})
 async function load() {
   try {
     queue.value = await api<Item[]>('/review/workshops')
+    // Чипы очереди (мокап ReviewQueue): здачі практикумів · відповіді на перевірку · чек-листи
+    answersCount.value = (await api<unknown[]>('/review/answers', { query: { checked: 'unchecked' } }).catch(() => [])).length
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -89,19 +92,25 @@ async function skip() {
 
 <template>
   <div>
-    <header class="head">
-      <h1>{{ t('workshop.reviewTitle') }}</h1>
-      <span class="count">{{ t('review.left', { n: queue.length }) }}</span>
-    </header>
+    <PageHeader :title="t('review.queueTitle')" :crumbs="[{ label: t('admin.section.learning') }, { label: t('review.queueTitle') }]" />
+    <div v-if="!card" class="chips tabs" role="tablist">
+      <span class="chip on" role="tab" aria-selected="true">{{ t('review.chipWorkshops') }} · {{ queue.length }}</span>
+      <NuxtLink to="/admin/review" class="chip" role="tab">{{ t('review.chipAnswers') }} · {{ answersCount }}</NuxtLink>
+      <NuxtLink to="/admin/checklists" class="chip" role="tab">{{ t('review.chipChecklists') }}</NuxtLink>
+    </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="notice">{{ notice }}</p>
 
     <div v-if="!card" class="list">
-      <button v-for="i in queue" :key="i.id" class="row" @click="open(i)">
-        <span class="who"><b>{{ i.fullName }}</b><span class="sub"> · {{ i.locationName || '' }}</span></span>
-        <span class="grow">{{ i.workshopTitle }}<span v-if="i.attemptNo > 1" class="sub"> · {{ t('workshop.attemptN', { n: i.attemptNo }) }}</span></span>
-        <span :class="['sla', { late: (i.hoursLeft ?? 0) < 0 }]">{{ i.hoursLeft === null ? '' : i.hoursLeft < 0 ? t('workshop.overdueH', { n: -i.hoursLeft }) : t('workshop.leftH', { n: i.hoursLeft }) }}</span>
-      </button>
+      <article v-for="i in queue" :key="i.id" :class="['row', { late: (i.hoursLeft ?? 0) < 0 }]">
+        <span class="avatar" aria-hidden="true">{{ i.fullName.split(' ').slice(0, 2).map(p => p[0] ?? '').join('').toUpperCase() }}</span>
+        <span class="grow">
+          <b>{{ i.fullName }}</b>
+          <span class="sub">{{ i.locationName ? `${i.locationName} · ` : '' }}{{ t('workshop.cardTitle', { title: i.workshopTitle }) }}<template v-if="i.attemptNo > 1"> · {{ t('workshop.attemptN', { n: i.attemptNo }) }}</template></span>
+          <span :class="['sla', { late: (i.hoursLeft ?? 0) < 0 }]">{{ i.hoursLeft === null ? '' : i.hoursLeft < 0 ? t('workshop.overdueH', { n: -i.hoursLeft }) : t('workshop.leftH', { n: i.hoursLeft }) }}</span>
+        </span>
+        <button class="btn primary small" @click="open(i)">{{ t('workshop.claim') }}</button>
+      </article>
       <p v-if="queue.length === 0" class="empty">{{ t('review.empty') }}</p>
     </div>
 
@@ -152,10 +161,12 @@ h2 { margin: 0 0 var(--space-3); font-weight: 800; font-size: var(--font-size-ti
 h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-faint); text-transform: uppercase; }
 .count { color: var(--color-ink-muted); }
 .list { display: grid; gap: var(--space-2); }
-.row { font: inherit; text-align: left; display: flex; gap: var(--space-3); align-items: center; background: var(--color-bg-soft); border: none; border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); cursor: pointer; color: var(--color-ink); }
-.who { min-width: 200px; }
-.grow { flex: 1; }
-.sla { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.tabs { margin-bottom: var(--space-4); }
+.row { display: flex; gap: var(--space-3); align-items: center; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); color: var(--color-ink); }
+.row.late { border-color: var(--color-coral); }
+.grow { flex: 1; min-width: 0; }
+.grow .sub { display: block; }
+.sla { display: block; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .sla.late { color: var(--color-coral-ink); font-weight: 700; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }

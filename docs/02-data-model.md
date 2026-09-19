@@ -295,6 +295,9 @@ create table questions (
   options jsonb,            -- варианты; для number — {value, tolerance, unit}
   answer jsonb,             -- эталон; для free — null (ручная проверка)
   score numeric(6,2) not null default 1,       -- «бал(ів)*», обязательное поле в эталоне
+  scoring_method text not null default 'formula', -- «Метод підрахунку балів»: formula | all_or_nothing (`12` §14.6)
+  grader_hint text,         -- «Підказка для перевіряючого» (free): видит наставник, не ученик
+  attach_files boolean not null default false, -- «Дозволити прикріпляти файли до відповіді» (free)
   explanation text,         -- разбор, показывается после ответа
   is_critical boolean not null default false,  -- провал критического = провал теста
   difficulty int,           -- 1..5, для отбора
@@ -473,12 +476,43 @@ create table attempt_answers (
   attempt_id uuid not null references attempts(id) on delete cascade,
   question_id uuid not null,
   question_version int not null,
-  answer jsonb,                               -- ответ пользователя
+  answer jsonb,                               -- ответ пользователя; для free с файлами — {text, files:[{mediaId, name, kind, bytes}]}
   is_correct boolean,                         -- null пока не проверено вручную
   score numeric(5,2),
   reviewed_by uuid references users(id),
   reviewed_at timestamptz,
   review_comment text
+);
+
+-- История результатов попытки (`22` §13.7, `04` §4.6): первый подсчёт, итог ручной проверки,
+-- каждое «Перерахувати». Снимок попытки не меняется — меняется только запись результата.
+create table attempt_results (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  attempt_id uuid not null references attempts(id) on delete cascade,
+  reason text not null,                       -- submit | review | recalculate
+  status text not null,
+  score numeric(5,2), max_score numeric(7,2), passed boolean,
+  created_by uuid references users(id),
+  comment text,
+  created_at timestamptz not null default now()
+);
+
+-- Запрос дополнительной попытки (`12` §6.3, §14.5). Одобренный запрос даёт +1 попытку
+-- сверх лимита назначения; само назначение не меняется.
+create table attempt_requests (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  quiz_id uuid not null references quizzes(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  enrollment_id uuid references enrollments(id) on delete cascade,
+  assignment_id uuid,
+  reason text not null,
+  attempts_used int not null, attempts_allowed int not null,  -- на момент запроса, для колонки «Використано спроб»
+  status text not null default 'pending',     -- attempt_request_status
+  decided_by uuid references users(id), decided_at timestamptz, decision_comment text,
+  request_context jsonb,                      -- CLAUDE.md п. 14
+  created_at timestamptz not null default now()
 );
 
 create table certificates (
@@ -1026,6 +1060,16 @@ notice_kind: acknowledge | event | notification
 
 -- Уровень события журнала безопасности
 security_severity: info | warning | critical
+
+-- Типы вопросов: семь эталона (`12` §14.3) + три Lola (number, text_short, file)
+question_kind: single | multi | free | ordering | classification | comparison | answer_by_map
+            | number | text_short | file
+
+-- «Метод підрахунку балів» (`12` §14.6): «За формулою» | «Все або нічого»
+scoring_method: formula | all_or_nothing
+
+-- Статус запроса дополнительной попытки (`12` §14.5: «Очікує» по умолчанию, «Надано»; «Відмовлено» — по кнопке «Відмовити» `12` §6.3)
+attempt_request_status: pending | approved | rejected
 ```
 
 ## Что проверяет тест схемы

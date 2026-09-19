@@ -146,12 +146,12 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
         <LessonBlocks :blocks="w.description" :blocks-state="{}" readonly />
       </section>
 
-      <!-- Критерии — до начала (docs/13 §5.1) -->
+      <!-- Критерии — до начала (docs/13 §5.1); мокап Workshop: «Що перевіряє наставник», нумерованный список -->
       <section class="block">
-        <h2>{{ t('workshop.criteria') }}</h2>
-        <ul class="criteria">
+        <h2>{{ t('workshop.criteriaLearner') }}</h2>
+        <ol class="criteria numbered">
           <li v-for="c in w.criteria" :key="c.id">{{ c.text }}<span v-if="c.isCritical" class="crit"> · {{ t('workshop.critical') }}</span></li>
-        </ul>
+        </ol>
       </section>
 
       <!-- Форма сдачи -->
@@ -165,7 +165,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
           </div>
           <label class="add-file">
             <input type="file" :accept="w.submissionKinds.includes('photo') ? 'image/*' : '*'" :capture="w.allowCameraOnly ? 'environment' : undefined" hidden @change="addFile">
-            {{ uploading ? t('blocks.uploading') : w.allowCameraOnly ? t('workshop.takePhoto') : t('workshop.addFile') }}
+            {{ uploading ? t('blocks.uploading') : files.length ? t('workshop.morePhoto') : w.allowCameraOnly ? t('workshop.takePhoto') : t('workshop.addFile') }}
           </label>
         </div>
       </section>
@@ -236,4 +236,6 @@ summary { cursor: pointer; font-weight: 700; }
 .rate { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-2); }
 .stars { display: flex; gap: 2px; }
 .star { font: inherit; font-size: var(--font-size-title-l); border: none; background: transparent; cursor: pointer; color: var(--color-sun-ink); line-height: 1; min-width: 44px; min-height: 44px; }
+.criteria.numbered { padding-left: var(--space-5); }
+.criteria.numbered li { padding-left: var(--space-1); }
 </style>

@@ -161,16 +161,26 @@ Lola повторяет эту структуру один в один, вклю
 | Отчёт на каждый тип контента (12 штук) | Отчёты с общим каркасом и фильтром по типу |
 | Собственный визуальный язык вендора | Бренд-бук Lola: беж, солнце, бирюза, коралл, Nunito |
 
-## 8.12 Осталось осмотреть для деталей полей
 
-- [ ] Форма создания назначения: полный состав полей «Параметри» и «Нагадування».
-- [ ] Настройки теста: все переключатели вкладки «Опис та налаштування».
-- [ ] Редактор вопроса: типы и параметры каждого.
-- [ ] Карточка пользователя: полный состав профиля.
-- [ ] Конструктор правил автоматизации: список триггеров и действий.
-- [ ] Практикум: поля задания и форма проверки.
-- [ ] Оценка: структура процедуры и чек-листа.
-- [ ] Формат файла импорта пользователей.
+## 8.12 Список «доосмотреть» — закрыт
+
+Все восемь пунктов, открытых при первом проходе, сняты с эталона 19.09.2026:
+
+| Пункт | Где результат |
+| --- | --- |
+| Форма назначения: «Параметри» и «Нагадування» | `15` §14.3 (пять групп целиком) |
+| Настройки теста, вкладка «Опис та налаштування» | `12` §14.1 — настроек прохождения там нет |
+| Редактор вопроса: типы и параметры | `12` §14.3 (семь типов, группа, метки, балл) |
+| Карточка пользователя | `16` §14.4 (полный состав полей) |
+| Правила автоматизации: триггеры и действия | `17` §14.2 (четыре измерения, «Всі, окрім») |
+| Практикум: поля и форма проверки | `13` §14 (критериев нет), `22` §13.6 (очередь) |
+| Оценка: структура процедуры и чек-листа | `20` §14.2–14.4 |
+| Формат файла импорта людей | `16` Г-16.1 — экран сопоставления снять нельзя, формат задан гипотезой |
+
+Что осталось незакрытым по эталону — собрано в разделах «Гипотезы и принятые по ним
+решения» каждого модуля (обозначены `Г-<номер модуля>.<номер>`). Пустых мест в ТЗ нет:
+там, где эталон не удалось снять, зафиксирована проверяемая гипотеза и принятое решение
+с обоснованием и ценой.
 
 ## 8.13 Детали, снятые при осмотре
 
@@ -188,3 +198,99 @@ Lola повторяет эту структуру один в один, вклю
 
 **Пользователи (`/users`)** — вкладки Активні/Заблоковані/Усі; колонки перечислены в §8.4;
 справочники (міста, посади, рівні посад, підрозділи, мітки) ведутся отдельно.
+
+## 12. Полная карта навигации эталона (снята 19.09.2026)
+
+Меню эталона — семь разделов (`/process/<раздел>`). Ниже каждый экран с путём: это
+контрольный список полноты для `05` (экраны) и `R1/R2/R3` (§2). Пункт, которого нет
+в этой таблице, в Lola не обязан существовать; пункт, который здесь есть, обязан быть
+либо реализован, либо явно отклонён с причиной.
+
+### 12.1 Користувачі (`/process/users`)
+
+`/users` · `/users/groups` · `/orgstructure/v3` · `/orgstructure/functional-chiefs` ·
+`/manage/tasks/study-history` · `/users/sessions/report` · `/notifications/report` ·
+`/users/import/reports` · `/users/security-journal` · `/orgstructure/conflicts-history` ·
+`/custom-reports` · `/users/cities` · `/users/positions` · `/users/positions-levels` ·
+`/users/departments` · `/tags`
+
+### 12.2 Контент (`/process/content`)
+
+`/resources/v3` · `/tests/v3` · `/polls/v3` · `/workshop/v3` · `/courses/v3` ·
+`/meetups/v3` · `/webinars/v3` · `/complex-tests/v3` · `/training-programs/v3` ·
+`/resources/categories/manage`
+
+Девять типов контента и один справочник категорий. Формы создания у всех девяти
+устроены одинаково (§12.8).
+
+### 12.3 Навчання (`/process/learning`)
+
+Моё: `/tasks/my` · `/trajectories/my` · `/tasks/requests`
+Управление: `/manage/tasks/v3` · `/trajectories` · `/tasks/tutor-workshops` ·
+`/tests/evaluation-answers` · `/manage/tasks/requests/manage` · `/tests/attempt-requests` ·
+`/workshop/evaluation-comments` · `/comments`
+Достижения: `/users/profile/study-history` · `/certificates/my` · `/badges/my`
+Отчёты: `/manage/tasks/study-history` · `/trajectories/report` · `/training-programs/report` ·
+`/courses/report` · `/tests/report` · `/complex-tests/report` · `/resources/report` ·
+`/polls/report` · `/workshop/reports` · `/webinars/reports` · `/meetups/report` ·
+`/manage/tasks/summary-report/first-step` · `/manage/tasks/access-report` ·
+`/manage/tasks/status-report` · `/notifications/report` · `/users/sessions/report`
+Настройки: `/manage/tasks/evaluation-scales` · `/manage/tasks/categories/manage` ·
+`/manage/tasks/requests/access-manage` · `/badges/views` · `/certificates/views` ·
+`/automation-rules`
+
+### 12.4 Мій розвиток (`/process/my-development`)
+
+`/individual-plan/my` · `/mbo/my` · `/external-learning/requests/my` · `/career-dev/my` ·
+`/individual-plan/users` · `/mbo` · `/mbo/statuses` · `/career-dev/requests/moderate` ·
+`/external-learning/requests` · `/competencies` · `/competencies/profiles` ·
+`/mbo/subordinates` · `/users/profile/study-history` · `/certificates/my` · `/badges/my` ·
+`/mbo/changes-report`
+
+Здесь живут четыре независимых механизма: ИПР, цели (MBO) со своими статусами,
+заявки на внешнее обучение и карьерное развитие с модерацией. В `19` описаны все четыре.
+
+### 12.5 Інформація (`/process/info`)
+
+`/knowledge-base/search` · `/wiki` · `/news/views` · `/events` · `/contacts/views` ·
+`/birthdays/views` · `/orgstructure/company` · `/notices` · `/simplenotices` · `/forum` ·
+`/chat` · `/gift-store` · `/gift-store/bonuses` ·
+`/knowledge-base/resource-attend-report` · `/notifications/report` ·
+`/gift-store/bonuses-log` · `/users/profile/notifications` · `/knowledge-base` ·
+`/notifications` · `/guest-blocks`
+
+### 12.6 Оцінка (`/process/assessment`)
+
+`/assessment` · `/checklists` · `/manage/tasks/v3` · `/assessment/report` ·
+`/checklists/report` · `/notifications/report` ·
+`/competence-dictionary/criteria-groups` · `/competence-dictionary/evaluation-scale`
+
+### 12.7 Робота (`/process/work`) и Налаштування (`/process/settings`)
+
+Робота: `/work-tasks/list` · `/work-tasks/settings` — рабочие задачи с настраиваемыми
+приоритетами и статусами (в снятой установке: приоритет «Терміново», статус «в роботі»).
+
+Налаштування: `/users/profile` · `/users/profile/security` · `/users/profile/notifications` ·
+`/site/integration` · `/site/policies` · `/tags` · `/notifications` · `/translates` ·
+`/statistics` · `/about`
+
+### 12.8 Единое правило карточки контента
+
+Проверены формы создания девяти типов: ресурс, тест, опрос, практикум, комплексный тест,
+очное занятие, вебинар, сертификат, бейдж. Во всех девяти карточка содержит только:
+
+**Назва · Опис · Прикріплені файли · Мітки · Опублікувати · Зображення для картки завдання**
+
+и ничего про то, как это проходят. Ни сроков, ни попыток, ни проходного балла, ни дат
+занятия, ни вместимости, ни критериев проверки — всё это задаётся в **назначении**
+(`/manage/tasks/v3`), а попытка хранит копию правил на момент старта.
+
+Это — главный архитектурный вывод всего разбора эталона. Он определяет `02` (данные),
+`12` (тесты), `15` (назначения) и объясняет, почему один и тот же тест живёт
+в десяти назначениях с разными правилами и не ломается.
+
+Исключения, которые всё же держат параметры в карточке, — только анкетные:
+опрос (режим выполнения, анонимность, конфиденциальность), чек-лист (шкала, веса)
+и оценка (шкала, нормы, правила комментирования). У них параметр неотделим от состава
+вопросов, поэтому и живёт рядом с ним; и у всех трёх после первого заполнения
+параметры замораживаются (`20` §14.4).

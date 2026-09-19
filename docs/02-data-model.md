@@ -72,10 +72,23 @@ create table users (
   phone text,                                 -- E.164, уникален в тенанте
   email text,
   full_name text not null,
+  first_name text, last_name text, patronymic text,  -- эталон хранит ПІБ по частям
+  gender text,                                -- поле есть в карточке эталона
+  birth_date date,                            -- нужна для поздравлений (`23`)
   avatar_key text,
   locale text,                                -- null → берём локаль тенанта
   status text not null default 'invited',     -- invited | active | suspended | archived
   hired_at date,
+  position_since date,                        -- «Дата призначення поточної посади»:
+                                              -- по ней считается «новичок в должности»
+                                              -- и отложенные назначения (`17` §14.2)
+  external_id text,                           -- «Зовнішній №», ключ идемпотентного импорта
+  login text,                                 -- эталон различает логин и e-mail
+  translit text,                              -- «Транслітерація» для выгрузок
+  work_contacts text,                         -- «Робочі контакти», отдельно от личного телефона
+  is_hidden boolean not null default false,   -- «Прихований»: работает, но не виден в контактах
+  must_change_password boolean not null default false,
+  comment text,
   archived_at timestamptz,
   telegram_chat_id bigint,
   password_hash text,                         -- только для e-mail входа
@@ -165,10 +178,37 @@ create table courses (
   status text not null default 'draft',       -- draft | published | archived
   published_version_id uuid,                  -- → course_versions.id
   estimated_minutes int,
+  code text,                                  -- «Код» из карточки эталона
+  icon_key text,                              -- «Іконка»
+  duration_days int,                          -- «Тривалість навчання», днів
+  workload text,                              -- «Оцінка зайнятості»
+  result_mode text not null default 'pct',    -- «Визначати результат проходження курсу по»:
+                                              -- pct (% успішності) | avg_score (середній бал)
+                                              -- | final_test (за підсумковим тестуванням)
   is_catalog_visible boolean not null default false,
   tags text[] not null default '{}',
   created_by uuid references users(id),
   unique (tenant_id, slug)
+);
+
+-- План курса: разделы и элементы. Раздел — обязательный уровень группировки.
+-- У теста внутри плана свой порог; назначение его перекрывает (`15` §14.3).
+create table course_sections (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  course_version_id uuid not null references course_versions(id) on delete cascade,
+  title text not null,
+  sort_order int not null default 0
+);
+
+create table course_items (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  section_id uuid not null references course_sections(id) on delete cascade,
+  item_type text not null,                    -- resource | quiz
+  item_id uuid not null,
+  pass_score_pct numeric(5,2),                -- «Поріг проходження, %» у теста в плане
+  sort_order int not null default 0
 );
 
 create table course_categories (
@@ -243,15 +283,30 @@ create table questions (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
   bank_id uuid not null references question_banks(id) on delete cascade,
-  kind text not null,       -- single | multiple | order | match | number | text_short | text_long | file
+  question_group_id uuid references question_groups(id),  -- «Вибрати групу», см. ниже
+  kind text not null,       -- эталон (7): single | multi | free | ordering |
+                            --             classification | comparison | answer_by_map
+                            -- Lola сверх эталона: number | text_short | file
   stem jsonb not null,      -- блоки, как в lessons.body (текст + картинка)
   options jsonb,            -- варианты; для number — {value, tolerance, unit}
-  answer jsonb,             -- эталон; для text_long — null (ручная проверка)
+  answer jsonb,             -- эталон; для free — null (ручная проверка)
+  score numeric(6,2) not null default 1,       -- «бал(ів)*», обязательное поле в эталоне
   explanation text,         -- разбор, показывается после ответа
   is_critical boolean not null default false,  -- провал критического = провал теста
   difficulty int,           -- 1..5, для отбора
   tags text[] not null default '{}',
   version int not null default 1
+);
+
+-- Группа вопросов внутри теста. Нужна для параметра назначения
+-- «Кількість питань → Одне питання від кожної групи» (`15` §14.3):
+-- по одному вопросу из каждой группы даёт разным людям разные наборы.
+create table question_groups (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  quiz_id uuid not null references quizzes(id) on delete cascade,
+  title text not null,
+  sort_order int not null default 0
 );
 
 create table quizzes (
@@ -286,15 +341,70 @@ create table quiz_questions (                 -- фиксированный со
 create table assignments (                    -- «кому что назначено»
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
-  course_id uuid not null references courses(id),
-  course_version_id uuid not null references course_versions(id),
+  content_type text not null,                 -- course|training_program|resource|test|complex_test|
+                                              -- workshop|meetup|webinar|poll|poll360|check_list
+  content_id uuid not null,                   -- ссылка в таблицу по content_type
+  content_version_id uuid,                    -- фиксация версии на момент назначения
   audience jsonb not null,                    -- {type: user|position|location|org_unit|role|segment, ids:[…]}
+  params jsonb not null default '{}',         -- ПРАВИЛА ПРОХОЖДЕНИЯ, см. ниже
+  automation_rule_id uuid references automation_rules(id),
+  via_catalog boolean not null default false, -- «Доступ через каталог навчання»
+  use_in_dev_plans boolean not null default false,
   due_at timestamptz,
   starts_at timestamptz,
+  due_days int,                               -- «кількість днів з моменту призначення»
   is_mandatory boolean not null default true,
   recurrence jsonb,                           -- {every: '12 months'} для переаттестации
   created_by uuid references users(id)
 );
+```
+
+**`assignments.params` — состав, сверено с эталоном** (`15` §14.3). Правила прохождения
+живут здесь, а не в контенте; контент содержит только материал. Ключи:
+
+```jsonc
+{
+  // срок
+  "deadline_mode": "unlimited|days_from_assign|calendar",   // Термін завершення завдання
+  "time_limit_min": 30,                                      // Час проходження, null = без лимита
+  // тест
+  "questions_mode": "all|one_per_group|limited",             // Кількість питань
+  "questions_count": 10,
+  "attempts": 3,                                             // null = необмежено
+  "training_mode": false,                                    // Режим тренування
+  "allow_other_pages": false,                                // Дозволити відкриття інших сторінок
+  "show_error_protocol": true,                               // Показати протокол помилок
+  "hide_correct_in_protocol": false,
+  "shuffle_options": true,                                   // Перемішувати варіанти відповідей
+  "keep_question_order": false,                              // Дотримуватися послідовності питань
+  "allow_skip": true,                                        // Пропускати питання
+  "instant_feedback": false,                                 // показывать верность сразу
+  "manual_next": false,                                      // Перейти до наступного питання вручну
+  // результат
+  "result_source": "last|best",                              // остання спроба | кращий результат
+  "pass_score_pct": 85,                                      // перекрывает порог контента
+  "fix_result": true,                                        // Фіксувати результат завдання
+  "scale_id": "uuid|null",                                   // Перетворити результат за шкалою
+  // награды
+  "badge_id": null, "certificate_id": null,
+  "points": 0,                                               // рейтинг
+  "bonuses": 0,                                              // магазин подарков
+  // прочее
+  "allow_comments": true,
+  "notify_on_result": true                                   // Повідомлення про успішне/неуспішне
+}
+```
+
+Набор ключей зависит от `content_type`: у курса нет `attempts` и `shuffle_options`,
+у практикума нет `questions_mode`. Валидация — схемой zod на каждый тип (`shared/schemas`).
+
+**Почему jsonb, а не колонки.** Одиннадцать типов контента с пересекающимися, но разными
+наборами правил дали бы таблицу на шестьдесят колонок, из которых для каждой строки
+заполнено пятнадцать. Поиск и отчёты по параметрам не нужны — они нужны по результатам.
+Единственное исключение — `due_at`, `starts_at` и `due_days`: по ним идут напоминания
+и просрочки, поэтому они вынесены в колонки и проиндексированы.
+
+```sql
 
 create table enrollments (                    -- «конкретный человек на конкретном курсе»
   id uuid primary key default gen_random_uuid(),
@@ -578,8 +688,13 @@ DDL приводится сокращённо: общие поля (`id`, `tenan
 ## Практикумы
 
 ```sql
-workshops(title, description jsonb, criteria jsonb, submission_kinds text[], -- text|file|photo|video
-          reviewer_scope text, deadline_days int, allow_rework boolean)
+-- Карточка практикума в эталоне несёт только материал (`13` §14).
+-- Критерии, правило зачёта и лимит доработок — наше добавление `[решение]`.
+workshops(title, description jsonb, body jsonb, attachments jsonb,
+          criteria jsonb,                       -- [{id, title, weight}] — наше
+          pass_rule text,                       -- all_criteria | weighted | reviewer_decision
+          submission_kinds text[],              -- text | file | photo | video
+          scale_id uuid references scales(id))  -- шкала заданий, общая (§ ниже)
 workshop_submissions(workshop_id, user_id, enrollment_id, body jsonb, files jsonb,
           status text,        -- draft | submitted | review | reworking | accepted | rejected
           score numeric(5,2), reviewed_by, reviewed_at, review_comment text, rework_count int)
@@ -593,18 +708,54 @@ programs(title, description, cover_key, status, certificate_template_id)
 program_items(program_id, item_type text,      -- course | quiz | workshop | meetup | webinar
           item_id uuid, sort int, is_required boolean, unlock_rule jsonb)
 program_enrollments(program_id, user_id, status, progress_pct, started_at, completed_at)
-trajectories(title, graph jsonb)               -- узлы и переходы с условиями (R2)
+trajectories(title, description, cover_key, status, tags text[],
+          assign_mode text,                     -- manual | catalog_free | catalog_request | automation
+          automation_rule_id uuid,
+          stop_assign_after_finish boolean)     -- «Не призначати завдання після завершення»
+
+-- Язык полотна снят с эталона (`17` §14.3): условия живут в УЗЛАХ, не в рёбрах.
+trajectory_nodes(
+  id, tenant_id, trajectory_id,
+  kind text not null,      -- start | finish | task | and | or | delay | stop_delay
+                           -- | branch  ← наш узел «Розгалуження за результатом» [решение]
+  title text,              -- «Назва (підпис до блоку)», обязательна у and/or/delay/stop_delay
+  content_type text,       -- для kind='task'
+  content_id uuid,
+  days int,                -- для delay («пропустити через N днів»)
+                           -- и stop_delay («закрити доступ через N днів»)
+  x int, y int             -- положение на полотне
+)
+
+trajectory_edges(
+  id, tenant_id, trajectory_id, from_node_id, to_node_id,
+  -- условие заполняется ТОЛЬКО когда from_node.kind = 'branch'; у остальных null
+  condition jsonb          -- {op:'passed'} | {op:'failed'} | {op:'score_gte', value:80} | {op:'else'}
+)
 ```
 
 ## Комплексные тесты, очные занятия, вебинары
 
 ```sql
-complex_tests(title, pass_score, time_limit_sec, parts jsonb)  -- ссылки на quizzes с весами
-meetups(title, starts_at, ends_at, location_id, room text, trainer_id, capacity int, status)
-meetup_registrations(meetup_id, user_id, status,  -- registered | waitlist | attended | missed
-          checked_in_at, check_in_method text)     -- manual | qr
-webinars(title, starts_at, provider text, join_url text, record_url text, capacity int)
-webinar_participations(webinar_id, user_id, joined_at, minutes int)
+-- Комплексный тест = именованный набор обычных тестов, сгруппированный по темам
+-- (`12` §14.2). Своих правил прохождения не несёт — они в назначении.
+complex_tests(title, description, attachments jsonb, tags text[], status)
+complex_test_items(complex_test_id, quiz_id, topic text, sort_order int)
+-- Карточка занятия — только материал; расписание вынесено в сессии (`18` §14.1, наше решение).
+meetups(title, announcement jsonb, description jsonb, attachments jsonb, tags text[], status)
+webinars(title, description jsonb, attachments jsonb, tags text[], status)
+
+sessions(                                  -- общая для очных занятий и вебинаров
+  id, tenant_id, task_id,                  -- сессия принадлежит НАЗНАЧЕНИЮ, не карточке
+  content_type text,                       -- meetup | webinar
+  starts_at, ends_at,
+  location_id uuid, room text, trainer_id uuid,   -- очное
+  join_url text, record_url text, provider text,  -- вебинар
+  capacity int, waitlist_enabled boolean, status text
+)
+session_registrations(session_id, user_id, status,  -- registered | waitlist | attended | missed
+          checked_in_at, check_in_method text,      -- qr | list | manual_late
+          checked_in_by uuid,
+          minutes_watched int, watch_pct numeric(5,2))  -- вебинар
 ```
 
 ## Развитие
@@ -625,15 +776,43 @@ career_requests(user_id, target_position_id, status, approved_by, comment)
 ## Оценка и чек-листы
 
 ```sql
-assessment_cycles(title, period_from, period_to, status, rater_kinds text[]) -- self|manager|peer
-assessment_criteria_groups(name, sort)
-assessment_criteria(group_id, name, description, scale_id)
-rating_scales(name, kind text, options jsonb)   -- percent | pass_fail | 1_5 | letters
-assessment_tasks(cycle_id, subject_user_id, rater_user_id, status, due_at)
-assessment_answers(task_id, criterion_id, value jsonb, comment)
-checklists(title, items jsonb, scale_id, requires_photo boolean)
-checklist_runs(checklist_id, location_id, observer_id, subject_user_id, started_at,
-          finished_at, score numeric(5,2), answers jsonb, photos jsonb)
+-- Словарь критериев (сверено `20` §14.6): критерий несёт только название и описание,
+-- группа — название, описание и метки. Связь критерия с компетенцией — наша `[решение]`.
+criteria_groups(id, tenant_id, name, description jsonb, tags text[])
+criteria(id, tenant_id, group_id, name, description jsonb,
+         competency_id uuid references competencies(id))   -- наше
+
+-- Анкета оценки (сверено `20` §14.2)
+assessments(
+  id, tenant_id, title, description jsonb, instruction jsonb, attachments jsonb,
+  kind text not null,               -- by_criteria | by_competencies
+  scale_id uuid not null references scales(id),
+  allow_comment_groups boolean, comment_groups_required boolean,
+  comment_when_above_norm boolean, comment_when_below_norm boolean, comment_when_equal boolean,
+  zero_means_no_grade boolean,      -- «значення 0 означає відсутність оцінки»
+  is_locked boolean not null default false,  -- после первого заполнения (§14.4)
+  tags text[], status text
+)
+assessment_items(assessment_id, criterion_id, norm numeric(6,2), cluster text, sort_order int)
+
+-- Чек-лист (сверено `20` §14.3): у пункта ВЕС, а не норма
+checklists(
+  id, tenant_id, title, description jsonb, instruction jsonb, attachments jsonb,
+  scale_id uuid not null references scales(id),
+  allow_skip boolean, allow_item_comment boolean, item_comment_required boolean,
+  requires_photo boolean,           -- наше `[решение]`
+  is_locked boolean not null default false,
+  tags text[], status text
+)
+checklist_items(checklist_id, criterion_id, weight numeric(6,2), sort_order int)
+
+-- Циклы и ответы — общие для обеих анкет
+assessment_cycles(assessment_id, task_id, period_from, period_to, status, min_raters int)
+assessment_raters(cycle_id, subject_user_id, rater_user_id,
+          rater_kind text,          -- self | manager | functional_manager | peer | subordinate | external
+          weight numeric(4,2), is_anonymous boolean, status text, due_at)
+assessment_answers(cycle_id, rater_id, item_id, value numeric(6,2), comment text,
+          photo_keys text[])
 ```
 
 ## Корпоративный хаб
@@ -642,9 +821,19 @@ checklist_runs(checklist_id, location_id, observer_id, subject_user_id, started_
 news(title, body jsonb, category_id, cover_key, is_pinned boolean, requires_ack boolean,
           published_at, author_id)
 news_views(news_id, user_id, viewed_at, acked_at)
-announcements(title, body jsonb, audience jsonb, show_mode text, -- modal | banner
-          starts_at, ends_at, requires_ack boolean)
-announcement_acks(announcement_id, user_id, acked_at)
+-- Объявление (сверено `21` §14.5) — назначаемая сущность, а не лента.
+notices(
+  id, tenant_id, title, body jsonb, attachments jsonb,
+  kind text not null,               -- acknowledge | event | notification («Ознайомлення/Подія/Сповіщення»)
+  starts_at, ends_at,               -- «Термін оголошення»
+  assign_mode text,                 -- manual | automation
+  automation_rule_id uuid,
+  status text
+)
+notice_acks(notice_id, user_id, acked_at)   -- «Ознайомлений N (всього M)»
+
+-- Простое объявление: без назначения и подтверждения
+simple_notices(title, body jsonb, published_at, ends_at, status)
 events(title, description, starts_at, ends_at, location_id, audience jsonb, capacity int)
 event_registrations(event_id, user_id, status)
 wiki_pages(parent_id, title, slug, body jsonb, access jsonb, updated_by)
@@ -654,9 +843,15 @@ forum_posts(topic_id, author_id, body text, reply_to_id, is_hidden boolean, mode
 chat_threads(kind text, title, member_ids uuid[])
 chat_messages(thread_id, author_id, body text, attachments jsonb, read_by uuid[])
 contacts(user_id, phone_public text, email_public text, room text, notes text)
-shop_items(title, description, image_key, price_points int, stock int, is_active boolean)
-shop_orders(user_id, item_id, price_points int, status, -- new | approved | issued | cancelled
-          approved_by, issued_at)
+-- Товар (сверено `21` Г-21.1): у эталона нет ни точки выдачи, ни лимита — это наше.
+shop_items(title, description, image_key, category_id, price_bonuses int, stock int,
+          location_id uuid,                 -- точка выдачи, null = любая  [решение]
+          limit_per_user int,               -- [решение]
+          is_active boolean)
+shop_orders(user_id, item_id, price_bonuses int,
+          status text,                      -- reserved | ready | issued | cancelled
+          reserved_until timestamptz,       -- 14 дней, потом автоотмена  [решение]
+          issued_by uuid, issued_at timestamptz, cancel_reason text)
 ```
 
 ## Рабочие задачи
@@ -671,9 +866,28 @@ work_task_comments(task_id, author_id, body)
 ## Геймификация и шкалы
 
 ```sql
-evaluation_scales(name, kind, options jsonb)    -- шкалы оценки заданий
+-- В эталоне три реестра шкал (`24` Г-24.4). Сводим к одному с полем kind.
+--   range  — «Шкали оцінки завдань»: диапазон процентов → название + характеристика
+--   levels — «Шкали оцінювання» анкет и «Шкала компетенцій»: перечень уровней
+scales(id, tenant_id, name, description,
+       kind text not null,                 -- range | levels
+       display_as text)                    -- label | value — только для levels
+scale_levels(scale_id, label, value numeric,
+       range_from numeric, range_to numeric,   -- только для kind='range'
+       characteristic text,                     -- «Характеристика оцінки»
+       show_in_reports boolean,                 -- «Відображати у звітах»
+       sort_order int)
 badges / user_badges / points_ledger            -- см. §2.10
 leaderboard_snapshots(scope_type, scope_id, period, rows jsonb)
+```
+
+## Метки
+
+```sql
+-- Область действия обязательна: без неё список меток на форме курса показывает
+-- метки должностей. Значения области в эталоне: course | resource | user (и другие).
+tags(id, tenant_id, name, description, scope text not null)
+-- name ≤ 40 знаков, без угловых скобок; уникальна в паре (tenant_id, scope, name)
 ```
 
 ## Интеграции и переводы
@@ -689,3 +903,116 @@ translations(locale, key, value, updated_by)    -- переопределени�
 saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
           schedule jsonb, owner_id)
 ```
+
+## Сквозные таблицы, добавленные по итогам разбора эталона
+
+```sql
+-- Технический контекст события. Пишется одинаково во ВСЕ журналы (`22` §13.4):
+-- IP с геолокацией и браузер встречаются в трёх журналах эталона из четырёх.
+-- Хранится строкой журнала, а не отдельной таблицей — join на каждый показ дороже.
+-- Формат поля request_context jsonb:
+--   {ip, geo:{country,country_code,city}, user_agent, browser, os, device}
+
+-- Правило автоматизации (`17` §14.2)
+automation_rules(
+  id, tenant_id, name, description,
+  trigger text not null,          -- first_activation | attributes_acquired (оба сразу — норма)
+  delay_days int,                 -- «Призначення через (кількість днів)»
+  on_leave_condition text not null default 'keep',  -- keep | cancel_unstarted | cancel_all  [решение]
+  status text
+)
+-- Четыре измерения; на каждое — свой режим и свой список значений
+automation_rule_dimensions(
+  rule_id,
+  dimension text not null,        -- city | position | org_unit | tag
+  mode text not null,             -- any | include | exclude   («Будь-яке» / список / «Всі, окрім»)
+  value_ids uuid[]
+)
+
+-- Правило «должность → роль» (`01` §1.9.1): роли в сети раздаются не руками
+position_role_map(tenant_id, position_id, role_id, scope_type, scope_id)
+
+-- Группа вопросов внутри теста — см. §2.6
+-- Разделы и элементы плана курса — см. §2.4
+
+-- Дополнительные параметры назначений (`15` §14.5)
+task_parameters(id, tenant_id, name, kind text,    -- text | select | number
+                options jsonb, is_required boolean)
+task_parameter_values(task_id, parameter_id, value jsonb)
+
+-- Заявки: внешнее обучение и карьерное развитие сведены в одну таблицу (`19` Г-19.1)
+requests(
+  id, tenant_id, user_id,
+  kind text not null,             -- external_learning | career
+  title, description jsonb, attachments jsonb,
+  target_position_id uuid,        -- для career
+  provider text, cost numeric(12,2), currency text,   -- для external_learning
+  status text not null,           -- draft | pending_manager | pending_budget | approved | rejected | cancelled
+  assignee_id uuid,               -- «Відповідальний»
+  decided_by uuid, decided_at timestamptz
+)
+request_approvals(request_id, step int, approver_id, decision text, comment, decided_at)
+
+-- Уровень компетенции человека — расчётное значение с источником (`19` Г-19.2)
+user_competencies(
+  user_id, competency_id, level int,
+  source text not null,           -- assessment | task | manual
+  source_ref_id uuid, reason text,
+  assessed_at timestamptz, valid_until timestamptz
+)
+
+-- Группы доступа базы знаний и каталога (`21` §14.1, `10` §14.1)
+access_groups(id, tenant_id, name, description, applies_to text)  -- knowledge | catalog
+access_group_members(group_id, subject_type text, subject_id uuid) -- position | org_unit | user | role
+content_access_groups(content_type, content_id, group_id)
+
+-- Единая лента комментариев (`10` §14.2)
+comments(
+  id, tenant_id, author_id, body text,
+  source_type text,               -- task | course | program | knowledge | notice
+  source_id uuid,
+  is_read boolean, read_by uuid, read_at timestamptz,
+  routed_to uuid,                 -- автор материала  [решение]
+  reply_to_id uuid
+)
+```
+
+## Перечисления, снятые с эталона (не выдумывать свои)
+
+```sql
+-- Статус прохождения. Пять значений, не четыре (`22` §13.3).
+-- not_assigned отличается от not_started: первое — элемент ещё не выдан,
+-- второе — выдан, но не открыт. Руководитель реагирует на них по-разному.
+enrollment_status: not_assigned | not_started | in_progress | done | failed
+
+-- Тип назначения (вкладки списка эталона)
+task_type: manual | auto | catalog | trajectory | archive
+
+-- Тип контента, одиннадцать значений
+content_type: course | training_program | resource | test | complex_test | workshop
+            | poll | assessment | check_list | meetup | webinar
+
+-- Режим назначения траектории и объявления
+assign_mode: manual | catalog_free | catalog_request | automation
+
+-- Узлы траектории (`17` §14.3)
+trajectory_node_kind: start | finish | task | and | or | delay | stop_delay | branch
+
+-- Тип объявления
+notice_kind: acknowledge | event | notification
+
+-- Уровень события журнала безопасности
+security_severity: info | warning | critical
+```
+
+## Что проверяет тест схемы
+
+Кроме теста полноты RLS (`25` §11) в CI работает `tests/integration/schema-parity.spec.ts`:
+
+1. У каждой таблицы с `tenant_id` есть политика и индекс, начинающийся с `tenant_id`.
+2. Ни одна таблица контента не содержит колонок `attempts`, `pass_score`, `due_at`,
+   `time_limit` — правила живут в `assignments.params` (`15` §14.3).
+3. Все перечисления из раздела выше объявлены ровно в этом составе; лишнее значение
+   или недостающее валит тест.
+4. `enrollment_status` используется во всех отчётных представлениях одинаково.
+5. У каждой таблицы-журнала есть колонка `request_context jsonb`.

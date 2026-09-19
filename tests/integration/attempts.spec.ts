@@ -58,21 +58,21 @@ describe('банк, тест, попытка со снапшотом', () => {
   let qLong: string
   let attemptId: string
 
-  it('банк, 3 вопроса (single критический, number, text_long), тест из них', async () => {
+  it('банк, 3 вопроса (single критический, number, free), тест из них', async () => {
     const bank = await createBank(author(), { name: `Тест-банк ${Date.now()}` })
     bankId = bank.id
 
     qSingle = (await createQuestion(author(), {
       bankId, kind: 'single', stem: stem('Температура зберігання риби?'), options: opts('a', 'b', 'c'),
-      answer: { correctId: 'b' }, isCritical: true, difficulty: 3, points: 2, partialCredit: true, negativeMarking: false, tags: [],
+      answer: { correctId: 'b' }, isCritical: true, difficulty: 3, points: 2, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
     })).id
     qNumber = (await createQuestion(author(), {
       bankId, kind: 'number', stem: stem('Скільки грамів сиру на піцу 30 см?'),
-      answer: { value: 120, tolerance: 10, unit: 'г' }, isCritical: false, difficulty: 2, points: 1, partialCredit: true, negativeMarking: false, tags: [],
+      answer: { value: 120, tolerance: 10, unit: 'г' }, isCritical: false, difficulty: 2, points: 1, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
     })).id
     qLong = (await createQuestion(author(), {
-      bankId, kind: 'text_long', stem: stem('Що зробиш, якщо гість каже, що піца холодна?'),
-      answer: { criteria: ['Вибачення', 'Заміна'], reference: 'Вибачитись, замінити' }, isCritical: false, difficulty: 3, points: 2, partialCredit: true, negativeMarking: false, tags: [],
+      bankId, kind: 'free', stem: stem('Що зробиш, якщо гість каже, що піца холодна?'),
+      answer: { criteria: ['Вибачення', 'Заміна'], reference: 'Вибачитись, замінити' }, isCritical: false, difficulty: 3, points: 2, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
     })).id
 
     const quiz = await createQuiz(author(), { title: 'Тест гарячого цеху', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
@@ -215,7 +215,7 @@ describe('тест как урок курса → сертификат', () => {
     const bank = await createBank(author(), { name: `Тест-банк ${Date.now()}b` })
     const q = await createQuestion(author(), {
       bankId: bank.id, kind: 'single', stem: stem('2+2?'), options: opts('a', 'b'),
-      answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, partialCredit: true, negativeMarking: false, tags: [],
+      answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
     })
     const quiz = await createQuiz(author(), { title: 'Фінальний тест', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
     quizId = quiz.id

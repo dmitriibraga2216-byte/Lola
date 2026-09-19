@@ -3,10 +3,12 @@
  * Чистые функции без БД: работают по снапшоту вопроса, а не по текущей версии.
  */
 
-export type QuestionKind
-  = 'single' | 'multiple' | 'order' | 'match' | 'number' | 'text_short' | 'text_long' | 'file'
+import type { QuestionKind, ScoringMethod } from '../enums'
 
-export const MANUAL_KINDS: ReadonlySet<QuestionKind> = new Set(['text_long', 'file'])
+export type { QuestionKind, ScoringMethod }
+
+/** Ручная проверка (docs/12 §15 Г-12.1): свободный ответ и файл всегда идут наставнику. */
+export const MANUAL_KINDS: ReadonlySet<QuestionKind> = new Set(['free', 'file'])
 
 export interface SnapshotQuestion {
   id: string
@@ -18,9 +20,25 @@ export interface SnapshotQuestion {
   explanation: unknown
   points: number
   isCritical: boolean
-  partialCredit: boolean
+  /** «Метод підрахунку балів» (docs/12 §14.6). У снимков до spec-12 поля нет — см. partialCredit. */
+  scoringMethod?: ScoringMethod
+  /** Снимки до spec-12: булев частичный балл. */
+  partialCredit?: boolean
   negativeMarking: boolean
   requireExact?: boolean
+  /** Группа вопросов теста, из которой вопрос попал в снимок (one_per_group). */
+  groupId?: string | null
+  /** Подсказка проверяющему (free): в снимке есть, ученику не отдаётся (stripAnswers). */
+  graderHint?: string | null
+  /** Можно ли прикрепить файлы к свободному ответу. */
+  attachFiles?: boolean
+}
+
+/** Эффективный метод подсчёта: новое поле, для старых снимков — из partialCredit. */
+export function scoringMethodOf(q: Pick<SnapshotQuestion, 'scoringMethod' | 'partialCredit' | 'requireExact'>): ScoringMethod {
+  if (q.requireExact) return 'all_or_nothing'
+  if (q.scoringMethod) return q.scoringMethod
+  return q.partialCredit === false ? 'all_or_nothing' : 'formula'
 }
 
 export interface GradeResult {
@@ -62,6 +80,18 @@ function levenshtein(a: string, b: string): number {
   return prev[n]!
 }
 
+/** Область на изображении: прямоугольник или круг, координаты — доли 0..1 от ширины/высоты. */
+export type MapArea
+  = | { id: string, shape: 'rect', x: number, y: number, w: number, h: number }
+    | { id: string, shape: 'circle', cx: number, cy: number, r: number }
+
+export function areaContains(area: MapArea, p: { x: number, y: number }): boolean {
+  if (area.shape === 'rect') return p.x >= area.x && p.x <= area.x + area.w && p.y >= area.y && p.y <= area.y + area.h
+  const dx = p.x - area.cx
+  const dy = p.y - area.cy
+  return Math.sqrt(dx * dx + dy * dy) <= area.r
+}
+
 export function gradeAnswer(q: SnapshotQuestion, answer: unknown): GradeResult {
   if (MANUAL_KINDS.has(q.kind)) return { isCorrect: null, score: 0, auto: false }
   if (answer === null || answer === undefined) return { isCorrect: false, score: 0, auto: true }
@@ -74,14 +104,14 @@ export function gradeAnswer(q: SnapshotQuestion, answer: unknown): GradeResult {
       return { isCorrect: ok, score: ok ? q.points : 0, auto: true }
     }
 
-    case 'multiple': {
+    case 'multi': {
       const correct = new Set((q.answer as { correctIds: string[] }).correctIds)
       const given = new Set(((answer as { optionIds?: string[] }).optionIds ?? []))
       const right = [...given].filter(id => correct.has(id)).length
       const wrong = given.size - right
       const exact = right === correct.size && wrong === 0
 
-      if (q.requireExact || !q.partialCredit) {
+      if (scoringMethodOf(q) === 'all_or_nothing') {
         return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
       }
       // points × (верно − неверно) / всего верных, не меньше 0
@@ -90,14 +120,14 @@ export function gradeAnswer(q: SnapshotQuestion, answer: unknown): GradeResult {
       return { isCorrect: exact, score, auto: true }
     }
 
-    case 'order': {
+    case 'ordering': {
       const correct = (q.answer as { order: string[] }).order
       const given = (answer as { order?: string[] }).order ?? []
       if (given.length !== correct.length) {
         return { isCorrect: false, score: 0, auto: true }
       }
       const exact = correct.every((id, i) => given[i] === id)
-      if (!q.partialCredit) return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
+      if (scoringMethodOf(q) === 'all_or_nothing') return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
 
       // Доля пар в правильном относительном порядке
       const pos = new Map(given.map((id, i) => [id, i]))
@@ -115,14 +145,46 @@ export function gradeAnswer(q: SnapshotQuestion, answer: unknown): GradeResult {
       return { isCorrect: exact, score, auto: true }
     }
 
-    case 'match': {
+    case 'comparison': {
       const correct = (q.answer as { pairs: { leftId: string, rightId: string }[] }).pairs
       const given = (answer as { pairs?: { leftId: string, rightId: string }[] }).pairs ?? []
       const givenMap = new Map(given.map(p => [p.leftId, p.rightId]))
       const right = correct.filter(p => givenMap.get(p.leftId) === p.rightId).length
       const exact = right === correct.length
-      if (!q.partialCredit) return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
+      if (scoringMethodOf(q) === 'all_or_nothing') return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
       return { isCorrect: exact, score: round2(q.points * right / correct.length), auto: true }
+    }
+
+    case 'classification': {
+      // Разложить элементы по классам (docs/12 §3.3 п. 10, §14.6): частичный балл по числу верно разложенных
+      const correct = (q.answer as { placements: { itemId: string, groupId: string }[] }).placements
+      const given = (answer as { placements?: { itemId: string, groupId: string }[] }).placements ?? []
+      const givenMap = new Map(given.map(p => [p.itemId, p.groupId]))
+      const right = correct.filter(p => givenMap.get(p.itemId) === p.groupId).length
+      const exact = right === correct.length
+      if (scoringMethodOf(q) === 'all_or_nothing') return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
+      return { isCorrect: exact, score: correct.length === 0 ? 0 : round2(q.points * right / correct.length), auto: true }
+    }
+
+    case 'answer_by_map': {
+      // Области в долях от размера изображения (docs/12 §15 Г-12.1 п. 2). Ответ — выбранные области
+      // либо точки {x, y} в долях; точка попадает в первую область, которая её содержит.
+      const areas = ((q.options as { areas?: MapArea[] } | null)?.areas ?? [])
+      const correct = new Set((q.answer as { areaIds: string[] }).areaIds)
+      const a = answer as { areaIds?: string[], points?: { x: number, y: number }[] }
+      const hit = new Set<string>(a.areaIds ?? [])
+      for (const p of a.points ?? []) {
+        const area = areas.find(ar => areaContains(ar, p))
+        if (area) hit.add(area.id)
+      }
+      const right = [...hit].filter(id => correct.has(id)).length
+      const wrong = hit.size - right
+      const exact = right === correct.size && wrong === 0
+      if (scoringMethodOf(q) === 'all_or_nothing' || correct.size === 0) {
+        return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
+      }
+      const raw = q.points * (right - (q.negativeMarking ? wrong : 0)) / correct.size
+      return { isCorrect: exact, score: round2(Math.max(0, Math.min(q.points, raw))), auto: true }
     }
 
     case 'number': {
@@ -271,9 +333,9 @@ export const DEFAULT_QUIZ_PARAMS: QuizParams = {
   notifyOnResult: true,
 }
 
-/** Убирает эталоны и разбор из вопроса для выдачи ученику до завершения. */
-export function stripAnswers(q: SnapshotQuestion): Omit<SnapshotQuestion, 'answer' | 'explanation'> {
-  const { answer: _a, explanation: _e, ...safe } = q
-  // Для match правая колонка перемешивается снапшотом, эталон в answer
+/** Убирает эталоны, разбор и подсказку проверяющему из вопроса для выдачи ученику. */
+export function stripAnswers(q: SnapshotQuestion): Omit<SnapshotQuestion, 'answer' | 'explanation' | 'graderHint'> {
+  const { answer: _a, explanation: _e, graderHint: _g, ...safe } = q
+  // Для comparison правая колонка перемешивается снапшотом, эталон в answer
   return safe
 }

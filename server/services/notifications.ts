@@ -26,6 +26,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   attempt_failed: 'Тест «{{quiz}}» не зараховано: {{score}}%. {{#left}}Залишилось спроб: {{left}}{{/left}}',
   review_needed: 'Розгорнута відповідь чекає перевірки: {{name}}, «{{quiz}}»',
   review_done: 'Наставник перевірив «{{quiz}}»: {{status}}',
+  attempt_request_created: '{{name}} просить ще одну спробу тесту «{{quiz}}»',
+  attempt_request_decided: 'Запит на додаткову спробу «{{quiz}}»: {{status}}. {{comment}}',
   certificate_issued: 'Сертифікат {{number}} за «{{course}}» видано',
   weekly_digest: '{{location}} — тиждень: завершено {{completed}}, прострочено {{overdue}}, нових призначень {{assigned}}',
   telegram_linked: 'Telegram підключено. Сюди приходитимуть нагадування про навчання.',

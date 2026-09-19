@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   boolean, index, inet, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
+import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 import { courseCategories, courses } from './content'
@@ -28,17 +29,23 @@ export const questions = pgTable('questions', {
   ...baseColumns,
   tenantId: tenantId(),
   bankId: uuid('bank_id').notNull().references(() => questionBanks.id, { onDelete: 'cascade' }),
+  // «Вибрати групу» (docs/12 §14.3): группа внутри теста, по ней работает «Одне питання від кожної групи»
+  questionGroupId: uuid('question_group_id').references((): AnyPgColumn => questionGroups.id, { onDelete: 'set null' }),
   kind: text('kind').notNull().default('single'),
-  // single | multiple | order | match | number | text_short | text_long | file
+  // Коды docs/02 (эталон): single | multi | free | ordering | classification | comparison | answer_by_map
+  // Lola сверх эталона: number | text_short | file
   stem: jsonb('stem').notNull(), // блоки: text, image
   options: jsonb('options'),
   answer: jsonb('answer'), // null для ручных типов
   explanation: jsonb('explanation'),
   hint: text('hint'),
+  graderHint: text('grader_hint'), // «Підказка для перевіряючого» (docs/12 §14.6): видит наставник, не ученик
+  attachFiles: boolean('attach_files').notNull().default(false), // «Дозволити прикріпляти файли до відповіді» (free)
   isCritical: boolean('is_critical').notNull().default(false),
   difficulty: integer('difficulty').notNull().default(3),
   points: numeric('points', { precision: 5, scale: 2 }).notNull().default('1'),
-  partialCredit: boolean('partial_credit').notNull().default(true),
+  // «Метод підрахунку балів» (docs/12 §14.6): formula — частка вірних елементів, all_or_nothing — всё или ничего
+  scoringMethod: text('scoring_method').notNull().default('formula'),
   negativeMarking: boolean('negative_marking').notNull().default(false),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   timeLimitSec: integer('time_limit_sec'),
@@ -47,6 +54,17 @@ export const questions = pgTable('questions', {
   stats: jsonb('stats').notNull().default('{}'),
 }, t => [
   index().on(t.tenantId, t.bankId, t.status),
+])
+
+/** Группа вопросов внутри теста (docs/02, docs/12 §14.3). */
+export const questionGroups = pgTable('question_groups', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  quizId: uuid('quiz_id').notNull().references((): AnyPgColumn => quizzes.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+}, t => [
+  index().on(t.tenantId, t.quizId),
 ])
 
 export const quizzes = pgTable('quizzes', {
@@ -129,6 +147,50 @@ export const attemptAnswers = pgTable('attempt_answers', {
   answeredAt: timestamp('answered_at', { withTimezone: true }),
 }, t => [
   unique().on(t.tenantId, t.attemptId, t.questionId),
+])
+
+/**
+ * История результатов попытки (docs/22 §13.7, docs/04 §4.6): первый подсчёт, итог ручной проверки
+ * и каждое «Перерахувати». Снимок попытки не меняется — меняется только запись результата.
+ */
+export const attemptResults = pgTable('attempt_results', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  attemptId: uuid('attempt_id').notNull().references(() => attempts.id, { onDelete: 'cascade' }),
+  reason: text('reason').notNull(), // submit | review | recalculate
+  status: text('status').notNull(),
+  score: numeric('score', { precision: 5, scale: 2 }),
+  maxScore: numeric('max_score', { precision: 7, scale: 2 }),
+  passed: boolean('passed'),
+  createdBy: uuid('created_by').references(() => users.id),
+  comment: text('comment'),
+}, t => [
+  index().on(t.tenantId, t.attemptId),
+])
+
+/**
+ * Запрос дополнительной попытки (docs/12 §14.5, §6.3): попытки из назначения кончились,
+ * человек просит ещё одну, решение принимает наставник/руководитель. Одобренный запрос
+ * добавляет одну попытку сверх лимита назначения — само назначение не меняется.
+ */
+export const attemptRequests = pgTable('attempt_requests', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  quizId: uuid('quiz_id').notNull().references(() => quizzes.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  enrollmentId: uuid('enrollment_id').references(() => enrollments.id, { onDelete: 'cascade' }),
+  assignmentId: uuid('assignment_id'),
+  reason: text('reason').notNull(),
+  attemptsUsed: integer('attempts_used').notNull(),
+  attemptsAllowed: integer('attempts_allowed').notNull(),
+  status: text('status').notNull().default('pending'), // pending | approved | rejected
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decisionComment: text('decision_comment'),
+  requestContext: jsonb('request_context'), // CLAUDE.md п. 14
+}, t => [
+  index().on(t.tenantId, t.status, t.createdAt),
+  index().on(t.tenantId, t.userId, t.quizId),
 ])
 
 export const certificates = pgTable('certificates', {

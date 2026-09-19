@@ -117,6 +117,8 @@
 | POST | `/attempts/:id/submit` | отправка → результат либо `review` |
 | GET | `/attempts/:id/result` | разбор по правилам назначения (протокол ошибок, скрытие верных) |
 | POST | `/attempts/:id/recalculate` | **«Перерахувати»** по текущему ключу (`22` §13.7); пишет новую запись результата, снимок не трогает |
+| POST | `/tests/:id/recalculate` | то же для всех завершённых попыток теста (после правки ключа одного вопроса) |
+| GET | `/attempts/:id/results` | история записей результата (`attempt_results`) |
 | POST | `/tests/:id/attempt-requests` | запрос дополнительной попытки |
 | GET/POST | `/attempt-requests`, `/attempt-requests/:id/decide` | очередь запросов и решение |
 
@@ -144,7 +146,7 @@
 | POST | `/content/:id/publish` | публикация; `{notifyAssigned: bool}` — «Сповістити про оновлення» (`11` §14.2) |
 | POST | `/content/:id/duplicate` | копия |
 | CRUD | `/courses/:id/sections`, `/courses/:id/items` | план курса: разделы и элементы, у теста в плане свой `passScorePct` |
-| CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3) |
+| CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3): `GET/POST /tests/:id/question-groups`, `PATCH/DELETE /question-groups/:id` |
 | POST | `/tests/:id/questions/import` | «Питання з іншого тесту» (копия) и «з банку» (ссылка) |
 | CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа) |
 | CRUD | `/complex-tests/:id/items` | состав: тесты, сгруппированные по темам |

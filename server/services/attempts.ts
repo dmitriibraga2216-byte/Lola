@@ -1,7 +1,10 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  attemptAnswers, attempts, lessonProgress, lessons, questions, quizQuestions, quizzes, users,
+  attemptAnswers, attemptRequests, attemptResults, attempts, lessonProgress, lessons, locations, mediaAssets,
+  positions, questions, quizQuestions, quizzes, userPlacements, users,
 } from '../db/schema'
+import type { z } from 'zod'
+import type { answerFileSchema, reviewAnswersQuerySchema } from '../../shared/schemas/quizzes'
 import { withTenant } from '../utils/withTenant'
 import { resolveQuizParams } from './taskParams'
 import { business } from '../utils/metrics'
@@ -11,12 +14,18 @@ import {
   MANUAL_KINDS, computeTotals, gradeAnswer, stripAnswers,
   type GradeResult, type QuizParams, type SnapshotQuestion,
 } from '../../shared/domain/grading'
+import type { ScoringMethod } from '../../shared/enums'
 import { completeLesson } from './learning'
 import { enqueueNotification } from './notifications'
 
 interface Ctx { tenantId: string, actorId: string }
 
 const EXPIRE_AFTER_MS = 24 * 60 * 60 * 1000
+
+/** Массив строк как параметр запроса: postgres-js не выводит тип text[] сам. */
+function textArray(values: string[]) {
+  return sql`array[${sql.join(values.map(v => sql`${v}::text`), sql`, `)}]::text[]`
+}
 
 function shuffle<T>(arr: T[]): T[] {
   const out = [...arr]
@@ -38,7 +47,7 @@ async function buildSnapshot(tx: TenantTx, quiz: typeof quizzes.$inferSelect, pa
         eq(questions.status, 'active'),
         ...(rule.difficultyMin ? [sql`${questions.difficulty} >= ${rule.difficultyMin}`] : []),
         ...(rule.difficultyMax ? [sql`${questions.difficulty} <= ${rule.difficultyMax}`] : []),
-        ...(rule.tags?.length ? [sql`${questions.tags} && ${rule.tags}`] : []),
+        ...(rule.tags?.length ? [sql`${questions.tags} && ${textArray(rule.tags)}`] : []),
       ))
       if (pool.length < rule.count) return { ok: false as const, code: 'not_enough_questions' as const }
       picked.push(...shuffle(pool).slice(0, rule.count).map(q => ({ q, points: Number(q.points), isCritical: q.isCritical })))
@@ -58,6 +67,26 @@ async function buildSnapshot(tx: TenantTx, quiz: typeof quizzes.$inferSelect, pa
   }
 
   if (picked.length === 0) return { ok: false as const, code: 'not_enough_questions' as const }
+
+  // «Кількість питань» из назначения (docs/15 §14.3, docs/12 §14.3): one_per_group — по одному случайному
+  // вопросу из каждой группы теста (вопросы без группы входят все), limited — случайные N.
+  if (quiz.selectionMode !== 'random' && params.questionsMode === 'one_per_group') {
+    const byGroup = new Map<string, typeof picked>()
+    const ungrouped: typeof picked = []
+    for (const p of picked) {
+      if (!p.q.questionGroupId) { ungrouped.push(p); continue }
+      const arr = byGroup.get(p.q.questionGroupId) ?? []
+      arr.push(p)
+      byGroup.set(p.q.questionGroupId, arr)
+    }
+    const chosen = [...byGroup.values()].map(arr => shuffle(arr)[0]!)
+    picked = picked.filter(p => ungrouped.includes(p) || chosen.includes(p))
+  }
+  else if (quiz.selectionMode !== 'random' && params.questionsMode === 'limited' && params.questionsCount && params.questionsCount < picked.length) {
+    const keep = new Set(shuffle(picked).slice(0, params.questionsCount))
+    picked = picked.filter(p => keep.has(p))
+  }
+
   if (params.shuffleQuestions) picked = shuffle(picked)
 
   const snapshot: SnapshotQuestion[] = picked.map(({ q, points, isCritical }) => {
@@ -66,6 +95,10 @@ async function buildSnapshot(tx: TenantTx, quiz: typeof quizzes.$inferSelect, pa
     if (params.shuffleOptions && options && typeof options === 'object' && 'right' in (options as object)) {
       const o = options as { left: unknown[], right: unknown[] }
       options = { left: o.left, right: shuffle(o.right) }
+    }
+    if (params.shuffleOptions && options && typeof options === 'object' && 'items' in (options as object) && 'groups' in (options as object)) {
+      const o = options as { groups: unknown[], items: unknown[] }
+      options = { groups: o.groups, items: shuffle(o.items) }
     }
     const answer = q.answer as { requireExact?: boolean } | null
     return {
@@ -78,12 +111,34 @@ async function buildSnapshot(tx: TenantTx, quiz: typeof quizzes.$inferSelect, pa
       explanation: q.explanation,
       points,
       isCritical,
-      partialCredit: q.partialCredit,
+      scoringMethod: q.scoringMethod as ScoringMethod,
       negativeMarking: q.negativeMarking,
       requireExact: answer?.requireExact,
+      groupId: q.questionGroupId,
+      graderHint: q.graderHint,
+      attachFiles: q.attachFiles,
     }
   })
   return { ok: true as const, snapshot }
+}
+
+/**
+ * Одобренные запросы дополнительных попыток (docs/12 §14.5): каждый даёт +1 попытку сверх
+ * лимита назначения. Само назначение не меняется.
+ */
+export async function approvedExtraAttempts(tx: TenantTx, userId: string, quizId: string, enrollmentId?: string | null): Promise<number> {
+  const [row] = await tx.select({ n: sql<number>`count(*)::int` }).from(attemptRequests).where(and(
+    eq(attemptRequests.userId, userId),
+    eq(attemptRequests.quizId, quizId),
+    eq(attemptRequests.status, 'approved'),
+    ...(enrollmentId ? [eq(attemptRequests.enrollmentId, enrollmentId)] : []),
+  ))
+  return row?.n ?? 0
+}
+
+/** Ограничение попыток с учётом одобренных запросов: 0 — без ограничения. */
+export function effectiveAttemptsAllowed(params: QuizParams, extra: number): number {
+  return params.attemptsAllowed > 0 ? params.attemptsAllowed + extra : 0
 }
 
 export type StartResult
@@ -114,7 +169,8 @@ export async function startAttempt(ctx: Ctx, quizId: string, opts: { enrollmentI
     const active = prior.find(a => a.status === 'in_progress')
     if (active) return { ok: false as const, code: 'in_progress' as const, attemptId: active.id }
 
-    if (params.attemptsAllowed > 0 && prior.length >= params.attemptsAllowed) {
+    const allowed = effectiveAttemptsAllowed(params, await approvedExtraAttempts(tx, ctx.actorId, quizId, opts.enrollmentId))
+    if (allowed > 0 && prior.length >= allowed) {
       return { ok: false as const, code: 'attempts_exhausted' as const }
     }
     const last = prior[0]
@@ -260,6 +316,7 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
     ...(status !== 'review' ? { gradedAt: now } : {}),
     updatedAt: now,
   }).where(eq(attempts.id, attempt.id))
+  await writeResult(tx, ctx, attempt.id, 'submit', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, reason === 'expire' ? 'expired' : null)
 
   if (status === 'passed') await onAttemptPassed(tx, ctx, attempt)
   if (status !== 'review') {
@@ -273,6 +330,21 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
     })
   }
   return { status, ...totals }
+}
+
+/** Запись результата (docs/22 §13.7): первый подсчёт, итог проверки, каждое «Перерахувати». Снимок не трогается. */
+async function writeResult(tx: TenantTx, ctx: Ctx, attemptId: string, reason: 'submit' | 'review' | 'recalculate', r: { status: string, score: number, maxScore: number, passed: boolean | null }, comment: string | null, createdBy: string | null = null) {
+  await tx.insert(attemptResults).values({
+    tenantId: ctx.tenantId,
+    attemptId,
+    reason,
+    status: r.status,
+    score: String(r.score),
+    maxScore: String(r.maxScore),
+    passed: r.passed,
+    createdBy,
+    comment,
+  })
 }
 
 /** Зачёт теста как урока курса → завершение урока и прогресс (docs/10 §7.3). */
@@ -357,6 +429,16 @@ export async function getAttemptResult(ctx: Ctx, attemptId: string) {
       || (params.showAnswers === 'after_pass' && attempt.passed === true)
       || params.showAnswers === 'after_question'
 
+    // Протокол помилок (docs/12 Г-12.4): «Показати протокол» · «Приховати правильні відповіді» ·
+    // «лише після останньої спроби» — если попытки ещё остались и тест не сдан, разбор не показывается.
+    const allowed = effectiveAttemptsAllowed(params, await approvedExtraAttempts(tx, attempt.userId, attempt.quizId, attempt.enrollmentId))
+    const attemptsLeft = allowed > 0 ? Math.max(0, allowed - attempt.attemptNo) : null
+    const isLast = allowed > 0 && attempt.attemptNo >= allowed
+    let protocol: 'shown' | 'hidden' | 'after_last_attempt' = params.showErrorProtocol ? 'shown' : 'hidden'
+    if (protocol === 'shown' && params.protocolAfterLastAttempt && attempt.passed !== true && !isLast) protocol = 'after_last_attempt'
+    const showCorrect = reveal && !params.hideCorrectInProtocol
+
+    const earned = snapshot.reduce((sum, q) => sum + Number(byQ.get(q.id)?.score ?? 0), 0)
     return {
       locked: false as const,
       status: attempt.status,
@@ -364,72 +446,280 @@ export async function getAttemptResult(ctx: Ctx, attemptId: string) {
       passScore: params.passScore,
       passed: attempt.passed,
       attemptNo: attempt.attemptNo,
+      attemptsAllowed: allowed,
+      attemptsLeft,
+      earned: Math.round(earned * 100) / 100,
+      maxScore: Number(attempt.maxScore ?? 0),
       timeSpentSec: attempt.timeSpentSec,
-      questions: snapshot.map((q) => {
-        const row = byQ.get(q.id)
-        return {
-          id: q.id,
-          kind: q.kind,
-          stem: q.stem,
-          options: q.options,
-          isCritical: q.isCritical,
-          points: q.points,
-          yourAnswer: row?.answer ?? null,
-          isCorrect: row?.isCorrect ?? (MANUAL_KINDS.has(q.kind) ? null : false),
-          score: row ? Number(row.score ?? 0) : 0,
-          reviewComment: row?.reviewComment ?? null,
-          ...(reveal ? { answer: q.answer, explanation: q.explanation } : {}),
-        }
-      }),
+      protocol,
+      questions: protocol !== 'shown'
+        ? []
+        : snapshot.map((q) => {
+            const row = byQ.get(q.id)
+            return {
+              id: q.id,
+              kind: q.kind,
+              stem: q.stem,
+              options: q.options,
+              isCritical: q.isCritical,
+              points: q.points,
+              yourAnswer: row?.answer ?? null,
+              isCorrect: row?.isCorrect ?? (MANUAL_KINDS.has(q.kind) ? null : false),
+              score: row ? Number(row.score ?? 0) : 0,
+              reviewComment: row?.reviewComment ?? null,
+              ...(showCorrect ? { answer: q.answer } : {}),
+              ...(reveal ? { explanation: q.explanation } : {}),
+            }
+          }),
     }
   })
 }
 
-// ── Очередь проверки (docs/14 §5.2) ───────────────────────────────────
+/** Вложение к свободному ответу (docs/04 §4.6): файл уже загружен через /media, здесь — ссылка в ответе. */
+export type AddFileResult = { ok: true, files: unknown[] } | { ok: false, code: 'not_found' | 'locked' | 'not_allowed' | 'media_not_found' | 'too_many' }
 
-export async function reviewQueue(ctx: Ctx) {
+export async function addAnswerFile(ctx: Ctx, attemptId: string, questionId: string, file: z.infer<typeof answerFileSchema>): Promise<AddFileResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [attempt] = await tx.select().from(attempts).where(and(eq(attempts.id, attemptId), eq(attempts.userId, ctx.actorId)))
+    if (!attempt) return { ok: false as const, code: 'not_found' as const }
+    if (attempt.status !== 'in_progress') return { ok: false as const, code: 'locked' as const }
+    const q = (attempt.snapshot as SnapshotQuestion[]).find(s => s.id === questionId)
+    if (!q) return { ok: false as const, code: 'not_found' as const }
+    if (!(q.kind === 'file' || (q.kind === 'free' && q.attachFiles))) return { ok: false as const, code: 'not_allowed' as const }
+    const [media] = await tx.select({ id: mediaAssets.id }).from(mediaAssets).where(eq(mediaAssets.id, file.mediaId))
+    if (!media) return { ok: false as const, code: 'media_not_found' as const }
+
+    const [row] = await tx.select().from(attemptAnswers).where(and(eq(attemptAnswers.attemptId, attemptId), eq(attemptAnswers.questionId, questionId)))
+    const prev = (row?.answer ?? {}) as { text?: string, files?: unknown[] }
+    const files = [...(prev.files ?? []), file]
+    if (files.length > 5) return { ok: false as const, code: 'too_many' as const }
+    const answer = { ...prev, files }
+    await tx.insert(attemptAnswers).values({
+      tenantId: ctx.tenantId, attemptId, questionId, questionVersion: q.version, answer, answeredAt: new Date(),
+    }).onConflictDoUpdate({
+      target: [attemptAnswers.tenantId, attemptAnswers.attemptId, attemptAnswers.questionId],
+      set: { answer, answeredAt: new Date(), updatedAt: new Date() },
+    })
+    return { ok: true as const, files }
+  })
+}
+
+// ── «Перерахувати» (docs/22 §13.7, docs/04 §4.6) ──────────────────────
+
+export type RecalcResult
+  = | { ok: true, before: { status: string, score: number | null, passed: boolean | null }, after: { status: string, score: number, passed: boolean | null }, changed: boolean }
+    | { ok: false, code: 'not_found' | 'in_progress' }
+
+/**
+ * Пересчёт результата по текущему ключу. Что пересчитывается: автопроверяемые ответы — по
+ * текущим answer / scoring_method / negative_marking / балл (с переопределением в составе теста)
+ * и критичности вопроса. Что не трогается: снимок попытки (формулировки, варианты, порядок),
+ * ответы ученика, оценки наставника по ручным вопросам, params назначения. Пишется новая
+ * запись attempt_results (reason=recalculate), attempts.score/passed/status обновляются,
+ * событие уходит в аудит с before/after.
+ */
+export async function recalculateAttempt(ctx: Ctx, attemptId: string, comment?: string): Promise<RecalcResult> {
+  const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [attempt] = await tx.select().from(attempts).where(eq(attempts.id, attemptId))
+    if (!attempt) return { ok: false as const, code: 'not_found' as const }
+    if (attempt.status === 'in_progress' || attempt.status === 'annulled') return { ok: false as const, code: 'in_progress' as const }
+
+    const snapshot = attempt.snapshot as SnapshotQuestion[]
+    const params = attempt.params as QuizParams
+    const current = await tx.select({ q: questions, override: quizQuestions })
+      .from(questions)
+      .leftJoin(quizQuestions, and(eq(quizQuestions.questionId, questions.id), eq(quizQuestions.quizId, attempt.quizId)))
+      .where(inArray(questions.id, snapshot.map(s => s.id)))
+    const keyById = new Map(current.map(r => [r.q.id, r]))
+
+    // Ключ для пересчёта: снимок + текущие эталон/метод/балл/критичность
+    const keyed: SnapshotQuestion[] = snapshot.map((q) => {
+      const cur = keyById.get(q.id)
+      if (!cur) return q
+      return {
+        ...q,
+        answer: cur.q.answer,
+        points: cur.override?.pointsOverride != null ? Number(cur.override.pointsOverride) : Number(cur.q.points),
+        isCritical: cur.override?.isCriticalOverride ?? cur.q.isCritical,
+        scoringMethod: cur.q.scoringMethod as ScoringMethod,
+        negativeMarking: cur.q.negativeMarking,
+        requireExact: (cur.q.answer as { requireExact?: boolean } | null)?.requireExact,
+      }
+    })
+
+    const rows = await tx.select().from(attemptAnswers).where(eq(attemptAnswers.attemptId, attemptId))
+    const byQ = new Map(rows.map(r => [r.questionId, r]))
+    const graded = new Map<string, GradeResult>()
+    for (const q of keyed) {
+      const row = byQ.get(q.id)
+      if (MANUAL_KINDS.has(q.kind)) {
+        // Ручные оценки не пересчитываются — только балл ограничивается новым весом
+        if (row && row.isCorrect !== null) graded.set(q.id, { isCorrect: row.isCorrect, score: Math.min(Number(row.score ?? 0), q.points), auto: false })
+        else if (!row) graded.set(q.id, { isCorrect: false, score: 0, auto: true })
+        continue
+      }
+      const late = attempt.deadlineAt && row?.answeredAt && row.answeredAt > attempt.deadlineAt
+      const g = gradeAnswer(q, late ? null : (row?.answer ?? null))
+      if (row) {
+        await tx.update(attemptAnswers).set({ isCorrect: g.isCorrect, score: String(g.score), autoGraded: g.auto, updatedAt: new Date() }).where(eq(attemptAnswers.id, row.id))
+      }
+      graded.set(q.id, g)
+    }
+
+    const totals = computeTotals(keyed, graded, params.passScore)
+    const status = totals.passed === null ? 'review' : totals.passed ? 'passed' : 'failed'
+    const before = { status: attempt.status, score: attempt.score != null ? Number(attempt.score) : null, passed: attempt.passed }
+    const now = new Date()
+    await tx.update(attempts).set({
+      status,
+      score: String(totals.score),
+      maxScore: String(totals.maxScore),
+      passed: totals.passed,
+      ...(status !== 'review' ? { gradedAt: now } : {}),
+      updatedAt: now,
+    }).where(eq(attempts.id, attemptId))
+    await writeResult(tx, ctx, attemptId, 'recalculate', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, comment ?? null, ctx.actorId)
+    const after = { status, score: totals.score, passed: totals.passed }
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.recalculate', entity: 'attempt', entityId: attemptId, before, after: { ...after, comment: comment ?? null } })
+    if (status === 'passed' && before.status !== 'passed') await onAttemptPassed(tx, ctx, attempt)
+    return { ok: true as const, before, after, changed: before.status !== status || before.score !== totals.score, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, userId: attempt.userId }
+  })
+  if (result.ok && result.after.status === 'passed' && result.before.status !== 'passed' && result.enrollmentId && result.lessonId) {
+    await completeLesson({ tenantId: ctx.tenantId, actorId: result.userId }, result.enrollmentId, result.lessonId).catch(() => {})
+  }
+  return result
+}
+
+/** «Перерахувати» для всех завершённых попыток теста — после правки ключа одного вопроса. */
+export async function recalculateQuiz(ctx: Ctx, quizId: string, comment?: string) {
+  const ids = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [quiz] = await tx.select({ id: quizzes.id }).from(quizzes).where(and(eq(quizzes.id, quizId), isNull(quizzes.deletedAt)))
+    if (!quiz) return null
+    return (await tx.select({ id: attempts.id }).from(attempts)
+      .where(and(eq(attempts.quizId, quizId), sql`${attempts.status} in ('submitted', 'review', 'passed', 'failed', 'expired')`))).map(r => r.id)
+  })
+  if (!ids) return null
+  let changed = 0
+  for (const id of ids) {
+    const r = await recalculateAttempt(ctx, id, comment)
+    if (r.ok && r.changed) changed++
+  }
+  return { total: ids.length, changed }
+}
+
+/** История результатов попытки (для отчёта и карточки попытки). */
+export async function listAttemptResults(ctx: Ctx, attemptId: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [attempt] = await tx.select({ id: attempts.id }).from(attempts).where(eq(attempts.id, attemptId))
+    if (!attempt) return null
+    return tx.select().from(attemptResults).where(eq(attemptResults.attemptId, attemptId)).orderBy(asc(attemptResults.createdAt))
+  })
+}
+
+// ── Очередь проверки по ответам (docs/12 §14.4, docs/04 §4.7) ─────────
+
+export type ReviewAnswersFilter = z.infer<typeof reviewAnswersQuerySchema>
+
+/**
+ * Поток отдельных ответов на ручные вопросы, а не попыток целиком. Вкладки Неперевірені ·
+ * Перевірені · Усі; фильтры — метки вопроса (маршрутизация по темам), «Поза програмами»,
+ * «Поза курсами», точка. Наставнику отдаётся grader_hint, ученику — никогда.
+ */
+export async function listReviewAnswers(ctx: Ctx, filter: ReviewAnswersFilter) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select({
       answerId: attemptAnswers.id,
       attemptId: attempts.id,
+      attemptStatus: attempts.status,
       questionId: attemptAnswers.questionId,
       answer: attemptAnswers.answer,
       answeredAt: attemptAnswers.answeredAt,
+      isCorrect: attemptAnswers.isCorrect,
+      score: attemptAnswers.score,
+      reviewedAt: attemptAnswers.reviewedAt,
+      reviewedBy: attemptAnswers.reviewedBy,
+      reviewComment: attemptAnswers.reviewComment,
       submittedAt: attempts.submittedAt,
+      enrollmentId: attempts.enrollmentId,
+      lessonId: attempts.lessonId,
       userId: attempts.userId,
       fullName: users.fullName,
+      quizId: quizzes.id,
       quizTitle: quizzes.title,
       snapshot: attempts.snapshot,
+      positionName: positions.name,
+      locationId: locations.id,
+      locationName: locations.name,
+      questionTags: questions.tags,
     })
       .from(attemptAnswers)
       .innerJoin(attempts, eq(attempts.id, attemptAnswers.attemptId))
       .innerJoin(users, eq(users.id, attempts.userId))
       .innerJoin(quizzes, eq(quizzes.id, attempts.quizId))
+      .leftJoin(questions, eq(questions.id, attemptAnswers.questionId))
+      .leftJoin(userPlacements, and(eq(userPlacements.userId, attempts.userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+      .leftJoin(positions, eq(positions.id, userPlacements.positionId))
+      .leftJoin(locations, eq(locations.id, userPlacements.locationId))
       .where(and(
-        eq(attempts.status, 'review'),
-        isNull(attemptAnswers.isCorrect),
         eq(attemptAnswers.autoGraded, false),
+        sql`${attempts.status} in ('review', 'passed', 'failed', 'expired')`,
+        ...(filter.checked === 'unchecked' ? [isNull(attemptAnswers.isCorrect)] : []),
+        ...(filter.checked === 'checked' ? [sql`${attemptAnswers.isCorrect} is not null`] : []),
+        ...(filter.tags.length ? [sql`${questions.tags} && ${textArray(filter.tags)}`] : []),
+        ...(filter.quizId ? [eq(quizzes.id, filter.quizId)] : []),
+        ...(filter.locationId ? [eq(locations.id, filter.locationId)] : []),
+        // «Поза курсами»: попытка не внутри урока курса; «Поза програмами»: тест не является узлом программы для этого человека
+        ...(filter.outsideCourses ? [isNull(attempts.lessonId)] : []),
+        ...(filter.outsidePrograms ? [sql`not exists (select 1 from program_nodes pn where pn.item_type = 'quiz' and pn.item_id = ${attempts.quizId})`] : []),
         // Свои попытки в очередь проверяющего не попадают (docs/01 §1.8)
         sql`${attempts.userId} <> ${ctx.actorId}::uuid`,
       ))
       .orderBy(asc(attempts.submittedAt))
-      .limit(200)
+      .limit(filter.limit)
 
     return rows.map((r) => {
       const q = (r.snapshot as SnapshotQuestion[]).find(s => s.id === r.questionId)
+      const a = (r.answer ?? {}) as { text?: string, files?: unknown[] }
       return {
         answerId: r.answerId,
         attemptId: r.attemptId,
+        attemptStatus: r.attemptStatus,
         userId: r.userId,
         fullName: r.fullName,
+        positionName: r.positionName,
+        locationId: r.locationId,
+        locationName: r.locationName,
+        quizId: r.quizId,
         quizTitle: r.quizTitle,
         submittedAt: r.submittedAt,
-        question: q ? { kind: q.kind, stem: q.stem, points: q.points, isCritical: q.isCritical, criteria: (q.answer as { criteria?: string[] } | null)?.criteria ?? [], reference: (q.answer as { reference?: string } | null)?.reference ?? null } : null,
+        answeredAt: r.answeredAt,
+        questionTags: q ? (r.questionTags ?? []) : [],
+        question: q
+          ? {
+              kind: q.kind,
+              stem: q.stem,
+              points: q.points,
+              isCritical: q.isCritical,
+              criteria: (q.answer as { criteria?: string[] } | null)?.criteria ?? [],
+              reference: (q.answer as { reference?: string } | null)?.reference ?? null,
+              graderHint: q.graderHint ?? null,
+            }
+          : null,
         answer: r.answer,
+        files: a.files ?? [],
+        isCorrect: r.isCorrect,
+        score: r.score != null ? Number(r.score) : null,
+        reviewedAt: r.reviewedAt,
+        reviewComment: r.reviewComment,
         hoursWaiting: r.submittedAt ? Math.floor((Date.now() - r.submittedAt.getTime()) / 3_600_000) : 0,
       }
     })
   })
+}
+
+/** Очередь непроверенных — совместимость с /review/queue (docs/14 §5.2). */
+export async function reviewQueue(ctx: Ctx) {
+  return listReviewAnswers(ctx, { checked: 'unchecked', tags: [], outsidePrograms: false, outsideCourses: false, limit: 200 })
 }
 
 export type GradeManualResult
@@ -482,6 +772,7 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
       gradedAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(attempts.id, row.att.id))
+    await writeResult(tx, ctx, row.att.id, 'review', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, null, ctx.actorId)
     if (status === 'passed') await onAttemptPassed(tx, ctx, row.att)
     const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, row.att.quizId))
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: row.att.userId, code: 'review_done', payload: { quiz: quiz?.title, status: status === 'passed' ? 'зараховано' : 'не зараховано' }, dedupKey: `review_done:${row.att.id}` })
@@ -566,18 +857,32 @@ export async function quizIntro(ctx: Ctx, quizId: string, enrollmentId?: string)
       .orderBy(desc(attempts.attemptNo))
     const active = prior.find(a => a.status === 'in_progress')
     const used = prior.length
+    const allowed = effectiveAttemptsAllowed(params, await approvedExtraAttempts(tx, ctx.actorId, quizId, enrollmentId))
+    const [pending] = await tx.select({ id: attemptRequests.id, createdAt: attemptRequests.createdAt }).from(attemptRequests)
+      .where(and(eq(attemptRequests.userId, ctx.actorId), eq(attemptRequests.quizId, quizId), eq(attemptRequests.status, 'pending')))
+    // «Кількість питань» из назначения меняет размер попытки (docs/15 §14.3)
+    let questionCount = quiz.questionCount
+    if (quiz.selectionMode === 'random') questionCount = ((quiz.randomRules as { count: number }[] | null) ?? []).reduce((s, r) => s + r.count, 0)
+    else if (params.questionsMode === 'one_per_group') {
+      const [row] = await tx.select({
+        groups: sql<number>`count(distinct ${questions.questionGroupId}) filter (where ${questions.questionGroupId} is not null)::int`,
+        ungrouped: sql<number>`count(*) filter (where ${questions.questionGroupId} is null)::int`,
+      }).from(quizQuestions).innerJoin(questions, eq(questions.id, quizQuestions.questionId))
+        .where(and(eq(quizQuestions.quizId, quizId), eq(questions.status, 'active')))
+      questionCount = (row?.groups ?? 0) + (row?.ungrouped ?? 0)
+    }
+    else if (params.questionsMode === 'limited' && params.questionsCount) questionCount = Math.min(params.questionsCount, quiz.questionCount)
     return {
       id: quiz.id,
       title: quiz.title,
       description: quiz.description,
-      questionCount: quiz.selectionMode === 'random'
-        ? ((quiz.randomRules as { count: number }[] | null) ?? []).reduce((s, r) => s + r.count, 0)
-        : quiz.questionCount,
+      questionCount,
       timeLimitSec: params.timeLimitSec,
       passScore: params.passScore,
-      attemptsAllowed: params.attemptsAllowed,
+      attemptsAllowed: allowed,
       attemptsUsed: used,
-      attemptsLeft: params.attemptsAllowed === 0 ? null : Math.max(0, params.attemptsAllowed - used),
+      attemptsLeft: allowed === 0 ? null : Math.max(0, allowed - used),
+      pendingRequestId: pending?.id ?? null,
       paramsSource,
       activeAttemptId: active?.id ?? null,
       lastPassed: prior.some(a => a.passed === true),

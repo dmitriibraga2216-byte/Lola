@@ -66,7 +66,7 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
   const { csrf } = await apiLogin(request, ADMIN_PHONE)
   const bank = await api<{ id: string }>(request, csrf, 'post', '/question-banks', { name: `${PREFIX}банк ${Date.now()}` })
   const q1 = await api<{ id: string }>(request, csrf, 'post', '/questions', { bankId: bank.id, kind: 'single', stem: [{ id: 's', type: 'text', html: '<p>Температура риби?</p>' }], options: [{ id: 'a', text: '0…+4' }, { id: 'b', text: '+10' }], answer: { correctId: 'a' }, points: 1 })
-  const q2 = await api<{ id: string }>(request, csrf, 'post', '/questions', { bankId: bank.id, kind: 'text_long', stem: [{ id: 's', type: 'text', html: '<p>Що зробиш, якщо гість каже, що піца холодна?</p>' }], answer: { criteria: ['Вибачення'] }, points: 1 })
+  const q2 = await api<{ id: string }>(request, csrf, 'post', '/questions', { bankId: bank.id, kind: 'free', stem: [{ id: 's', type: 'text', html: '<p>Що зробиш, якщо гість каже, що піца холодна?</p>' }], answer: { criteria: ['Вибачення'] }, points: 1 })
   // Правил прохождения у теста нет (CLAUDE.md п. 11): порог — в плане курса, остальное — умолчания тенанта
   const quiz = await api<{ id: string }>(request, csrf, 'post', '/quizzes', { title: `${PREFIX}тест` })
   await api(request, csrf, 'put', `/quizzes/${quiz.id}/questions`, { items: [{ questionId: q1.id, sort: 0 }, { questionId: q2.id, sort: 1 }] })
@@ -88,7 +88,7 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
     const option = page.getByRole('button', { name: '0…+4' })
     if (await option.isVisible()) await option.click()
     else await page.getByRole('textbox').fill('Вибачусь і заміню піцу за рахунок закладу')
-    await page.getByRole('button', { name: i === 0 ? /Далі/ : /Надіслати/ }).click()
+    await page.getByRole('button', { name: i === 0 ? /Відповісти/ : /Надіслати/ }).click()
   }
   await expect(page.getByText('На перевірці')).toBeVisible()
 
@@ -98,7 +98,7 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
   await resetOtp()
   await loginViaUi(mp, MENTOR_PHONE)
   await mp.goto('/admin/review')
-  await expect(mp.getByText(/Залишилось \d+/)).toBeVisible()
+  await expect(mp.getByRole('tab', { name: /Неперевірені · \d+/ })).toBeVisible()
   const queue = await api<{ answerId: string, question: { stem: { html: string }[] } }[]>(mp.request, (await mp.context().cookies()).find(c => c.name === 'lola_csrf')!.value, 'get', '/review/queue')
   const ours = queue.find(i => JSON.stringify(i.question.stem).includes('гість каже'))!
   expect(ours).toBeDefined()

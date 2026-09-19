@@ -17,6 +17,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/programs', label: t('admin.nav.programs'), show: hasScope('program.manage') },
     { to: '/admin/review-workshops', label: t('admin.nav.reviewWorkshops'), show: hasScope('review.queue') },
     { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue') },
+    { to: '/admin/attempt-requests', label: t('admin.nav.attemptRequests'), show: hasScope('review.grade') },
     { to: '/admin/rules', label: t('admin.nav.rules'), show: hasScope('settings.tenant') },
     { to: '/admin/profiles', label: t('admin.nav.profiles'), show: hasScope('assignment.create') },
     { to: '/admin/knowledge', label: t('admin.nav.knowledge'), show: hasScope('knowledge.manage') },

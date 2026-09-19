@@ -20,11 +20,13 @@ interface Intro {
   timeLimitSec: number | null
   passScore: number
   attemptsAllowed: number
+  attemptsUsed: number
   attemptsLeft: number | null
+  pendingRequestId: string | null
   activeAttemptId: string | null
   lastPassed: boolean
 }
-interface Q { id: string, kind: string, stem: ContentBlock[], options: unknown, isCritical: boolean, points: number, answered: boolean }
+interface Q { id: string, kind: string, stem: ContentBlock[], options: unknown, isCritical: boolean, points: number, answered: boolean, attachFiles?: boolean }
 interface State {
   id: string
   status: string
@@ -33,12 +35,19 @@ interface State {
   questions: Q[]
   answers: Record<string, unknown>
 }
+interface ResultQ { id: string, kind: string, stem: ContentBlock[], options: unknown, isCritical: boolean, yourAnswer: unknown, isCorrect: boolean | null, score: number, points: number, answer?: unknown, explanation?: ContentBlock[] | null, reviewComment: string | null }
 interface Result {
   status: string
   score: number | null
   passScore: number
   passed: boolean | null
-  questions: { id: string, kind: string, stem: ContentBlock[], isCritical: boolean, yourAnswer: unknown, isCorrect: boolean | null, score: number, points: number, explanation?: ContentBlock[] | null, reviewComment: string | null }[]
+  attemptNo: number
+  attemptsAllowed: number
+  attemptsLeft: number | null
+  earned: number
+  maxScore: number
+  protocol: 'shown' | 'hidden' | 'after_last_attempt'
+  questions: ResultQ[]
 }
 
 type Phase = 'intro' | 'question' | 'result'
@@ -51,6 +60,10 @@ const answers = ref<Record<string, unknown>>({})
 const error = ref('')
 const busy = ref(false)
 const secondsLeft = ref<number | null>(null)
+const requestReason = ref('')
+const requestSent = ref(false)
+const files = ref<Record<string, { name: string }[]>>({})
+const { upload, compressImage } = useMediaUpload()
 
 const current = computed(() => state.value?.questions[index.value] ?? null)
 const total = computed(() => state.value?.questions.length ?? 0)
@@ -110,6 +123,65 @@ async function loadState(attemptId: string) {
   }
 }
 
+/** «Попросити ще одну спробу» прямо с экрана исчерпанных попыток (docs/12 §14.5). */
+async function requestAttempt() {
+  busy.value = true
+  error.value = ''
+  try {
+    await api(`/tests/${quizId}/attempt-requests`, { method: 'POST', body: { reason: requestReason.value.trim(), enrollmentId } })
+    requestSent.value = true
+    await loadIntro()
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
+  finally {
+    busy.value = false
+  }
+}
+
+/** Вложение к свободному ответу: файл → /media → привязка к ответу (docs/04 §4.6). */
+async function attach(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file || !current.value || !state.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    const blob = await compressImage(file)
+    const mediaId = await upload(blob, file.name)
+    const r = await api<{ files: { name: string }[] }>(`/attempts/${state.value.id}/answers/${current.value.id}/files`, {
+      method: 'POST',
+      body: { mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: blob.size },
+    })
+    files.value[current.value.id] = r.files
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
+  finally {
+    busy.value = false
+  }
+}
+
+async function skip() {
+  if (index.value < total.value - 1) index.value++
+}
+
+/** Ответ текстом — для протокола помилок «Ви відповіли …, правильно — …». */
+function answerLabel(q: ResultQ, a: unknown): string {
+  const opts = (Array.isArray(q.options) ? q.options : []) as { id: string, text: string }[]
+  const o = (a ?? {}) as Record<string, unknown>
+  const byId = (id: string) => opts.find(x => x.id === id)?.text ?? id
+  switch (q.kind) {
+    case 'single': return byId(String(o.optionId ?? o.correctId ?? ''))
+    case 'multi': return (((o.optionIds ?? o.correctIds) as string[] | undefined) ?? []).map(byId).join(', ')
+    case 'number': return String(o.value ?? '')
+    case 'text_short': return String(o.text ?? ((o.accepted as string[] | undefined) ?? [])[0] ?? '')
+    case 'free': return String(o.text ?? '')
+    default: return a == null ? '' : t('quiz.answerGiven')
+  }
+}
+
 async function saveCurrent() {
   if (!current.value || !state.value) return
   const a = answers.value[current.value.id]
@@ -140,6 +212,7 @@ async function submit() {
     result.value = await api<Result>(`/attempts/${state.value.id}/result`)
     phase.value = 'result'
     clearInterval(timer)
+    await loadIntro()
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -154,6 +227,14 @@ function fmtTime(s: number) {
 }
 
 const backTo = computed(() => complexAttemptId ? `/learn/complex/${route.query.complexId}?attemptId=${complexAttemptId}` : enrollmentId ? `/learn/${enrollmentId}` : '/learn')
+const mistakes = computed(() => (result.value?.questions ?? []).filter(q => q.isCorrect === false))
+const canRetry = computed(() => !!intro.value && !intro.value.activeAttemptId && (intro.value.attemptsLeft === null || intro.value.attemptsLeft > 0))
+function retry() {
+  result.value = null
+  state.value = null
+  answers.value = {}
+  phase.value = 'intro'
+}
 </script>
 
 <template>
@@ -199,18 +280,34 @@ const backTo = computed(() => complexAttemptId ? `/learn/complex/${route.query.c
         >
           {{ t('quiz.start') }}
         </button>
-        <p v-else class="exhausted">{{ t('quiz.exhausted') }}</p>
+        <template v-else>
+          <p class="exhausted">{{ t('quiz.exhausted') }}</p>
+          <p v-if="intro.pendingRequestId || requestSent" class="note sun">{{ t('quiz.requestPending') }}</p>
+          <form v-else class="request" @submit.prevent="requestAttempt">
+            <label class="label" for="request-reason">{{ t('quiz.requestReason') }}</label>
+            <textarea id="request-reason" v-model="requestReason" class="field" rows="3" minlength="10" maxlength="300" :placeholder="t('quiz.requestReasonPh')" />
+            <button class="primary" type="submit" :disabled="busy || requestReason.trim().length < 10">{{ t('quiz.requestAttempt') }}</button>
+          </form>
+        </template>
       </template>
 
       <!-- Вопрос -->
       <template v-else-if="phase === 'question' && current">
         <span v-if="current.isCritical" class="critical">{{ t('quiz.critical') }}</span>
         <LessonBlocks :blocks="current.stem" :blocks-state="{}" readonly />
+        <p class="kind-line">{{ t(`quiz.kindHint.${current.kind}`) }} · {{ t('quiz.pointsN', { n: current.points }) }}</p>
         <QuestionInput
           v-model="answers[current.id]"
           :kind="current.kind"
           :options="current.options"
         />
+        <div v-if="current.kind === 'file' || (current.kind === 'free' && current.attachFiles)" class="attach">
+          <label class="ghost attach-btn">
+            {{ t('quiz.attachFile') }}
+            <input type="file" accept="image/*,video/*,application/pdf" capture="environment" hidden :disabled="busy" @change="attach">
+          </label>
+          <span v-for="f in files[current.id] ?? []" :key="f.name" class="file-chip">{{ f.name }}</span>
+        </div>
       </template>
 
       <!-- Результат -->
@@ -219,26 +316,37 @@ const backTo = computed(() => complexAttemptId ? `/learn/complex/${route.query.c
           <h1>{{ t('quiz.onReview') }}</h1>
           <p>{{ t('quiz.onReviewHint') }}</p>
         </div>
-        <template v-else>
-          <div :class="['score', result.passed ? 'teal' : 'coral']">{{ result.score ?? '—' }}%</div>
-          <p class="pass-line">{{ t('quiz.passLine', { pass: result.passScore }) }}</p>
+        <div v-else :class="['result-card', result.passed ? 'teal' : 'coral']">
+          <div class="score">{{ result.score ?? '—' }}%</div>
           <p class="verdict">{{ result.passed ? t('quiz.passed') : t('quiz.failed') }}</p>
-        </template>
-
-        <div class="breakdown">
-          <div v-for="(q, i) in result.questions" :key="q.id" :class="['item', q.isCorrect === true ? 'ok' : q.isCorrect === false ? 'bad' : 'pending']">
-            <div class="item-head">
-              <span>{{ i + 1 }}. {{ q.isCorrect === true ? '✓' : q.isCorrect === false ? '✕' : '…' }}</span>
-              <span class="pts">{{ q.score }} / {{ q.points }}</span>
-            </div>
-            <LessonBlocks :blocks="q.stem" :blocks-state="{}" readonly />
-            <div v-if="q.explanation?.length" class="expl">
-              <LessonBlocks :blocks="q.explanation" :blocks-state="{}" readonly />
-            </div>
-            <p v-if="q.reviewComment" class="comment">{{ q.reviewComment }}</p>
-          </div>
+          <p class="pass-line">
+            {{ t('quiz.thresholdLine', { pass: result.passScore, earned: result.earned, max: result.maxScore }) }}
+            · {{ result.attemptsAllowed > 0 ? t('quiz.attemptOf', { n: result.attemptNo, total: result.attemptsAllowed }) : t('quiz.attemptN', { n: result.attemptNo }) }}
+          </p>
         </div>
 
+        <p v-if="result.protocol === 'after_last_attempt'" class="note sun">{{ t('quiz.protocolAfterLast') }}</p>
+
+        <template v-if="result.protocol === 'shown' && result.status !== 'review'">
+          <h2 class="mistakes-title">{{ t('quiz.mistakes', { n: mistakes.length }) }}</h2>
+          <div class="breakdown">
+            <div v-for="q in mistakes" :key="q.id" class="item bad">
+              <LessonBlocks :blocks="q.stem" :blocks-state="{}" readonly />
+              <p class="compare">
+                <span v-if="answerLabel(q, q.yourAnswer)">{{ t('quiz.youAnswered', { a: answerLabel(q, q.yourAnswer) }) }}</span>
+                <span v-else>{{ t('quiz.noAnswer') }}</span>
+                <span v-if="q.answer !== undefined && answerLabel(q, q.answer)">, {{ t('quiz.correctIs', { a: answerLabel(q, q.answer) }) }}</span>
+              </p>
+              <span v-if="q.isCritical" class="critical">{{ t('quiz.critical') }}</span>
+              <div v-if="q.explanation?.length" class="expl">
+                <LessonBlocks :blocks="q.explanation" :blocks-state="{}" readonly />
+              </div>
+              <p v-if="q.reviewComment" class="comment">{{ q.reviewComment }}</p>
+            </div>
+          </div>
+        </template>
+
+        <button v-if="canRetry && result.passed !== true" class="ghost" @click="retry">{{ t('quiz.retry') }}</button>
         <NuxtLink :to="backTo" class="primary link">{{ t('quiz.backToLearning') }}</NuxtLink>
       </template>
     </main>
@@ -250,13 +358,14 @@ const backTo = computed(() => complexAttemptId ? `/learn/complex/${route.query.c
       <div class="row">
         <button v-if="state.params.allowBack" class="ghost" :disabled="index === 0" @click="back">{{ t('quiz.back') }}</button>
         <span class="spacer" />
+        <button v-if="state.params.allowSkip && index < total - 1" class="ghost" :disabled="busy" @click="skip">{{ t('quiz.skip') }}</button>
         <button
           v-if="index < total - 1"
           class="primary"
-          :disabled="busy || (!state.params.allowSkip && answers[current!.id] === undefined)"
+          :disabled="busy || answers[current!.id] === undefined"
           @click="next"
         >
-          {{ t('learner.next') }}
+          {{ t('quiz.answer') }}
         </button>
         <button
           v-else
@@ -398,6 +507,70 @@ dd {
 .exhausted {
   color: var(--color-coral-ink);
   font-weight: 700;
+}
+
+.request {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.kind-line {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--font-size-body-s);
+  font-weight: 700;
+}
+
+.attach {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.attach-btn {
+  cursor: pointer;
+}
+
+.file-chip {
+  font-size: var(--font-size-body-s);
+  background: var(--color-bg-soft);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+}
+
+.result-card {
+  border-radius: var(--radius-l);
+  padding: var(--space-5);
+  text-align: center;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.result-card.teal {
+  background: var(--color-teal);
+  color: var(--color-teal-deep);
+}
+
+.result-card.coral {
+  background: var(--color-coral);
+  color: var(--color-coral-deep);
+}
+
+.result-card .score,
+.result-card .verdict,
+.result-card .pass-line {
+  color: inherit;
+}
+
+.mistakes-title {
+  margin: 0;
+  font-size: var(--font-size-title-l);
+  font-weight: 900;
+}
+
+.compare {
+  margin: 0;
 }
 
 .critical {

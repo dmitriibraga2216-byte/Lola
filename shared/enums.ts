@@ -32,6 +32,21 @@ export type TrajectoryNodeKind = typeof TRAJECTORY_NODE_KINDS[number]
 export const NOTICE_KINDS = ['acknowledge', 'event', 'notification'] as const
 export type NoticeKind = typeof NOTICE_KINDS[number]
 
+/** Типы вопросов: семь эталона (docs/12 §14.3) + три Lola (number, text_short, file). Коды — из docs/02. */
+export const QUESTION_KINDS = [
+  'single', 'multi', 'free', 'ordering', 'classification', 'comparison', 'answer_by_map',
+  'number', 'text_short', 'file',
+] as const
+export type QuestionKind = typeof QUESTION_KINDS[number]
+
+/** «Метод підрахунку балів» (docs/12 §14.6): за формулою | все або нічого. */
+export const SCORING_METHODS = ['formula', 'all_or_nothing'] as const
+export type ScoringMethod = typeof SCORING_METHODS[number]
+
+/** Статус запроса дополнительной попытки (docs/12 §14.5: «Очікує» по умолчанию, «Надано», «Відмовлено»). */
+export const ATTEMPT_REQUEST_STATUSES = ['pending', 'approved', 'rejected'] as const
+export type AttemptRequestStatus = typeof ATTEMPT_REQUEST_STATUSES[number]
+
 /** Уровень события журнала безопасности. */
 export const SECURITY_SEVERITIES = ['info', 'warning', 'critical'] as const
 export type SecuritySeverity = typeof SECURITY_SEVERITIES[number]
@@ -45,4 +60,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   trajectory_node_kind: TRAJECTORY_NODE_KINDS,
   notice_kind: NOTICE_KINDS,
   security_severity: SECURITY_SEVERITIES,
+  question_kind: QUESTION_KINDS,
+  scoring_method: SCORING_METHODS,
+  attempt_request_status: ATTEMPT_REQUEST_STATUSES,
 }

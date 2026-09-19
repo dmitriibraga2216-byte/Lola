@@ -52,7 +52,10 @@
 | `is_critical` | boolean | ✓ | false | | ошибка = провал теста |
 | `difficulty` | int | — | 3 | 1–5 | для отбора |
 | `points` | numeric(5,2) | ✓ | 1 | 0.1–100 | базовый вес |
-| `partial_credit` | boolean | ✓ | true | | частичный балл для multiple/match/order |
+| `scoring_method` | text | ✓ | `formula` | `formula` \| `all_or_nothing` | «Метод підрахунку балів» (§14.6) для multi/ordering/comparison/classification/answer_by_map |
+| `grader_hint` | text | — | | ≤2000 | «Підказка для перевіряючого» (§14.6): видит наставник, не ученик |
+| `attach_files` | boolean | ✓ | false | | «Дозволити прикріпляти файли до відповіді» (free) |
+| `question_group_id` | uuid | — | | FK `question_groups` | «Вибрати групу» (§14.3) |
 | `negative_marking` | boolean | ✓ | false | | вычитать за неверные варианты |
 | `tags` | text[] | ✓ | `{}` | ≤20 | |
 | `time_limit_sec` | int | — | null | 10–3600 | лимит на конкретный вопрос |
@@ -139,7 +142,7 @@
 - Для проверки знания планограммы, схемы цеха, зон уборки.
 
 **10. `classification` — классификация** (в эталоне `classification`, R1)
-- `options`: `{groups:[{id,title}], items:[{id,text,group_id}]}`, 2–6 групп, 4–20 элементов.
+- `options`: `{groups:[{id,title}], items:[{id,text}]}`, 2–6 групп, 2–20 элементов; эталон `answer: {placements:[{itemId, groupId}]}` — верный класс не хранится в `options`, чтобы не утекал ученику `[решение, docs/28 Spec 12]`.
 - Ученик раскладывает элементы по группам; частичный балл по числу верно разложенных.
 - Пример: разложить позиции меню по цехам — холодный, горячий, пекарня.
 

@@ -94,6 +94,9 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Build production image (docs/26)
@@ -103,3 +106,14 @@ jobs:
           docker run -d --name smoke -e NUXT_DATABASE_URL=postgres://x:x@localhost:1/x -e SESSION_SECRET=x -e ENCRYPTION_KEY=x -e OTP_PEPPER=x -e WORKER_ENABLED=0 -p 3000:3000 lola/app:${{ github.sha }}
           for i in $(seq 1 30); do curl -sf http://localhost:3000/health && break; sleep 1; done
           curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
+      # Образ для демо-стенда и прода: ghcr.io/<owner>/lola:latest и :<sha> (docs/26 §26.4)
+      - name: Push to GHCR
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/lola
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          docker tag lola/app:${{ github.sha }} $IMAGE:${{ github.sha }}
+          docker tag lola/app:${{ github.sha }} $IMAGE:latest
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest

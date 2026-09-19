@@ -6,6 +6,7 @@ const { fetchMe } = useAuth()
 
 type Step = 'phone' | 'code' | 'tenant'
 const step = ref<Step>('phone')
+const devCode = ref('')
 const phone = ref('')
 const code = ref('')
 const channel = ref<'telegram' | 'sms'>('sms')
@@ -47,11 +48,12 @@ async function requestCode() {
   error.value = ''
   busy.value = true
   try {
-    const data = await rawFetch<{ data: { channel: 'telegram' | 'sms' } }>(
+    const data = await rawFetch<{ data: { channel: 'telegram' | 'sms', devCode?: string } }>(
       '/api/v1/auth/otp/request',
       { method: 'POST', body: { phone: normalizedPhone() } },
     )
     channel.value = data.data.channel
+    devCode.value = data.data.devCode ?? '' // только демо-стенд/dev (OTP_DEBUG=1), в проде поля нет
     step.value = 'code'
     code.value = ''
     startResendTimer()
@@ -147,6 +149,7 @@ async function selectTenant(tenantId: string) {
         <p class="hint">
           {{ channel === 'telegram' ? t('login.sentTelegram') : t('login.sentSms') }}
         </p>
+        <p v-if="devCode" class="hint demo-code">{{ t('login.demoCode') }}: <b>{{ devCode }}</b></p>
         <input
           v-model="code"
           class="code-input"
@@ -283,6 +286,8 @@ button:disabled {
   text-align: left;
   padding: var(--space-4);
 }
+
+.demo-code { background: var(--color-sun); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); color: var(--color-ink); }
 
 .hint {
   margin: 0;

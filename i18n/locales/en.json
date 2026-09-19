@@ -29,7 +29,8 @@
     "errors": {
       "google_no_user": "This Google account is not linked to any employee",
       "oauth": "Google sign-in failed. Try again or use your phone"
-    }
+    },
+    "demoCode": "Demo stand, no SMS is sent — your code"
   },
   "home": {
     "signedInAs": "Signed in as {name}",

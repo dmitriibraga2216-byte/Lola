@@ -332,7 +332,11 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     const code = input.decision === 'accepted' ? 'workshop_accepted' : input.decision === 'rework' ? 'workshop_rework' : 'workshop_rejected'
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s.userId, code, payload: { title: w.title, comment, submissionId }, dedupKey: `ws_${code}:${submissionId}:${s.reworkCount}` })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.grade', entity: 'workshop_submission', entityId: submissionId, after: { decision: input.decision, score } })
-    return { ok: true as const, status: input.decision, enrollmentId: s.enrollmentId, lessonId: s.lessonId, learnerId: s.userId }
+    return { ok: true as const, status: input.decision, enrollmentId: s.enrollmentId, lessonId: s.lessonId, learnerId: s.userId, workshopId: s.workshopId }
+  }).then((r) => {
+    // Практикум как узел программы (docs/17 §7.4)
+    if (r.ok && (r.status === 'accepted' || r.status === 'rejected')) import('./programs').then(p => p.onItemResult(ctx.tenantId, r.learnerId, 'workshop', r.workshopId, { passed: r.status === 'accepted' })).catch(err => console.error('program workshop hook', err))
+    return r
   })
 
   if (result.ok && result.status === 'accepted' && result.enrollmentId && result.lessonId) {

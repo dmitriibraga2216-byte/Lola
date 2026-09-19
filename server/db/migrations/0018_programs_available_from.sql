@@ -1,0 +1,1 @@
+ALTER TABLE "program_enrollments" ADD COLUMN "available_from" timestamp with time zone;

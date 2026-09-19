@@ -50,6 +50,7 @@ export default defineNitroPlugin(async () => {
       const { assessmentScan } = await import('../services/assessment')
       const { actionDueScan, frequencyScan } = await import('../services/checklists')
       const { announcementScan } = await import('../services/news')
+      const { programScan } = await import('../services/programs')
       const monday = new Date().getDay() === 1
       for (const tenantId of await allActiveTenants()) {
         const s = await runDueScan(tenantId)
@@ -58,7 +59,8 @@ export default defineNitroPlugin(async () => {
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
         const an = await announcementScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an })
+        const pr = await programScan(tenantId)
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync

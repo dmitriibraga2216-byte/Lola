@@ -21,3 +21,4 @@ docker/data/
 coverage/
 playwright-report/
 test-results/
+.claude/worktrees/

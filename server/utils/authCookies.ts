@@ -4,8 +4,16 @@ import { CSRF_COOKIE, SESSION_COOKIE } from '../middleware/01.session'
 
 const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60
 
+/** Secure только по HTTPS: за Cloudflare/Caddy — X-Forwarded-Proto, локально по http — нет (docs/27 §27.6). */
+export function isSecureRequest(event: H3Event): boolean {
+  if (process.env.COOKIE_SECURE === '0') return false
+  if (process.env.COOKIE_SECURE === '1') return true
+  const proto = getHeader(event, 'x-forwarded-proto') ?? (event.node.req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http'
+  return proto === 'https'
+}
+
 export function setSessionCookies(event: H3Event, token: string): void {
-  const secure = process.env.NODE_ENV === 'production'
+  const secure = isSecureRequest(event)
   setCookie(event, SESSION_COOKIE, token, {
     httpOnly: true,
     secure,

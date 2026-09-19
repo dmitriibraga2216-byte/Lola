@@ -489,6 +489,8 @@ textarea {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 20;
+  overflow: auto;
   background: rgb(12 15 20 / 40%);
   display: grid;
   place-items: center;
@@ -500,6 +502,7 @@ textarea {
   border-radius: var(--radius-xl);
   padding: var(--space-5);
   width: min(480px, 100%);
+  box-sizing: border-box;
   display: grid;
   gap: var(--space-3);
 }
@@ -522,6 +525,7 @@ textarea {
 
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
 }

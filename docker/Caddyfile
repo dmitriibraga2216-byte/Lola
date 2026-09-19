@@ -1,0 +1,54 @@
+# docs/26 §26.7 (локальный TLS) + docs/27 §27.6 (заголовки за Cloudflare)
+(secure_headers) {
+	header {
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
+		-Server
+	}
+}
+
+{$APP_HOST:app.lola.local} {
+	tls internal
+	encode zstd gzip
+	import secure_headers
+	request_body {
+		max_size 500MB
+	}
+	handle /files/* {
+		uri strip_prefix /files
+		reverse_proxy minio:9000
+	}
+	handle {
+		reverse_proxy app:3000 {
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	log {
+		output file /data/access.log {
+			roll_size 50mb
+			roll_keep 7
+		}
+		format json
+	}
+}
+
+# За Cloudflare Tunnel трафик приходит по http внутрь сети (docs/27 §27.4)
+:80 {
+	encode zstd gzip
+	import secure_headers
+	request_body {
+		max_size 500MB
+	}
+	handle /files/* {
+		uri strip_prefix /files
+		reverse_proxy minio:9000
+	}
+	handle {
+		reverse_proxy app:3000 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+}

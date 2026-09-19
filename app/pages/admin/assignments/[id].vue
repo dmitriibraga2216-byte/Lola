@@ -159,9 +159,9 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }
 .notice { color: var(--color-teal-ink); }
-.modal-backdrop { position: fixed; inset: 0; background: rgb(12 15 20 / 40%); display: grid; place-items: center; padding: var(--space-4); }
-.modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(420px, 100%); display: grid; gap: var(--space-3); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; overflow: auto; background: rgb(12 15 20 / 40%); display: grid; place-items: center; padding: var(--space-4); }
+.modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(420px, 100%); box-sizing: border-box; display: grid; gap: var(--space-3); }
 .modal h2 { margin: 0; font-weight: 900; font-size: var(--font-size-title-l); }
 .modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
-.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 </style>

@@ -24,11 +24,20 @@ async function connectOAuth(p: string) {
     const { url } = await api<{ url: string }>(`/integrations/${p}/auth-url`)
     connecting.value = p
     const win = window.open(url, 'lola-oauth', 'width=520,height=680')
+    if (!win) { connecting.value = null; oauthError.value[p] = t('integrations.popupBlocked'); return }
     const done = async () => { window.removeEventListener('message', onMsg); connecting.value = null; await loadOAuth() }
     const onMsg = (e: MessageEvent) => { if (e.data?.type === 'lola:oauth') { if (!e.data.ok) oauthError.value[p] = e.data.message; done() } }
     window.addEventListener('message', onMsg)
     const poll = setInterval(() => { if (!win || win.closed) { clearInterval(poll); done() } }, 700)
   } catch (err) { oauthError.value[p] = apiErrorOf(err).message }
+}
+/** Коды провайдера → одна понятная причина: 401 доступ отозван, 403 API ещё не открыт, 429 квота. */
+function humanError(e: string | null) {
+  const code = e?.match(/^(\d{3})/)?.[1]
+  if (code === '401' || /invalid_grant/.test(e ?? '')) return t('integrations.err401')
+  if (code === '403') return t('integrations.err403')
+  if (code === '429') return t('integrations.err429')
+  return e ?? ''
 }
 async function disconnectOAuth(p: string) { await api(`/integrations/${p}/disconnect`, { method: 'POST' }); await loadOAuth() }
 const wsImport = reactive({ domain: '', defaultPosition: '', defaultOrgUnit: '', defaultLocation: '', result: null as null | { fetched: number, stats: Record<string, number>, errors: { row: string, errors: string[] }[] }, busy: false })
@@ -143,7 +152,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
           <p v-if="oauthError[p]" class="fail">{{ oauthError[p] }} <button class="chip" @click="connectOAuth(p)">{{ t('integrations.retry') }}</button></p>
           <p v-if="oauth[p]!.state === 'not_configured'" class="sub">{{ t('integrations.oauthNotConfigured') }}</p>
           <p v-else-if="oauth[p]!.state === 'not_connected'" class="sub">{{ t('integrations.oauthNotConnected') }}</p>
-          <p v-else-if="oauth[p]!.state === 'failing'" class="fail">{{ t('integrations.silentSince', { at: fmt(oauth[p]!.lastOkAt) }) }} · {{ oauth[p]!.lastError }}</p>
+          <p v-else-if="oauth[p]!.state === 'failing'" class="fail">{{ t('integrations.silentSince', { at: fmt(oauth[p]!.lastOkAt) }) }} · {{ humanError(oauth[p]!.lastError) }}</p>
           <p v-else class="sub">{{ t('integrations.connectedAs', { account: oauth[p]!.accountLabel ?? '', at: fmt(oauth[p]!.lastOkAt ?? oauth[p]!.connectedAt) }) }}</p>
           <p class="sub">{{ t(`integrations.${p}Uses`) }}</p>
           <div class="actions">

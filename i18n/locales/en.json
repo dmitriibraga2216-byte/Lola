@@ -932,7 +932,11 @@
     "wsPreview": "Preview",
     "wsApply": "Import",
     "wsResult": "Fetched {n} people",
-    "wsErrors": "with errors"
+    "wsErrors": "with errors",
+    "popupBlocked": "The browser blocked the sign-in window — allow pop-ups and try again",
+    "err401": "Access revoked — connect the account again",
+    "err403": "No API access yet (request pending or permission not enabled)",
+    "err429": "Quota exhausted — will retry next time"
   },
   "dev": {
     "title": "My development",

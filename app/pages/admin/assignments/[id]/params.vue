@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { PARAM_KEYS_BY_CONTENT_TYPE } from '../../../../../shared/schemas/assignments'
-import type { ContentType } from '../../../../../shared/enums'
+import { PARAM_KEYS_BY_CONTENT_TYPE } from '#shared/schemas/assignments'
+import type { ContentType } from '#shared/enums'
 
 /**
  * Параметры назначения по мокапу TaskParams (docs/15 §14.3): боковое меню из пяти групп —

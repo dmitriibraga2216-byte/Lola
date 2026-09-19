@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CONTENT_TYPES } from '../../../../shared/enums'
+import { CONTENT_TYPES } from '#shared/enums'
 
 /**
  * Главный экран администратора по мокапу Main: вкладки-чипы task_type, баннер

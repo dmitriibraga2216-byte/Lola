@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { CONTENT_TYPES } from '../../../../shared/enums'
-import type { ContentType } from '../../../../shared/enums'
+import { CONTENT_TYPES } from '#shared/enums'
+import type { ContentType } from '#shared/enums'
 
 /**
  * Создание назначения (docs/15 §5.2, §14.1): тип контента — из `?type=` меню «Додати призначення»

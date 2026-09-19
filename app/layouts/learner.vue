@@ -5,6 +5,7 @@ const { me, hasScope } = useAuth()
 
 <template>
   <div class="learner">
+    <header class="top"><span class="brand">Lola</span><NotificationBell /></header>
     <main class="content">
       <slot />
     </main>
@@ -36,6 +37,9 @@ const { me, hasScope } = useAuth()
   margin: 0 auto;
   box-sizing: border-box;
 }
+
+.top { display: flex; justify-content: space-between; align-items: center; padding: 0 var(--space-3); max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.brand { font-weight: 900; }
 
 .bottom {
   position: fixed;

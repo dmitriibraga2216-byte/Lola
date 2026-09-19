@@ -84,10 +84,15 @@ export default defineNitroPlugin(async () => {
     await work('assignment.sync', async () => {
       const { scheduledReportsScan } = await import('../services/reportBuilder')
       const { recalcGroups } = await import('../services/groups')
+      const { escalationScan } = await import('../services/notifications')
+      const { telegramHealth } = await import('../services/telegram')
+      await telegramHealth() // docs/23 §10 telegram.health
       for (const tenantId of await allActiveTenants()) {
         const n = await scheduledReportsScan(tenantId)
         if (n) console.log(`[report.scheduled] ${tenantId}: ${n}`)
         const g = await recalcGroups(tenantId) // docs/16 §11 groups.recalc — до раскрытия аудиторий
+        const esc = await escalationScan(tenantId) // docs/23 §6.6 notification.escalate
+        if (esc) console.log(`[notification.escalate] ${tenantId}: ${esc}`)
         if (g) console.log(`[groups.recalc] ${tenantId}: ${g}`)
       }
       for (const tenantId of await allActiveTenants()) {

@@ -131,7 +131,9 @@ describe('этап 10: оргструктура и конструктор отч
   it('docs/21 §5.5: блокировка страницы на время правки и diff между версиями', async () => {
     const editor = await makePerson('Редактор Вікі', lazarevaId, 'author')
     const other = await makePerson('Інший Автор', lazarevaId, 'author')
-    const p = await wk.createPage(ctx(editor), { title: `Замок ${Date.now()}`, body: text('<p>Перший абзац</p>') })
+    const created = await wk.createPage(ctx(editor), { title: `Замок ${Date.now()}`, body: text('<p>Перший абзац</p>') })
+    if ('forbidden' in created) throw new Error('forbidden')
+    const p = created
     pageIds.push(p.id)
     expect((await wk.lockPage(ctx(editor), p.id))!.ok).toBe(true)
     const busy = await wk.lockPage(ctx(other), p.id)

@@ -5,7 +5,7 @@
  * страница сама рисует шапку через <PageHeader>.
  */
 const { t } = useI18n()
-const { me, logout, hasScope, initials } = useAuth()
+const { me, logout, hasScope, initials, switchRole } = useAuth()
 const route = useRoute()
 
 interface Item { to: string, label: string, show: boolean }
@@ -86,7 +86,26 @@ const isOpen = (key: string) => (opened.value ?? (narrow.value ? null : activeKe
 watch(() => route.path, () => { opened.value = null })
 
 const menuOpen = ref(false)
-const roleName = computed(() => me.value?.user.roles?.[0]?.name ?? '')
+// Карточка человека по мокапу Main: под именем — активная роль (docs/01 §1.9.2), в меню — все роли для переключения
+const roleName = computed(() => me.value?.activeRole?.name ?? '')
+const roleList = computed(() => me.value?.roles ?? [])
+const switching = ref(false)
+const switchError = ref('')
+async function pickRole(id: string) {
+  if (switching.value || id === me.value?.activeRole?.id) { menuOpen.value = false; return }
+  switching.value = true
+  switchError.value = ''
+  try {
+    await switchRole(id)
+    menuOpen.value = false
+  }
+  catch (err) {
+    switchError.value = apiErrorOf(err).message
+  }
+  finally {
+    switching.value = false
+  }
+}
 </script>
 
 <template>
@@ -122,7 +141,15 @@ const roleName = computed(() => me.value?.user.roles?.[0]?.name ?? '')
           </span>
           <span class="chevron" aria-hidden="true">⌄</span>
         </button>
-        <div v-if="menuOpen" class="menu">
+        <div v-if="menuOpen" class="menu" role="menu">
+          <template v-if="roleList.length > 1">
+            <small class="menu-label">{{ t('admin.menu.roleSwitch') }}</small>
+            <button v-for="r in roleList" :key="r.id" class="menu-item role-item" role="menuitemradio" :aria-checked="r.id === me?.activeRole?.id" :disabled="switching" @click="pickRole(r.id)">
+              <span class="check" aria-hidden="true">{{ r.id === me?.activeRole?.id ? '●' : '○' }}</span>{{ r.name }}
+            </button>
+            <p v-if="switchError" class="menu-error" role="alert">{{ switchError }}</p>
+            <hr class="menu-sep">
+          </template>
           <NuxtLink to="/learn" class="menu-item" @click="menuOpen = false">{{ t('admin.menu.learner') }}</NuxtLink>
           <NuxtLink to="/learn/profile" class="menu-item" @click="menuOpen = false">{{ t('admin.menu.profile') }}</NuxtLink>
           <button class="menu-item" @click="logout">{{ t('home.logout') }}</button>
@@ -160,6 +187,13 @@ const roleName = computed(() => me.value?.user.roles?.[0]?.name ?? '')
 .menu { position: absolute; bottom: 100%; left: 0; right: 0; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1); display: grid; gap: 2px; margin-bottom: var(--space-2); }
 .menu-item { font: inherit; font-weight: 700; font-size: var(--font-size-body-s); text-align: left; border: none; background: transparent; color: var(--color-ink); text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-s); cursor: pointer; }
 .menu-item:hover { background: var(--color-bg); }
+.menu-label { font-size: 12px; font-weight: 700; color: var(--color-ink-muted); padding: var(--space-1) var(--space-3) 0; }
+.role-item { display: flex; align-items: center; gap: var(--space-2); }
+.role-item[aria-checked="true"] { color: var(--color-teal-ink); }
+.role-item:disabled { opacity: .6; cursor: progress; }
+.check { width: 1em; color: var(--color-teal); }
+.menu-sep { border: none; border-top: 1px solid var(--color-bg-line-soft); margin: var(--space-1) 0; }
+.menu-error { margin: 0; padding: 0 var(--space-3); font-size: 12px; color: var(--color-coral-ink); }
 .content { min-width: 0; padding: var(--space-5) var(--space-6) var(--space-6); overflow-x: clip; }
 @media (max-width: 860px) {
   .admin { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; align-content: start; }

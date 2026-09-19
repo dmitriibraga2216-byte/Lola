@@ -69,6 +69,28 @@ export const roleAssignSchema = z.object({
   roleCode: z.string().min(1).max(50),
   scopeType: z.enum(['tenant', 'org_unit', 'location']),
   scopeId: z.string().uuid().nullable().optional(),
+  validUntil: z.string().date().nullable().optional(), // docs/16 §6.2: бессрочно (null) или до даты
+  reason: z.string().trim().max(500).nullable().optional(), // причина — для аудита
+})
+
+/** Снятие роли (docs/16 §6.2): причина — в аудит. */
+export const roleRevokeSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+})
+
+/** POST /me/role/switch (docs/04 §4.4, docs/01 §1.9.2) */
+export const roleSwitchSchema = z.object({
+  roleId: z.string().uuid(),
+})
+
+/** PUT /settings/position-role-map (docs/04 §4.13): правило «должность → роль» целиком. */
+export const positionRoleMapSchema = z.object({
+  items: z.array(z.object({
+    positionId: z.string().uuid(),
+    roleCode: z.string().min(1).max(50),
+    scopeType: z.enum(['tenant', 'org_unit', 'location']).default('location'),
+    scopeId: z.string().uuid().nullable().optional(), // null — область размещения
+  })).max(500),
 })
 
 export const refCreateSchema = z.object({

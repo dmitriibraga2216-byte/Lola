@@ -46,6 +46,16 @@ export function currentRequestContext(): RequestContext | null {
   }
 }
 
+/** Текущее событие Nitro внутри запроса (undefined в фоновых задачах и тестах). */
+export function currentEvent(): H3Event | undefined {
+  try {
+    return eventAccessor?.()
+  }
+  catch {
+    return undefined
+  }
+}
+
 /** Выполнить fn с заданным контекстом (фоновые задачи, тесты). */
 export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
   return als.run(ctx, fn)

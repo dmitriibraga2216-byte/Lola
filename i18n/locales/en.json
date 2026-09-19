@@ -104,7 +104,11 @@
     },
     "menu": {
       "learner": "My cabinet",
-      "profile": "Profile"
+      "profile": "Profile",
+      "roleActive": "Active role",
+      "roleSwitch": "Switch to role",
+      "roleSwitched": "Role switched: {name}",
+      "roleSingle": "This is your only role"
     }
   },
   "people": {
@@ -251,6 +255,17 @@
     "addRole": "Add role",
     "scope": "Scope",
     "orgUnitScope": "Unit",
+    "validUntil": "Valid until",
+    "validForever": "no expiry",
+    "validExpired": "expired",
+    "reason": "Reason",
+    "reasonHint": "For the audit log: why the role was granted",
+    "revokeReason": "Reason for removal",
+    "roleDerived": "Granted automatically by the position → role rule",
+    "roleManual": "Granted manually",
+    "roleSince": "since {date}",
+    "editRole": "Change expiry or reason",
+    "confirmRevoke": "Remove role",
     "enrollments": "Enrollments",
     "attempts": "Quiz attempts",
     "certificates": "Certificates",

@@ -3,8 +3,19 @@
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
-const { me, initials, logout, hasScope } = useAuth()
+const { me, initials, logout, hasScope, switchRole } = useAuth()
 const { api } = useApi()
+
+// Переключение активной роли (docs/01 §1.9.2, мокап Profile: список ролей, активная помечена)
+const roleList = computed(() => me.value?.roles ?? [])
+const switching = ref(false)
+async function pickRole(id: string) {
+  if (switching.value || id === me.value?.activeRole?.id) return
+  switching.value = true
+  try { await switchRole(id) }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { switching.value = false }
+}
 
 interface Cert { id: string, number: string, validUntil: string | null, revokedAt: string | null, courseTitle: string, publicToken: string | null }
 const certs = ref<Cert[]>([])
@@ -45,8 +56,16 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
       <div class="who">
         <h1 class="name">{{ me?.user.fullName }}</h1>
         <p class="sub">{{ [me?.user.position, me?.user.location].filter(Boolean).join(' · ') || me?.tenant.name }}</p>
+        <p v-if="me?.activeRole" class="sub role">{{ me.activeRole.name }}</p>
       </div>
     </div>
+
+    <template v-if="roleList.length > 1">
+      <h2 class="section-title">{{ t('admin.menu.roleSwitch') }}</h2>
+      <div class="roles" role="radiogroup" :aria-label="t('admin.menu.roleActive')">
+        <button v-for="r in roleList" :key="r.id" :class="['chip', { on: r.id === me?.activeRole?.id }]" role="radio" :aria-checked="r.id === me?.activeRole?.id" :disabled="switching" @click="pickRole(r.id)">{{ r.name }}</button>
+      </div>
+    </template>
 
     <div class="tiles">
       <div class="tile teal"><b>{{ counts?.done ?? '—' }}</b><span>{{ t('profile.tiles.done') }}</span></div>
@@ -107,6 +126,9 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
 .day .bar.on { background: var(--color-teal); }
 .day span { font-size: 11px; font-weight: 700; color: var(--color-ink-muted); }
 .links { display: grid; gap: var(--space-1); }
+.role { color: var(--color-teal-ink); font-weight: 800; }
+.roles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.chip[disabled] { opacity: .6; cursor: progress; }
 .row-link { font: inherit; font-weight: 700; text-align: left; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line-soft); color: var(--color-ink); text-decoration: none; border-radius: var(--radius-s); padding: var(--space-3) var(--space-4); cursor: pointer; }
 .row-link.danger { color: var(--color-coral-ink); }
 .tg { margin: 0 var(--space-2); }

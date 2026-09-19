@@ -16,6 +16,7 @@ const BASE = `http://127.0.0.1:${PORT}`
 
 const ADMIN_PHONE = '+380661864742'
 const EMPLOYEE_PHONE = '+380670000003' // Кухар Тестовий, роль employee
+const CHEF_PHONE = '+380670000002' // Шеф Лазарева: mentor + employee на точке
 
 let server: ChildProcess | undefined
 
@@ -186,6 +187,54 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
       const crs = await fetch(`${BASE}/api/v1/courses/${course!.id}`, { headers: { cookie } })
       expect(crs.status).toBe(404)
       await cleanup()
+    }
+    finally {
+      await admin.end()
+    }
+  })
+
+  it('активная роль (docs/01 §1.9.2): /auth/me отдаёт её, /me/role/switch — только среди своих, права — по активной', async () => {
+    const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
+    try {
+      await admin`delete from otp_codes where phone = ${CHEF_PHONE}`
+      // Полный вход: нужны обе cookie (сессия + CSRF) для мутации
+      const reqRes = await fetch(`${BASE}/api/v1/auth/otp/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: CHEF_PHONE }) })
+      const { data } = await reqRes.json() as { data: { devCode: string } }
+      const verifyRes = await fetch(`${BASE}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: CHEF_PHONE, code: data.devCode }) })
+      const jar = verifyRes.headers.getSetCookie().map(c => c.split(';')[0]!)
+      const cookie = jar.join('; ')
+      const csrf = jar.find(c => c.startsWith('lola_csrf='))!.split('=')[1]!
+      const headers = { 'cookie': cookie, 'x-csrf-token': csrf, 'Content-Type': 'application/json' }
+
+      const me = await (await fetch(`${BASE}/api/v1/auth/me`, { headers })).json() as { data: { activeRole: { code: string }, roles: { id: string, code: string }[], scopes: string[] } }
+      expect(me.data.activeRole.code).toBe('mentor') // по умолчанию — самая широкая
+      expect(me.data.roles.map(r => r.code).sort()).toEqual(['employee', 'mentor'])
+      expect(me.data.scopes).toContain('people.view')
+      expect((await fetch(`${BASE}/api/v1/people`, { headers })).status).toBe(200)
+
+      const employee = me.data.roles.find(r => r.code === 'employee')!
+      const sw = await fetch(`${BASE}/api/v1/me/role/switch`, { method: 'POST', headers, body: JSON.stringify({ roleId: employee.id }) })
+      expect(sw.status).toBe(200)
+      expect((await sw.json() as { data: { activeRole: { code: string }, changed: boolean } }).data).toMatchObject({ activeRole: { code: 'employee' }, changed: true })
+      const me2 = await (await fetch(`${BASE}/api/v1/auth/me`, { headers })).json() as { data: { activeRole: { code: string }, scopes: string[] } }
+      expect(me2.data.activeRole.code).toBe('employee')
+      expect(me2.data.scopes).not.toContain('people.view')
+      expect((await fetch(`${BASE}/api/v1/people`, { headers })).status).toBe(403) // объединение ролей не действует
+
+      const [adminRole] = await admin`select r.id from roles r join tenants t on t.id = r.tenant_id where t.slug = 'kappi' and r.code = 'admin'`
+      const foreign = await fetch(`${BASE}/api/v1/me/role/switch`, { method: 'POST', headers, body: JSON.stringify({ roleId: adminRole!.id }) })
+      expect(foreign.status).toBe(403)
+      expect((await foreign.json() as { error: { code: string } }).error.code).toBe('forbidden')
+      const bad = await fetch(`${BASE}/api/v1/me/role/switch`, { method: 'POST', headers, body: JSON.stringify({ roleId: 'not-a-uuid' }) })
+      expect(bad.status).toBe(400)
+
+      // Аудит: обе роли и request_context (CLAUDE.md п. 14)
+      const [chef] = await admin`select u.id from users u join tenants t on t.id = u.tenant_id where t.slug = 'kappi' and u.phone = ${CHEF_PHONE}`
+      const [ev] = await admin`select before, after, actor_roles, request_context from audit_log where action = 'role.switch' and actor_id = ${chef!.id} order by created_at desc limit 1`
+      expect(ev!.before).toMatchObject({ code: 'mentor' })
+      expect(ev!.after).toMatchObject({ code: 'employee' })
+      expect((ev!.actor_roles as string[]).sort()).toEqual(['employee', 'mentor'])
+      expect((ev!.request_context as { ip: string }).ip).toBeTruthy()
     }
     finally {
       await admin.end()

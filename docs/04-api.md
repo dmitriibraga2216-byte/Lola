@@ -54,7 +54,7 @@
 | POST | `/auth/invite/accept` | `{token}` → активация и сессия |
 | POST | `/auth/logout` | текущая сессия |
 | POST | `/auth/logout-all` | все сессии пользователя |
-| GET | `/auth/me` | профиль, роли, скоупы, настройки тенанта |
+| GET | `/auth/me` | профиль, `activeRole`, `roles` (все действующие — для переключателя), `scopes` активной роли, настройки тенанта |
 
 Лимиты: `/auth/otp/request` — 3 на номер / 15 мин и 30 на IP / час; `/auth/otp/verify` — 5 на код.
 
@@ -90,7 +90,7 @@
 | GET | `/me/study-history` | история и динамика рейтинга (свой и внешний) |
 | GET | `/me/bonuses` | баланс и книга операций |
 | GET/PATCH | `/me/notifications/prefs` | свои переключатели уведомлений |
-| POST | `/me/role/switch` | `{roleId}` — переключение активной роли (`01` §1.9.2) |
+| POST | `/me/role/switch` | `{roleId}` — переключение активной роли (`01` §1.9.2) среди своих действующих; чужая, снятая или истёкшая — 403 `forbidden`, по API-токену — 400; ответ `{activeRole, changed}`, событие `role.switch` в аудите с обеими ролями |
 
 ## 4.5 Прохождение контента
 
@@ -185,7 +185,8 @@
 | --- | --- | --- |
 | GET/POST | `/people` | список с фильтрами (посада, місто, підрозділ, мітки, рівень, активність) |
 | GET/PATCH | `/people/:id` | карточка (`16` §14.4) |
-| POST | `/people/:id/roles` | роли в области |
+| POST | `/people/:id/roles` | роль в области: `{roleCode, scopeType, scopeId?, validUntil?, reason?}`; повтор той же роли в той же области — редактирование срока и причины |
+| DELETE | `/people/:id/roles/:code` | снять роль; `?reason=` — в аудит; последний администратор — 409 `last_admin` |
 | POST | `/people/:id/password` | смена пароля администратором (отдельный эндпоинт, отдельный скоуп) |
 | POST | `/people/import` | CSV → `importJobId`, файл проверяется целиком |
 | GET | `/people/import/:id` | протокол: создать N, обновить M, ошибок K с номерами строк |
@@ -268,7 +269,7 @@
 | GET/PATCH | `/settings/tenant` | бренд, языки, флаги модулей (`24` Г-24.2) |
 | GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
 | CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1) |
-| GET/PUT | `/settings/position-role-map` | правило «должность → роль» |
+| GET/PUT | `/settings/position-role-map` | правило «должность → роль»: `{items: [{positionId, roleCode, scopeType, scopeId?}]}` целиком; применяется при следующей смене должности или импорте |
 | CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` |
 | GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
 | GET/PUT | `/settings/email-layout` | шапка и подвал письма |

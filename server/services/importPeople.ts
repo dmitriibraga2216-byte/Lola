@@ -7,6 +7,7 @@ import {
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { applyPositionRoles } from './positionRoleMap'
 import { enqueueNotification } from './notifications'
 import { splitName } from './people'
 import { phoneSchema } from '../../shared/schemas/auth'
@@ -523,6 +524,8 @@ export async function applyImport(ctx: Ctx, jobId: string) {
               positionId,
               isPrimary: true,
             })
+            // docs/01 §1.9.3: правило «должность → роль» применяется при импорте
+            await applyPositionRoles(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId }, id)
           }
         }
 

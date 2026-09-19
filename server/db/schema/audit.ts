@@ -7,6 +7,8 @@ export const auditLog = pgTable('audit_log', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
   tenantId: tenantId(),
   actorId: uuid('actor_id'),
+  actorRoleId: uuid('actor_role_id'), // активная роль в момент действия (docs/01 §1.9.2)
+  actorRoles: text('actor_roles').array(), // коды всех действующих ролей актора — кто на самом деле мог совершить действие
   action: text('action').notNull(), // course.publish, user.archive, attempt.grade …
   entity: text('entity').notNull(),
   entityId: uuid('entity_id'),

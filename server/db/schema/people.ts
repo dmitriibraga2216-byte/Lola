@@ -77,8 +77,28 @@ export const userRoles = pgTable('user_roles', {
   roleId: uuid('role_id').notNull().references(() => roles.id),
   scopeType: text('scope_type').notNull(), // tenant | org_unit | location
   scopeId: uuid('scope_id'), // null для tenant
+  validUntil: timestamp('valid_until', { withTimezone: true }), // docs/16 §6.2, 29 Б.15: бессрочно (null) или до даты; истёкшая роль не даёт прав
+  reason: text('reason'), // причина назначения — для аудита (docs/16 §6.2)
+  isOrgDerived: boolean('is_org_derived').notNull().default(false), // выдана правилом «должность → роль» (position_role_map), пересобирается при смене должности
 }, t => [
   unique().on(t.tenantId, t.userId, t.roleId, t.scopeType, t.scopeId),
+])
+
+/**
+ * Правило «должность → роль» (docs/01 §1.9.1, §1.9.3; docs/02 «Сквозные таблицы»):
+ * применяется при импорте и смене должности. scope_id null при scope_type location | org_unit
+ * означает «точка/подразделение размещения» — правило одно на всю сеть.
+ */
+export const positionRoleMap = pgTable('position_role_map', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  positionId: uuid('position_id').notNull().references(() => positions.id, { onDelete: 'cascade' }),
+  roleId: uuid('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  scopeType: text('scope_type').notNull().default('location'), // tenant | org_unit | location
+  scopeId: uuid('scope_id'), // null — область размещения
+}, t => [
+  unique().on(t.tenantId, t.positionId, t.roleId, t.scopeType, t.scopeId),
+  index().on(t.tenantId),
 ])
 
 export const sessions = pgTable('sessions', {
@@ -89,6 +109,7 @@ export const sessions = pgTable('sessions', {
   userAgent: text('user_agent'),
   ip: inet('ip'),
   impersonatedBy: uuid('impersonated_by').references(() => users.id),
+  activeRoleId: uuid('active_role_id').references(() => roles.id, { onDelete: 'set null' }), // активная роль сессии (docs/01 §1.9.2): права — по ней, переключение без выхода
   requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),

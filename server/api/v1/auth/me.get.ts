@@ -1,5 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm'
-import { locations, positions, roles, tenants, userPlacements, userRoles, users } from '../../../db/schema'
+import { locations, positions, tenants, userPlacements, users } from '../../../db/schema'
 import { db } from '../../../db/client'
 import { withTenant } from '../../../utils/withTenant'
 import type { AuthContext } from '../../../services/session'
@@ -23,15 +23,13 @@ export default defineEventHandler(async (event) => {
       status: users.status,
     }).from(users).where(eq(users.id, auth.userId))
     if (!u) return null
-    // Роли и основное размещение — для карточки человека в меню и профиля (мокапы Main, Profile)
-    const roleRows = await tx.select({ code: roles.code, name: roles.name }).from(userRoles)
-      .innerJoin(roles, eq(roles.id, userRoles.roleId)).where(eq(userRoles.userId, auth.userId))
+    // Основное размещение — для карточки человека в меню и профиля (мокапы Main, Profile)
     const [placement] = await tx.select({ position: positions.name, location: locations.name })
       .from(userPlacements)
       .leftJoin(positions, eq(positions.id, userPlacements.positionId))
       .leftJoin(locations, eq(locations.id, userPlacements.locationId))
       .where(and(eq(userPlacements.userId, auth.userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-    return { ...u, roles: [...new Map(roleRows.map(r => [r.code, r])).values()], position: placement?.position ?? null, location: placement?.location ?? null }
+    return { ...u, position: placement?.position ?? null, location: placement?.location ?? null }
   })
   if (!profile) return apiError(event, 401, 'auth_required', 'Користувача не знайдено')
 
@@ -44,12 +42,15 @@ export default defineEventHandler(async (event) => {
     timezone: tenants.timezone,
   }).from(tenants).where(eq(tenants.id, auth.tenantId))
 
+  // Скоупы — по активной роли (docs/01 §1.9.2); roles — все действующие, для переключателя
   const scopes = [...new Set(access.grants.flatMap(g => g.scopes))].sort()
 
   return apiData({
-    user: profile,
+    user: { ...profile, roles: access.roles },
     tenant,
     scopes,
+    activeRole: access.activeRole,
+    roles: access.roles,
     impersonated: auth.impersonatedBy !== null,
   })
 })

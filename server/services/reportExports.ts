@@ -43,7 +43,7 @@ export async function myExports(ctx: Ctx) {
 
 /** Строки любого отчёта по имени и фильтрам — с областью видимости заказчика выгрузки. */
 export async function reportRows(tenantId: string, userId: string, report: string, filters: Record<string, unknown>): Promise<Row[]> {
-  const access = await loadAccess({ sessionId: 'export', tenantId, userId, impersonatedBy: null } as never)
+  const access = await loadAccess({ sessionId: 'export', tenantId, userId, impersonatedBy: null, activeRoleId: null } as never)
   if (!access) return []
   const ctx = { tenantId, actorId: userId }
   const scope = narrowScope(await reportScope(access), filters.locationId as string | undefined)

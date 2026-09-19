@@ -104,7 +104,11 @@
     },
     "menu": {
       "learner": "Мій кабінет",
-      "profile": "Профіль"
+      "profile": "Профіль",
+      "roleActive": "Активна роль",
+      "roleSwitch": "Перейти на роль",
+      "roleSwitched": "Роль змінено: {name}",
+      "roleSingle": "Це ваша єдина роль"
     }
   },
   "people": {
@@ -251,6 +255,17 @@
     "addRole": "Додати роль",
     "scope": "Область",
     "orgUnitScope": "Підрозділ",
+    "validUntil": "Діє до",
+    "validForever": "безстроково",
+    "validExpired": "термін минув",
+    "reason": "Причина",
+    "reasonHint": "Для журналу: навіщо видано роль",
+    "revokeReason": "Причина зняття",
+    "roleDerived": "Видана автоматично за правилом «посада → роль»",
+    "roleManual": "Видана вручну",
+    "roleSince": "з {date}",
+    "editRole": "Змінити термін або причину",
+    "confirmRevoke": "Зняти роль",
     "enrollments": "Записи на навчання",
     "attempts": "Спроби тестів",
     "certificates": "Сертифікати",

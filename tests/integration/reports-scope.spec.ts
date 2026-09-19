@@ -42,18 +42,18 @@ afterAll(async () => {
 
 describe('область видимости отчётов (docs/22 §13.1)', () => {
   it('роль на точке → область = эта точка; фильтр другой точкой сужает до пустого; администратор видит всё', async () => {
-    const mgr = (await loadAccess({ sessionId: 's', tenantId, userId: managerId, impersonatedBy: null } as never))!
+    const mgr = (await loadAccess({ sessionId: 's', tenantId, userId: managerId, impersonatedBy: null, activeRoleId: null } as never))!
     const scope = await reportScope(mgr)
     expect(scope).toEqual([lazarevaId])
     expect(narrowScope(scope, segedskaId)).toEqual([])
     expect(narrowScope(scope, lazarevaId)).toEqual([lazarevaId])
-    const adm = (await loadAccess({ sessionId: 's', tenantId, userId: adminId, impersonatedBy: null } as never))!
+    const adm = (await loadAccess({ sessionId: 's', tenantId, userId: adminId, impersonatedBy: null, activeRoleId: null } as never))!
     expect(await reportScope(adm)).toBeNull()
     expect(narrowScope(null, segedskaId)).toEqual([segedskaId])
   })
 
   it('роль на подразделении раскрывается в его точки', async () => {
-    const um = (await loadAccess({ sessionId: 's', tenantId, userId: unitManagerId, impersonatedBy: null } as never))!
+    const um = (await loadAccess({ sessionId: 's', tenantId, userId: unitManagerId, impersonatedBy: null, activeRoleId: null } as never))!
     const scope = await reportScope(um)
     expect(scope).toContain(segedskaId)
   })

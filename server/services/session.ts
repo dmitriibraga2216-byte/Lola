@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { sessions, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { sessionByTokenHash } from './authLookup'
+import { defaultRoleOf, effectiveRoles } from './activeRole'
 
 /**
  * Сессии (docs/01-roles.md §1.5): токен — 32 байта, в БД только sha256-хеш,
@@ -28,6 +29,8 @@ export async function createSession(input: {
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
 
   const sessionId = await withTenant(input.tenantId, input.userId, async (tx) => {
+    // При входе активная роль — роль по умолчанию (docs/01 §1.9.2, docs/28 «Паритет 4»)
+    const activeRoleId = defaultRoleOf(await effectiveRoles(tx, input.userId))?.id ?? null
     const [row] = await tx.insert(sessions).values({
       tenantId: input.tenantId,
       userId: input.userId,
@@ -36,6 +39,7 @@ export async function createSession(input: {
       ip: input.ip ?? null,
       requestContext: currentRequestContext(),
       impersonatedBy: input.impersonatedBy ?? null,
+      activeRoleId,
       expiresAt,
     }).returning({ id: sessions.id })
 
@@ -55,6 +59,8 @@ export interface AuthContext {
   tenantId: string
   userId: string
   impersonatedBy: string | null
+  /** Активная роль сессии (docs/01 §1.9.2); null — у старых сессий и API-токенов, тогда берётся роль по умолчанию */
+  activeRoleId: string | null
 }
 
 export async function validateSession(token: string): Promise<AuthContext | null> {
@@ -67,6 +73,7 @@ export async function validateSession(token: string): Promise<AuthContext | null
     tenantId: row.tenant_id,
     userId: row.user_id,
     impersonatedBy: row.impersonated_by,
+    activeRoleId: row.active_role_id,
   }
 }
 

@@ -142,4 +142,9 @@ export const templateSchema = z.object({
   subject: z.string().max(200).optional(),
   body: z.string().min(1).max(2000),
   isEnabled: z.boolean().default(true),
+  buttons: z.array(z.object({ text: z.string().min(1).max(40), action: z.string().min(1).max(200) })).max(3).optional(),
+  isMandatory: z.boolean().optional(),
+  throttle: z.object({ maxPerDay: z.number().int().min(1).max(50).optional(), perSubject: z.boolean().optional() }).nullable().optional(),
+  escalateAfterHours: z.number().int().min(1).max(720).nullable().optional(),
+  ignoreQuietHours: z.boolean().optional(),
 })

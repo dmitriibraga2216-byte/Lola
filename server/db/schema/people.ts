@@ -30,6 +30,7 @@ export const users = pgTable('users', {
   hiredAt: date('hired_at'),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   telegramChatId: bigint('telegram_chat_id', { mode: 'bigint' }),
+  telegramBlocked: boolean('telegram_blocked').notNull().default(false), // бот заблокирован (403) — канал переключается на SMS (docs/23 §6.5)
   passwordHash: text('password_hash'), // только для e-mail входа
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   externalId: text('external_id'), // ID в учётной системе тенанта (для импорта)

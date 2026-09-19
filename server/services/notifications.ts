@@ -1,6 +1,6 @@
 import { and, eq, lte, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { notificationTemplates, notifications, tenants, users } from '../db/schema'
+import { notificationTemplates, notifications, tenants, userNotificationPrefs, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
@@ -95,13 +95,19 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   people_inactive: '{{n}} люд. не заходили понад 30 днів — перевірте, чи не час архівувати',
   import_finished: 'Імпорт «{{file}}» завершено: створено {{created}}, оновлено {{updated}}, помилок {{errors}}. {{url}}',
   import_failed: 'Імпорт «{{file}}» не вдався: {{error}}',
+  // docs/23
+  manual: '{{text}}',
+  test_message: 'Це перевірка сповіщень Lola, {{user.first_name}}. Усе працює ✅',
+  telegram_blocked_manager: '{{name}} заблокував(ла) бота — нагадування йдуть у SMS. Попросіть повернути Telegram',
+  escalation: 'Без реакції: {{name}} — «{{text}}»',
+  security_suspicious_login: 'Вхід з нового пристрою: {{device}}. Якщо це не ви — закрийте сесії в профілі',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */
 export function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
   let out = tpl.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, inner: string) =>
     vars[key] ? inner : '')
-  out = out.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+  out = out.replace(/\{\{([\w.]+)\}\}/g, (_, key: string) => {
     const v = vars[key]
     if (v === null || v === undefined) return ''
     if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
@@ -132,13 +138,26 @@ export interface EnqueueInput {
   dedupKey?: string
   channel?: 'telegram' | 'sms' | 'email'
   urgent?: boolean // OTP и подобное — минуя тихие часы
+  refType?: string
+  refId?: string
 }
 
-/** Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает. */
+/**
+ * Коды, которые обходят дневной лимит (docs/23 §6.4, решение Б.9): дедлайны, аттестации,
+ * блокирующие объявления, безопасность. OTP в очередь не попадает вовсе.
+ */
+export const BYPASS_DAILY_LIMIT = (code: string) => /(_due_today|_overdue|_expiring|^assessment_|^announcement_|^security_|^user_invited$|^import_)/.test(code)
+export const DAILY_LIMIT = 10
+
+/** Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален). */
 export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Promise<boolean> {
   const [tenant] = await db.select({ timezone: tenants.timezone, settings: tenants.settings }).from(tenants).where(eq(tenants.id, input.tenantId))
   const settings = (tenant?.settings ?? {}) as { quietHours?: { from: number, to: number } }
-  const scheduledFor = input.urgent ? new Date() : scheduleWithQuietHours(new Date(), tenant?.timezone ?? 'Europe/Kyiv', settings.quietHours)
+  // Тихие часы по таймзоне точки человека (docs/23 §3.3), иначе — тенанта
+  const [loc] = await tx.execute(sql`select l.timezone from user_placements up join locations l on l.id = up.location_id where up.user_id = ${input.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { timezone: string | null }[]
+  const [tpl] = await tx.select({ ignoreQuietHours: notificationTemplates.ignoreQuietHours }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, input.channel ?? 'telegram')))
+  const now = new Date()
+  const scheduledFor = input.urgent || tpl?.ignoreQuietHours ? now : scheduleWithQuietHours(now, loc?.timezone ?? tenant?.timezone ?? 'Europe/Kyiv', settings.quietHours)
 
   const [row] = await tx.insert(notifications).values({
     tenantId: input.tenantId,
@@ -148,30 +167,62 @@ export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Pr
     payload: input.payload,
     dedupKey: input.dedupKey ?? null,
     scheduledFor,
+    skipReason: scheduledFor.getTime() > now.getTime() + 60_000 ? 'quiet_hours' : null, // §13.1: в журнале причина переноса
+    refType: input.refType ?? null,
+    refId: input.refId ?? null,
+    urgent: input.urgent ?? false,
   }).onConflictDoNothing().returning({ id: notifications.id })
   return !!row
 }
 
-async function templateFor(tx: TenantTx, tenantId: string, code: string, channel: string, locale: string): Promise<string | null> {
-  const [t] = await tx.select().from(notificationTemplates).where(and(
-    eq(notificationTemplates.code, code),
-    eq(notificationTemplates.channel, channel),
-    eq(notificationTemplates.locale, locale),
-  ))
-  if (t) return t.isEnabled ? t.body : null
-  return DEFAULT_TEMPLATES[code] ?? null
+interface TemplateRow { body: string, version: number, isMandatory: boolean, throttle: { maxPerDay?: number } | null, buttons: { text: string, action: string }[] }
+
+/** Шаблон с учётом переопределений тенанта; отключённый → null. Fallback на uk (docs/23 §6.9). */
+async function templateFor(tx: TenantTx, tenantId: string, code: string, channel: string, locale: string): Promise<TemplateRow | null> {
+  const pick = async (loc: string) => (await tx.select().from(notificationTemplates).where(and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.code, code), eq(notificationTemplates.channel, channel), eq(notificationTemplates.locale, loc))))[0]
+  const t = (await pick(locale)) ?? (locale !== 'uk' ? await pick('uk') : undefined)
+  if (t) return t.isEnabled ? { body: t.body, version: t.version, isMandatory: t.isMandatory, throttle: t.throttle as TemplateRow['throttle'], buttons: t.buttons as TemplateRow['buttons'] } : null
+  const body = DEFAULT_TEMPLATES[code]
+  return body ? { body, version: 0, isMandatory: MANDATORY_DEFAULT(code), throttle: null, buttons: [] } : null
+}
+/** Обязательные по умолчанию: дедлайны, аттестации, объявления, безопасность, приглашение. */
+export const MANDATORY_DEFAULT = (code: string) => BYPASS_DAILY_LIMIT(code) || /_due_soon$|^user_blocked$|^user_role_granted$/.test(code)
+
+/** Общие переменные шаблонов (docs/23 §3.4): user.*, location.name, position.name, tenant.name, link. */
+async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promise<Record<string, unknown>> {
+  const [r] = await tx.execute(sql`
+    select u.full_name, u.first_name, l.name as location, p.name as position, t.name as tenant
+    from users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+    left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
+    cross join (select name from tenants where id = ${tenantId}::uuid) t where u.id = ${userId}::uuid
+  `) as unknown as { full_name: string, first_name: string | null, location: string | null, position: string | null, tenant: string }[]
+  return { 'user.full_name': r?.full_name ?? '', 'user.first_name': r?.first_name ?? r?.full_name?.split(' ')[1] ?? '', 'location.name': r?.location ?? '', 'position.name': r?.position ?? '', 'tenant.name': r?.tenant ?? '', 'name': r?.full_name ?? '' }
 }
 
+/** Ссылка на предмет уведомления для кнопки «Пройти» и колокольчика. */
+export function refUrl(n: { refType: string | null, refId: string | null, payload: unknown }): string | null {
+  const p = n.payload as Record<string, unknown>
+  if (n.refType === 'enrollment' || p.enrollmentId) return `/learn/${n.refId ?? p.enrollmentId}`
+  if (n.refType === 'program' || p.programId) return `/learn/programs/${n.refId ?? p.programId}`
+  if (n.refType === 'goal' || p.goalId) return `/learn/development/goals/${n.refId ?? p.goalId}`
+  if (n.refType === 'meetup' || p.meetupId) return `/learn/meetups/${n.refId ?? p.meetupId}`
+  if (n.refType === 'article' || p.articleId) return `/learn/knowledge/${n.refId ?? p.articleId}`
+  if (typeof p.url === 'string' && p.url.startsWith('/')) return p.url
+  return null
+}
+
+const RETRY_MINUTES = [1, 5, 25, 60, 180] // docs/23 §6.5
+
 /**
- * notification.dispatch (docs/06 §6.3): каждую минуту забирает queued с наступившим
- * scheduled_for, рендерит, шлёт. Нет chat_id → skipped (SMS/e-mail — этап 6).
+ * notification.dispatch (docs/23 §6): выбор канала Telegram → SMS (обязательные) → in-app;
+ * настройки человека, троттлинг, ретраи с экспонентой, 403 → telegram_blocked.
  */
 export async function dispatchNotifications(tenantId: string, limit = 100): Promise<{ sent: number, skipped: number, failed: number }> {
   const stats = { sent: 0, skipped: 0, failed: 0 }
   await withTenant(tenantId, null, async (tx) => {
     const due = await tx.select({
       n: notifications,
-      user: { telegramChatId: users.telegramChatId, locale: users.locale, fullName: users.fullName },
+      user: { telegramChatId: users.telegramChatId, telegramBlocked: users.telegramBlocked, locale: users.locale, fullName: users.fullName, phone: users.phone, email: users.email },
     })
       .from(notifications)
       .innerJoin(users, eq(users.id, notifications.userId))
@@ -179,60 +230,214 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       .orderBy(notifications.scheduledFor)
       .limit(limit)
 
-    for (const { n, user } of due) {
-      const tpl = await templateFor(tx, tenantId, n.code, n.channel, user.locale ?? 'uk')
-      if (!tpl) {
-        await tx.update(notifications).set({ status: 'skipped', error: 'template disabled', updatedAt: new Date() }).where(eq(notifications.id, n.id))
-        stats.skipped++
-        continue
+    const skip = async (id: string, reason: string, text?: string) => {
+      await tx.update(notifications).set({ status: 'skipped', skipReason: reason, error: reason, ...(text ? { renderedText: text } : {}), updatedAt: new Date() }).where(eq(notifications.id, id))
+      stats.skipped++
+    }
+    const sent = async (id: string, text: string, channel: string, version: number) => {
+      await tx.update(notifications).set({ status: 'sent', channel, renderedText: text, templateVersion: version, sentAt: new Date(), skipReason: null, error: null, updatedAt: new Date() }).where(eq(notifications.id, id))
+      stats.sent++
+      business.inc({ event: 'notification_sent' })
+    }
+    const failed = async (n: typeof due[number]['n'], text: string, error: string) => {
+      const attempt = n.attempt + 1
+      if (attempt < RETRY_MINUTES.length) {
+        await tx.update(notifications).set({ status: 'queued', attempt, renderedText: text, error, scheduledFor: new Date(Date.now() + RETRY_MINUTES[attempt]! * 60_000), updatedAt: new Date() }).where(eq(notifications.id, n.id))
       }
-      const text = renderTemplate(tpl, { ...(n.payload as Record<string, unknown>), name: user.fullName })
+      else {
+        await tx.update(notifications).set({ status: 'failed', attempt, renderedText: text, error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
+        stats.failed++
+        business.inc({ event: 'notification_failed' })
+      }
+    }
 
-      if (n.channel === 'telegram') {
-        if (!user.telegramChatId) {
-          await tx.update(notifications).set({ status: 'skipped', renderedText: text, error: 'no telegram', updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.skipped++
-          continue
-        }
-        const payload = n.payload as { enrollmentId?: string }
-        const res = await sendTelegram(user.telegramChatId, text, payload.enrollmentId ? { enrollmentId: payload.enrollmentId } : undefined)
-        if (res.ok) {
-          await tx.update(notifications).set({ status: 'sent', renderedText: text, sentAt: new Date(), updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.sent++
-          business.inc({ event: 'notification_sent' })
-        }
+    for (const { n, user } of due) {
+      const locale = user.locale ?? 'uk'
+      const tpl = await templateFor(tx, tenantId, n.code, n.channel, locale)
+      if (!tpl) { await skip(n.id, 'template_disabled'); continue }
+
+      // Настройки человека (docs/23 §3.3): необязательное можно отключить
+      if (!tpl.isMandatory) {
+        const [pref] = await tx.select().from(userNotificationPrefs).where(and(eq(userNotificationPrefs.userId, n.userId), eq(userNotificationPrefs.code, n.code)))
+        if (pref && !pref.enabled) { await skip(n.id, 'unsubscribed'); continue }
+      }
+      // Троттлинг (§6.4): по коду и общий дневной лимит
+      const maxPerDay = tpl.throttle?.maxPerDay
+      if (maxPerDay) {
+        const [c] = await tx.execute(sql`select count(*)::int as n from notifications where user_id = ${n.userId}::uuid and code = ${n.code} and status = 'sent' and sent_at >= current_date`) as unknown as { n: number }[]
+        if ((c?.n ?? 0) >= maxPerDay) { await skip(n.id, 'throttled'); continue }
+      }
+      if (!n.urgent && !BYPASS_DAILY_LIMIT(n.code)) {
+        const [c] = await tx.execute(sql`select count(*)::int as n from notifications where user_id = ${n.userId}::uuid and status = 'sent' and sent_at >= current_date`) as unknown as { n: number }[]
+        if ((c?.n ?? 0) >= DAILY_LIMIT) { await skip(n.id, 'throttled'); continue }
+      }
+
+      const vars = { ...(await commonVars(tx, tenantId, n.userId)), ...(n.payload as Record<string, unknown>) }
+      const text = renderTemplate(tpl.body, vars)
+
+      // Правило выбора канала (docs/23 §4): Telegram → SMS (обязательные) → in-app
+      let channel = n.channel
+      if (channel === 'telegram' && (!user.telegramChatId || user.telegramBlocked)) channel = tpl.isMandatory && user.phone ? 'sms' : 'inapp'
+      if (channel === 'email' && !user.email) channel = 'inapp'
+      if (channel === 'inapp') { await skip(n.id, 'no_channel', text); continue } // видно в колокольчике
+
+      if (channel === 'telegram') {
+        const url = refUrl(n)
+        const res = await sendTelegram(user.telegramChatId!, text, { url, notificationId: n.id, buttons: tpl.buttons, mandatory: tpl.isMandatory })
+        if (res.ok) await sent(n.id, text, channel, tpl.version)
         else if (res.blocked) {
-          // Бот заблокирован (docs/06 §6.4): помечаем, канал далее — SMS
-          await tx.update(users).set({ telegramChatId: null }).where(eq(users.id, n.userId))
-          await tx.update(notifications).set({ status: 'skipped', renderedText: text, error: 'telegram_blocked', updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.skipped++
+          // Бот заблокирован (docs/23 §6.5): помечаем, критичное — сразу SMS, руководителю уведомление
+          await tx.update(users).set({ telegramBlocked: true }).where(eq(users.id, n.userId))
+          const [mgr] = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${n.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
+          if (mgr?.manager_id) await enqueueNotification(tx, { tenantId, userId: mgr.manager_id, code: 'telegram_blocked_manager', payload: { name: user.fullName }, dedupKey: `tg_blocked:${n.userId}` })
+          if (tpl.isMandatory && user.phone) {
+            const { sendViaChannel } = await import('./channels')
+            const r2 = await sendViaChannel(tenantId, 'sms', { userId: n.userId, text, subject: n.code })
+            if (r2.ok) { await sent(n.id, text, 'sms', tpl.version); continue }
+          }
+          await skip(n.id, 'blocked', text)
         }
-        else {
-          await tx.update(notifications).set({ status: 'failed', renderedText: text, error: res.error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.failed++
-          business.inc({ event: 'notification_failed' })
-          business.inc({ event: 'telegram_error' })
-        }
+        else { await failed(n, text, res.error ?? 'telegram error'); business.inc({ event: 'telegram_error' }) }
       }
       else {
         const { sendViaChannel } = await import('./channels')
-        const res = await sendViaChannel(tenantId, n.channel as 'sms' | 'email', { userId: n.userId, text, subject: n.code })
-        if (res.ok) {
-          await tx.update(notifications).set({ status: 'sent', renderedText: text, sentAt: new Date(), updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.sent++
-        }
-        else if (res.skipped) {
-          await tx.update(notifications).set({ status: 'skipped', renderedText: text, error: res.error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.skipped++
-        }
-        else {
-          await tx.update(notifications).set({ status: 'failed', renderedText: text, error: res.error, updatedAt: new Date() }).where(eq(notifications.id, n.id))
-          stats.failed++
-        }
+        const res = await sendViaChannel(tenantId, channel as 'sms' | 'email', { userId: n.userId, text, subject: n.code })
+        if (res.ok) await sent(n.id, text, channel, tpl.version)
+        else if (res.skipped) await skip(n.id, res.error?.includes('limit') ? 'blocked' : 'no_channel', text)
+        else await failed(n, text, res.error ?? 'channel error')
       }
     }
   })
   return stats
+}
+
+// ── Колокольчик, настройки, повторная отправка, рассылка (docs/23 §5, §9) ──
+
+export async function inbox(ctx: { tenantId: string, actorId: string }) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.select().from(notifications).where(and(eq(notifications.userId, ctx.actorId), sql`${notifications.status} in ('sent','skipped','read')`)).orderBy(sql`${notifications.createdAt} desc`).limit(50)
+    const items = []
+    for (const n of rows) {
+      let text = n.renderedText
+      if (!text) { const tpl = DEFAULT_TEMPLATES[n.code]; if (tpl) text = renderTemplate(tpl, { ...(await commonVars(tx, ctx.tenantId, ctx.actorId)), ...(n.payload as Record<string, unknown>) }) }
+      items.push({ id: n.id, code: n.code, text: text ?? n.code, createdAt: n.createdAt, readAt: n.readAt, url: refUrl(n) })
+    }
+    const [c] = await tx.execute(sql`select count(*)::int as n from notifications where user_id = ${ctx.actorId}::uuid and read_at is null and status in ('sent','skipped')`) as unknown as { n: number }[]
+    return { items, unread: c?.n ?? 0 }
+  })
+}
+
+export async function markRead(ctx: { tenantId: string, actorId: string }, ids?: string[]) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.update(notifications).set({ readAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(notifications.userId, ctx.actorId), sql`${notifications.readAt} is null`, ...(ids?.length ? [sql`${notifications.id} in ${ids}`] : []))).returning({ id: notifications.id })
+    return rows.length
+  })
+}
+
+/** Клик по ссылке из уведомления — реакция (docs/23 §8 «Реакція», §6.6 эскалация). */
+export async function markReacted(tenantId: string, notificationId: string) {
+  await withTenant(tenantId, null, tx => tx.update(notifications).set({ reactedAt: new Date(), readAt: sql`coalesce(${notifications.readAt}, now())` }).where(and(eq(notifications.id, notificationId), sql`${notifications.reactedAt} is null`)))
+}
+
+export async function listPrefs(ctx: { tenantId: string, actorId: string }) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const prefs = await tx.select().from(userNotificationPrefs).where(eq(userNotificationPrefs.userId, ctx.actorId))
+    const custom = await tx.select({ code: notificationTemplates.code, isMandatory: notificationTemplates.isMandatory }).from(notificationTemplates).where(eq(notificationTemplates.channel, 'telegram'))
+    const mandatory = new Map(custom.map(c => [c.code, c.isMandatory]))
+    return Object.keys(DEFAULT_TEMPLATES).map(code => ({ code, enabled: prefs.find(p => p.code === code)?.enabled ?? true, channel: prefs.find(p => p.code === code)?.channel ?? null, isMandatory: mandatory.get(code) ?? MANDATORY_DEFAULT(code), group: groupOf(code) }))
+  })
+}
+/** Группы кодов на экране «Мої сповіщення» (docs/23 §5.1). */
+export function groupOf(code: string): 'learning' | 'assessment' | 'reminders' | 'hub' | 'other' {
+  if (/^(assignment|enrollment|program|attempt|workshop|review|certificate)/.test(code)) return 'learning'
+  if (/^(assessment|checklist|action_item|competency|goal|plan|request)/.test(code)) return 'assessment'
+  if (/_due|_overdue|reminder|meetup|webinar|digest/.test(code)) return 'reminders'
+  if (/^(news|announcement|knowledge|survey|event|wiki)/.test(code)) return 'hub'
+  return 'other'
+}
+
+export async function setPref(ctx: { tenantId: string, actorId: string }, input: { code: string, enabled?: boolean, channel?: 'telegram' | 'sms' | 'email' | null }): Promise<{ ok: true } | { ok: false, code: 'mandatory' | 'unknown' }> {
+  if (!(input.code in DEFAULT_TEMPLATES)) return { ok: false, code: 'unknown' }
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [t] = await tx.select({ isMandatory: notificationTemplates.isMandatory }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, 'telegram')))
+    if ((t?.isMandatory ?? MANDATORY_DEFAULT(input.code)) && input.enabled === false) return { ok: false as const, code: 'mandatory' as const }
+    await tx.insert(userNotificationPrefs).values({ tenantId: ctx.tenantId, userId: ctx.actorId, code: input.code, enabled: input.enabled ?? true, channel: input.channel ?? null })
+      .onConflictDoUpdate({ target: [userNotificationPrefs.tenantId, userNotificationPrefs.userId, userNotificationPrefs.code], set: { ...(input.enabled !== undefined ? { enabled: input.enabled } : {}), ...(input.channel !== undefined ? { channel: input.channel } : {}), updatedAt: new Date() } })
+    return { ok: true as const }
+  })
+}
+
+/** «Перевірити» / «Надіслати собі»: тестовое сообщение сразу, минуя тихие часы. */
+export async function sendTest(ctx: { tenantId: string, actorId: string }, code = 'test_message', payload: Record<string, unknown> = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, tx => enqueueNotification(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, code, payload, urgent: true, dedupKey: `test:${ctx.actorId}:${Date.now()}` }))
+}
+
+export async function resend(ctx: { tenantId: string, actorId: string }, id: string): Promise<boolean> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.update(notifications).set({ status: 'queued', attempt: 0, error: null, skipReason: null, scheduledFor: new Date(), urgent: true, updatedAt: new Date() })
+      .where(and(eq(notifications.id, id), sql`${notifications.status} in ('failed','skipped','sent')`)).returning({ id: notifications.id })
+    return rows.length > 0
+  })
+}
+
+/** Ручная рассылка (docs/23 §5.4): аудитория из конструктора, код manual, автор в payload. */
+export async function broadcast(ctx: { tenantId: string, actorId: string }, input: { audience: unknown, text: string, channel?: 'telegram' | 'sms' | 'email' }): Promise<{ recipients: number, queued: number }> {
+  const { resolveAudience } = await import('./audience')
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const ids = [...await resolveAudience(tx, input.audience as never)]
+    const [author] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
+    let queued = 0
+    const stamp = Date.now()
+    for (const userId of ids) {
+      if (await enqueueNotification(tx, { tenantId: ctx.tenantId, userId, code: 'manual', channel: input.channel, payload: { text: input.text, author: author?.fullName ?? '', authorId: ctx.actorId }, dedupKey: `manual:${stamp}:${userId}` })) queued++
+    }
+    const { recordAudit } = await import('./audit')
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'notification.broadcast', entity: 'notification', after: { recipients: ids.length, text: input.text.slice(0, 200) } })
+    return { recipients: ids.length, queued }
+  })
+}
+
+/** Ежечасно (docs/23 §6.6): отправленное с escalate_after_hours без реакции → руководителю точки. */
+export async function escalationScan(tenantId: string): Promise<number> {
+  return withTenant(tenantId, null, async (tx) => {
+    const rows = await tx.execute(sql`
+      select n.id, n.user_id, n.code, n.rendered_text, u.full_name, l.manager_id
+      from notifications n join notification_templates t on t.tenant_id = n.tenant_id and t.code = n.code and t.channel = 'telegram' and t.escalate_after_hours is not null
+      join users u on u.id = n.user_id
+      left join user_placements up on up.user_id = n.user_id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
+      where n.status = 'sent' and n.reacted_at is null and n.escalated_at is null and n.sent_at < now() - (t.escalate_after_hours || ' hours')::interval and l.manager_id is not null and l.manager_id <> n.user_id
+      limit 200
+    `) as unknown as { id: string, user_id: string, code: string, rendered_text: string | null, full_name: string, manager_id: string }[]
+    let n = 0
+    for (const r of rows) {
+      if (await enqueueNotification(tx, { tenantId, userId: r.manager_id, code: 'escalation', payload: { name: r.full_name, text: r.rendered_text ?? r.code }, dedupKey: `esc:${r.id}` })) n++
+      await tx.update(notifications).set({ escalatedAt: new Date() }).where(eq(notifications.id, r.id))
+    }
+    return n
+  })
+}
+
+/** Отчёты (docs/23 §8): доставляемость, реакция, SMS-сегменты, заблокированные боты. */
+export async function notificationsReport(ctx: { tenantId: string, actorId: string }, f: { from?: string, to?: string } = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const period = sql`${f.from ? sql`and n.created_at >= ${f.from}::date` : sql``} ${f.to ? sql`and n.created_at < (${f.to}::date + 1)` : sql``}`
+    const delivery = await tx.execute(sql`
+      select n.code, n.channel, count(*)::int as total, count(*) filter (where n.status in ('sent','read'))::int as sent, count(*) filter (where n.status = 'failed')::int as failed,
+             count(*) filter (where n.status = 'skipped')::int as skipped,
+             jsonb_object_agg(coalesce(n.skip_reason, '-'), 1) filter (where n.status = 'skipped') as skip_reasons,
+             count(*) filter (where n.reacted_at is not null)::int as reacted,
+             round(avg(extract(epoch from (n.reacted_at - n.sent_at)) / 60) filter (where n.reacted_at is not null))::int as avg_minutes_to_react
+      from notifications n where true ${period} group by 1, 2 order by 3 desc limit 200
+    `) as unknown as Record<string, unknown>[]
+    const sms = await tx.execute(sql`
+      select coalesce(l.name, '—') as location, count(*)::int as messages, sum(ceil(greatest(1, length(n.rendered_text)) / 70.0))::int as segments
+      from notifications n left join user_placements up on up.user_id = n.user_id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
+      where n.channel = 'sms' and n.status in ('sent','read') ${period} group by 1 order by 3 desc
+    `) as unknown as Record<string, unknown>[]
+    const blocked = await tx.execute(sql`select u.id, u.full_name, l.name as location from users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id where u.telegram_blocked and u.status = 'active' order by u.full_name limit 200`) as unknown as Record<string, unknown>[]
+    return { delivery, sms, blocked }
+  })
 }
 
 export async function listNotifications(ctx: { tenantId: string, actorId: string }, filter: { userId?: string, status?: string } = {}) {

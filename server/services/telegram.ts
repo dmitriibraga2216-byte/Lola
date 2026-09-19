@@ -15,27 +15,37 @@ import { logSecurity } from './securityLog'
 
 const API = (token = process.env.TELEGRAM_BOT_TOKEN) => `https://api.telegram.org/bot${token}`
 const botEnabled = () => !!process.env.TELEGRAM_BOT_TOKEN
+/** Подмена HTTP для тестов (как setOAuthHttp). */
+let http: typeof fetch = (...args) => fetch(...args)
+export function setTelegramHttp(f: typeof fetch | null) { http = f ?? ((...args) => fetch(...args)) }
 
 export interface SendResult { ok: boolean, blocked?: boolean, error?: string }
 
 /** sendMessage с inline-кнопками «Пройти». Без токена — заглушка в лог (dev/CI). */
-export async function sendTelegram(chatId: bigint, text: string, opts?: { enrollmentId?: string }): Promise<SendResult> {
+export interface SendOpts { enrollmentId?: string, url?: string | null, notificationId?: string, buttons?: { text: string, action: string }[], mandatory?: boolean }
+
+/** Кнопки под уведомлением (docs/23 §7): «Пройти» (автологин), «Відкласти на день» (до двух раз), «Не нагадувати» (только необязательные). */
+export function keyboardFor(chatId: bigint, opts: SendOpts): unknown {
+  const appUrl = process.env.APP_URL || 'http://localhost:3000'
+  const row: Record<string, unknown>[] = []
+  const url = opts.url ?? (opts.enrollmentId ? `/learn/${opts.enrollmentId}` : null)
+  if (url) row.push({ text: 'Пройти', url: `${appUrl}/tg/go?to=${encodeURIComponent(url)}&c=${chatId}${opts.notificationId ? `&n=${opts.notificationId}` : ''}` })
+  if (opts.notificationId) row.push({ text: 'Відкласти на день', callback_data: `snooze:${opts.notificationId}` })
+  if (opts.notificationId && !opts.mandatory) row.push({ text: 'Не нагадувати про це', callback_data: `mute:${opts.notificationId}` })
+  for (const b of opts.buttons ?? []) row.push(b.action.startsWith('http') ? { text: b.text, url: b.action } : { text: b.text, callback_data: b.action.slice(0, 60) })
+  return row.length ? { inline_keyboard: [row.slice(0, 3)] } : undefined
+}
+
+export async function sendTelegram(chatId: bigint, text: string, opts?: SendOpts): Promise<SendResult> {
   if (!botEnabled()) {
     console.log(`[telegram:stub] chat ${chatId}: ${text}`)
     return { ok: true }
   }
-  const appUrl = process.env.APP_URL || 'http://localhost:3000'
   const body: Record<string, unknown> = { chat_id: String(chatId), text, parse_mode: 'HTML' }
-  if (opts?.enrollmentId) {
-    body.reply_markup = {
-      inline_keyboard: [[
-        { text: 'Пройти', url: `${appUrl}/tg/go?e=${opts.enrollmentId}&c=${chatId}` },
-        { text: 'Відкласти на день', callback_data: `snooze:${opts.enrollmentId}` },
-      ]],
-    }
-  }
+  const kb = opts ? keyboardFor(chatId, opts) : undefined
+  if (kb) body.reply_markup = kb
   try {
-    const res = await fetch(`${API()}/sendMessage`, {
+    const res = await http(`${API()}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -44,6 +54,8 @@ export async function sendTelegram(chatId: bigint, text: string, opts?: { enroll
     const json = await res.json() as { ok: boolean, error_code?: number, description?: string }
     if (json.ok) return { ok: true }
     if (json.error_code === 403) return { ok: false, blocked: true, error: json.description }
+    if (json.error_code === 400 && /chat not found/i.test(json.description ?? '')) return { ok: false, blocked: true, error: json.description } // §7: сброс привязки
+    if (json.error_code === 429) return { ok: false, error: `rate_limited retry_after=${(json as { parameters?: { retry_after?: number } }).parameters?.retry_after ?? 5}` }
     return { ok: false, error: json.description ?? `HTTP ${res.status}` }
   }
   catch (err) {
@@ -81,7 +93,7 @@ export async function linkChat(token: string, chatId: bigint): Promise<{ ok: boo
 
   const fullName = await withTenant(row.tenant_id, row.user_id, async (tx) => {
     await tx.update(telegramTokens).set({ consumedAt: new Date() }).where(eq(telegramTokens.id, row.token_id))
-    const [u] = await tx.update(users).set({ telegramChatId: chatId }).where(eq(users.id, row.user_id)).returning({ fullName: users.fullName })
+    const [u] = await tx.update(users).set({ telegramChatId: chatId, telegramBlocked: false }).where(eq(users.id, row.user_id)).returning({ fullName: users.fullName })
     await enqueueNotification(tx, { tenantId: row.tenant_id, userId: row.user_id, code: 'telegram_linked', payload: {}, urgent: true })
     return u!.fullName
   })
@@ -116,9 +128,39 @@ export async function consumeLoginToken(token: string, meta: { userAgent?: strin
   return { sessionToken }
 }
 
-/** Обработка апдейта от Telegram (webhook). */
+const HELP = 'Команди: /menu — мої завдання, /stop — вимкнути необовʼязкові нагадування, /help — довідка. Навчання проходиться у вебі: натискайте «Пройти» під повідомленням.'
+
+/** Обработка апдейта от Telegram (webhook): /start, /menu, /help, /stop, кнопки (docs/23 §7). */
 export async function handleUpdate(update: Record<string, unknown>): Promise<void> {
   const msg = update.message as { chat?: { id: number }, text?: string } | undefined
+  if (msg?.chat?.id && msg.text && !msg.text.startsWith('/start')) {
+    const chatId = BigInt(msg.chat.id)
+    const cmd = msg.text.trim().split(/\s+/)[0]!.toLowerCase()
+    const who = (await db.execute(sql`select * from telegram_chat_lookup(${chatId})`) as unknown as { tenant_id: string, user_id: string }[])[0]
+    if (cmd === '/help') { await sendTelegram(chatId, HELP); return }
+    if (!who) { await sendTelegram(chatId, 'Цей чат не привʼязано. Відкрийте Lola → Профіль → «Підключити Telegram».'); return }
+    if (cmd === '/menu') {
+      const rows = await withTenant(who.tenant_id, who.user_id, tx => tx.execute(sql`
+        select e.id, coalesce(c.title, '') as title, e.due_at, e.progress_pct from enrollments e left join courses c on c.id = e.subject_id
+        where e.user_id = ${who.user_id}::uuid and e.status in ('not_started','in_progress','expired') order by e.due_at nulls last limit 5`)) as unknown as { id: string, title: string, due_at: string | null, progress_pct: number }[]
+      const appUrl = process.env.APP_URL || 'http://localhost:3000'
+      const text = rows.length ? `Мої завдання:\n${rows.map((r, i) => `${i + 1}. ${r.title} — ${r.progress_pct}%${r.due_at ? ` (до ${String(r.due_at).slice(0, 10)})` : ''}`).join('\n')}` : 'Активних завдань немає 🎉'
+      await sendTelegram(chatId, text, rows[0] ? { url: `/learn/${rows[0].id}` } : undefined)
+      void appUrl
+      return
+    }
+    if (cmd === '/stop') {
+      const { listPrefs, setPref } = await import('./notifications')
+      const ctx = { tenantId: who.tenant_id, actorId: who.user_id }
+      const prefs = await listPrefs(ctx)
+      let n = 0
+      for (const p of prefs) if (!p.isMandatory && p.enabled) { await setPref(ctx, { code: p.code, enabled: false }); n++ }
+      await sendTelegram(chatId, `Вимкнено необовʼязкових нагадувань: ${n}. Обовʼязкові (дедлайни, атестації) залишаться. Увімкнути назад можна в Lola → Профіль → Сповіщення.`)
+      return
+    }
+    await sendTelegram(chatId, HELP)
+    return
+  }
   if (msg?.chat?.id && msg.text?.startsWith('/start')) {
     const token = msg.text.split(' ')[1]
     const chatId = BigInt(msg.chat.id)
@@ -131,11 +173,30 @@ export async function handleUpdate(update: Record<string, unknown>): Promise<voi
     return
   }
   const cb = update.callback_query as { id: string, data?: string, message?: { chat: { id: number } } } | undefined
-  if (cb?.data?.startsWith('snooze:') && botEnabled()) {
-    await fetch(`${API()}/answerCallbackQuery`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ callback_query_id: cb.id, text: 'Нагадаю завтра' }),
-    }).catch(() => {})
+  if (cb?.data && cb.message?.chat?.id) {
+    const answer = async (text: string) => { if (botEnabled()) await fetch(`${API()}/answerCallbackQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: cb.id, text }) }).catch(() => {}) }
+    const chatId = BigInt(cb.message.chat.id)
+    const who = (await db.execute(sql`select * from telegram_chat_lookup(${chatId})`) as unknown as { tenant_id: string, user_id: string }[])[0]
+    if (!who) { await answer('Чат не привʼязано'); return }
+    const [kind, id] = cb.data.split(':')
+    const { snooze, mute } = await import('./notificationActions')
+    if (kind === 'snooze' && id) { const r = await snooze(who.tenant_id, who.user_id, id); await answer(r === 'ok' ? 'Нагадаю завтра' : r === 'limit' ? 'Відкладати можна не більше двох разів' : 'Не знайдено') }
+    else if (kind === 'mute' && id) { const r = await mute(who.tenant_id, who.user_id, id); await answer(r === 'ok' ? 'Більше не нагадуватиму про це' : r === 'mandatory' ? 'Це сповіщення не можна вимкнути' : 'Не знайдено') }
+    else await answer('')
   }
 }
+
+/** telegram.health (docs/23 §10): раз в час getMe; результат — в метрики и лог. */
+let lastHealth: { ok: boolean, at: Date, error?: string } | null = null
+export async function telegramHealth(): Promise<{ ok: boolean, error?: string } | null> {
+  if (!botEnabled()) return null
+  try {
+    const res = await fetch(`${API()}/getMe`, { signal: AbortSignal.timeout(8_000) })
+    const json = await res.json() as { ok: boolean, description?: string }
+    lastHealth = { ok: json.ok, at: new Date(), error: json.ok ? undefined : json.description }
+  }
+  catch (err) { lastHealth = { ok: false, at: new Date(), error: String(err) } }
+  if (!lastHealth.ok) console.error('[telegram.health]', lastHealth.error)
+  return lastHealth
+}
+export const telegramHealthState = () => lastHealth

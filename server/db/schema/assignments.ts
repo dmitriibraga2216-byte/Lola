@@ -94,8 +94,38 @@ export const notificationTemplates = pgTable('notification_templates', {
   subject: text('subject'),
   body: text('body').notNull(), // шаблон с {{переменными}}
   isEnabled: boolean('is_enabled').notNull().default(true),
+  // docs/23 §3.1
+  buttons: jsonb('buttons').notNull().default('[]'), // [{text, action}] для Telegram
+  isMandatory: boolean('is_mandatory').notNull().default(false), // человек не может отключить
+  throttle: jsonb('throttle'), // {maxPerDay, perSubject}
+  escalateAfterHours: integer('escalate_after_hours'), // §6.6: без реакции → руководителю
+  ignoreQuietHours: boolean('ignore_quiet_hours').notNull().default(false),
+  version: integer('version').notNull().default(1),
 }, t => [
   unique().on(t.tenantId, t.code, t.channel, t.locale),
+])
+
+/** История версий шаблона (docs/23 §3.1 version): отправленное ссылается на свою версию. */
+export const notificationTemplateVersions = pgTable('notification_template_versions', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  templateId: uuid('template_id').notNull().references(() => notificationTemplates.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  subject: text('subject'),
+  body: text('body').notNull(),
+  authorId: uuid('author_id').references(() => users.id),
+})
+
+/** Настройки человека (docs/23 §3.3): по каждому коду — включено и канал; обязательные не отключаются. */
+export const userNotificationPrefs = pgTable('user_notification_prefs', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  channel: text('channel'), // null = по умолчанию
+}, t => [
+  unique().on(t.tenantId, t.userId, t.code),
 ])
 
 export const notifications = pgTable('notifications', {
@@ -107,10 +137,20 @@ export const notifications = pgTable('notifications', {
   payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
   renderedText: text('rendered_text'),
   dedupKey: text('dedup_key'), // одно due_soon на курс в сутки и т.п.
-  status: text('status').notNull().default('queued'), // queued | sent | failed | skipped
+  status: text('status').notNull().default('queued'), // queued | sending | sent | failed | skipped | read
   error: text('error'),
   scheduledFor: timestamp('scheduled_for', { withTimezone: true }).notNull().defaultNow(),
   sentAt: timestamp('sent_at', { withTimezone: true }),
+  // docs/23 §3.2
+  skipReason: text('skip_reason'), // quiet_hours | unsubscribed | duplicate | no_channel | blocked | throttled
+  attempt: integer('attempt').notNull().default(0),
+  readAt: timestamp('read_at', { withTimezone: true }), // колокольчик
+  reactedAt: timestamp('reacted_at', { withTimezone: true }), // открыл ссылку
+  refType: text('ref_type'),
+  refId: uuid('ref_id'),
+  templateVersion: integer('template_version'),
+  escalatedAt: timestamp('escalated_at', { withTimezone: true }),
+  urgent: boolean('urgent').notNull().default(false),
 }, t => [
   index().on(t.tenantId, t.status, t.scheduledFor),
   index().on(t.tenantId, t.userId, t.createdAt.desc()),

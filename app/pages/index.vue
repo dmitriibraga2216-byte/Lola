@@ -20,6 +20,7 @@ async function linkTelegram() {
       <div class="links-row">
         <NuxtLink to="/learn/certificates" class="small-link">{{ t('learner.certificates') }}</NuxtLink>
         <NuxtLink to="/learn/surveys" class="small-link">{{ t('survey.title') }}</NuxtLink>
+        <NuxtLink to="/learn/notifications" class="small-link">{{ t('notif.title') }}</NuxtLink>
       </div>
       <button class="admin-link ghost tg" @click="linkTelegram">{{ t('home.linkTelegram') }}</button>
       <p v-if="tgLink" class="tg-hint">

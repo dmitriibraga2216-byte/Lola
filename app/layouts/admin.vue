@@ -41,6 +41,7 @@ const nav = computed(() => [
   { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },
   { to: '/admin/reports/people', label: t('admin.nav.peopleReport'), show: hasScope('report.team') },
   { to: '/admin/journals', label: t('admin.nav.journals'), show: hasScope('audit.view') },
+  { to: '/admin/settings/notifications', label: t('admin.nav.notifications'), show: hasScope('settings.notifications') },
   { to: '/admin/settings/integrations', label: t('admin.nav.integrations'), show: hasScope('settings.integrations') },
 ].filter(i => i.show))
 </script>
@@ -48,7 +49,7 @@ const nav = computed(() => [
 <template>
   <div class="admin">
     <aside class="side">
-      <NuxtLink to="/" class="brand">{{ t('app.name') }}</NuxtLink>
+      <div class="brand-row"><NuxtLink to="/" class="brand">{{ t('app.name') }}</NuxtLink><NotificationBell /></div>
       <nav>
         <NuxtLink v-for="item in nav" :key="item.to" :to="item.to" class="nav-item">
           {{ item.label }}
@@ -82,6 +83,8 @@ const nav = computed(() => [
   padding: var(--space-5) var(--space-4);
   border-right: 1px solid var(--color-bg-line);
 }
+
+.brand-row { display: flex; align-items: center; justify-content: space-between; }
 
 .brand {
   font-weight: 900;

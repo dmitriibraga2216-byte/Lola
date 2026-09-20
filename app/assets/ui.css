@@ -5,7 +5,7 @@
 
 /* Кнопки: солнце — единственное главное действие на экране, остальное — ghost */
 .btn { font: inherit; font-weight: 800; border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: var(--space-2); line-height: 1.2; white-space: nowrap; }
-.btn.primary { background: var(--color-sun); color: var(--color-ink); border: 1px solid var(--color-sun); }
+.btn.primary { background: var(--color-accent); color: var(--color-accent-ink); border: 1px solid var(--color-accent); }
 .btn.primary:disabled { opacity: 0.5; cursor: default; }
 .btn.ghost { background: var(--color-bg-soft); color: var(--color-ink); border: 1px solid var(--color-bg-line); }
 .btn.ghost:hover { border-color: var(--color-ink); }

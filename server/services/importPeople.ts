@@ -7,6 +7,7 @@ import {
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { readSettings } from './settings'
 import { applyPositionRoles } from './positionRoleMap'
 import { logOrgConflict } from './journals'
 import { enqueueNotification } from './notifications'
@@ -441,6 +442,8 @@ export async function applyImport(ctx: Ctx, jobId: string) {
       const positionByName = new Map(positionRows2.map(r => [r.name.toLowerCase(), r.id]))
       const locationByName = new Map(locationRows.map(r => [r.name.toLowerCase(), r.id]))
       const roleByKey = new Map(roleRows.flatMap(r => [[r.code.toLowerCase(), r], [r.name.toLowerCase(), r]] as [string, typeof r][]))
+      // Политика «Роль за замовчуванням» (docs/24 §3.4.1 «Ролі»): роль для новых людей без колонки role
+      const defaultRoleCode = (await readSettings(tx, ctx.tenantId)).policies.roles.defaultRoleCode
 
       // Проставить уровни позициям, где заданы
       for (const r of batch) {
@@ -534,7 +537,7 @@ export async function applyImport(ctx: Ctx, jobId: string) {
           }
         }
 
-        const role = row.role ? roleByKey.get(row.role.toLowerCase()) : roleByKey.get('employee')
+        const role = row.role ? roleByKey.get(row.role.toLowerCase()) : (roleByKey.get(defaultRoleCode) ?? roleByKey.get('employee'))
         if (role) {
           await tx.insert(userRoles).values({
             tenantId: ctx.tenantId,

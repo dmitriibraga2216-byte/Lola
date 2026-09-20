@@ -159,7 +159,7 @@
 | CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа) |
 | CRUD | `/complex-tests/:id/items` | состав: тесты, сгруппированные по темам |
 | CRUD | `/checklists`, `/assessments` | анкеты; параметры замораживаются после первого заполнения |
-| CRUD | `/criteria-groups`, `/criteria`, `/scales` | словарь критериев и шкал (`24` Г-24.4) |
+| CRUD | `/criteria-groups`, `/criteria`, `/scales` | словарь критериев и шкал (`24` Г-24.4): `/scales?kind=range\|levels`, `PUT /scales/:id` пересобирает уровни целиком, диапазоны подряд 0–100 |
 
 ## 4.9 Назначения
 
@@ -294,16 +294,20 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET/PATCH | `/settings/tenant` | бренд, языки, флаги модулей (`24` Г-24.2) |
+| GET/PATCH | `/settings/tenant` | простір: `name`, `slug` (409 `slug_taken` / `slug_locked` — после первого входа сотрудника не меняется, `29` Б.12), `locale`, `timezone`, `accent` только из палитры (`29` Б.14), `space`, `defaults`, `quietHours`; `GET` отдаёт ещё `slugLocked`, `plan`, `modules` |
 | GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
-| CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1) |
+| CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1): `GET` (people.view, со счётчиками и группами скоупов), `POST`, `PATCH /:id`, `DELETE /:id` (settings.tenant); 409 `code_taken` · `admin_role` · `role_in_use` · `last_settings_role`, 403 `scope_not_owned` |
 | GET/PUT | `/settings/position-role-map` | правило «должность → роль»: `{items: [{positionId, roleCode, scopeType, scopeId?}]}` целиком; применяется при следующей смене должности или импорте |
 | CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` |
 | GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
 | GET/PUT | `/settings/email-layout` | шапка и подвал письма |
 | CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены |
-| CRUD | `/settings/translations` | переопределение строк интерфейса |
-| GET | `/settings/usage` | потребление: активные, диск, дата последнего сбора (`24` §4.4.1) |
+| CRUD | `/settings/translations` | переопределение строк интерфейса: `GET ?locale&q&changedOnly&page`, `PUT {locale,key,value}`, `DELETE ?locale&key?` (без key — весь набор), `GET /export?locale`, `POST /import {locale, items}`; клиенту — `GET /translations/:locale` (любая сессия) поверх словаря |
+| GET | `/settings/usage` | потребление: активные, диск, SMS, дата последнего сбора, тариф и лимиты (`24` §4.4.1) |
+| GET/PATCH | `/settings/modules` | переключатели модулей; выключенный модуль → 403 `module.disabled` на его маршрутах (`24` §3.2) |
+| CRUD | `/course-categories`, `POST /course-categories/reorder` | «Категорії каталогу навчання» с порядком (`24` §3.7.1); категория с курсами — 409 `in_use` |
+| GET | `/certificates/summary` | сводка сертификатов по курсам для экрана Certificates |
+| POST | `/auth/impersonation/stop` | выход из режима «от имени» с плашки → `impersonation.ended` |
 | GET | `/audit` | журнал изменений |
 | GET | `/health`, `/ready`, `/metrics` | служебное |
 

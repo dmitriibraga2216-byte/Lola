@@ -26,6 +26,10 @@
   --color-teal-soft: #dcf3ef;
   --color-coral-soft: #ffe1d9;
 
+  /* Акцент простору (docs/24 §3.1, docs/29 Б.14): один из токенов палитры, задаётся тенантом; по умолчанию — солнце */
+  --color-accent: var(--color-sun);
+  --color-accent-ink: var(--color-ink);
+
   /* Шрифт: заголовки 900 */
   --font-family: 'Nunito', 'Trebuchet MS', sans-serif;
   --font-size-body-s: 0.8125rem;

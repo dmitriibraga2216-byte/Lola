@@ -49,6 +49,11 @@ export default defineNitroPlugin(async () => {
         if (s.sent || s.failed) console.log(`[notification.dispatch] ${tenantId}:`, s)
       }
     })
+    await work('usage.collect', async () => {
+      const { collectUsageDue } = await import('../services/usage')
+      const n = await collectUsageDue()
+      if (n) console.log(`[usage.collect] собрано: ${n}`)
+    })
     await work('due.scan', async () => {
       const { goalDueScan } = await import('../services/development')
       const { assessmentScan } = await import('../services/assessment')

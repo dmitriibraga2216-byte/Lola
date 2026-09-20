@@ -59,6 +59,8 @@ export interface AuthContext {
   tenantId: string
   userId: string
   impersonatedBy: string | null
+  /** Оператор платформы, вошедший «от имени» (docs/24 §4.5): сессия 60 минут, запреты в middleware 03.guards */
+  impersonatorAdminId?: string | null
   /** Активная роль сессии (docs/01 §1.9.2); null — у старых сессий и API-токенов, тогда берётся роль по умолчанию */
   activeRoleId: string | null
 }
@@ -73,12 +75,14 @@ export async function validateSession(token: string): Promise<AuthContext | null
     tenantId: row.tenant_id,
     userId: row.user_id,
     impersonatedBy: row.impersonated_by,
+    impersonatorAdminId: row.impersonator_admin_id ?? null,
     activeRoleId: row.active_role_id,
   }
 }
 
 /** Скользящее продление и last_seen_at — не чаще раза в час. */
 export async function touchSession(auth: AuthContext): Promise<void> {
+  if (auth.impersonatorAdminId) return // сессия «от имени» живёт ровно 60 минут и не продлевается (docs/24 §4.5, §11)
   await withTenant(auth.tenantId, auth.userId, async (tx) => {
     const [row] = await tx.select({ updatedAt: sessions.updatedAt })
       .from(sessions).where(eq(sessions.id, auth.sessionId))

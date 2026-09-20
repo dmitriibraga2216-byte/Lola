@@ -7,8 +7,6 @@ import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
 import { SYSTEM_ROLES } from '../../shared/domain/roles'
 import { ensureTenantDefaults } from '../db/tenantDefaults'
-import { createSession } from './session'
-import { logSecurity } from './securityLog'
 
 /**
  * Панель оператора платформы (docs/03 §3.12, docs/01 §1.5 impersonation).
@@ -174,19 +172,13 @@ export async function platformMetrics() {
 }
 
 /**
- * Impersonation (docs/01 §1.5): только с причиной, сессия помечена
- * impersonated_by, фиксируется в security_log и audit_log.
+ * Impersonation (docs/24 §4.5, docs/29 Б.13): логика в `services/impersonation` — сессия 60 минут,
+ * `impersonation.started` с обеими сторонами, запреты в middleware, уведомление администраторам тенанта.
  */
-export async function impersonate(tenantId: string, userId: string, reason: string, actor: PlatformAuth): Promise<{ token: string } | null> {
-  const db = platformDb()
-  const [u] = await db.select({ id: schema.users.id, status: schema.users.status }).from(schema.users).where(eq(schema.users.id, userId))
-  if (!u || u.status !== 'active') return null
-  // impersonated_by ссылается на users — храним маркер через отдельного системного пользователя нельзя,
-  // поэтому пишем NULL в FK и фиксируем оператора в журналах; сессия помечается через meta в security_log
-  const { token, sessionId } = await createSession({ tenantId, userId, userAgent: `platform:${actor.email}`, ip: null })
-  await db.insert(schema.auditLog).values({ tenantId, actorId: null, action: 'user.impersonate', entity: 'user', entityId: userId, after: { by: actor.email, reason, sessionId } })
-  await logSecurity({ tenantId, userId, event: 'impersonation.start', meta: { by: actor.email, reason, sessionId } })
-  return { token }
+export async function impersonate(tenantId: string, userId: string, reason: string, actor: PlatformAuth): Promise<{ token: string, expiresAt: Date } | null> {
+  const { startImpersonation } = await import('./impersonation')
+  const r = await startImpersonation(tenantId, userId, reason, actor)
+  return r.ok ? { token: r.token, expiresAt: r.expiresAt } : null
 }
 
 export async function tenantUsers(tenantId: string) {

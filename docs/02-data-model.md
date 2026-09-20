@@ -116,6 +116,8 @@ create table roles (
   name text not null,
   scopes text[] not null,                     -- см. 01-roles.md §1.3
   is_system boolean not null default false,
+  description text,                           -- редактор ролей (`24` §3.5); Spec 24
+  default_scope_type text not null default 'location', -- «область по умолчанию» роли: tenant | org_unit | location
   unique (tenant_id, code)
 );
 
@@ -140,6 +142,8 @@ create table sessions (
   user_agent text,
   ip inet,
   impersonated_by uuid references users(id),
+  impersonator_admin_id uuid references platform_admins(id), -- вход «от имени» оператором (`24` §4.5): сессия 60 минут без продления, запреты `29` Б.13
+  impersonation_reason text,                  -- причина 10–500 знаков, видна клиенту в журнале
   active_role_id uuid references roles(id),   -- активная роль сессии (`01` §1.9.2): права по ней, переключение без выхода
   expires_at timestamptz not null,
   revoked_at timestamptz
@@ -1014,6 +1018,7 @@ scale_levels(scale_id, label, value numeric,
        characteristic text,                     -- «Характеристика оцінки»
        show_in_reports boolean,                 -- «Відображати у звітах»
        sort_order int)
+-- Spec 24: обе таблицы созданы (0035, RLS, scale_levels.tenant_id ради политики); rating_scales анкет/чек-листов пока живёт отдельно — долг docs/28.
 badges / user_badges / points_ledger            -- см. §2.10
 leaderboard_snapshots(scope_type, scope_id, period, rows jsonb)
 ```
@@ -1036,7 +1041,10 @@ webhook_endpoints(url, secret_encrypted, events text[], is_active boolean)
 webhook_deliveries(endpoint_id, event, payload jsonb, status_code int, attempt int,
           response_body text, delivered_at)
 api_tokens(name, token_hash, scopes text[], last_used_at, expires_at, created_by)
-translations(locale, key, value, updated_by)    -- переопределения строк тенантом
+translations(tenant_id, locale, key, value, updated_by, unique (tenant_id, locale, key)) -- переопределения строк тенантом поверх словаря (`24` §3.6); Spec 24
+tenant_usage(tenant_id, collected_at,           -- потребление раз в сутки, строка на сбор (`24` §4.4.1, задача usage.collect); Spec 24
+       active_users int, blocked_users int, archived_users int, storage_bytes bigint,
+       sms_month int, courses_count int, assignments_count int, attempts_month int)
 saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
           schedule jsonb, owner_id)
 ```

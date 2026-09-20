@@ -6,6 +6,7 @@ import { withTenant } from '../utils/withTenant'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { sendTelegram } from './telegram'
+import { readSettings } from './settings'
 
 /**
  * Уведомления (docs/03 §3.10, docs/06 §6.4): ни одна задача не шлёт напрямую —
@@ -118,6 +119,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   escalation: 'Без реакції: {{name}} — «{{text}}»',
   security_suspicious_login: 'Вхід з нового пристрою: {{device}}. Якщо це не ви — закрийте сесії в профілі',
   security_alert: 'Журнал безпеки · {{level}}: {{event}}{{#person}} — {{person}}{{/person}}, {{when}}{{#ip}}, IP {{ip}}{{/ip}}. Деталі: {{link}}',
+  // docs/24 §8: вход «от имени» и смена критичных настроек
+  impersonation_started: 'Оператор платформи {{operator}} увійшов як {{subject}}. Причина: {{reason}}',
+  settings_critical_changed: 'Змінено налаштування безпеки простору: {{group}}',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */
@@ -231,6 +235,11 @@ export function refUrl(n: { refType: string | null, refId: string | null, payloa
 
 const RETRY_MINUTES = [1, 5, 25, 60, 180] // docs/23 §6.5
 
+export function isVirtualEmail(email: string, domains: string[]): boolean {
+  const d = email.split('@')[1]?.toLowerCase() ?? ''
+  return domains.some(v => d === v.toLowerCase() || d.endsWith(`.${v.toLowerCase()}`))
+}
+
 /**
  * notification.dispatch (docs/23 §6): выбор канала Telegram → SMS (обязательные) → in-app;
  * настройки человека, троттлинг, ретраи с экспонентой, 403 → telegram_blocked.
@@ -238,6 +247,7 @@ const RETRY_MINUTES = [1, 5, 25, 60, 180] // docs/23 §6.5
 export async function dispatchNotifications(tenantId: string, limit = 100): Promise<{ sent: number, skipped: number, failed: number }> {
   const stats = { sent: 0, skipped: 0, failed: 0 }
   await withTenant(tenantId, null, async (tx) => {
+    const virtualDomains = (await readSettings(tx, tenantId)).policies.notifications.virtualEmailDomains
     const due = await tx.select({
       n: notifications,
       user: { telegramChatId: users.telegramChatId, telegramBlocked: users.telegramBlocked, locale: users.locale, fullName: users.fullName, phone: users.phone, email: users.email },
@@ -297,6 +307,8 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       let channel = n.channel
       if (channel === 'telegram' && (!user.telegramChatId || user.telegramBlocked)) channel = tpl.isMandatory && user.phone ? 'sms' : 'inapp'
       if (channel === 'email' && !user.email) channel = 'inapp'
+      // «Домени віртуальної пошти» (docs/24 §3.4.1): на технические адреса вида ivan@local система молча не шлёт
+      if (channel === 'email' && user.email && isVirtualEmail(user.email, virtualDomains)) channel = 'inapp'
       if (channel === 'inapp') { await skip(n.id, 'no_channel', text); continue } // видно в колокольчике
 
       if (channel === 'telegram') {

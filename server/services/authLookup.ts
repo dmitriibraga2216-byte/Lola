@@ -30,6 +30,7 @@ export interface SessionRow {
   revoked_at: string | null
   impersonated_by: string | null
   active_role_id: string | null
+  impersonator_admin_id: string | null
 }
 
 export async function sessionByTokenHash(tokenHash: string): Promise<SessionRow | null> {

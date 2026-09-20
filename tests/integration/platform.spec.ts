@@ -132,9 +132,15 @@ describe('панель оператора (docs/03 §3.12)', () => {
     expect(r).not.toBeNull()
     const auth = await validateSession(r!.token)
     expect(auth!.userId).toBe(adminId)
-    const [sec] = await admin`select meta from security_log where tenant_id = ${tenantId} and event = 'impersonation.start' order by created_at desc limit 1`
-    expect((sec!.meta as { by: string, reason: string }).by).toBe('ops-test@lola.local')
-    expect((sec!.meta as { reason: string }).reason).toContain('скарги')
+    expect(auth!.impersonatorAdminId).toBeTruthy()
+    // docs/24 §4.5: сессия 60 минут
+    expect(r!.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(60 * 60_000)
+    // docs/16 §15: код события impersonation.started, обе стороны в meta
+    const [sec] = await admin`select meta from security_log where tenant_id = ${tenantId} and event = 'impersonation.started' order by created_at desc limit 1`
+    const meta = sec!.meta as { operator: { email: string }, subject: { id: string }, reason: string }
+    expect(meta.operator.email).toBe('ops-test@lola.local')
+    expect(meta.subject.id).toBe(adminId)
+    expect(meta.reason).toContain('скарги')
     const [aud] = await admin`select id from audit_log where tenant_id = ${tenantId} and action = 'user.impersonate' order by created_at desc limit 1`
     expect(aud).toBeDefined()
   })

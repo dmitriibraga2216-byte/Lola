@@ -67,6 +67,8 @@ export const roles = pgTable('roles', {
   name: text('name').notNull(),
   scopes: text('scopes').array().notNull(), // см. docs/01-roles.md §1.3
   isSystem: boolean('is_system').notNull().default(false),
+  description: text('description'), // редактор ролей (docs/24 §3.5)
+  defaultScopeType: text('default_scope_type').notNull().default('location'), // «область по умолчанию»: tenant | org_unit | location
 }, t => [
   unique().on(t.tenantId, t.code),
 ])
@@ -110,6 +112,8 @@ export const sessions = pgTable('sessions', {
   userAgent: text('user_agent'),
   ip: inet('ip'),
   impersonatedBy: uuid('impersonated_by').references(() => users.id),
+  impersonatorAdminId: uuid('impersonator_admin_id'), // оператор платформы, вошедший «от имени» (docs/24 §4.5): FK на platform_admins в миграции; сессия 60 минут без продления
+  impersonationReason: text('impersonation_reason'),
   activeRoleId: uuid('active_role_id').references(() => roles.id, { onDelete: 'set null' }), // активная роль сессии (docs/01 §1.9.2): права — по ней, переключение без выхода
   requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

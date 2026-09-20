@@ -4,6 +4,10 @@ import { db } from '../../../db/client'
 import { withTenant } from '../../../utils/withTenant'
 import type { AuthContext } from '../../../services/session'
 import { getAccess } from '../../../services/access'
+import { accentOf } from '../../../services/settings'
+import { tenantModules } from '../../../services/modules'
+import { impersonationInfo } from '../../../services/impersonation'
+import { tenantSettingsSchema } from '../../../../shared/schemas/settings'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
 export default defineEventHandler(async (event) => {
@@ -41,17 +45,24 @@ export default defineEventHandler(async (event) => {
     name: tenants.name,
     locale: tenants.locale,
     timezone: tenants.timezone,
+    branding: tenants.branding,
+    settings: tenants.settings,
   }).from(tenants).where(eq(tenants.id, auth.tenantId))
+  // Модули и акцент нужны клиенту для меню и CSS-переменной (docs/24 §3.1, §3.2); политики наружу не отдаём
+  const modules = await tenantModules(auth.tenantId)
+  const space = tenantSettingsSchema.parse(tenant?.settings ?? {}).space
 
   // Скоупы — по активной роли (docs/01 §1.9.2); roles — все действующие, для переключателя
   const scopes = [...new Set(access.grants.flatMap(g => g.scopes))].sort()
 
   return apiData({
     user: { ...profile, roles: access.roles },
-    tenant,
+    tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, localesEnabled: space.localesEnabled } : null,
     scopes,
     activeRole: access.activeRole,
     roles: access.roles,
-    impersonated: auth.impersonatedBy !== null,
+    impersonated: auth.impersonatedBy !== null || !!auth.impersonatorAdminId,
+    // Плашка «Ви увійшли як …» (docs/24 §4.5): оператор, причина, до когда
+    impersonation: await impersonationInfo(auth),
   })
 })

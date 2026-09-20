@@ -5,10 +5,20 @@
  * страница сама рисует шапку через <PageHeader>.
  */
 const { t } = useI18n()
-const { me, logout, hasScope, initials, switchRole } = useAuth()
+const { me, logout, hasScope, moduleOn, initials, switchRole } = useAuth()
 const route = useRoute()
 
 interface Item { to: string, label: string, show: boolean }
+
+/** Страница → модуль (docs/24 §3.2): выключенный модуль исчезает из меню; список — как в server/services/modules MODULE_PAGES. */
+const PAGE_MODULES: [string, string][] = [
+  ['/admin/workshops', 'workshops'], ['/admin/review-workshops', 'workshops'], ['/admin/programs', 'programs'], ['/admin/trajectories', 'trajectories'], ['/admin/rules', 'trajectories'],
+  ['/admin/meetups/complex', 'complexTests'], ['/admin/meetups', 'meetups'], ['/admin/development', 'development'], ['/admin/assessment', 'assessment'], ['/admin/checklists', 'assessment'],
+  ['/admin/knowledge', 'knowledge'], ['/admin/news', 'news'], ['/admin/notices', 'notices'], ['/admin/simple-notices', 'notices'], ['/admin/events', 'events'],
+]
+function moduleOfPage(to: string): string | null {
+  return [...PAGE_MODULES].sort((a, b) => b[0].length - a[0].length).find(([p]) => to === p || to.startsWith(`${p}/`))?.[1] ?? null
+}
 interface Section { key: string, label: string, icon: string, items: Item[] }
 
 const sections = computed<Section[]>(() => [
@@ -75,8 +85,17 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/notifications', label: t('admin.nav.notifications'), show: hasScope('settings.notifications') },
     { to: '/admin/settings/integrations', label: t('admin.nav.integrations'), show: hasScope('settings.integrations') },
     { to: '/admin/settings/guest-page', label: t('admin.nav.guestPage'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/policies', label: t('admin.nav.policies'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/roles', label: t('admin.nav.roles'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/scales', label: t('admin.nav.scales'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('settings.tenant') },
+    { to: '/admin/certificates', label: t('admin.nav.certificates'), show: hasScope('report.team') },
   ] },
-].map(s => ({ ...s, items: s.items.filter(i => i.show) })).filter(s => s.items.length > 0))
+].map(s => ({ ...s, items: s.items.filter((i) => {
+  const m = moduleOfPage(i.to)
+  return i.show && (!m || moduleOn(m))
+}) })).filter(s => s.items.length > 0))
 
 /** Активный раздел — тот, чей пункт лучше всего совпадает с текущим путём (самый длинный префикс). */
 const activeKey = computed(() => {

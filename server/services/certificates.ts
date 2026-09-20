@@ -122,6 +122,27 @@ export async function listCertificates(ctx: Ctx) {
   })
 }
 
+/**
+ * Экран «Сертифікати» (мокап Certificates, docs/24 §3.7 «шаблоны сертификатов — точки входа»): строка на курс —
+ * выдано, действующих, отозвано, срок действия (из выданных), последняя выдача. Шаблон один (PDF), своих шаблонов ТЗ не задаёт.
+ */
+export async function certificatesSummary(ctx: Ctx) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.execute(sql`
+      select c.course_id, co.title, co.status as course_status,
+        count(*)::int as issued,
+        count(*) filter (where c.revoked_at is null and (c.valid_until is null or c.valid_until > now()))::int as active,
+        count(*) filter (where c.revoked_at is not null)::int as revoked,
+        max(c.issued_at) as last_issued_at,
+        mode() within group (order by case when c.valid_until is null then null else round(extract(epoch from (c.valid_until - c.issued_at)) / 86400 / 30) end) as validity_months
+      from certificates c left join courses co on co.id = c.course_id
+      group by c.course_id, co.title, co.status
+      order by max(c.issued_at) desc
+    `) as unknown as { course_id: string | null, title: string | null, course_status: string | null, issued: number, active: number, revoked: number, last_issued_at: string, validity_months: number | null }[]
+    return rows.map(r => ({ courseId: r.course_id, title: r.title, published: r.course_status === 'published', format: 'pdf', issued: r.issued, active: r.active, revoked: r.revoked, lastIssuedAt: new Date(r.last_issued_at).toISOString(), validityMonths: r.validity_months == null ? null : Number(r.validity_months) }))
+  })
+}
+
 export async function revokeCertificate(ctx: Ctx, id: string, reason: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [cert] = await tx.update(certificates).set({

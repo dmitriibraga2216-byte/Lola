@@ -26,6 +26,7 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('webhook.deliver', { retryLimit: 3, expireInSeconds: 300 })
       await b.createQueue('report.export', { retryLimit: 2, expireInSeconds: 600 }) // docs/22 §10
       await b.createQueue('trajectory.timer', { retryLimit: 5, retryBackoff: true, expireInSeconds: 300 }) // docs/17 §14.3: затримка / закриття доступу
+      await b.createQueue('usage.collect', { retryLimit: 2, expireInSeconds: 600 }) // docs/24 §4.4.1: потребление раз в сутки
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -34,6 +35,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('workshop.sla_scan', '*/5 * * * *', {}, { singletonKey: 'workshop.sla_scan' })
       await b.schedule('meetup.scan', '*/5 * * * *', {}, { singletonKey: 'meetup.scan' })
       await b.schedule('webhook.deliver', '* * * * *', {}, { singletonKey: 'webhook.deliver' })
+      // Раз в час: собирает тех, у кого по своей таймзоне наступило 00:00 и сегодня ещё не собирали (docs/24 §4.4.1 п. 2)
+      await b.schedule('usage.collect', '5 * * * *', {}, { singletonKey: 'usage.collect' })
       return b
     })
   }

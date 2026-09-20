@@ -70,6 +70,7 @@ export const reportExports = pgTable('report_exports', {
   ...baseColumns,
   tenantId: tenantId(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  activeRoleId: uuid('active_role_id'), // роль, активная в момент запроса — область выгрузки считается по ней, а не по роли по умолчанию (docs/01 §1.9.2)
   report: text('report').notNull(), // имя отчёта или saved:<id>
   filters: jsonb('filters').notNull().default('{}'),
   format: text('format').notNull().default('xlsx'),

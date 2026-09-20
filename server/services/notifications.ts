@@ -113,6 +113,7 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   telegram_blocked_manager: '{{name}} заблокував(ла) бота — нагадування йдуть у SMS. Попросіть повернути Telegram',
   escalation: 'Без реакції: {{name}} — «{{text}}»',
   security_suspicious_login: 'Вхід з нового пристрою: {{device}}. Якщо це не ви — закрийте сесії в профілі',
+  security_alert: 'Журнал безпеки · {{level}}: {{event}}{{#person}} — {{person}}{{/person}}, {{when}}{{#ip}}, IP {{ip}}{{/ip}}. Деталі: {{link}}',
 }
 
 /** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */

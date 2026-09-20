@@ -1043,9 +1043,31 @@ saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
 -- Формат поля request_context jsonb:
 --   {ip, geo:{country,country_code,city}, user_agent, browser, os, device}
 -- Журналы: audit_log, security_log, sessions, enrollment_events, notifications,
--- import_jobs, goal_status_log, automation_runs (+ points_ledger, когда появится).
+-- import_jobs, goal_status_log, automation_runs, task_access_log, org_conflicts
+-- (+ points_ledger, когда появится).
 -- Заполняет server/utils/requestContext.ts; вне HTTP-запроса (очередь, вебхук) — null.
 -- security_log.severity text not null default 'info' — security_severity (см. перечисления).
+
+-- Звіт звернень до завдань (`22` §13.4): строка на каждое открытие или скачивание, не на первый вход. Spec 22.
+task_access_log(
+  id, tenant_id, user_id,
+  content_type text not null,     -- content_type
+  content_id uuid not null,
+  title text,                     -- название на момент обращения
+  assignment_id uuid, enrollment_id uuid,
+  action text not null default 'open',   -- open | download
+  request_context jsonb, created_at
+)
+-- Протокол конфліктів в оргструктурі (`16` §7, §14): эталон не падает на конфликте, а пишет строку и продолжает. Spec 22.
+org_conflicts(
+  id, tenant_id, user_id,
+  kind text not null,             -- double_unit | placement_replaced | manager_self | manager_cycle  [решение]
+  source text not null default 'manual',  -- manual | import
+  import_job_id uuid, details jsonb, actor_id uuid,
+  request_context jsonb, resolved_at timestamptz, resolved_by uuid, created_at
+)
+-- Протокол змін статусу завдань — это enrollment_events (payload {from, to, result}) ∪ attempt_results; отдельной таблицы нет.
+-- report_exports.active_role_id uuid — роль, активная в момент запроса выгрузки (`01` §1.9.2); область считается по ней.
 
 -- Правило автоматизации (`17` §14.2)
 automation_rules(

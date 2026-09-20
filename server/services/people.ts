@@ -7,6 +7,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { recordAudit } from './audit'
+import { logOrgConflict } from './journals'
 import { scopeSql } from './access'
 import { hashToken } from './session'
 import { applyPositionRoles } from './positionRoleMap'
@@ -331,6 +332,14 @@ export async function addPlacement(ctx: Ctx, userId: string, input: {
     if (!loc) throw createError({ statusCode: 400, data: { code: 'validation_failed', message: 'Точку не знайдено' } })
     // docs/16 §6.1: точка должна принадлежать выбранному подразделению
     if (input.orgUnitId && input.orgUnitId !== loc.orgUnitId) throw createError({ statusCode: 400, data: { code: 'validation_failed', message: 'Точка не належить обраному підрозділу' } })
+    if (!input.isPrimary) {
+      // docs/16 §14: человек в двух подразделениях — не ошибка, а строка протокола конфликтов; действие продолжается
+      const other = await tx.select({ id: userPlacements.id, orgUnitId: userPlacements.orgUnitId, locationId: userPlacements.locationId }).from(userPlacements)
+        .where(and(eq(userPlacements.userId, userId), isNull(userPlacements.endedAt)))
+      const unitId = input.orgUnitId ?? loc.orgUnitId
+      const clash = other.find(o => (o.orgUnitId ?? null) !== unitId)
+      if (clash) await logOrgConflict(tx, { tenantId: ctx.tenantId, userId, kind: 'double_unit', actorId: ctx.actorId, details: { orgUnitId: unitId, otherOrgUnitId: clash.orgUnitId, otherLocationId: clash.locationId, locationId: input.locationId } })
+    }
     if (input.isPrimary) {
       // Прошлое основное размещение закрывается (docs/01-roles.md §1.8: история цела)
       await tx.update(userPlacements)
@@ -547,8 +556,14 @@ export async function listChiefs(ctx: Ctx, userId?: string) {
   `) as unknown as Promise<Record<string, unknown>[]>)
 }
 export async function setChief(ctx: Ctx, input: { userId: string, chiefId: string, kind: 'line' | 'functional', scope?: string }) {
-  if (input.userId === input.chiefId) return null
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    // docs/16 §14: «начальник сам себе подчинён» и кольцо руководителей — строка протокола конфликтов; сам себе — не сохраняем
+    if (input.userId === input.chiefId) {
+      await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: input.userId, kind: 'manager_self', actorId: ctx.actorId, details: { kind: input.kind } })
+      return null
+    }
+    const [cycle] = await tx.select({ id: functionalChiefs.id }).from(functionalChiefs).where(and(eq(functionalChiefs.userId, input.chiefId), eq(functionalChiefs.chiefId, input.userId), eq(functionalChiefs.kind, input.kind)))
+    if (cycle) await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: input.userId, kind: 'manager_cycle', actorId: ctx.actorId, details: { chiefId: input.chiefId, kind: input.kind } })
     const [r] = await tx.insert(functionalChiefs).values({ tenantId: ctx.tenantId, ...input, scope: input.scope ?? null }).onConflictDoUpdate({ target: [functionalChiefs.userId, functionalChiefs.chiefId, functionalChiefs.kind], set: { scope: input.scope ?? null, updatedAt: new Date() } }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.chief_set', entity: 'user', entityId: input.userId, after: input })
     return r!

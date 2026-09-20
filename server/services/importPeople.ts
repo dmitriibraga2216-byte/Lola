@@ -8,6 +8,7 @@ import {
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { applyPositionRoles } from './positionRoleMap'
+import { logOrgConflict } from './journals'
 import { enqueueNotification } from './notifications'
 import { splitName } from './people'
 import { phoneSchema } from '../../shared/schemas/auth'
@@ -514,6 +515,10 @@ export async function applyImport(ctx: Ctx, jobId: string) {
               isNull(userPlacements.endedAt),
             ))
           if (current.length === 0) {
+            // docs/16 §14: ручная правка и импорт спорят — старое основное размещение уходит в протокол конфликтов, импорт продолжается
+            const replaced = await tx.select({ locationId: userPlacements.locationId, positionId: userPlacements.positionId }).from(userPlacements)
+              .where(and(eq(userPlacements.userId, id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+            for (const r of replaced) await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: id, kind: 'placement_replaced', source: 'import', importJobId: jobId, actorId: ctx.actorId, details: { from: r, to: { locationId, positionId } } })
             await tx.update(userPlacements)
               .set({ endedAt: sql`current_date` })
               .where(and(eq(userPlacements.userId, id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))

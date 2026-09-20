@@ -80,29 +80,29 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/me/tasks` | мои задания; `?group=new\|planned\|failed\|overdue\|done` — пять групп эталона |
-| GET | `/me/tasks/:id` | карточка задания: контент, сроки, правила, прогресс |
+| GET | `/me/tasks` | мои задания; `?group=new\|planned\|failed\|overdue\|done` — пять групп эталона (старый путь: `/learning/my`, до конца R1) |
+| GET | `/me/tasks/:id` | карточка задания: контент, сроки, правила, прогресс — нет вовсе, долг (docs/28 «Spec 04») |
 | GET | `/me/trajectories` | мои траектории с деревом и текущим блоком |
-| GET | `/me/catalog` | каталог: `?kind=tasks\|trajectories`, фильтр по категории |
-| POST | `/me/catalog/:id/enroll` | самозапись (режим «Вільний доступ») |
-| POST | `/me/catalog/:id/request` | заявка (режим «Подання заявки») |
-| GET | `/me/development-plan` | планы развития: `?status=active\|inactive\|done` |
-| GET | `/me/certificates`, `/me/badges` | достижения |
+| GET | `/me/catalog` | каталог: `?kind=tasks\|trajectories`, фильтр по категории (старый путь: `/learning/catalog`, до конца R1) |
+| POST | `/me/catalog/:id/enroll` | самозапись (режим «Вільний доступ») — сегодня тело `{courseId}` без `:id` в пути (`/learning/enroll`), долг (docs/28 «Spec 04») |
+| POST | `/me/catalog/:id/request` | заявка (режим «Подання заявки») — нет вовсе, долг (docs/28 «Spec 04») |
+| GET | `/me/development-plan` | планы развития: `?status=active\|inactive\|done` (старый путь: `/development/me`, до конца R1) |
+| GET | `/me/certificates`, `/me/badges` | достижения; сертифікати — старий шлях `/learning/certificates`, до кінця R1; бейджі — нема зовсім, борг (docs/28 «Spec 04») |
 | GET | `/me/study-history` | история и динамика рейтинга (свой и внешний) |
-| GET | `/me/bonuses` | баланс и книга операций |
-| GET/PATCH | `/me/notifications/prefs` | свои переключатели уведомлений |
+| GET | `/me/bonuses` | баланс и книга операций — нет вовсе, долг (docs/28 «Spec 04») |
+| GET/PATCH | `/me/notifications/prefs` | свои переключатели уведомлений (старый путь: `/notifications/prefs`, до конца R1) |
 | POST | `/me/role/switch` | `{roleId}` — переключение активной роли (`01` §1.9.2) среди своих действующих; чужая, снятая или истёкшая — 403 `forbidden`, по API-токену — 400; ответ `{activeRole, changed}`, событие `role.switch` в аудите с обеими ролями |
 
 ## 4.5 Прохождение контента
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/enrollments/:id` | состояние прохождения: дерево, прогресс, доступность элементов |
-| GET | `/enrollments/:id/items/:itemId` | тело урока или ресурса, если элемент доступен |
-| POST | `/enrollments/:id/items/:itemId/tick` | `{seconds, scrollPct, videoPct, blocksState}` идемпотентно, окно 15 с; ответ `{secondsSpent, scrollPct, videoPct, ready, reasons, requiredSeconds}`. Сегодня — `/learning/enrollments/:id/lessons/:lessonId/tick`, рядом `/acknowledge` и `/download` |
-| POST | `/enrollments/:id/items/:itemId/complete` | завершение; сервер сам проверяет условия зачёта (`11` Г-11.5) |
-| POST | `/enrollments/:id/items/:itemId/acknowledge` | «Я ознайомився» для ссылок и объявлений |
-| POST | `/enrollments/:id/migrate-version` | перейти на новую версию материала (`10` Г-10.1) |
+| GET | `/enrollments/:id` | состояние прохождения: дерево, прогресс, доступность элементов (старый путь: `/learning/enrollments/:id`, до конца R1) |
+| GET | `/enrollments/:id/items/:itemId` | тело урока или ресурса, если элемент доступен — сегодня это `POST /learning/enrollments/:id/lessons/:lessonId/open` (иной метод и путь, не тривиальное переименование), долг (docs/28 «Spec 04») |
+| POST | `/enrollments/:id/items/:itemId/tick` | `{seconds, scrollPct, videoPct, blocksState}` идемпотентно, окно 15 с; ответ `{secondsSpent, scrollPct, videoPct, ready, reasons, requiredSeconds}`. Старый путь — `/learning/enrollments/:id/lessons/:lessonId/tick`, до конца R1 (там же `/acknowledge`, `/complete`, `/download`, `/open`) |
+| POST | `/enrollments/:id/items/:itemId/complete` | завершение; сервер сам проверяет условия зачёта (`11` Г-11.5) (старый путь: `/learning/enrollments/:id/lessons/:lessonId/complete`, до конца R1) |
+| POST | `/enrollments/:id/items/:itemId/acknowledge` | «Я ознайомився» для ссылок и объявлений (старый путь: `/learning/enrollments/:id/lessons/:lessonId/acknowledge`, до конца R1) |
+| POST | `/enrollments/:id/migrate-version` | перейти на новую версию материала (`10` Г-10.1) — нет вовсе, долг (docs/28 «Spec 04») |
 
 Клиент никогда не решает, пройден ли элемент: он присылает факты (сколько секунд,
 докуда доскроллил, сколько видео просмотрел), решение принимает сервер.
@@ -133,9 +133,9 @@
 | GET | `/review/answers` | очередь **ответов** (`12` §14.4); фильтры: `checked`, метки вопросов, точка, курс, давность |
 | POST | `/review/answers/:id/grade` | `{score, comment}`; наставнику видна `grader_hint` |
 | GET | `/review/workshops` | очередь сдач практикумов; сортировка по времени в очереди |
-| POST | `/review/workshops/:id/claim` | взять в работу (блокировка 30 минут) |
-| POST | `/review/workshops/:id/grade` | `{decision: passed\|rework\|failed, criteria[], comment}` |
-| GET | `/review/checklists` | заполненные чек-листы на согласование |
+| POST | `/review/workshops/:id/claim` | взять в работу (блокировка 30 минут) (старый путь: `/review/submissions/:id/claim`, до конца R1) |
+| POST | `/review/workshops/:id/grade` | `{decision: passed\|rework\|failed, criteria[], comment}` (старый путь: `/review/submissions/:id/grade`, до конца R1) |
+| GET | `/review/checklists` | заполненные чек-листы на согласование — нет вовсе, долг (docs/28 «Spec 04») |
 
 ## 4.8 Контент (методист)
 
@@ -155,7 +155,7 @@
 | CRUD | `/resource-categories`, `POST /resource-categories/reorder` | категории ресурсов с порядком (`{ids[]}`) |
 | CRUD | `/access-groups` | группы доступа (`?appliesTo=knowledge\|catalog`), члены `{subjectType, subjectId}` |
 | GET | `/learning/resources/:id` | ресурс для ученика: текущая версия, только при доступе; иначе 404 |
-| CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3): `GET/POST /tests/:id/question-groups`, `PATCH/DELETE /question-groups/:id` |
+| CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3): `GET/POST /tests/:id/question-groups`, `PATCH/DELETE /question-groups/:id`; правка и удаление вопроса — по-прежнему `PATCH /questions/:id` (старый путь для списка и создания — `/questions?quizId=`, до конца R1) |
 | POST | `/tests/:id/questions/import` | «Питання з іншого тесту» (копия) и «з банку» (ссылка) |
 | CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа). Spec 20: реализовано как `GET/POST /surveys`, `GET/PATCH /surveys/:id` (вопросы в теле; после первого ответа вопросы/режим/приватность — 409 `survey.locked`), `GET /surveys/:id/report` (конфіденційно — имена только владельцу) |
 | POST | `/learning/surveys/:id/start`, `/learning/surveys/:id/answer` | прохождение опроса по одному вопросу: сервер отдаёт следующий по правилам «з умовами», граф клиенту не уходит; `{questionId, answer}` → `{done:false, question}` \| `{done:true, results?}`; 422 `survey.required\|bad_option\|own_not_allowed\|bad_value` |
@@ -217,7 +217,7 @@
 | POST | `/people/import` | CSV → `importJobId`, файл проверяется целиком |
 | GET | `/people/import/:id` | протокол: создать N, обновить M, ошибок K с номерами строк |
 | POST | `/people/import/:id/apply` | применить (всё или ничего) |
-| CRUD | `/org-units`, `/locations`, `/positions`, `/position-levels`, `/cities`, `/user-groups` | справочники |
+| CRUD | `/org-units`, `/locations`, `/positions`, `/position-levels`, `/cities`, `/user-groups` | справочники; у первых пяти нет отдельного `GET /:id` (старый путь для GET/POST/PATCH/DELETE первых пяти — общий `/refs/:kind`, до конца R1); `/user-groups` уже свой |
 | CRUD | `/tags` | `GET ?scope=` (people.view, со счётчиком использований), `POST {name, scope, description?, color?}` / `PATCH /:id` / `DELETE /:id` (settings.tenant); 409 `duplicate` \| `in_use`; `/refs/tags?scope=user` — для форм людей |
 | GET | `/org-conflicts` | `?state=open\|resolved\|all&kind=&from&to&userId` — протокол конфликтов оргструктуры (people.edit) |
 | POST | `/org-conflicts/:id/resolve` | `{action: acknowledge\|close_placement, placementId?, comment?}`; 409 `already_resolved`; `GET /org-conflicts/:id/placements` — открытые размещения человека |
@@ -229,7 +229,7 @@
 | CRUD | `/competencies`, `/competencies/:id/indicators`, `/competency-profiles` | словарь и профили должностей |
 | GET | `/people/:id/competencies` | уровни с источником и датой (`19` Г-19.2) |
 | POST | `/people/:id/competencies/:cid` | ручная установка с причиной |
-| CRUD | `/development-plans` | планы развития |
+| CRUD | `/development-plans` | планы развития; заведены только создание и переход по статусу (старый путь: `/development/plans`, до конца R1) — списка, карточки и удаления нет вовсе, долг (docs/28 «Spec 04») |
 | CRUD | `/goals`, `/goal-statuses` | цели и справочник их статусов |
 | CRUD | `/requests` | заявки: `kind=external_learning\|career`, маршрут согласования (`19` Г-19.1) |
 | POST | `/assessments/:id/cycles` | цикл оценки: состав оценщиков по ролям |
@@ -301,7 +301,7 @@
 | GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
 | CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1): `GET` (people.view, со счётчиками и группами скоупов), `POST`, `PATCH /:id`, `DELETE /:id` (settings.tenant); 409 `code_taken` · `admin_role` · `role_in_use` · `last_settings_role`, 403 `scope_not_owned` |
 | GET/PUT | `/settings/position-role-map` | правило «должность → роль»: `{items: [{positionId, roleCode, scopeType, scopeId?}]}` целиком; применяется при следующей смене должности или импорте |
-| CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` |
+| CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` (старый путь: `/settings/notifications`, до конца R1; список и правка целиком — `PUT`, не `POST`/`PATCH`, как и было) |
 | GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
 | GET/PUT | `/settings/email-layout` | шапка и подвал письма |
 | CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены |
@@ -313,7 +313,7 @@
 | GET | `/certificates/summary` | сводка сертификатов по курсам для экрана Certificates |
 | POST | `/auth/impersonation/stop` | выход из режима «от имени» с плашки → `impersonation.ended` |
 | GET | `/audit` | журнал изменений |
-| GET | `/health`, `/ready`, `/metrics` | служебное |
+| GET | `/health`, `/ready`, `/metrics` | служебное — намеренно вне `/api/v1` (health-чек не должен зависеть от версии API), `server/routes/{health,ready,metrics}.get.ts`, docs/28 «Spec 04» |
 
 ## 4.17 Панель оператора платформы
 

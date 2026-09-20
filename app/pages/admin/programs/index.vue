@@ -6,7 +6,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'program.manage' })
 const { t } = useI18n()
 const { api } = useApi()
-interface P { id: string, title: string, mode: string, status: string, due_days: number | null, items: number, active_people: number, completed_people: number, updated_at: string, published_at: string | null, updated_by_name: string | null }
+interface P { id: string, title: string, mode: string, status: string, code: string | null, due_days: number | null, items: number, active_people: number, completed_people: number, updated_at: string, published_at: string | null, updated_by_name: string | null }
 const items = ref<P[]>([])
 const error = ref('')
 const creating = ref(false)
@@ -45,7 +45,7 @@ function shortName(name: string | null) {
         <thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('prog.col.duration') }}</th><th>{{ t('assign.col.author') }}</th><th>{{ t('traj.col.updated') }}</th><th>{{ t('traj.col.published') }}</th></tr></thead>
         <tbody>
           <tr v-for="p in items" :key="p.id" class="row-link" tabindex="0" @click="navigateTo(`/admin/programs/${p.id}`)" @keydown.enter="navigateTo(`/admin/programs/${p.id}`)">
-            <td><b>{{ p.title }}</b><span class="sub">{{ t('prog.itemsCount', { n: p.items }) }}<template v-if="p.mode === 'graph'"> · {{ t('prog.modes.graph') }}</template> · {{ p.active_people }} / {{ p.completed_people }}</span></td>
+            <td><b>{{ p.title }}</b><span class="sub">{{ p.code ? t('prog.metaCode', { code: p.code, items: t('prog.itemsCount', { n: p.items }) }) : t('prog.itemsCount', { n: p.items }) }}<template v-if="p.mode === 'graph'"> · {{ t('prog.modes.graph') }}</template> · {{ p.active_people }} / {{ p.completed_people }}</span></td>
             <td class="muted">{{ p.due_days ? t('rules.daysN', { n: p.due_days }) : '—' }}</td>
             <td class="muted">{{ shortName(p.updated_by_name) }}</td>
             <td class="muted">{{ fmt(p.updated_at) }}</td>

@@ -24,6 +24,7 @@ export const IMPORT_COLUMNS = [
   'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Зовнішній ID',
   'Прізвище', 'Імʼя', 'По батькові', 'Дата народження',
   'Дата призначення посади', 'Гендер', // Г-16.1: position_since, gender
+  'Керівник (зовнішній ID)', // docs/33 D-023: manager_external_id — лінійний керівник за зовнішнім №, окремо від functional_chiefs
 ] as const
 export type ImportColumn = typeof IMPORT_COLUMNS[number]
 
@@ -47,6 +48,7 @@ const COLUMN_ALIASES: Record<ImportColumn, string[]> = {
   'Дата народження': ['дата народження', 'дата рождения', 'birth date', 'birthday', 'dob', 'д.н.', 'birth_date'],
   'Дата призначення посади': ['дата призначення посади', 'дата призначення', 'position since', 'position_since', 'на посаді з'],
   'Гендер': ['гендер', 'стать', 'gender', 'пол', 'sex'],
+  'Керівник (зовнішній ID)': ['керівник (зовнішній id)', 'керівник', 'manager external id', 'manager_external_id', 'manager id', 'зовнішній id керівника'],
 }
 const norm = (s: string) => s.toLowerCase().replace(/[ʼ'’`]/g, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim()
 
@@ -86,6 +88,7 @@ export interface ImportRow {
   birthDate?: string
   positionSince?: string
   gender?: 'male' | 'female' | 'unspecified'
+  managerExternalId?: string // docs/33 D-023: лінійний керівник за зовнішнім № — резолв окремим проходом після застосування пакету
   unknownUnit?: string // подразделение не из справочника при createRefs=false — строка протокола конфликтов (unit_missing)
   action: 'create' | 'update' | 'skip'
   errors: string[]
@@ -195,6 +198,8 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
 
     const seenPhones = new Map<string, number>()
     const seenExternal = new Map<string, number>()
+    // docs/33 D-023: керівник за зовнішнім № може бути будь-де у файлі, незалежно від порядку рядків
+    const allFileExternalIds = new Set(raw.map(src => remap(src, mapping)['Зовнішній ID']).filter((v): v is string => !!v))
 
     const rows: ImportRow[] = raw.map((src, idx) => {
       const rec = remap(src, mapping)
@@ -251,6 +256,12 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
       const genderRaw = (rec['Гендер'] ?? '').trim().toLowerCase()
       const gender = !genderRaw ? undefined : ['ч', 'чол', 'чоловік', 'м', 'муж', 'male', 'm'].includes(genderRaw) ? 'male' as const : ['ж', 'жін', 'жінка', 'жен', 'female', 'f'].includes(genderRaw) ? 'female' as const : 'unspecified' as const
 
+      // docs/33 D-023: manager_external_id — лінійний керівник за зовнішнім №, окремо від functional_chiefs;
+      // резолв — окремим проходом після застосування пакету (керівник може бути будь-де у файлі)
+      const managerExternalId = rec['Керівник (зовнішній ID)'] ?? ''
+      if (managerExternalId && managerExternalId === externalId) errors.push('Керівник (зовнішній ID): не може бути власним ідентифікатором')
+      else if (managerExternalId && !externalMap.has(managerExternalId) && !allFileExternalIds.has(managerExternalId)) warnings.push(`Керівник (зовнішній ID): «${managerExternalId}» не знайдено — призначте пізніше`)
+
       const email = rec['Email'] ?? ''
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email: невірний')
 
@@ -277,7 +288,7 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
         tags: (rec['Мітки'] ?? '').split(/[,;]/).map(s => s.trim()).filter(Boolean),
         hiredAt,
         externalId,
-        lastName, firstName, middleName, birthDate, positionSince, gender,
+        lastName, firstName, middleName, birthDate, positionSince, gender, managerExternalId,
         ...(!options.createRefs && orgUnit && !known.orgUnits.has(orgUnit.toLowerCase()) ? { unknownUnit: orgUnit } : {}),
         action: errors.length > 0 ? 'skip' : existingId ? 'update' : 'create',
         errors,
@@ -590,6 +601,28 @@ export async function applyImport(ctx: Ctx, jobId: string) {
       await tx.update(importJobs).set({ stats: { ...baseStats, processed: Math.min(offset + 200, applicable.length), created, updated }, updatedAt: new Date() }).where(eq(importJobs.id, jobId))
     })
   }
+  }
+
+  // docs/33 D-023: manager_external_id — окремим проходом після застосування пакету (керівник міг зустрітись
+  // будь-де у файлі, у т.ч. нижче за рядком); пишеться в user_placements.manager_id основного розміщення,
+  // окремо від functional_chiefs (там — виключення з дерева оргструктури, тут — прямий керівник з імпорту)
+  const managerRows = applicable.filter(r => r.managerExternalId)
+  if (managerRows.length) {
+    await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+      const externalIds = [...new Set(managerRows.flatMap(r => [r.externalId, r.managerExternalId]).filter((v): v is string => !!v))]
+      const phones = [...new Set(managerRows.map(r => r.phone).filter(Boolean))]
+      const byExt = externalIds.length ? await tx.select({ id: users.id, externalId: users.externalId }).from(users).where(inArray(users.externalId, externalIds)) : []
+      const byPh = phones.length ? await tx.select({ id: users.id, phone: users.phone }).from(users).where(inArray(users.phone, phones)) : []
+      const extMap = new Map(byExt.filter(u => u.externalId).map(u => [u.externalId as string, u.id]))
+      const phMap = new Map(byPh.filter(u => u.phone).map(u => [u.phone as string, u.id]))
+      for (const r of managerRows) {
+        const targetId = (r.externalId && extMap.get(r.externalId)) || (r.phone && phMap.get(r.phone)) || null
+        const managerId = r.managerExternalId ? extMap.get(r.managerExternalId) ?? null : null
+        if (targetId && managerId && targetId !== managerId) {
+          await tx.update(userPlacements).set({ managerId, updatedAt: new Date() }).where(and(eq(userPlacements.userId, targetId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+        }
+      }
+    })
   }
 
   // Строки с подразделением не из справочника (createRefs выключен): протокол конфликтов — unit_missing, импорт продолжается (мокап OrgConflicts)

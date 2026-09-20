@@ -149,6 +149,8 @@ describe('метки со scope (docs/16 §14.2)', () => {
 
 describe('группы «з оргструктури» (docs/16 §3.3, §14.1)', () => {
   it('пересборка создаёт группу на подразделение и точку с людьми, производную нельзя править и удалять', async () => {
+    // docs/33 D-022: пересборка строит производные группы только при orgStructure.mode ≠ user_groups (import/hybrid)
+    await updatePolicies(ctx(), { orgStructure: { mode: 'hybrid' } })
     const { id } = await makePerson('Група Орг', { locationId: kitchenLocId, orgUnitId: unitKitchenId })
     await G.rebuildOrgGroups(tenantId)
     const [unitGroup] = await admin`select * from user_groups where tenant_id = ${tenantId} and org_unit_id = ${unitKitchenId}`

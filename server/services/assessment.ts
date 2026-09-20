@@ -181,6 +181,25 @@ export async function saveForm(ctx: Ctx, input: AssessmentFormInput): Promise<Fo
   })
 }
 
+/**
+ * «Дублювати новою версією» для замороженої анкети (docs/20 §14.4, docs/33 D-038): єдиний спосіб
+ * змінити шкалу/склад/норми зафіксованої анкети — нова анкета з новим `id`, копія карточки і складу,
+ * без перенесення `is_locked` (нова анкета — чернетка, розблокована, доки не заповнять першу оцінку).
+ */
+export async function duplicateForm(ctx: Ctx, id: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [f] = await tx.select().from(assessmentForms).where(eq(assessmentForms.id, id))
+    if (!f) return null
+    const [nf] = await tx.insert(assessmentForms).values({
+      ...f, id: undefined, title: `${f.title} (копія)`, isLocked: false, isActive: false, createdAt: undefined, updatedAt: undefined,
+    } as never).returning()
+    const items = await tx.select({ criterionId: assessmentItems.criterionId, norm: assessmentItems.norm, cluster: assessmentItems.cluster, sortOrder: assessmentItems.sortOrder }).from(assessmentItems).where(eq(assessmentItems.formId, id))
+    if (items.length) await tx.insert(assessmentItems).values(items.map(i => ({ tenantId: ctx.tenantId, formId: nf!.id, criterionId: i.criterionId, norm: i.norm, cluster: i.cluster, sortOrder: i.sortOrder })))
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.form.duplicate', entity: 'assessment_form', entityId: nf!.id, after: { title: nf!.title, fromId: id } })
+    return nf!
+  })
+}
+
 /** Заморозка при первом заполнении (docs/20 §14.4): дальше шкала, состав и нормы не меняются. */
 export async function lockForm(tx: TenantTx, tenantId: string, formId: string, actorId: string | null) {
   const [r] = await tx.update(assessmentForms).set({ isLocked: true, updatedAt: new Date() }).where(and(eq(assessmentForms.id, formId), eq(assessmentForms.isLocked, false))).returning({ id: assessmentForms.id })

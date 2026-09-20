@@ -2,10 +2,10 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'development.team' })
 const { t } = useI18n()
 const { api } = useApi()
-interface Cell { competencyId: string, current: number, required: number, gap: number, isCritical: boolean, color: 'teal' | 'sun' | 'coral', source: string | null }
+interface Cell { competencyId: string, current: number, required: number, currentLabel: string, requiredLabel: string, gap: number, isCritical: boolean, color: 'teal' | 'sun' | 'coral', source: string | null }
 interface Row { userId: string, fullName: string, position: string, location: string, hasProfile: boolean, cells: Cell[], fits: boolean }
-interface M { columns: { id: string, name: string, kind: string }[], rows: Row[], summary: { people: number, withProfile: number, fit: number, fitPct: number | null } }
-interface Hist { competency: { name: string, levels: { level: number, title: string, behavior: string }[] } | null, history: { id: string, level: number, source: string, assessed_at: string, comment: string | null, assessed_by: string | null }[], whatToLearn: { id: string, title: string }[] }
+interface M { columns: { id: string, name: string, kind: string }[], rows: Row[], displayAs: 'label' | 'value', summary: { people: number, withProfile: number, fit: number, fitPct: number | null } }
+interface Hist { competency: { name: string, levels: { level: number, title: string, behavior: string }[] } | null, history: { id: string, level: number, levelLabel: string, source: string, assessed_at: string, comment: string | null, assessed_by: string | null }[], whatToLearn: { id: string, title: string }[], displayAs: 'label' | 'value' }
 const m = ref<M | null>(null)
 const locations = ref<{ id: string, name: string }[]>([])
 const locationId = ref('')
@@ -24,6 +24,7 @@ async function open(row: Row, cell: Cell) {
 }
 const cellOf = (row: Row, compId: string) => row.cells.find(c => c.competencyId === compId)
 const fmt = (d: string) => new Date(d).toLocaleDateString('uk')
+const asLabel = (v: number, label: string) => m.value?.displayAs === 'label' ? label : String(v)
 </script>
 <template>
   <div>
@@ -46,8 +47,8 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('uk')
             <tr v-for="r in m.rows" :key="r.userId">
               <td><b>{{ r.fullName }}</b><div class="sub">{{ r.position }} · {{ r.location }}</div><div v-if="!r.hasProfile" class="sub">{{ t('dev.noProfileShort') }}</div></td>
               <td v-for="c in m.columns" :key="c.id" class="cellwrap">
-                <button v-if="cellOf(r, c.id)" :class="['cell', cellOf(r, c.id)!.color, { crit: cellOf(r, c.id)!.isCritical }]" :aria-label="`${r.fullName}: ${c.name} ${cellOf(r, c.id)!.current}/${cellOf(r, c.id)!.required}`" @click="open(r, cellOf(r, c.id)!)">
-                  {{ cellOf(r, c.id)!.current }}<span class="req">/{{ cellOf(r, c.id)!.required }}</span>
+                <button v-if="cellOf(r, c.id)" :class="['cell', cellOf(r, c.id)!.color, { crit: cellOf(r, c.id)!.isCritical }]" :aria-label="`${r.fullName}: ${c.name} ${asLabel(cellOf(r, c.id)!.current, cellOf(r, c.id)!.currentLabel)}/${asLabel(cellOf(r, c.id)!.required, cellOf(r, c.id)!.requiredLabel)}`" @click="open(r, cellOf(r, c.id)!)">
+                  {{ asLabel(cellOf(r, c.id)!.current, cellOf(r, c.id)!.currentLabel) }}<span class="req">/{{ asLabel(cellOf(r, c.id)!.required, cellOf(r, c.id)!.requiredLabel) }}</span>
                 </button>
                 <span v-else class="sub">·</span>
               </td>
@@ -59,11 +60,11 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('uk')
     <div v-if="picked" class="overlay" @click.self="picked = null">
       <section class="modal" role="dialog" aria-modal="true">
         <h2>{{ picked.row.fullName }} · {{ picked.hist?.competency?.name ?? '' }}</h2>
-        <p class="sub">{{ t('dev.levelNow') }}: <b>{{ picked.cell.current }}</b> / {{ t('dev.levelRequired') }}: <b>{{ picked.cell.required }}</b><template v-if="picked.cell.gap"> · {{ t('dev.gapN', { n: picked.cell.gap }) }}</template></p>
+        <p class="sub">{{ t('dev.levelNow') }}: <b>{{ asLabel(picked.cell.current, picked.cell.currentLabel) }}</b> / {{ t('dev.levelRequired') }}: <b>{{ asLabel(picked.cell.required, picked.cell.requiredLabel) }}</b><template v-if="picked.cell.gap"> · {{ t('dev.gapN', { n: picked.cell.gap }) }}</template></p>
         <template v-if="picked.hist">
           <h3>{{ t('dev.history') }}</h3>
           <ul class="list">
-            <li v-for="h in picked.hist.history" :key="h.id"><b>{{ t('dev.level') }} {{ h.level }}</b> <span class="sub">{{ t(`dev.source.${h.source}`, h.source) }} · {{ fmt(h.assessed_at) }}{{ h.assessed_by ? ` · ${h.assessed_by}` : '' }}</span><div v-if="h.comment" class="sub">{{ h.comment }}</div></li>
+            <li v-for="h in picked.hist.history" :key="h.id"><b>{{ t('dev.level') }} {{ picked.hist.displayAs === 'label' ? h.levelLabel : h.level }}</b> <span class="sub">{{ t(`dev.source.${h.source}`, h.source) }} · {{ fmt(h.assessed_at) }}{{ h.assessed_by ? ` · ${h.assessed_by}` : '' }}</span><div v-if="h.comment" class="sub">{{ h.comment }}</div></li>
             <li v-if="picked.hist.history.length === 0" class="sub">{{ t('person.noData') }}</li>
           </ul>
           <h3 v-if="picked.hist.whatToLearn.length">{{ t('dev.whatToLearn') }}</h3>

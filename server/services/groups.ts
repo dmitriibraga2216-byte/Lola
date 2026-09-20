@@ -4,6 +4,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
+import { readSettings } from './settings'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -67,9 +68,18 @@ export async function recalcGroups(tenantId: string): Promise<number> {
  * размещений в нём и его потомках) и на точку. Пересобираются при импорте, смене размещения и ежечасно;
  * руками не правятся, при исчезновении узла — уходят (FK on delete cascade). Ручная группа с тем же именем
  * не затирается — производная получает суффикс « (оргструктура)».
+ *
+ * Режим оргструктуры (`policies.orgStructure.mode`, docs/16 §14.3, docs/33 D-022): при `user_groups`
+ * («За групами користувачів») людей объединяют вручную самими группами, а не деревом подразделений/точек —
+ * производные группы не строятся, а уже существующие (например, оставшиеся от `import`/`hybrid`) снимаются.
  */
 export async function rebuildOrgGroups(tenantId: string, tx?: TenantTx): Promise<number> {
   const run = async (t: TenantTx) => {
+    const { policies } = await readSettings(t, tenantId)
+    if (policies.orgStructure.mode === 'user_groups') {
+      const removed = await t.delete(userGroups).where(eq(userGroups.isOrgDerived, true)).returning({ id: userGroups.id })
+      return removed.length
+    }
     const units = await t.execute(sql`
       select ou.id, ou.name,
              coalesce(array_agg(distinct up.user_id) filter (where up.user_id is not null), '{}'::uuid[]) as members

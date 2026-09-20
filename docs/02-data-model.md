@@ -133,6 +133,8 @@ create table user_placements (                -- где человек рабо�
   user_id uuid not null references users(id) on delete cascade,
   location_id uuid not null references locations(id),
   position_id uuid not null references positions(id),
+  manager_id uuid references users(id),       -- «Керівник» (зовнішній № при імпорті); Spec 16, docs/33 D-023 —
+                                              -- окремо від functional_chiefs (там винятки з дерева оргструктури)
   is_primary boolean not null default true,
   started_at date not null default current_date,
   ended_at date
@@ -875,7 +877,8 @@ workshop_comments(submission_id, author_id, body text, is_internal boolean)
 ## Программы и траектории
 
 ```sql
-programs(title, description, cover_key, status, certificate_template_id)
+programs(title, description, cover_key, status, certificate_template_id,
+          code text, icon_key text, workload text)     -- docs/33 D-025, по аналогии с courses
 program_items(program_id, item_type text,      -- course | quiz | workshop | meetup | webinar
           item_id uuid, sort int, is_required boolean, unlock_rule jsonb)
 program_enrollments(program_id, user_id, status, progress_pct, started_at, completed_at)
@@ -1011,8 +1014,9 @@ checklists(
   tags text[], status text
 )
 checklist_items(checklist_id, criterion_id, weight numeric(6,2), sort_order int)
--- Spec 20: пункты по-прежнему в checklists.items jsonb [{id, text, criterionId?, weight, isCritical, requiresPhoto, hint}] — criterionId
+-- Spec 20: пункты по-прежнему в checklists.items jsonb [{id, text, criterionId?, weight, isCritical, requiresPhoto, hint, passThreshold?}] — criterionId
 -- ссылается на словарь; шкала одна (checklists.scale_id → scales); фото — на пункте, не на чек-листе (`20` §3.5)
+-- passThreshold (docs/33 D-037) — опциональный свой порог провала пункта (％ доли), без него — прохідний бал чек-листа
 
 -- Циклы и ответы — общие для обеих анкет
 assessment_cycles(assessment_id, task_id, period_from, period_to, status, min_raters int)

@@ -7,7 +7,7 @@ const route = useRoute()
 
 interface Status { code: string, name: string, color: string, requiresComment: boolean, isSuccess: boolean }
 interface Goal {
-  id: string, userId: string, title: string, description: string | null, kind: string, dueAt: string, metric: string | null, progressPct: number, result: string | null, evaluation: string | null, targetLevel: number | null
+  id: string, userId: string, title: string, description: string | null, kind: string, dueAt: string, metric: string | null, progressPct: number, result: string | null, evaluation: string | null, targetLevel: number | null, targetLevelLabel: string | null, displayAs: 'label' | 'value'
   status: Status | null, transitions: Status[]
   log: { id: string, fromStatus: string | null, toStatus: string, actorName: string | null, comment: string | null, createdAt: string }[]
   comments: { id: string, authorName: string, body: string, createdAt: string }[]
@@ -65,7 +65,7 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'sho
         <h1>{{ goal.title }}</h1>
         <span v-if="goal.status" :class="['badge', goal.status.color]" data-testid="goal-status">{{ goal.status.name }}</span>
       </div>
-      <p class="sub">{{ t(`dev.kind.${goal.kind}`) }} · {{ t('dev.due') }} {{ goal.dueAt }}<template v-if="goal.competency"> · {{ goal.competency.name }}<template v-if="goal.targetLevel"> → {{ t('dev.level') }} {{ goal.targetLevel }}</template></template></p>
+      <p class="sub">{{ t(`dev.kind.${goal.kind}`) }} · {{ t('dev.due') }} {{ goal.dueAt }}<template v-if="goal.competency"> · {{ goal.competency.name }}<template v-if="goal.targetLevel"> → {{ t('dev.level') }} {{ goal.displayAs === 'label' ? goal.targetLevelLabel : goal.targetLevel }}</template></template></p>
       <p v-if="goal.description" class="text">{{ goal.description }}</p>
       <p v-if="goal.metric" class="sub">{{ t('dev.metric') }}: {{ goal.metric }}</p>
 

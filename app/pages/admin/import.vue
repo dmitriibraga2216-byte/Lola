@@ -9,7 +9,7 @@ interface ImportStats { total: number, create: number, update: number, skip: num
 interface Options { createRefs: boolean, archiveMissing: boolean, sendInvites: boolean }
 interface HistoryRow { id: string, file_name: string, status: string, stats: ImportStats, created_at: string, created_by_name: string | null }
 
-const COLUMNS = ['ПІБ', 'Прізвище', 'Імʼя', 'По батькові', 'Телефон', 'Email', 'Посада', 'Рівень посади', 'Місто', 'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Дата призначення посади', 'Дата народження', 'Гендер', 'Зовнішній ID']
+const COLUMNS = ['ПІБ', 'Прізвище', 'Імʼя', 'По батькові', 'Телефон', 'Email', 'Посада', 'Рівень посади', 'Місто', 'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Дата призначення посади', 'Дата народження', 'Гендер', 'Зовнішній ID', 'Керівник (зовнішній ID)']
 
 const file = ref<File | null>(null)
 const jobId = ref('')

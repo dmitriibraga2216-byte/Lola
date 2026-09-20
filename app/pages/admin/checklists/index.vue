@@ -3,7 +3,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'che
 const { t } = useI18n()
 const { api } = useApi()
 /** Чек-листи за мокапом Checklists: назва · пунктів · шкала · підрахунок · дата зміни · опубліковано; одна шкала, у пункту вага (docs/20 §14.3). */
-interface Item { id: string, group?: string, text: string, criterionId?: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
+interface Item { id: string, group?: string, text: string, criterionId?: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string, passThreshold?: number | null }
 interface CL { id: string, title: string, description: string | null, kind: string, subject_kind: string, scale_id: string, scale_name: string, scoring: string, pass_score: string, items: Item[], is_active: boolean, is_locked: boolean, runs: number, frequency: { timesPerWeek: number } | null, critical_fail_rule: string, who_can_run: { roles: string[] }, require_signature?: boolean, allow_skip: boolean, allow_item_comment: boolean, item_comment_required: boolean, tags: string[], updated_at: string }
 interface Crit { id: string, text: string, groupName: string }
 interface Wave { id: string, title: string, checklist_id: string, checklist_title: string, starts_at: string, ends_at: string, status: string, links: number, done: number, avg_score: string | null }
@@ -17,7 +17,7 @@ const library = ref<Crit[]>([])
 const blank = () => ({ title: '', description: '', kind: 'observation', subjectKind: 'location', scaleId: '', scoring: 'points', passScore: 80, criticalFailRule: 'any_critical_fails_all', roles: ['mentor', 'manager', 'admin'] as string[], timesPerWeek: 0, requireSignature: false, allowSkip: false, allowItemComment: true, itemCommentRequired: false, isLocked: false, isActive: true, tags: '', items: [] as Item[] })
 const form = reactive(blank())
 const lockedFields = ref<string[]>([])
-const newItem = (c?: Crit) => ({ id: crypto.randomUUID().slice(0, 8), group: c?.groupName ?? '', text: c?.text ?? '', criterionId: c?.id, weight: 1, isCritical: false, requiresPhoto: false, hint: '' })
+const newItem = (c?: Crit) => ({ id: crypto.randomUUID().slice(0, 8), group: c?.groupName ?? '', text: c?.text ?? '', criterionId: c?.id, weight: 1, isCritical: false, requiresPhoto: false, hint: '', passThreshold: null as number | null })
 async function load() {
   try {
     items.value = await api('/checklists'); scales.value = await api('/scales?kind=levels')
@@ -30,7 +30,7 @@ async function load() {
 onMounted(load)
 function edit(c: CL) {
   editing.value = c.id; lockedFields.value = []
-  Object.assign(form, { title: c.title, description: c.description ?? '', kind: c.kind, subjectKind: c.subject_kind, scaleId: c.scale_id, scoring: c.scoring, passScore: Number(c.pass_score), criticalFailRule: c.critical_fail_rule, roles: [...c.who_can_run.roles], timesPerWeek: c.frequency?.timesPerWeek ?? 0, requireSignature: c.require_signature ?? false, allowSkip: c.allow_skip, allowItemComment: c.allow_item_comment, itemCommentRequired: c.item_comment_required, isLocked: c.is_locked, isActive: c.is_active, tags: c.tags.join(', '), items: c.items.map(i => ({ ...i, group: i.group ?? '', hint: i.hint ?? '', isCritical: i.isCritical ?? false, requiresPhoto: i.requiresPhoto ?? false })) })
+  Object.assign(form, { title: c.title, description: c.description ?? '', kind: c.kind, subjectKind: c.subject_kind, scaleId: c.scale_id, scoring: c.scoring, passScore: Number(c.pass_score), criticalFailRule: c.critical_fail_rule, roles: [...c.who_can_run.roles], timesPerWeek: c.frequency?.timesPerWeek ?? 0, requireSignature: c.require_signature ?? false, allowSkip: c.allow_skip, allowItemComment: c.allow_item_comment, itemCommentRequired: c.item_comment_required, isLocked: c.is_locked, isActive: c.is_active, tags: c.tags.join(', '), items: c.items.map(i => ({ ...i, group: i.group ?? '', hint: i.hint ?? '', isCritical: i.isCritical ?? false, requiresPhoto: i.requiresPhoto ?? false, passThreshold: i.passThreshold ?? null })) })
 }
 function reset() { editing.value = null; lockedFields.value = []; Object.assign(form, blank()); form.scaleId = scales.value[0]?.id ?? '' }
 function body(extra: Record<string, unknown> = {}) {
@@ -38,7 +38,7 @@ function body(extra: Record<string, unknown> = {}) {
     id: editing.value ?? undefined, title: form.title, description: form.description || null, kind: form.kind, subjectKind: form.subjectKind, scaleId: form.scaleId, scoring: form.scoring, passScore: form.passScore, criticalFailRule: form.criticalFailRule,
     whoCanRun: { roles: form.roles }, frequency: form.timesPerWeek ? { timesPerWeek: form.timesPerWeek } : null, requireSignature: form.requireSignature, allowSkip: form.allowSkip, allowItemComment: form.allowItemComment, itemCommentRequired: form.allowItemComment && form.itemCommentRequired,
     tags: form.tags.split(',').map(x => x.trim()).filter(Boolean), isActive: form.isActive,
-    items: form.items.filter(i => i.text.trim()).map(i => ({ ...i, group: i.group || undefined, hint: i.hint || undefined })), ...extra,
+    items: form.items.filter(i => i.text.trim()).map(i => ({ ...i, group: i.group || undefined, hint: i.hint || undefined, passThreshold: i.passThreshold || undefined })), ...extra,
   }
 }
 async function save() {
@@ -130,6 +130,7 @@ async function toggle(c: CL) {
         <label class="sub">{{ t('assess.weight') }}<input v-model.number="it.weight" class="field short" type="number" step="0.5" min="0.1" :disabled="form.isLocked"></label>
         <label class="check" :title="t('cl.criticalHint')"><input v-model="it.isCritical" type="checkbox" :disabled="form.isLocked"> {{ t('cl.critical') }}</label>
         <label class="check"><input v-model="it.requiresPhoto" type="checkbox" :disabled="form.isLocked"> {{ t('cl.photoRequired') }}</label>
+        <label class="sub" :title="t('cl.itemThresholdHint')">{{ t('cl.itemThreshold') }}<input v-model.number="it.passThreshold" class="field short" type="number" min="1" max="100" :placeholder="String(form.passScore)" :disabled="form.isLocked"></label>
         <input v-model="it.hint" class="field grow" :placeholder="t('cl.hint')" maxlength="300">
         <button class="chip" :disabled="form.isLocked" :aria-label="t('common.delete')" @click="form.items.splice(i, 1)">✕</button>
       </div>

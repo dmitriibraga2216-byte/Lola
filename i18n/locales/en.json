@@ -1967,6 +1967,17 @@
       "comment": "comment required"
     },
     "noPending": "Nothing to decide",
+    "reqViewQueue": "Pending",
+    "reqViewTable": "All requests",
+    "reqAllKinds": "All",
+    "reqCol": {
+      "title": "Training topic",
+      "person": "Person",
+      "cost": "Cost",
+      "date": "Date",
+      "status": "Status"
+    },
+    "reqNoRows": "No requests match these filters",
     "approve": "Approve",
     "reject": "Reject",
     "category": "Category",
@@ -2172,6 +2183,7 @@
     "lockedShort": "filling started",
     "noForms": "No forms yet — create the first one",
     "lockedBanner": "Filling has already started. Scale, criteria and norms cannot be changed — only title, description and instruction.",
+    "duplicate": "Duplicate as a new version",
     "criterionIndicator": "Criterion — indicator",
     "titleField": "Title",
     "norm": "Norm",
@@ -2284,6 +2296,8 @@
     "itemText": "Item",
     "criticalHint": "Fail = whole checklist fails",
     "photoRequired": "photo",
+    "itemThreshold": "Own threshold, %",
+    "itemThresholdHint": "Fail threshold for this item only — falls back to the checklist's pass score if not set",
     "hint": "Hint: what counts as done",
     "passedShare": "passed",
     "actionsDone": "action items done",
@@ -2768,7 +2782,8 @@
     "col": {
       "duration": "Duration"
     },
-    "itemsCount": "{n} items"
+    "itemsCount": "{n} items",
+    "metaCode": "Code: {code} · {items}"
   },
   "groups": {
     "title": "Groups and segments",

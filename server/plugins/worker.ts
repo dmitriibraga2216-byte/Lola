@@ -86,6 +86,7 @@ export default defineNitroPlugin(async () => {
       const { recalcGroups } = await import('../services/groups')
       const { escalationScan } = await import('../services/notifications')
       const { telegramHealth } = await import('../services/telegram')
+      const { trajectoryScan } = await import('../services/trajectories')
       await telegramHealth() // docs/23 §10 telegram.health
       await runPerTenant('assignment.sync', async (tenantId) => {
         const n = await scheduledReportsScan(tenantId)
@@ -96,6 +97,10 @@ export default defineNitroPlugin(async () => {
         if (g) console.log(`[groups.recalc] ${tenantId}: ${g}`)
         const s = await syncAssignments(tenantId)
         if (s) console.log(`[assignment.sync] ${tenantId}: +${s}`)
+        // docs/33 D-026: подстраховка таймеров pg-boss траєкторій раз на добу давала запізнення до доби —
+        // переведено на щогодинний скан разом з іншими assignment.sync-завданнями
+        const tr = await trajectoryScan(tenantId)
+        if (tr.opened || tr.fired) console.log(`[trajectory.scan] ${tenantId}:`, tr)
       })
     })
     // Занятия (docs/18 §11): статусы planned→ongoing→finished, неявки, напоминания за сутки/час

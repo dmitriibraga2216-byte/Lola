@@ -168,7 +168,7 @@ describe('программы и траектории (docs/17 §13)', () => {
     const p = await pg.createProgram(ctx(), { title: `Лінійна ${Date.now()}`, mode: 'linear' })
     programIds.push(p.id)
     await pg.upsertNode(ctx(), p.id, { itemType: 'course', itemId: c1 })
-    const rule = await createRule(ctx(), { name: `Правило програми ${Date.now()}`, trigger: 'user.attributes_changed', conditions: { positionIds: [posId] }, actions: [], isActive: true, runLimit: { oncePerUser: false }, assignDelayDays: 0 })
+    const rule = await createRule(ctx(), { name: `Правило програми ${Date.now()}`, trigger: 'user.attributes_changed', conditions: {}, dimensions: [{ dimension: 'position', mode: 'include', valueIds: [posId] }], actions: [], isActive: true, runLimit: { oncePerUser: false }, assignDelayDays: 0 })
     ruleIds.push(rule.id)
     await pg.updateProgram(ctx(), p.id, { assignmentMode: ['automation'], automationRuleId: rule.id, noAssignAfterFinish: true })
     expect((await pg.publishProgram(ctx(), p.id)).ok).toBe(true)

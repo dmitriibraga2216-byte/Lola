@@ -335,7 +335,7 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     return { ok: true as const, status: input.decision, enrollmentId: s.enrollmentId, lessonId: s.lessonId, learnerId: s.userId, workshopId: s.workshopId }
   }).then((r) => {
     // Практикум как узел программы (docs/17 §7.4)
-    if (r.ok && (r.status === 'accepted' || r.status === 'rejected')) import('./programs').then(p => p.onItemResult(ctx.tenantId, r.learnerId, 'workshop', r.workshopId, { passed: r.status === 'accepted' })).catch(err => console.error('program workshop hook', err))
+    if (r.ok && (r.status === 'accepted' || r.status === 'rejected')) { import('./programs').then(p => p.onItemResult(ctx.tenantId, r.learnerId, 'workshop', r.workshopId, { passed: r.status === 'accepted' })).catch(err => console.error('program workshop hook', err)); import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, r.learnerId, 'workshop', r.workshopId, { passed: r.status === 'accepted' })).catch(err => console.error('trajectory workshop hook', err)) }
     return r
   })
 

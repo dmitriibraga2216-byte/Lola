@@ -185,13 +185,23 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| CRUD | `/automation-rules` | правило: четыре измерения (місто, посада, підрозділ, мітка), каждое с режимом `any\|include\|exclude`, `delayDays`, `onLeaveCondition` |
-| GET | `/automation-rules/:id/preview` | «Буде призначено»: состав аудитории на сейчас |
-| GET | `/automation-rules/:id/usages` | «Використовується для»: обратные ссылки |
-| CRUD | `/trajectories` | траектория |
-| GET/PUT | `/trajectories/:id/graph` | блоки и переходы с условиями (`17` Г-17.1) |
-| POST | `/trajectories/:id/validate` | проверка перед публикацией: недостижимые блоки, пути к Finish, циклы |
-| GET/POST | `/trajectories/:id/audience` | режим назначения и аудитория |
+| CRUD | `/automation-rules` | правило: четыре измерения (місто, посада, підрозділ, мітка) в `dimensions[]`, каждое с режимом `any\|include\|exclude`, `assignDelayDays`, `onLeaveCondition` |
+| GET | `/automation-rules/:id/preview` | «Буде призначено»: состав аудитории на сейчас, без побочных эффектов |
+| POST | `/automation-rules/preview` | то же по несохранённым `dimensions` формы (живая сводка) |
+| GET | `/automation-rules/:id/usages` | «Використовується для»: обратные ссылки `{kind: trajectory\|program\|assignment, id, title}` |
+| CRUD | `/trajectories` | траектория: `assignMode`, `automationRuleId` (только `program.link_rule`), `stopAssignAfterFinish` |
+| GET/PUT | `/trajectories/:id/graph` | полотно целиком: узлы (`kind` — `trajectory_node_kind`, новые — `tmpId`) и связи; условие — только на гілках `branch` (`17` §14.3, Г-17.1); ответ — сохранённый граф, `ids` (tmpId → id), `problems`. У опубликованной — только координаты (409) |
+| POST | `/trajectories/:id/validate` | «Перевірити»: недостижимые блоки, пути к Finish, циклы, «І» с одним входом, закриття перед Finish, гілка без «інакше», пустые поля — с `nodeId` и текстом, что исправить |
+| POST | `/trajectories/:id/publish` | публикация с проверками; 422 `trajectory.invalid` + `problems` |
+| POST | `/trajectories/:id/duplicate` | копия (черновик) — способ перестроить опубликованную |
+| GET/POST | `/trajectories/:id/audience` | кто на траектории (статус, текущий крок) / ручное назначение `{userIds}` |
+| GET | `/trajectories/:id/usages` | правило, число назначений узлов, прохождения |
+| GET | `/trajectories/usages?contentType=&contentId=` | траектории, где используется контент |
+| GET | `/trajectories/enrollments/:id` | лента прохождения глазами руководителя |
+| POST | `/trajectories/enrollments/:id/{cancel,decide}` | снятие с причиной / решение по заявке из каталога |
+| POST | `/trajectories/enrollments/:id/nodes/:nodeId/confirm` | узел «Наставник»: подтверждение наставником (керівник точки або адмін) |
+| GET | `/me/trajectories`, `/me/trajectories/:id` | мои траектории; лента шагов — только фактический путь |
+| GET/POST | `/me/trajectories/catalog`, `/me/trajectories/catalog/:id/enroll` | каталог траекторий; самозапись (`catalog_free`) или заявка (`catalog_request`) |
 
 ## 4.11 Люди и справочники
 

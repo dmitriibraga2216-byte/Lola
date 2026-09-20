@@ -408,6 +408,7 @@ export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<Submit
   if (result.ok && result.quizId && (result.status === 'passed' || result.status === 'failed')) {
     const quizId = result.quizId, passed = result.status === 'passed', score = result.score
     import('./programs').then(p => p.onItemResult(ctx.tenantId, ctx.actorId, 'quiz', quizId, { passed, score })).catch(err => console.error('program quiz hook', err))
+    import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, ctx.actorId, 'quiz', quizId, { passed, score })).catch(err => console.error('trajectory quiz hook', err))
   }
   return result
 }

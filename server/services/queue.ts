@@ -25,6 +25,7 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('certificate.render_pdf', { retryLimit: 3, expireInSeconds: 120 })
       await b.createQueue('webhook.deliver', { retryLimit: 3, expireInSeconds: 300 })
       await b.createQueue('report.export', { retryLimit: 2, expireInSeconds: 600 }) // docs/22 §10
+      await b.createQueue('trajectory.timer', { retryLimit: 5, retryBackoff: true, expireInSeconds: 300 }) // docs/17 §14.3: затримка / закриття доступу
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -57,4 +58,10 @@ export async function enqueueExpand(tenantId: string, assignmentId: string): Pro
 export async function enqueueReportExport(tenantId: string, exportId: string) {
   const b = await getBoss()
   await b.send('report.export', { tenantId, exportId }, { singletonKey: `export:${exportId}` })
+}
+
+/** Таймер узла траектории (delay / stop_delay): задача стартует в `at`; обработчик — trajectories.fireTimer. */
+export async function enqueueTrajectoryTimer(tenantId: string, stateId: string, at: Date): Promise<void> {
+  const b = await getBoss()
+  await b.send('trajectory.timer', { tenantId, stateId }, { singletonKey: `trajectory:${stateId}`, startAfter: at })
 }

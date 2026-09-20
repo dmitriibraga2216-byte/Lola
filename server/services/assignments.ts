@@ -74,56 +74,64 @@ export type CreateResult
     | { ok: false, code: 'subject_not_found' | 'empty_audience' }
 
 export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmentCreateSchema>): Promise<CreateResult> {
-  const created = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const title = await subjectTitle(tx, input.subjectType, input.subjectId)
-    if (!title) return { ok: false as const, code: 'subject_not_found' as const }
-
-    const count = (await resolveAudience(tx, input.audience, input.exclude)).size
-    if (count === 0 && input.status === 'active') return { ok: false as const, code: 'empty_audience' as const }
-
-    let versionId: string | null = null
-    if (input.lockVersion && input.subjectType === 'course') {
-      const [c] = await tx.select({ v: courses.publishedVersionId }).from(courses).where(eq(courses.id, input.subjectId))
-      versionId = c?.v ?? null
-    }
-
-    const [row] = await tx.insert(assignments).values({
-      tenantId: ctx.tenantId,
-      title: input.title ?? title,
-      kind: 'manual',
-      subjectType: input.subjectType,
-      subjectId: input.subjectId,
-      subjectVersionId: versionId,
-      audience: input.audience,
-      exclude: input.exclude ?? { rules: [], match: 'any' },
-      startsAt: input.startsAt ? new Date(input.startsAt) : null,
-      dueMode: input.dueMode,
-      dueAt: input.dueAt ? new Date(input.dueAt) : null,
-      dueDays: input.dueMode === 'relative' ? input.dueDays : null,
-      isMandatory: input.isMandatory,
-      recurrence: input.recurrence ?? null,
-      params: paramsFor(input.subjectType, input.params ?? {}),
-      reminders: { ...DEFAULT_REMINDERS, ...(input.reminders ?? {}) },
-      autoSync: input.autoSync,
-      tags: input.tags,
-      status: input.status,
-      createdBy: ctx.actorId,
-      onLeaveCondition: input.onLeaveCondition ?? 'keep',
-      viaCatalog: input.method?.viaCatalog ?? false,
-      automationRuleId: input.method?.automationRuleId ?? null,
-      useInDevPlans: input.method?.useInDevPlans ?? false,
-    }).returning({ id: assignments.id })
-    if (input.competencyIds?.length) {
-      await tx.insert(assignmentCompetencies).values(input.competencyIds.map(competencyId => ({ tenantId: ctx.tenantId, assignmentId: row!.id, competencyId }))).onConflictDoNothing()
-    }
-
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.create', entity: 'assignment', entityId: row!.id, after: { title, count, subjectType: input.subjectType } })
-    return { ok: true as const, assignmentId: row!.id }
-  })
+  const created = await withTenant(ctx.tenantId, ctx.actorId, tx => createAssignmentTx(tx, ctx, input))
   if (!created.ok) return created
 
   const expanded = created.ok && input.status === 'active' ? await expandAssignment(ctx.tenantId, created.assignmentId) : 0
   return { ok: true, assignmentId: created.assignmentId, expanded }
+}
+
+/**
+ * Создание назначения внутри чужой транзакции: узел траектории (spec-17) создаёт
+ * назначение той же транзакцией, что и состояние узла; раскрытие — после фиксации.
+ * `source.kind` — task_type (docs/02): manual | trajectory; `source.trajectoryId/nodeId` кладутся в audience.
+ */
+export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory', trajectoryId?: string, nodeId?: string, enrollmentId?: string } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' }> {
+  const title = await subjectTitle(tx, input.subjectType, input.subjectId)
+  if (!title) return { ok: false as const, code: 'subject_not_found' as const }
+
+  const count = (await resolveAudience(tx, input.audience, input.exclude)).size
+  if (count === 0 && input.status === 'active') return { ok: false as const, code: 'empty_audience' as const }
+
+  let versionId: string | null = null
+  if (input.lockVersion && input.subjectType === 'course') {
+    const [c] = await tx.select({ v: courses.publishedVersionId }).from(courses).where(eq(courses.id, input.subjectId))
+    versionId = c?.v ?? null
+  }
+
+  const audience = source.trajectoryId ? { ...input.audience, trajectoryId: source.trajectoryId, nodeId: source.nodeId, trajectoryEnrollmentId: source.enrollmentId } : input.audience
+  const [row] = await tx.insert(assignments).values({
+    tenantId: ctx.tenantId,
+    title: input.title ?? title,
+    kind: source.kind ?? 'manual',
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
+    subjectVersionId: versionId,
+    audience,
+    exclude: input.exclude ?? { rules: [], match: 'any' },
+    startsAt: input.startsAt ? new Date(input.startsAt) : null,
+    dueMode: input.dueMode,
+    dueAt: input.dueAt ? new Date(input.dueAt) : null,
+    dueDays: input.dueMode === 'relative' ? input.dueDays : null,
+    isMandatory: input.isMandatory,
+    recurrence: input.recurrence ?? null,
+    params: paramsFor(input.subjectType, input.params ?? {}),
+    reminders: { ...DEFAULT_REMINDERS, ...(input.reminders ?? {}) },
+    autoSync: input.autoSync,
+    tags: input.tags,
+    status: input.status,
+    createdBy: ctx.actorId,
+    onLeaveCondition: input.onLeaveCondition ?? 'keep',
+    viaCatalog: input.method?.viaCatalog ?? false,
+    automationRuleId: input.method?.automationRuleId ?? null,
+    useInDevPlans: input.method?.useInDevPlans ?? false,
+  }).returning({ id: assignments.id })
+  if (input.competencyIds?.length) {
+    await tx.insert(assignmentCompetencies).values(input.competencyIds.map(competencyId => ({ tenantId: ctx.tenantId, assignmentId: row!.id, competencyId }))).onConflictDoNothing()
+  }
+
+  await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.create', entity: 'assignment', entityId: row!.id, after: { title, count, subjectType: input.subjectType, ...(source.trajectoryId ? { trajectoryId: source.trajectoryId, nodeId: source.nodeId } : {}) } })
+  return { ok: true as const, assignmentId: row!.id }
 }
 
 /**
@@ -227,11 +235,12 @@ export async function syncAssignments(tenantId: string): Promise<number> {
       .where(and(eq(assignments.status, 'active'), eq(assignments.autoSync, true)))).map(r => r.id)
   })
   let total = 0
-  const { applyOnLeave } = await import('./tasks')
+  const { applyOnLeave, applyOnLeaveForRules } = await import('./tasks')
   for (const id of ids) {
     total += await expandAssignment(tenantId, id)
     await applyOnLeave(tenantId, id) // Г-15.2: keep | cancel_unstarted | cancel_all
   }
+  await applyOnLeaveForRules(tenantId).catch(err => console.error('applyOnLeaveForRules', err)) // Г-15.2 для программ и траекторий правила (spec-17)
   return total
 }
 

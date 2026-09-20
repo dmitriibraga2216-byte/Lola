@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import type { z } from 'zod'
-import { assignments, automationRules, automationRuns, learningProfiles, users } from '../db/schema'
+import { assignments, automationRuleDimensions, automationRules, automationRuns, learningProfiles, tags, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -9,7 +9,7 @@ import { expandAssignment } from './assignments'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
-import type { profileSchema, ruleSchema } from '../../shared/schemas/assignments'
+import type { RuleDimensionInput, profileSchema, ruleSchema } from '../../shared/schemas/assignments'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -111,12 +111,102 @@ const TRIGGER_ALIASES: Record<string, RuleTrigger[]> = {
   'user.activated': ['user.activated'],
 }
 
+/** Измерения правила → плоские условия для matchesConditions (метки — по имени в users.tags). */
+export async function dimensionsToConditions(tx: TenantTx, dims: { dimension: string, mode: string, valueIds: string[] }[]): Promise<Conditions> {
+  const cond: Conditions = {}
+  for (const d of dims) {
+    if (d.mode === 'any' || d.valueIds.length === 0) continue
+    const invert = d.mode === 'exclude'
+    if (d.dimension === 'city') { cond.cityIds = d.valueIds; cond.cityInvert = invert }
+    else if (d.dimension === 'position') { cond.positionIds = d.valueIds; cond.positionInvert = invert }
+    else if (d.dimension === 'org_unit') { cond.orgUnitIds = d.valueIds; cond.orgUnitInvert = invert }
+    else if (d.dimension === 'tag') {
+      const rows = await tx.select({ name: tags.name }).from(tags).where(inArray(tags.id, d.valueIds))
+      cond.tags = rows.map(r => r.name); cond.tagInvert = invert
+      if (cond.tags.length === 0) cond.tags = ['\u0000'] // выбранных меток больше нет: include → никто, exclude → все
+    }
+  }
+  return cond
+}
+
+/** Полные условия правила: четыре измерения из таблицы + прочее из conditions jsonb (courseIds, locationIds, daysBefore). */
+export async function ruleConditions(tx: TenantTx, rule: { id: string, conditions: unknown }): Promise<Conditions> {
+  const dims = await tx.select().from(automationRuleDimensions).where(eq(automationRuleDimensions.ruleId, rule.id))
+  return { ...(rule.conditions as Conditions), ...await dimensionsToConditions(tx, dims) }
+}
+
+async function saveDimensions(tx: TenantTx, tenantId: string, ruleId: string, dims: RuleDimensionInput[]) {
+  await tx.delete(automationRuleDimensions).where(eq(automationRuleDimensions.ruleId, ruleId))
+  const rows = RULE_DIMENSION_KEYS.map((dimension) => {
+    const d = dims.find(x => x.dimension === dimension)
+    return { tenantId, ruleId, dimension, mode: d?.mode ?? 'any', valueIds: d?.valueIds ?? [] }
+  })
+  await tx.insert(automationRuleDimensions).values(rows)
+}
+const RULE_DIMENSION_KEYS = ['city', 'position', 'org_unit', 'tag'] as const
+
+/** Названия значений измерений — для сводки «Буде призначено» и колонки «Аудиторія». */
+async function dimensionLabels(tx: TenantTx, dims: { dimension: string, valueIds: string[] }[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const ids = (d: string) => dims.filter(x => x.dimension === d).flatMap(x => x.valueIds)
+  const q = async (table: string, list: string[]) => {
+    if (!list.length) return
+    const rows = await tx.execute(sql`select id, name from ${sql.identifier(table)} where id in (${sql.join(list.map(x => sql`${x}::uuid`), sql`, `)})`) as unknown as { id: string, name: string }[]
+    for (const r of rows) out.set(r.id, r.name)
+  }
+  await q('cities', ids('city')); await q('positions', ids('position')); await q('org_units', ids('org_unit')); await q('tags', ids('tag'))
+  return out
+}
+
+export type RuleUsage = { kind: 'trajectory' | 'program' | 'assignment', id: string, title: string }
+
+/** «Використовується для»: обратные ссылки — траектории, программы, назначения (docs/04 §4.10). */
+export async function ruleUsagesTx(tx: TenantTx, ruleIds: string[]): Promise<Map<string, RuleUsage[]>> {
+  const out = new Map<string, RuleUsage[]>()
+  if (!ruleIds.length) return out
+  const push = (ruleId: string, u: RuleUsage) => out.set(ruleId, [...(out.get(ruleId) ?? []), u])
+  const { trajectoriesUsingRules } = await import('./trajectories')
+  for (const [ruleId, list] of await trajectoriesUsingRules(tx, ruleIds)) for (const t of list) push(ruleId, { kind: 'trajectory', ...t })
+  const { programsUsingRules } = await import('./programs')
+  for (const [ruleId, list] of await programsUsingRules(tx, ruleIds)) for (const p of list) push(ruleId, { kind: 'program', ...p })
+  const rows = await tx.select({ id: assignments.id, title: assignments.title, ruleId: assignments.automationRuleId }).from(assignments)
+    .where(and(inArray(assignments.automationRuleId, ruleIds), sql`${assignments.status} <> 'archived'`, eq(assignments.kind, 'manual')))
+  for (const a of rows) push(a.ruleId!, { kind: 'assignment', id: a.id, title: a.title })
+  return out
+}
+
+export async function ruleUsages(ctx: Ctx, id: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [r] = await tx.select({ id: automationRules.id }).from(automationRules).where(eq(automationRules.id, id))
+    if (!r) return null
+    return (await ruleUsagesTx(tx, [id])).get(id) ?? []
+  })
+}
+
+function serializeRule(r: typeof automationRules.$inferSelect, dims: typeof automationRuleDimensions.$inferSelect[], labels: Map<string, string>, usedBy: RuleUsage[]) {
+  const dimensions = RULE_DIMENSION_KEYS.map((dimension) => {
+    const d = dims.find(x => x.dimension === dimension)
+    return { dimension, mode: d?.mode ?? 'any', valueIds: d?.valueIds ?? [], values: (d?.valueIds ?? []).map(id => ({ id, name: labels.get(id) ?? '?' })) }
+  })
+  return { ...r, dimensions, usedBy }
+}
+
 export async function listRules(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rules = await tx.select().from(automationRules).orderBy(automationRules.name)
-    const { programsUsingRules } = await import('./programs')
-    const used = await programsUsingRules(tx, rules.map(r => r.id))
-    return rules.map(r => ({ ...r, usedBy: used.get(r.id) ?? [] }))
+    const dims = rules.length ? await tx.select().from(automationRuleDimensions).where(inArray(automationRuleDimensions.ruleId, rules.map(r => r.id))) : []
+    const labels = await dimensionLabels(tx, dims)
+    const used = await ruleUsagesTx(tx, rules.map(r => r.id))
+    return rules.map(r => serializeRule(r, dims.filter(d => d.ruleId === r.id), labels, used.get(r.id) ?? []))
+  })
+}
+
+export async function getRule(ctx: Ctx, id: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [r] = await tx.select().from(automationRules).where(eq(automationRules.id, id))
+    if (!r) return null
+    const dims = await tx.select().from(automationRuleDimensions).where(eq(automationRuleDimensions.ruleId, id))
+    return serializeRule(r, dims, await dimensionLabels(tx, dims), (await ruleUsagesTx(tx, [id])).get(id) ?? [])
   })
 }
 
@@ -124,8 +214,7 @@ export async function deleteRule(ctx: Ctx, id: string): Promise<{ ok: true } | {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [r] = await tx.select({ id: automationRules.id, name: automationRules.name }).from(automationRules).where(eq(automationRules.id, id))
     if (!r) return { ok: false as const, code: 'not_found' as const, usedBy: [] }
-    const { programsUsingRules } = await import('./programs')
-    const used = (await programsUsingRules(tx, [id])).get(id) ?? []
+    const used = (await ruleUsagesTx(tx, [id])).get(id) ?? []
     if (used.length) return { ok: false as const, code: 'in_use' as const, usedBy: used.map(u => u.title) }
     await tx.delete(automationRules).where(eq(automationRules.id, id))
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'rule.delete', entity: 'automation_rule', entityId: id, before: { name: r.name } })
@@ -135,15 +224,22 @@ export async function deleteRule(ctx: Ctx, id: string): Promise<{ ok: true } | {
 
 export async function createRule(ctx: Ctx, input: z.infer<typeof ruleSchema>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.insert(automationRules).values({ tenantId: ctx.tenantId, ...input }).returning()
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'rule.create', entity: 'automation_rule', entityId: r!.id, after: { name: input.name, trigger: input.trigger } })
+    const { dimensions, ...rest } = input
+    const [r] = await tx.insert(automationRules).values({ tenantId: ctx.tenantId, ...rest }).returning()
+    await saveDimensions(tx, ctx.tenantId, r!.id, dimensions)
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'rule.create', entity: 'automation_rule', entityId: r!.id, after: { name: input.name, trigger: input.trigger, dimensions } })
     return r!
   })
 }
 
 export async function updateRule(ctx: Ctx, id: string, input: Partial<z.infer<typeof ruleSchema>>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.update(automationRules).set({ ...input, updatedAt: new Date() }).where(eq(automationRules.id, id)).returning()
+    const { dimensions, ...rest } = input
+    const [before] = await tx.select().from(automationRules).where(eq(automationRules.id, id))
+    if (!before) return null
+    const [r] = await tx.update(automationRules).set({ ...rest, updatedAt: new Date() }).where(eq(automationRules.id, id)).returning()
+    if (dimensions) await saveDimensions(tx, ctx.tenantId, id, dimensions)
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'rule.update', entity: 'automation_rule', entityId: id, before: { name: before.name, isActive: before.isActive }, after: { ...rest, dimensions } })
     return r ?? null
   })
 }
@@ -193,10 +289,29 @@ export async function ruleUsers(ctx: Ctx, ruleId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [rule] = await tx.select().from(automationRules).where(eq(automationRules.id, ruleId))
     if (!rule) return null
-    const people = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.status, 'active')).orderBy(users.fullName)
-    const out: { id: string, fullName: string }[] = []
-    for (const p of people) if (await matchesConditions(tx, p.id, rule.conditions as Conditions)) out.push(p)
-    return out
+    return peopleMatching(tx, await ruleConditions(tx, rule))
+  })
+}
+
+async function peopleMatching(tx: TenantTx, cond: Conditions) {
+  const people = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.status, 'active')).orderBy(users.fullName)
+  const out: { id: string, fullName: string }[] = []
+  for (const p of people) if (await matchesConditions(tx, p.id, cond)) out.push(p)
+  return out
+}
+
+/** «Буде призначено: N людей на зараз» — без побочных эффектов; по сохранённому правилу или по измерениям формы. */
+export async function previewRule(ctx: Ctx, input: { ruleId: string } | { dimensions: RuleDimensionInput[] }) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    let cond: Conditions
+    if ('ruleId' in input) {
+      const [rule] = await tx.select().from(automationRules).where(eq(automationRules.id, input.ruleId))
+      if (!rule) return null
+      cond = await ruleConditions(tx, rule)
+    }
+    else cond = await dimensionsToConditions(tx, input.dimensions)
+    const people = await peopleMatching(tx, cond)
+    return { count: people.length, people }
   })
 }
 
@@ -227,6 +342,7 @@ type Action
 export async function runRules(tenantId: string, trigger: RuleTrigger, userId: string, payload: Record<string, unknown> = {}, opts: { dryRun?: boolean, ruleId?: string } = {}) {
   const results: { ruleId: string, ruleName: string, status: string, actions: unknown[] }[] = []
   const toExpand: string[] = []
+  const toStart: string[] = []
 
   await withTenant(tenantId, null, async (tx) => {
     const triggers = [...new Set([trigger, ...(TRIGGER_ALIASES[trigger] ?? [])])]
@@ -241,7 +357,7 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
         const [done] = await tx.select({ id: automationRuns.id }).from(automationRuns).where(and(eq(automationRuns.ruleId, rule.id), eq(automationRuns.userId, userId)))
         if (done) { results.push({ ruleId: rule.id, ruleName: rule.name, status: 'skipped:once_per_user', actions: [] }); continue }
       }
-      if (!await matchesConditions(tx, userId, rule.conditions as Conditions, payload)) {
+      if (!await matchesConditions(tx, userId, await ruleConditions(tx, rule), payload)) {
         results.push({ ruleId: rule.id, ruleName: rule.name, status: 'skipped:conditions', actions: [] })
         continue
       }
@@ -300,6 +416,9 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
       // Программы/траектории с режимом automation, привязанные к правилу (docs/17 §3.4, §7.8)
       const { assignProgramsForRule } = await import('./programs')
       for (const r of await assignProgramsForRule(tx, tenantId, rule.id, userId, { dryRun: !!opts.dryRun, delayDays: rule.assignDelayDays })) done.push(r)
+      // Траектории с assign_mode=automation (docs/17 §14.1): узлы выдаются по мере прохождения
+      const { assignTrajectoriesForRule } = await import('./trajectories')
+      for (const r of await assignTrajectoriesForRule(tx, tenantId, rule.id, userId, { dryRun: !!opts.dryRun, delayDays: rule.assignDelayDays })) { done.push(r); if (r.enrollmentId && r.started) toStart.push(r.enrollmentId) }
 
       if (!opts.dryRun) {
         await tx.insert(automationRuns).values({ tenantId, ruleId: rule.id, userId, triggerPayload: payload, actionsResult: done, status: 'ok', requestContext: currentRequestContext() }).onConflictDoNothing()
@@ -310,6 +429,10 @@ export async function runRules(tenantId: string, trigger: RuleTrigger, userId: s
   })
 
   if (!opts.dryRun) for (const aid of toExpand) await expandAssignment(tenantId, aid)
+  if (!opts.dryRun && toStart.length) {
+    const { startEnrollment } = await import('./trajectories')
+    for (const eid of toStart) await startEnrollment(tenantId, eid).catch(err => console.error('trajectory.start', err))
+  }
   return results
 }
 

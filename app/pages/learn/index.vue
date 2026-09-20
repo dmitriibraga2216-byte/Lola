@@ -5,7 +5,7 @@ const { t } = useI18n()
 const { me, hasScope } = useAuth()
 const route = useRoute()
 const sections = computed(() => [
-  { to: '/learn/programs', label: t('prog.short') }, { to: '/learn/meetups', label: t('mt.short') }, { to: '/learn/knowledge', label: t('kb.short') }, { to: '/learn/wiki', label: t('wiki.short') }, { to: '/learn/org', label: t('org.short') }, { to: '/learn/news', label: t('news.short') }, { to: '/learn/development', label: t('dev.short') },
+  { to: '/learn/trajectories', label: t('traj.short') }, { to: '/learn/programs', label: t('prog.short') }, { to: '/learn/meetups', label: t('mt.short') }, { to: '/learn/knowledge', label: t('kb.short') }, { to: '/learn/wiki', label: t('wiki.short') }, { to: '/learn/org', label: t('org.short') }, { to: '/learn/news', label: t('news.short') }, { to: '/learn/development', label: t('dev.short') },
   { to: '/learn/assessment', label: t('assess.short') }, { to: '/learn/certificates', label: t('learner.certificates') }, { to: '/learn/surveys', label: t('survey.short') },
   ...(hasScope('checklist.run') ? [{ to: '/learn/checklists', label: t('cl.short') }] : []),
 ])

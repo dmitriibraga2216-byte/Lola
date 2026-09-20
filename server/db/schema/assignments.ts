@@ -118,6 +118,23 @@ export const automationRules = pgTable('automation_rules', {
   index().on(t.tenantId),
 ])
 
+/**
+ * Четыре измерения правила (docs/17 §14.2, docs/02): каждое — свой режим и список значений.
+ * Каноничный источник аудитории правила; `automation_rules.conditions` держит остальное
+ * (courseIds, locationIds, daysBefore).
+ */
+export const automationRuleDimensions = pgTable('automation_rule_dimensions', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  ruleId: uuid('rule_id').notNull().references(() => automationRules.id, { onDelete: 'cascade' }),
+  dimension: text('dimension').notNull(), // city | position | org_unit | tag
+  mode: text('mode').notNull().default('any'), // any | include | exclude («Будь-яке» / «Тільки ці» / «Всі, окрім»)
+  valueIds: uuid('value_ids').array().notNull().default(sql`'{}'::uuid[]`),
+}, t => [
+  index().on(t.tenantId, t.ruleId),
+  unique().on(t.ruleId, t.dimension),
+])
+
 export const automationRuns = pgTable('automation_runs', {
   ...baseColumns,
   tenantId: tenantId(),

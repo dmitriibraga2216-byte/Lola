@@ -87,6 +87,21 @@ Html-отчёт — в `visual-report/index.html` (`pnpm exec playwright show-re
 Развёртывание на своём железе — `docker/` и `Makefile` (см. [docs/26](docs/26-server-local.md), [docs/27](docs/27-gateway-public.md)).
 Демо-стенд — `docker/docker-compose.demo.yml`: готовый образ `ghcr.io/dmitriibraga2216-byte/lola:latest` (собирается CI на `main`), воркер внутри приложения, код входа показывается на экране (`OTP_DEBUG=1`), наружу — быстрый туннель Cloudflare без аккаунта (адрес `*.trycloudflare.com` меняется при перезапуске туннеля; свежий адрес печатает `deploy.sh`). Стенд живёт на VM `devbox` (доступ только через Tailscale, `ssh devbox`, каталог `~/lola-demo` с `docker-compose.yml`, `.env` и `deploy.sh` = копия `scripts/deploy-demo.sh`). **Обновление — pull-ом, а не push-ом:** CI до машины за Tailscale не достучится, поэтому на стенде крон раз в 5 минут запускает `deploy.sh --if-changed` — тянет `:latest`, и если digest изменился, накатывает миграции (сервис `migrate`) и перезапускает приложение; лог — `~/lola-demo/deploy.log`. Руками: `ssh devbox 'bash -s' < scripts/deploy-demo.sh`. Job `deploy-demo` в CI (ssh по секретам `DEMO_SSH_*`) оставлен для стенда с публичным адресом — сейчас он стучится в старую песочницу, где `deploy.sh` только печатает, что стенд переехал.
 
+## Прод
+
+Подготовлено (докс/26 §26.13 «Розгортання R1», докс/32 §Б строка 22 — 🟡 «подготовлено», выкатка
+не выполнялась), выкатка ждёт решения по [Г.1](docs/32-audit-2026-09-19-2.md): отдельная VM или
+прод рядом со стендом на том же `devbox`. Конфигурация — как у стенда, но без демо-упрощений:
+`docker/docker-compose.prod.yml` (`db`, `minio`, одноразовый `migrate`, `app` с воркером внутри,
+именованный туннель Cloudflare `tunnel`; профиль `public` — Caddy про запас для VM с белым IP,
+по умолчанию не поднимается — TLS и вход в R1 терминирует Cloudflare). Каталог на VM — `~/lola-prod`
+(по образцу `~/lola-demo`): `scripts/gen-env.sh` генерирует `.env` со случайными секретами,
+`scripts/first-run-prod.sh` — первый запуск (миграции, минимальный тенант `SEED_MODE=prod` без
+демо-контента, пароли ролям БД), `scripts/deploy-prod.sh` — обновление по крону (аналог
+`deploy-demo.sh`, тянет только `app`/`migrate`), `scripts/backup-prod.sh` — ежедневный дамп БД
+и зеркало MinIO с ротацией. Подробный пошаговый runbook, чек-лист перед показом заказчику и
+как откатиться/восстановиться из бэкапа — [docs/26](docs/26-server-local.md) §26.13.
+
 ## ТЗ
 
 | Документ | О чём |

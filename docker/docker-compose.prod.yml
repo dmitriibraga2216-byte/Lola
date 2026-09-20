@@ -1,20 +1,13 @@
-# Прод на своём железе (docs/26 §26.4). Переменные — из /srv/lola/secrets/.env
-name: lola
-
-x-app: &app
-  image: lola/app:${APP_VERSION:-latest}
-  build:
-    context: ..
-    dockerfile: docker/Dockerfile
-    args:
-      APP_VERSION: ${APP_VERSION:-dev}
-      APP_COMMIT: ${APP_COMMIT:-local}
-  env_file: ${ENV_FILE:-/srv/lola/secrets/.env}
-  restart: unless-stopped
-  logging:
-    driver: json-file
-    options: { max-size: "20m", max-file: "5" }
-  networks: [internal]
+# Прод «конфігурація R1» (docs/26 «Розгортання R1», docs/32 §Б рядок 22): одна VM без
+# публічного IP (Tailscale-only), TLS і вхід ззовні термінує Cloudflare — тунель ходить
+# прямо в app:3000. Тому тут немає Caddy й немає відкритих портів у профілі за замовчуванням.
+# Профіль `public` (сервіс `gateway`, Caddy) — резерв на випадок VM з білим IP (docs/27 §27.1
+# «Проброс портів + Caddy»), у прийнятій R1 не запускається.
+#
+# Каталог розгортання (не в git): ~/lola-prod з .env (див. scripts/gen-env.sh) і cf/config.yml
+# (див. scripts/first-run-prod.sh, docs/26). Запуск: ENV_FILE=./.env docker compose -f
+# docker/docker-compose.prod.yml up -d --wait
+name: lola-prod
 
 services:
   db:
@@ -22,125 +15,116 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lola}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-lola}
+    # 4 ГБ RAM на всю VM (docs/32 §Г.1 Proxmox devbox): shared_buffers 512MB — четверть RAM,
+    # обычная рекомендация для Postgres, а не «под завязку» лимита контейнера (1g ниже).
+    command: postgres -c shared_buffers=512MB -c max_connections=60
     volumes:
-      - ${DATA_DIR:-/srv/lola/data}/postgres:/var/lib/postgresql/data
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lola} -d ${POSTGRES_DB:-lola}"]
       interval: 5s
       timeout: 3s
       retries: 30
     deploy:
-      resources: { limits: { memory: 2g } }
+      resources: { limits: { memory: 1g } }
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
-    networks: [internal]
 
   minio:
     image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
     command: server /data --console-address ":9001"
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set in .env}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set in .env}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY?set in .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY?set in .env}
     volumes:
-      - ${DATA_DIR:-/srv/lola/data}/minio:/data
+      - ${DATA_DIR:-./data}/minio:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 12
     deploy:
-      resources: { limits: { memory: 1g } }
+      resources: { limits: { memory: 512m } }
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
-    networks: [internal]
+
+  # Одноразовий контейнер при кожному деплої: без цього оновлення образу лишає схему
+  # старою (так уже було на демо-стенді 19.09 — 0020–0025 не накотились, docs/26 §26.8).
+  migrate:
+    image: ${APP_IMAGE:-ghcr.io/dmitriibraga2216-byte/lola}:${APP_TAG:-latest}
+    env_file: ${ENV_FILE:-./.env}
+    command: ["node", "--import", "tsx", "server/db/migrate.ts"]
+    depends_on:
+      db: { condition: service_healthy }
+    deploy:
+      resources: { limits: { memory: 256m } }
 
   app:
-    <<: *app
+    image: ${APP_IMAGE:-ghcr.io/dmitriibraga2216-byte/lola}:${APP_TAG:-latest}
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-./.env}
     environment:
-      WORKER_ENABLED: "0"
+      # Воркер (pg-boss, ffmpeg) у тому ж процесі — окремий сервіс `worker` з docs/26 §26.4
+      # надлишковий при 4 ГБ RAM на VM (docs/32 §Г.1); винести в другу VM можна без зміни
+      # образу, коли черга виросте (docs/26 §26.11).
+      WORKER_ENABLED: "1"
+      OTP_DEBUG: "0"
+      DB_POOL_MAX: "${DB_POOL_MAX:-10}"
     depends_on:
       db: { condition: service_healthy }
       minio: { condition: service_healthy }
-    deploy:
-      resources: { limits: { memory: 1536m } }
+      migrate: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-
-  worker:
-    <<: *app
-    command: ["node", ".output/server/index.mjs"]
-    environment:
-      WORKER_ENABLED: "1"
-      PORT: "3001"
-    depends_on:
-      db: { condition: service_healthy }
-      minio: { condition: service_healthy }
     deploy:
-      resources: { limits: { memory: 2g } }
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      resources: { limits: { memory: 1536m } }
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
 
-  proxy:
+  # Іменований тунель Cloudflare (docs/27 §27.4): вихідне з'єднання від сервера, портів
+  # на VM не відкриваємо. `config.yml` і файл облікових даних тунелю — поза git, том
+  # монтується лише на читання; заповнюються скриптом first-run-prod.sh за докс/26.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    restart: unless-stopped
+    volumes:
+      - ${CF_DIR:-./cf}:/etc/cloudflared:ro
+    depends_on:
+      app: { condition: service_healthy }
+    deploy:
+      resources: { limits: { memory: 128m } }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Профіль `public` — резерв для VM з білим IP (docs/27 §27.1, план Б): TLS і вхід тримає
+  # Caddy, порти 80/443 відкриваються назовні. У прийнятій конфігурації R1 не піднімається.
+  # Запуск за потреби: docker compose -f docker/docker-compose.prod.yml --profile public up -d gateway
+  gateway:
     image: caddy:2-alpine
     restart: unless-stopped
+    profiles: [public]
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ${DATA_DIR:-/srv/lola/data}/caddy:/data
+      - ${DATA_DIR:-./data}/caddy:/data
     environment:
       APP_HOST: ${APP_HOST:-app.lola.local}
     depends_on: [app]
     deploy:
-      resources: { limits: { memory: 256m } }
+      resources: { limits: { memory: 128m } }
     logging:
       driver: json-file
-      options: { max-size: "20m", max-file: "5" }
-    networks: [internal]
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel run
-    restart: unless-stopped
-    environment:
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
-    depends_on: [proxy]
-    profiles: [tunnel]
-    networks: [internal]
-
-  backup:
-    image: pgvector/pgvector:pg16
-    restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        while true; do
-          sleep $$(( ( $$(date -d '03:00' +%s 2>/dev/null || date -j -f '%H:%M' '03:00' +%s) - $$(date +%s) + 86400 ) % 86400 ))
-          f=/backups/db/lola-$$(date +%F).dump
-          PGPASSWORD=$$POSTGRES_PASSWORD pg_dump -h db -U $$POSTGRES_USER -Fc $$POSTGRES_DB > $$f && echo "backup ok $$f"
-          find /backups/db -name '*.dump' -mtime +30 -delete
-        done
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-lola}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-lola}
-    volumes:
-      - ${DATA_DIR:-/srv/lola}/backups:/backups
-    depends_on:
-      db: { condition: service_healthy }
-    networks: [internal]
-
-networks:
-  internal:
+      options: { max-size: "10m", max-file: "3" }

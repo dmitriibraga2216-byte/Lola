@@ -209,3 +209,122 @@ make rollback    # откат на предыдущий тег образа + и
 4. Восстановление из вчерашнего дампа на пустой базе даёт рабочую систему.
 5. `/health` отдаёт версию и хеш коммита; `/ready` краснеет, если БД или MinIO недоступны.
 6. Ни один секрет не лежит в git и не виден в `docker inspect` в открытом виде.
+
+## 26.13 Розгортання R1: VM за Tailscale + тунель Cloudflare (прийнята конфігурація)
+
+Фактична середовище, під яке готується прод зараз (докс/32 §Б рядок 22, §Г.1). Відрізняється
+від загального плану §26.2–26.12 ресурсами (одна VM на 4 ГБ, не 8) і способом виходу назовні:
+публічного IP немає, тунель уже є для стенду — прод використовує другий, іменований тунель
+на тому самому Cloudflare-акаунті. **Caddy (докс/27) у цій конфігурації не піднімається** —
+TLS і вхід термінує Cloudflare, тунель ходить прямо у `app:3000`; профіль `public` з Caddy
+лишається в `docker/docker-compose.prod.yml` як резерв для VM з білим IP.
+
+| Параметр | Значення |
+| --- | --- |
+| VM | `devbox` (Proxmox), Debian 12, 2 vCPU / 4 ГБ / 32 ГБ, Docker 29 + compose v5 |
+| Доступ до VM | тільки Tailscale, публічного IP немає |
+| Домен | `lmscappi.pp.ua` у Cloudflare, Universal SSL покриває `*.lmscappi.pp.ua` |
+| Прод | `app.lmscappi.pp.ua`; тенанти — `<slug>.lmscappi.pp.ua` (докс/25 §16.1, Spec 25) |
+| Тунель стенду (є) | `lola-stand` → `lms.lmscappi.pp.ua`, конфіг `~/lola-demo/cf/config.yml` |
+| Тунель прода (створити) | окремий іменований тунель, конфіг `~/lola-prod/cf/config.yml` |
+| Каталог розгортання | `~/lola-prod` (не `/srv/lola` з §26.3 — без root, за зразком `~/lola-demo`) |
+
+### 26.13.1 Тунель: створення (виконується один раз, вручну — не автоматизовано цим PR)
+
+```bash
+cloudflared tunnel login                       # якщо ще не логінились для lola-stand
+cloudflared tunnel create lola-prod            # видає <UUID> і credentials-file ~/.cloudflared/<UUID>.json
+cloudflared tunnel route dns lola-prod app.lmscappi.pp.ua
+cloudflared tunnel route dns lola-prod '*.lmscappi.pp.ua'   # wildcard — резолв тенанта по Host усередині app
+```
+
+`~/lola-prod/cf/config.yml` (том `tunnel` у `docker-compose.prod.yml` монтує `./cf` як
+`/etc/cloudflared:ro`; сам файл і credentials — поза git):
+
+```yaml
+tunnel: lola-prod
+credentials-file: /etc/cloudflared/<UUID>.json
+ingress:
+  - hostname: app.lmscappi.pp.ua
+    service: http://app:3000
+  - hostname: "*.lmscappi.pp.ua"
+    service: http://app:3000
+  - service: http_status:404
+```
+
+Резолв тенанта за `Host` — усередині застосунку (`server/middleware/01.host.ts`,
+`TENANT_HOST_BASE=lmscappi.pp.ua`), тунелю не потрібно знати список тенантів.
+
+### 26.13.2 Перший запуск
+
+```bash
+mkdir -p ~/lola-prod/cf
+cp docker/docker-compose.prod.yml ~/lola-prod/docker-compose.yml
+cp docker/Caddyfile ~/lola-prod/Caddyfile           # лежить про запас (профіль public)
+cp scripts/{gen-env,first-run-prod,deploy-prod,backup-prod}.sh ~/lola-prod/
+# credentials-file і config.yml тунеля — вручну, за 26.13.1
+cd ~/lola-prod && bash first-run-prod.sh
+```
+
+`first-run-prod.sh`: генерує `.env` (`gen-env.sh`), піднімає `db`+`minio`, накочує міграції,
+сіє `SEED_MODE=prod` (мінімальний тенант з `FIRST_TENANT_SLUG`/`FIRST_TENANT_NAME` і
+адміністратором `FIRST_ADMIN_PHONE` — без демо-даних «Каппі»), виставляє реальні паролі
+ролям `app_user`/`platform_admin` (`ALTER ROLE`, докс §26.5 — міграції 0001/0009 створюють
+їх із dev-паролем), піднімає `app`+`tunnel`, чекає `/health`. Оператора платформи
+(`PLATFORM_ADMIN_EMAIL`/`PLATFORM_ADMIN_PASSWORD`) створює сам застосунок при старті
+(`ensureFirstAdmin`, `server/plugins/worker.ts`) — окремого кроку не потрібно.
+
+### 26.13.3 Оновлення (крон)
+
+```
+*/5 * * * * cd ~/lola-prod && bash deploy-prod.sh --if-changed >> deploy.log 2>&1
+0   3 * * * cd ~/lola-prod && bash backup-prod.sh >> backup.log 2>&1
+```
+
+`deploy-prod.sh` тягне `:${APP_TAG:-latest}` з GHCR тільки для `app`/`migrate`, накочує
+міграції одноразовим сервісом до перезапуску `app` (`depends_on: service_completed_successfully`),
+чекає `/health`, друкує digest образу — щоб потім знайти саме цей знімок у GHCR. Руками:
+`cd ~/lola-prod && bash deploy-prod.sh` (без `--if-changed` — оновлює завжди).
+
+### 26.13.4 Відкат на конкретний коміт
+
+```bash
+cd ~/lola-prod
+APP_TAG=<sha> bash deploy-prod.sh    # job `image` у CI пушить і :latest, і :<sha> (.github/workflows/ci.yml)
+```
+
+Міграції вперед сумісні (§26.8) — відкат образу без відкату схеми безпечний; відкат самої
+схеми — новою міграцією, не руками в БД (CLAUDE.md п. 5).
+
+### 26.13.5 Відновлення з бэкапа
+
+```bash
+cd ~/lola-prod
+gunzip -c backups/db/<YYYY-MM-DD>.sql.gz | docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+# медіа — назад у бакет:
+docker run --rm --network lola-prod_default -v "$PWD/backups/media/<YYYY-MM-DD>:/backup" \
+  --entrypoint sh minio/mc:latest -c \
+  "mc alias set dst http://minio:9000 \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" && mc mirror /backup dst/${S3_BUCKET:-lola-media}"
+```
+
+Перевірка відновлення — щомісяця, на окремому/тимчасовому стенді, не на проді (докс/26 §26.9,
+докс/25 §16.2): «неперевірений бэкап бэкапом не рахується».
+
+### 26.13.6 Чек-лист перед показом замовнику
+
+- [ ] `OTP_DEBUG` відсутній або `0` — код входу не в логах.
+- [ ] SMS-провайдер підключено в панелі тенанта (докс/09 §9.1) — вхід не залежить від логів.
+- [ ] Свіжий бэкап є (`backups/db/*.sql.gz` за сьогодні/вчора, `backup.log` без помилок).
+- [ ] `GET https://app.lmscappi.pp.ua/health` і `/ready` — `200`.
+- [ ] `GET /metrics` з `Authorization: Bearer $METRICS_TOKEN` — `200`; без токена — відмова
+      (докс/06 §6.7, `.env.production.example`).
+- [ ] `SENTRY_DSN` заповнено — помилки не губляться мовчки.
+- [ ] `<slug>.lmscappi.pp.ua` для першого тенанта відкривається (wildcard-маршрут тунеля).
+
+### 26.13.7 Чого цей PR свідомо не робить
+
+Підготовка, не викатка (докс/32 §Б рядок 22 → «🟡 підготовлено»): нічого не запускалося на
+реальній VM, тунель прода не створювався, секрети не генерувалися. Рішення, що залишаються
+за замовником/оператором до фактичної викатки — докс/32 §Г.1 (окрема VM чи прод поруч зі
+стендом на тому самому `devbox`) і §Г.3 (уже закрито на користь іменованого тунеля — застосовано
+тут для прода за аналогією зі стендом).

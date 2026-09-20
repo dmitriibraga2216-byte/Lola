@@ -10,6 +10,12 @@ import { ensureTenantDefaults } from './tenantDefaults'
  * Сид этапа 0 (docs/07-stages.md): тенант «Каппі», две точки, позиции,
  * системные роли, тестовые люди. Идемпотентен: повторный запуск ничего не дублирует.
  * Идёт от владельца БД — сид создаёт данные до того, как появился контекст тенанта.
+ *
+ * `SEED_MODE` (docs/26 «Розгортання R1»): `demo` (по умолчанию) — сценарий ниже, тенант
+ * «Каппі» с демо-даними. `prod` — минимальный тенант без демо-контенту: тільки системні
+ * ролі, довідники за замовчуванням (`ensureTenantDefaults`) і перший адміністратор із
+ * `FIRST_ADMIN_PHONE`. Оператора платформи (`PLATFORM_ADMIN_EMAIL`/`PLATFORM_ADMIN_PASSWORD`)
+ * створює `ensureFirstAdmin` при старті застосунку (`server/plugins/worker.ts`) — сюди не входить.
  */
 
 const url = process.env.DATABASE_ADMIN_URL
@@ -20,6 +26,56 @@ if (!url) {
 
 const client = postgres(url, { max: 1, onnotice: () => {} })
 const db = drizzle(client, { schema })
+
+const SEED_MODE = process.env.SEED_MODE === 'prod' ? 'prod' : 'demo'
+
+if (SEED_MODE === 'prod') {
+  const slug = process.env.FIRST_TENANT_SLUG
+  const name = process.env.FIRST_TENANT_NAME
+  const adminPhone = process.env.FIRST_ADMIN_PHONE
+  if (!slug || !name || !adminPhone) {
+    console.error('SEED_MODE=prod вимагає FIRST_TENANT_SLUG, FIRST_TENANT_NAME, FIRST_ADMIN_PHONE')
+    process.exit(1)
+  }
+
+  const existingProd = await db.query.tenants.findFirst({ where: eq(schema.tenants.slug, slug) })
+  if (existingProd) {
+    console.log(`Сід уже застосовано (тенант ${slug} існує) — пропускаю`)
+    await client.end()
+    process.exit(0)
+  }
+
+  await db.transaction(async (tx) => {
+    const [tenant] = await tx.insert(schema.tenants).values({
+      slug, name, locale: 'uk', timezone: 'Europe/Kyiv',
+    }).returning()
+    const tenantId = tenant!.id
+
+    await tx.insert(schema.orgUnits).values({
+      tenantId, name, path: slug.replace(/[^a-zA-Z0-9_]/g, '_'),
+    })
+
+    const roles = await tx.insert(schema.roles).values(
+      Object.entries(SYSTEM_ROLES).map(([code, r]) => ({
+        tenantId, code, name: r.name, scopes: [...r.scopes], isSystem: true,
+      })),
+    ).returning()
+    const adminRole = roles.find(r => r.code === 'admin')!
+    await ensureTenantDefaults(tx, tenantId)
+
+    const [admin] = await tx.insert(schema.users).values({
+      tenantId, phone: adminPhone, fullName: 'Адміністратор', status: 'active',
+    }).returning()
+
+    await tx.insert(schema.userRoles).values({
+      tenantId, userId: admin!.id, roleId: adminRole.id, scopeType: 'tenant',
+    })
+  })
+
+  console.log(`Сід застосовано (prod): тенант «${name}» (${slug}), системні ролі, адмін ${adminPhone}`)
+  await client.end()
+  process.exit(0)
+}
 
 const existing = await db.query.tenants.findFirst({ where: eq(schema.tenants.slug, 'kappi') })
 if (existing) {

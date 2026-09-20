@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { smsUsage, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { getSecret, markSecretResult, SECRET_KEYS } from './secrets'
+import { effectiveLimits } from './tenantLimits'
 
 /**
  * SMS и e-mail (docs/06 §6.4): провайдер по API из секретов тенанта.
@@ -33,16 +34,16 @@ export async function sendSms(tenantId: string, phone: string, text: string): Pr
   const apiKey = await getSecret(tenantId, 'sms', SECRET_KEYS.sms.API_KEY)
   if (!provider || !apiKey) return { ok: false, skipped: true, error: 'sms not configured' }
 
-  // Лимит тарифа на месяц
+  // Лимит SMS в месяц: переопределение тенанта (`tenant_limits.smsPerMonth`), иначе — тариф (docs/25 §10, докс/33 D-054/D-055)
   const month = new Date().toISOString().slice(0, 7)
-  const [tenant] = await (await import('../db/client')).db.execute(sql`select p.max_sms_per_month as lim from tenants t join plans p on p.code = t.plan where t.id = ${tenantId}`) as unknown as { lim: number | null }[]
+  const lim = (await effectiveLimits(tenantId)).smsPerMonth
   const used = await withTenant(tenantId, null, async (tx) => {
     const [r] = await tx.insert(smsUsage).values({ tenantId, month, count: 1 })
       .onConflictDoUpdate({ target: [smsUsage.tenantId, smsUsage.month], set: { count: sql`${smsUsage.count} + 1` } })
       .returning({ count: smsUsage.count })
     return r!.count
   })
-  if (tenant?.lim != null && used > tenant.lim) return { ok: false, skipped: true, error: `sms limit ${tenant.lim}/month` }
+  if (lim != null && used > lim) return { ok: false, skipped: true, error: `sms limit ${lim}/month` }
 
   try {
     if (provider === 'turbosms') {

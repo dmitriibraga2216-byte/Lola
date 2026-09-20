@@ -34,7 +34,7 @@ let opsAuth: { adminId: string, email: string, fullName: string }
 const cleanup: { table: string, ids: string[] }[] = []
 const track = (table: string, id: string) => { (cleanup.find(c => c.table === table) ?? cleanup[cleanup.push({ table, ids: [] }) - 1]!).ids.push(id) }
 const ctx = () => ({ tenantId, actorId: adminId })
-const auth = (userId: string) => ({ sessionId: 'x', tenantId, userId, impersonatedBy: null, activeRoleId: null })
+const auth = (userId: string) => ({ sessionId: 'x', tenantId, userId, impersonatedBy: null, activeRoleId: null, previewRoleId: null })
 
 beforeAll(async () => {
   tenantId = (await admin`select id from tenants where slug = 'kappi'`)[0]!.id as string

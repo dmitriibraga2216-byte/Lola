@@ -7,6 +7,7 @@ import { getAccess } from '../../../services/access'
 import { accentOf } from '../../../services/settings'
 import { tenantModules } from '../../../services/modules'
 import { impersonationInfo } from '../../../services/impersonation'
+import { previewInfo } from '../../../services/previewAs'
 import { tenantSettingsSchema } from '../../../../shared/schemas/settings'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
@@ -70,5 +71,7 @@ export default defineEventHandler(async (event) => {
     impersonated: auth.impersonatedBy !== null || !!auth.impersonatorAdminId,
     // Плашка «Ви увійшли як …» (docs/24 §4.5): оператор, причина, до когда
     impersonation: await impersonationInfo(auth),
+    // Плашка «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052)
+    preview: await previewInfo(auth),
   })
 })

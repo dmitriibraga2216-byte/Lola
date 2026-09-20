@@ -6,7 +6,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
 const { t } = useI18n()
 const { api } = useApi()
-const { hasScope } = useAuth()
+const { hasScope, startPreview } = useAuth()
 
 interface Role { id: string, code: string, name: string, description: string | null, scopes: string[], isSystem: boolean, defaultScopeType: string, peopleCount: number }
 interface Group { key: string, scopes: string[] }
@@ -66,6 +66,12 @@ async function remove() {
   try { await api(`/settings/roles/${selected.value.id}`, { method: 'DELETE' }); selected.value = null; await load() }
   catch (err) { error.value = apiErrorOf(err).message }
 }
+/** «Переглянути систему як роль» (docs/24 §3.5): не змінює власних прав, лише показує екрани очима цієї ролі. */
+async function previewAs(r: Role) {
+  error.value = ''
+  try { await startPreview(r.id) }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 </script>
 
 <template>
@@ -95,7 +101,10 @@ async function remove() {
       </div>
 
       <aside v-if="selected || creating" class="card editor">
-        <h2 class="panel-title">{{ creating ? t('settings.roles.newRole') : form.name }}</h2>
+        <div class="ehead">
+          <h2 class="panel-title">{{ creating ? t('settings.roles.newRole') : form.name }}</h2>
+          <button v-if="selected" class="btn ghost small" type="button" @click="previewAs(selected)">{{ t('settings.roles.previewAs') }}</button>
+        </div>
         <p v-if="selected" class="help">{{ t('settings.roles.scopeLine', { scope: t(`settings.scopeTypes.${selected.defaultScopeType}`), n: selected.peopleCount }) }}</p>
         <div class="two">
           <div><label class="label" for="r-name">{{ t('settings.roles.name') }}</label><input id="r-name" v-model="form.name" class="field" maxlength="80"></div>
@@ -129,6 +138,7 @@ async function remove() {
 .list tr { cursor: pointer; }
 .list tr.on td { background: var(--color-sun-soft); }
 .editor { display: grid; gap: var(--space-2); }
+.ehead { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .top { margin-top: var(--space-3); }
 .group { border-top: 1px solid var(--color-bg-line-soft); padding-top: var(--space-2); }

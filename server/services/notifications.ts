@@ -94,6 +94,10 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   birthday_upcoming: 'За {{days}} дн. день народження у {{name}} ({{date}}) — час подбати про привітання',
   // Докс/33 D-044: щоденний дайджест на точку замість окремого сповіщення на кожного іменинника
   birthday_today: 'Сьогодні день народження: {{names}} — привітайте!',
+  // Докс/33 D-049: клас сповіщень `anniversaries` — річниця роботи за `user_placements.started_at`
+  anniversary_upcoming: 'За {{days}} дн. річниця роботи у {{name}} ({{years}} р.) — час подбати про привітання',
+  anniversary_today: 'Сьогодні річниця роботи: {{names}} — привітайте!',
+  anniversary_self: 'Вітаємо! Сьогодні {{years}} р. відколи ви в команді',
   scheduled_report: 'Звіт «{{name}}» готовий: {{rows}} рядків. {{url}}',
   program_assigned: 'Вам призначено програму «{{title}}»{{#due}}. Термін: {{due}}{{/due}}',
   program_node_unlocked: '«{{title}}»: відкрився наступний крок{{#step}} — {{step}}{{/step}}',
@@ -101,6 +105,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   program_completed: 'Програму «{{title}}» завершено',
   program_stuck: 'Підопічний не рухається по програмі «{{title}}» 14 днів',
   program_request: 'Заявка на програму «{{title}}» чекає рішення',
+  // Докс/33 D-049: клас сповіщень `programReminder` — нагадування за день до старту елемента програми
+  program_reminder: 'Завтра відкриється програма «{{title}}»',
   // docs/17 §14.3, docs/30 (trajectory.next_unlocked, trajectory.finished)
   trajectory_assigned: 'Вам призначено траєкторію «{{title}}»{{#availableFrom}}. Відкриється {{availableFrom}}{{/availableFrom}}',
   trajectory_next_unlocked: 'Траєкторія «{{title}}»: відкрився наступний крок{{#step}} — {{step}}{{/step}}',
@@ -129,6 +135,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // docs/24 §8: вход «от имени» и смена критичных настроек
   impersonation_started: 'Оператор платформи {{operator}} увійшов як {{subject}}. Причина: {{reason}}',
   settings_critical_changed: 'Змінено налаштування безпеки простору: {{group}}',
+  // docs/24 §8, docs/25 §10, докс/33 D-054: 80% ліміту тарифу — попередження, 100% і більше — перевищення
+  limit_warning: 'Використано {{pct}}% ліміту тарифу: {{resource}} ({{used}} з {{limit}})',
+  limit_exceeded: 'Перевищено ліміт тарифу: {{resource}} ({{used}} з {{limit}}). Зверніться до підтримки Lola, щоб підвищити тариф',
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',
@@ -182,8 +191,10 @@ export function nextOccurrence(now: Date, timezone: string, hour: number, minute
  */
 export function eventClassOf(code: string): keyof NotificationSchedule | null {
   if (/^birthday_/.test(code)) return 'birthdays'
+  if (/^anniversary_/.test(code)) return 'anniversaries' // докс/33 D-049
   if (/^(weekly_digest|digest_)/.test(code)) return 'managerDigest'
   if (/^enrollment_(due_soon|due_today)$/.test(code)) return 'dueTasks'
+  if (code === 'program_reminder') return 'programReminder' // докс/33 D-049
   return null
 }
 
@@ -449,7 +460,7 @@ export function groupOf(code: string): 'learning' | 'assessment' | 'reminders' |
   if (/^(assignment|enrollment|program|attempt|workshop|review|certificate)/.test(code)) return 'learning'
   if (/^(assessment|checklist|action_item|competency|goal|plan|request)/.test(code)) return 'assessment'
   if (/_due|_overdue|reminder|meetup|webinar|digest/.test(code)) return 'reminders'
-  if (/^(news|announcement|notice|knowledge|survey|event|wiki|birthday)/.test(code)) return 'hub'
+  if (/^(news|announcement|notice|knowledge|survey|event|wiki|birthday|anniversary)/.test(code)) return 'hub'
   return 'other'
 }
 

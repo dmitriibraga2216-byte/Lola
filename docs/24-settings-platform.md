@@ -256,7 +256,7 @@ API-запросы в минуту, вебхуки), `price_per_active_user`, `m
 | GET/PATCH | `/settings/defaults` |
 | GET/PATCH | `/settings/policies` |
 | CRUD | `/settings/roles` |
-| POST | `/settings/roles/preview-as` |
+| POST/DELETE | `/settings/roles/preview-as` (старт / вихід, докс/33 D-052) |
 | CRUD | `/settings/translations` |
 | GET/POST | `/settings/export` (архив тенанта) |
 | **Платформа** | |

@@ -176,6 +176,7 @@ create table sessions (
   impersonator_admin_id uuid references platform_admins(id), -- вход «от имени» оператором (`24` §4.5): сессия 60 минут без продления, запреты `29` Б.13
   impersonation_reason text,                  -- причина 10–500 знаков, видна клиенту в журнале
   active_role_id uuid references roles(id),   -- активная роль сессии (`01` §1.9.2): права по ней, переключение без выхода
+  preview_role_id uuid references roles(id),  -- «Переглянути систему як роль» (`24` §3.5, докс/33 D-052): права рахуються по ній, а не по власних ролях
   expires_at timestamptz not null,
   revoked_at timestamptz
 );

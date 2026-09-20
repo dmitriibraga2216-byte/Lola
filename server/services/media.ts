@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
+import { effectiveLimits } from './tenantLimits'
 
 /**
  * Медиа (docs/11 §3.4, Г-11.4, docs/04 §4.15): presigned PUT в S3, ключ — uuid
@@ -92,7 +93,15 @@ interface Ctx { tenantId: string, actorId: string }
 
 export type UploadUrlResult
   = | { ok: true, mediaId: string, uploadUrl: string, key: string }
-    | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big', message: string }
+    | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big' | 'storage_limit', message: string }
+
+/** Скільки байт уже займають файли тенанта (докс/33 D-054, docs/25 §10): жорсткий лімит перевіряється по поточному значенню, не по нічному знімку `tenant_usage`. */
+export async function tenantStorageBytes(ctx: Ctx): Promise<number> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [r] = await tx.execute(sql`select coalesce(sum(bytes), 0)::bigint as bytes from media_assets where deleted_at is null`) as unknown as { bytes: string }[]
+    return Number(r?.bytes ?? 0)
+  })
+}
 
 /** Сколько байт уже занимают файлы ресурса (основной файл + медиа в блоках) — для лимита «на ресурс ≤ 1 ГБ». */
 export async function resourceBytes(ctx: Ctx, resourceId: string): Promise<number> {
@@ -115,6 +124,17 @@ export async function createUploadUrl(ctx: Ctx, input: {
   const used = input.resourceId ? await resourceBytes(ctx, input.resourceId) : 0
   const check = checkFileLimits(input.mime, input.bytes, used)
   if (!check.ok) return check
+
+  // Жорсткий ліміт диска тенанта (docs/25 §10, docs/24 §4.4; докс/33 D-054): перевіряється в момент
+  // операції по поточному об'єму, а не по нічному знімку `tenant_usage`. Навчання не зупиняється —
+  // блокується лише нове завантаження.
+  const storageGb = (await effectiveLimits(ctx.tenantId)).storageGb
+  if (storageGb != null) {
+    const used2 = await tenantStorageBytes(ctx)
+    if (used2 + input.bytes > storageGb * 1024 * 1024 * 1024) {
+      return { ok: false, code: 'storage_limit', message: `Ліміт дискового простору (${storageGb} ГБ) вичерпано. Зверніться до адміністратора` }
+    }
+  }
 
   const now = new Date()
   const key = `t/${ctx.tenantId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${randomUUID()}.${ALLOWED[input.mime]!.ext}`

@@ -10,8 +10,8 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const { assessmentScan } = await import('../services/assessment')
   const { actionDueScan, frequencyScan } = await import('../services/checklists')
   const { noticeScan } = await import('../services/notices')
-  const { birthdayScan } = await import('../services/hubPeople')
-  const { programScan } = await import('../services/programs')
+  const { birthdayScan, anniversaryScan } = await import('../services/hubPeople')
+  const { programScan, programReminderScan } = await import('../services/programs')
   const { inactiveScan } = await import('../services/people')
   const { planPeriodScan, requestReportScan, competencyExpiryScan } = await import('../services/developmentExtra')
   const { reviewScan } = await import('../services/knowledge')
@@ -37,10 +37,12 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const cf = monday ? await frequencyScan(tenantId) : 0
   const an = await noticeScan(tenantId)
   const bd = await birthdayScan(tenantId)
+  const av = await anniversaryScan(tenantId) // докс/33 D-049: клас сповіщень anniversaries
   const pr = await programScan(tenantId)
+  const prReminder = await programReminderScan(tenantId) // докс/33 D-049: клас сповіщень programReminder
   // trajectoryScan (docs/17: отложенные правилом прохождения, подстраховка таймеров) перенесён на щогодинний
   // assignment.sync (docs/33 D-026) — щоденний due.scan давав запізнення таймера до доби
-  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired }
+  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, anniversaries: av, programs: pr, programReminders: prReminder, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired }
   console.log(`[due.scan] ${tenantId}:`, stats)
   return stats
 }

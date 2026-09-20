@@ -145,3 +145,62 @@ export async function birthdayScan(tenantId: string): Promise<{ upcoming: number
   return out
 }
 
+interface AnniversaryRow { id: string, full_name: string, started_at: string, location_id: string | null }
+
+/**
+ * Річниці роботи (докс/33 D-049, клас сповіщень `anniversaries` — налаштування часу вже було,
+ * події не було): рахуємо від `user_placements.started_at` основного розміщення, як роковини
+ * дати найму (не менше одного повного року). За зразком `birthdayScan` — керівнику точки за
+ * `reminderDays` наперед, у сам день — один дайджест на точку (без самого ювіляра) плюс
+ * особисте привітання ювіляру.
+ */
+export async function anniversaryScan(tenantId: string): Promise<{ upcoming: number, today: number }> {
+  const out = { upcoming: 0, today: 0 }
+  await withTenant(tenantId, null, async (tx) => {
+    const [t] = await tx.execute(sql`select coalesce((settings->'birthdays'->>'reminderDays')::int, 3) as days from tenants where id = ${tenantId}::uuid`) as unknown as { days: number }[]
+    const days = t?.days ?? 3
+    const today = new Date(iso(new Date()))
+    const year = today.getUTCFullYear()
+    const dateKey = today.toISOString().slice(0, 10)
+    const rows = await tx.execute(sql`
+      select u.id, u.full_name, up.started_at::text as started_at, up.location_id
+      from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+      where u.status = 'active'
+    `) as unknown as AnniversaryRow[]
+    const mgrOf = new Map<string, string | null>()
+    const todayByLocation = new Map<string, { id: string, fullName: string, years: number }[]>()
+    for (const r of rows) {
+      const startYear = Number(r.started_at.slice(0, 4))
+      const years = year - startYear
+      if (years < 1) continue // менше року — не річниця
+      const d = birthdayIn(year, r.started_at)
+      const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000)
+      if (diff === days && r.location_id) {
+        if (!mgrOf.has(r.location_id)) {
+          const [l] = await tx.execute(sql`select manager_id from locations where id = ${r.location_id}::uuid`) as unknown as { manager_id: string | null }[]
+          mgrOf.set(r.location_id, l?.manager_id ?? null)
+        }
+        const mgr = mgrOf.get(r.location_id)
+        if (mgr && mgr !== r.id && await enqueueNotification(tx, { tenantId, userId: mgr, code: 'anniversary_upcoming', payload: { name: r.full_name, years, days }, dedupKey: `anniv_up:${r.id}:${year}` })) out.upcoming++
+      }
+      if (diff === 0 && r.location_id) {
+        if (!todayByLocation.has(r.location_id)) todayByLocation.set(r.location_id, [])
+        todayByLocation.get(r.location_id)!.push({ id: r.id, fullName: r.full_name, years })
+      }
+    }
+    for (const [locationId, celebrants] of todayByLocation) {
+      const celebrantIds = new Set(celebrants.map(c => c.id))
+      const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${locationId}::uuid and u.status = 'active'`) as unknown as { id: string }[]
+      const names = celebrants.map(c => `${c.fullName} (${c.years} р.)`).join(', ')
+      for (const m of mates) {
+        if (celebrantIds.has(m.id)) continue
+        if (await enqueueNotification(tx, { tenantId, userId: m.id, code: 'anniversary_today', payload: { names, count: celebrants.length }, dedupKey: `anniv_digest:${locationId}:${dateKey}:${m.id}` })) out.today++
+      }
+      for (const c of celebrants) {
+        if (await enqueueNotification(tx, { tenantId, userId: c.id, code: 'anniversary_self', payload: { years: c.years }, dedupKey: `anniv_self:${c.id}:${dateKey}` })) out.today++
+      }
+    }
+  })
+  return out
+}
+

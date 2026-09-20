@@ -1,7 +1,9 @@
 import { desc, eq, sql } from 'drizzle-orm'
-import { plans, tenantUsage, tenants } from '../db/schema'
+import { platformAudit, plans, tenantUsage, tenants } from '../db/schema'
 import { db } from '../db/client'
 import { withTenant } from '../utils/withTenant'
+import { effectiveLimits } from './tenantLimits'
+import { enqueueNotification } from './notifications'
 
 /**
  * Потребление тенанта (docs/24 §4.4.1, экран «Статистика» / мокап TenantStats).
@@ -45,7 +47,44 @@ export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
     }
     const [row] = await tx.insert(tenantUsage).values(values).returning({ collectedAt: tenantUsage.collectedAt })
     return { collectedAt: row!.collectedAt.toISOString(), ...values, tenantId: undefined } as unknown as UsageSnapshot
+  }).then(async (snap) => {
+    await checkLimitsAndNotify(tenantId, snap)
+    return snap
   })
+}
+
+/**
+ * `limit_warning` (80% ліміту) і `limit_exceeded` (докс/33 D-054, docs/24 §8, docs/25 §10):
+ * адміністраторам тенанта — через звичайні `notifications`, оператору платформи — записом
+ * `platform_audit` (він і так дивиться журнал тенанта на панелі, окремої розсилки операторам
+ * ще нема). Дедуп на добу: `usage.collect` і так раз на добу, повторний виклик у той самий день
+ * (ручний запуск, тести) не спамить.
+ */
+async function checkLimitsAndNotify(tenantId: string, snap: UsageSnapshot): Promise<void> {
+  const limits = await effectiveLimits(tenantId)
+  const checks: { resource: 'users' | 'storage' | 'sms', used: number, limit: number | null, label: string }[] = [
+    { resource: 'users', used: snap.activeUsers, limit: limits.users, label: 'активних людей' },
+    { resource: 'storage', used: snap.storageBytes, limit: limits.storageGb != null ? limits.storageGb * 1024 * 1024 * 1024 : null, label: 'дискового простору' },
+    { resource: 'sms', used: snap.smsMonth, limit: limits.smsPerMonth, label: 'SMS за місяць' },
+  ]
+  const day = snap.collectedAt.slice(0, 10)
+  for (const c of checks) {
+    if (c.limit == null || c.limit <= 0) continue
+    const ratio = c.used / c.limit
+    if (ratio < 0.8) continue
+    const code = ratio >= 1 ? 'limit_exceeded' : 'limit_warning'
+    // Диск — у ГБ для читабельності листа, решта — цілими лічильниками
+    const toDisplay = (n: number) => c.resource === 'storage' ? `${(n / (1024 * 1024 * 1024)).toFixed(1)} ГБ` : String(n)
+    const payload = { resource: c.label, used: toDisplay(c.used), limit: toDisplay(c.limit), pct: Math.round(ratio * 100) }
+    await withTenant(tenantId, null, async (tx) => {
+      const admins = await tx.execute(sql`
+        select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
+        where r.code = 'admin' and (ur.valid_until is null or ur.valid_until > now()) and a.status = 'active' and not a.is_blocked
+      `) as unknown as { user_id: string }[]
+      for (const a of admins) await enqueueNotification(tx, { tenantId, userId: a.user_id, code, payload, dedupKey: `${code}:${c.resource}:${tenantId}:${day}:${a.user_id}` })
+    })
+    await db.insert(platformAudit).values({ adminId: null, adminEmail: 'system', action: `tenant.${code}`, subjectTenantId: tenantId, entity: 'tenant_limits', entityId: tenantId, after: payload })
+  }
 }
 
 /** Ежедневный проход по всем активным тенантам (ручной запуск, тесты). */

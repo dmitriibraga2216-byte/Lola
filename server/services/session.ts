@@ -67,6 +67,8 @@ export interface AuthContext {
   impersonatorAdminId?: string | null
   /** Активная роль сессии (docs/01 §1.9.2); null — у старых сессий и API-токенов, тогда берётся роль по умолчанию */
   activeRoleId: string | null
+  /** «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052): права рахуються по цій ролі — `loadAccess`; мутації заборонені (03.guards). */
+  previewRoleId: string | null
 }
 
 export async function validateSession(token: string): Promise<AuthContext | null> {
@@ -81,6 +83,7 @@ export async function validateSession(token: string): Promise<AuthContext | null
     impersonatedBy: row.impersonated_by,
     impersonatorAdminId: row.impersonator_admin_id ?? null,
     activeRoleId: row.active_role_id,
+    previewRoleId: row.preview_role_id ?? null,
   }
 }
 

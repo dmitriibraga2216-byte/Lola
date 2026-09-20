@@ -167,7 +167,9 @@ describe('вебхуки наружу (docs/09 §9.5)', () => {
   afterAll(() => server.close())
 
   it('подписка на событие → доставка с подписью HMAC; события мимо подписки не шлются', async () => {
-    const ep = await createEndpoint(ctx(), { url: `http://127.0.0.1:${port}/ok`, events: ['certificate.issued'], description: 'test ok' })
+    const epr = await createEndpoint(ctx(), { url: `http://127.0.0.1:${port}/ok`, events: ['certificate.issued'], description: 'test ok' })
+    if (!epr.ok) throw new Error('unexpected webhooks_limit')
+    const ep = epr
     expect(ep.secret).toMatch(/^whsec_/)
 
     await withTenant(tenantId, adminId, async (tx) => {
@@ -188,7 +190,9 @@ describe('вебхуки наружу (docs/09 §9.5)', () => {
   it('500 → повтор с экспонентой; ручной retry доставляет', async () => {
     received = []
     failCount = 0
-    const ep = await createEndpoint(ctx(), { url: `http://127.0.0.1:${port}/fail`, events: ['user.created'], description: 'test fail' })
+    const epr2 = await createEndpoint(ctx(), { url: `http://127.0.0.1:${port}/fail`, events: ['user.created'], description: 'test fail' })
+    if (!epr2.ok) throw new Error('unexpected webhooks_limit')
+    const ep = epr2
     await withTenant(tenantId, adminId, tx => emitWebhook(tx, tenantId, 'user.created', { userId: 'u1' }))
     const s1 = await deliverPending(tenantId)
     expect(s1.retried).toBe(1)

@@ -2,8 +2,17 @@
  * Рендер листа з `body_mjml` (docs/23 §3.1, §13.4) — без mjml-компілятора (CLAUDE.md «не додавати
  * залежностей»; рішення зафіксоване в docs/28 «Spec 23»): підтримуємо безпечне підмножина тегів
  * MJML, яких зазвичай достатньо для листа-сповіщення (секція/колонка/текст/кнопка/картинка/розділювач),
- * і компілюємо їх у прості інлайн-стилізовані `<div>`/`<p>`/`<a>` — не адаптивну таблицю справжнього
- * MJML. Довг: повна компіляція MJML (складні layout, breakpoints, mj-social тощо) — не робимо.
+ * і компілюємо їх у прості інлайн-стилізовані `<div>`/`<p>`/`<a>` — не повний layout-движок справжнього
+ * MJML.
+ *
+ * Докс/33 D-048: секція з ≥2 `<mj-column>` компілюється в `<table>` з `<td>` на колонку (ширина —
+ * атрибут `width` колонки або рівний поділ), а не просто «розгортається» в один стовпець як раніше —
+ * це і є спосіб зробити колонки в HTML-листі без компілятора. Одна колонка (або без колонок) —
+ * як і раніше, просто `<div>`. Проста медіа-точка (`breakpoint`) у `buildEmailHtml` складає колонки
+ * в один стовпець на вузьких екранах у клієнтах, що підтримують `<style>` у листі (докс/33 D-048:
+ * «breakpoints/колонки → таблиці» — зроблено в межах підмножини, без `mj-social` і вкладених layout).
+ * Довг, що лишається: справжня компіляція MJML (`mj-social`, вкладені колонки з довільним layout,
+ * повноцінні breakpoints для всіх клієнтів) — не робимо, `mjml` як пакет не додавали.
  *
  * Якщо `body_mjml` порожній або в ньому взагалі немає розпізнаних `<mj-*>` тегів — фолбек:
  * беремо текст (`body_text` після рендеру змінних) і показуємо його як прості абзаци.
@@ -46,10 +55,29 @@ export function renderMjmlSubset(mjml: string): string {
     return `<p style="margin:16px 0"><a href="${esc(href)}" style="display:inline-block;background:#F4B740;color:#0C0F14;padding:10px 22px;border-radius:999px;text-decoration:none;font-weight:700;font-family:Nunito,Arial,sans-serif">${inner.trim()}</a></p>`
   })
   src = src.replace(/<mj-text\b[^>]*>([\s\S]*?)<\/mj-text>/gi, (_, inner: string) => `<p style="margin:0 0 12px;font-family:Nunito,Arial,sans-serif;color:#0C0F14;line-height:1.5">${inner.trim()}</p>`)
-  src = src.replace(/<\/?mj-column[^>]*>/gi, '')
-  src = src.replace(/<mj-section\b[^>]*>([\s\S]*?)<\/mj-section>/gi, (_, inner: string) => `<div style="padding:12px 0">${inner}</div>`)
+
+  // Секція: ≥2 колонки → таблиця з <td> на колонку (докс/33 D-048), інакше — як раніше, просто <div>.
+  src = src.replace(/<mj-section\b[^>]*>([\s\S]*?)<\/mj-section>/gi, (_, inner: string) => {
+    const columns = [...inner.matchAll(/<mj-column\b([^>]*)>([\s\S]*?)<\/mj-column>/gi)]
+    if (columns.length >= 2) {
+      const equalWidth = `${(100 / columns.length).toFixed(2)}%`
+      const cells = columns.map((c) => {
+        const width = attr(c[1] ?? '', 'width') ?? equalWidth
+        return `<td class="mj-col" valign="top" style="width:${esc(width)};padding:0 8px">${(c[2] ?? '').trim()}</td>`
+      }).join('')
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse"><tr>${cells}</tr></table>`
+    }
+    return `<div style="padding:12px 0">${inner.replace(/<\/?mj-column[^>]*>/gi, '')}</div>`
+  })
+
+  // Невідомі mj-* теги (наприклад mj-social — лишається довгом, компілятор не підключали) прибираємо
+  // як розмітку, текст усередині лишаємо — інваріант «безпечний список тегів» з докс/28 «Spec 23».
+  src = src.replace(/<\/?mj-[a-z-]+(?:\s[^>]*)?>/gi, '')
   return src.trim()
 }
+
+/** Стиль медіа-точки для табличних колонок (докс/33 D-048): у клієнтах, що читають <style> в тілі, колонки складаються в один стовпець на вузьких екранах. */
+const COLUMN_BREAKPOINT_STYLE = '<style>@media only screen and (max-width:480px){.mj-col{display:block!important;width:100%!important;padding:0 0 12px!important}}</style>'
 
 /** Фолбек: обычный текст → абзацы (перенос строки = новый абзац), с экранированием. */
 export function textToHtml(text: string): string {
@@ -68,6 +96,7 @@ export function buildEmailHtml(input: { bodyMjml: string | null, fallbackText: s
   const header = input.layout?.headerMjml ? (looksLikeMjml(input.layout.headerMjml) ? renderMjmlSubset(input.layout.headerMjml) : textToHtml(input.layout.headerMjml)) : ''
   const footer = input.layout?.footerMjml ? (looksLikeMjml(input.layout.footerMjml) ? renderMjmlSubset(input.layout.footerMjml) : textToHtml(input.layout.footerMjml)) : ''
   return `<!doctype html><html><body style="margin:0;padding:24px;background:#E6DACA;font-family:Nunito,Arial,sans-serif">`
+    + COLUMN_BREAKPOINT_STYLE
     + `<div style="max-width:600px;margin:0 auto;background:#FAF6EC;border-radius:16px;padding:24px">`
     + header + bodyHtml + footer
     + `</div></body></html>`

@@ -40,6 +40,8 @@ export interface SessionRow {
   impersonated_by: string | null
   active_role_id: string | null
   impersonator_admin_id: string | null
+  /** «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052) */
+  preview_role_id: string | null
 }
 
 export async function sessionByTokenHash(tokenHash: string): Promise<SessionRow | null> {

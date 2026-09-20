@@ -19,6 +19,8 @@ export interface EffectiveLimits {
 }
 
 export const DEFAULT_ACTIVE_JOBS = 100
+/** Лимит Bearer-запросов без переопределения тенанта (докс/33 D-055) — прежняя константа `validateBearer`. */
+export const DEFAULT_API_PER_MINUTE = 60
 
 const TTL_MS = 60_000
 const cache = new Map<string, { at: number, v: EffectiveLimits }>()

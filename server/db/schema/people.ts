@@ -120,6 +120,9 @@ export const sessions = pgTable('sessions', {
   impersonatorAdminId: uuid('impersonator_admin_id'), // оператор платформы, вошедший «от имени» (docs/24 §4.5): FK на platform_admins в миграции; сессия 60 минут без продления
   impersonationReason: text('impersonation_reason'),
   activeRoleId: uuid('active_role_id').references(() => roles.id, { onDelete: 'set null' }), // активная роль сессии (docs/01 §1.9.2): права — по ней, переключение без выхода
+  // Режим «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052): права сесії рахуються по цій ролі,
+  // а не по власних ролях людини; знята роль (delete) сама скидає перегляд. Мутації заборонені (middleware 03.guards).
+  previewRoleId: uuid('preview_role_id').references(() => roles.id, { onDelete: 'set null' }),
   requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),

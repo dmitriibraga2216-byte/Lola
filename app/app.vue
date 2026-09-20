@@ -4,7 +4,7 @@
  * CSS-переменной из токенов (docs/29 Б.14) и переводы тенанта поверх словаря (docs/24 §3.6).
  */
 const { t, locale, mergeLocaleMessage } = useI18n()
-const { me, stopImpersonation } = useAuth()
+const { me, stopImpersonation, stopPreview } = useAuth()
 const { api } = useApi()
 const route = useRoute()
 const isPublic = computed(() => route.path.startsWith('/login') || route.path.startsWith('/ops') || route.path.startsWith('/c/') || route.path.startsWith('/m/'))
@@ -47,6 +47,10 @@ watch([() => me.value?.tenant?.id, locale], async ([tenantId, loc]) => {
     <div v-if="me?.impersonation" class="impersonation-bar" role="status">
       <span>{{ t('impersonation.banner', { name: me?.user.fullName ?? '' }) }} · {{ t('impersonation.operator', { email: me?.impersonation?.operator ?? '' }) }} · {{ t('impersonation.expires', { min: expiresIn }) }}</span>
       <button class="btn small exit" type="button" @click="stopImpersonation">{{ t('impersonation.exit') }}</button>
+    </div>
+    <div v-else-if="me?.preview" class="impersonation-bar" role="status">
+      <span>{{ t('previewAs.banner', { role: me.preview.name }) }}</span>
+      <button class="btn small exit" type="button" @click="stopPreview">{{ t('previewAs.exit') }}</button>
     </div>
     <!-- Без NuxtLayout лейауты (сайдбар админки, нижняя панель кабинета) не применяются вовсе -->
     <NuxtLayout>

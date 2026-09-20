@@ -551,3 +551,23 @@ export async function programScan(tenantId: string): Promise<{ opened: number, s
   })
   return out
 }
+
+/**
+ * Нагадування за день до старту програми (докс/33 D-049, клас сповіщень `programReminder`):
+ * `available_from` — дата, з якої `programScan` відкриє призначення (Spec 17 «Призначення через
+ * N днів»); за день до цього — нагадування людині, поки запис ще `not_started`.
+ */
+export async function programReminderScan(tenantId: string): Promise<number> {
+  let count = 0
+  await withTenant(tenantId, null, async (tx) => {
+    const day = new Date().toISOString().slice(0, 10)
+    const rows = await tx.execute(sql`
+      select e.id, e.user_id, p.title, e.available_from from program_enrollments e join programs p on p.id = e.program_id
+      where e.status = 'not_started' and e.available_from is not null and e.available_from::date = (current_date + 1)
+    `) as unknown as { id: string, user_id: string, title: string, available_from: string }[]
+    for (const r of rows) {
+      if (await enqueueNotification(tx, { tenantId, userId: r.user_id, code: 'program_reminder', payload: { title: r.title, availableFrom: r.available_from }, dedupKey: `prog_reminder:${r.id}:${day}` })) count++
+    }
+  })
+  return count
+}

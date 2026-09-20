@@ -3,11 +3,11 @@ definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
 
-interface GapItem { competencyId: string, name: string, requiredLevel: number, currentLevel: number, maxLevel: number, gap: number, isCritical: boolean, source: string | null, whatToLearn: { id: string, title: string }[] }
+interface GapItem { competencyId: string, name: string, requiredLevel: number, currentLevel: number, currentLevelLabel: string | null, maxLevel: number, gap: number, isCritical: boolean, source: string | null, validUntil: string | null, expiringSoon: boolean, whatToLearn: { id: string, title: string }[] }
 interface Goal { id: string, title: string, kind: string, dueAt: string, statusCode: string, statusName: string, statusColor: string, isFinal: boolean, progressPct: number, approvedAt: string | null, returnComment: string | null }
 interface Plan { id: string, periodFrom: string, periodTo: string, status: string, summary: string | null }
 interface Me {
-  gap: { position: { positionName: string } | null, profile: { id: string } | null, items: GapItem[] }
+  gap: { position: { positionName: string } | null, profile: { id: string } | null, items: GapItem[], displayAs: 'label' | 'value' }
   plan: Plan | null, goals: Goal[]
   requests: { external: { id: string, title: string, status: string, format: string }[], career: { id: string, targetPosition: string, status: string }[] } | null
 }
@@ -62,6 +62,9 @@ async function createRequest() {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().slice(0, 10)
+function levelText(c: GapItem, displayAs: 'label' | 'value', level: number) {
+  return displayAs === 'label' && level === c.currentLevel && c.currentLevelLabel ? c.currentLevelLabel : String(level)
+}
 </script>
 
 <template>
@@ -85,11 +88,12 @@ const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().
           <div v-for="c in data.gap.items" :key="c.competencyId" class="card" :data-testid="`gap-${c.competencyId}`">
             <div class="row">
               <span class="card-title">{{ c.name }}<span v-if="c.isCritical" class="crit"> · {{ t('dev.critical') }}</span></span>
-              <span :class="['badge', c.gap > 0 ? 'coral' : 'teal']">{{ c.currentLevel }} / {{ c.requiredLevel }}</span>
+              <span :class="['badge', c.gap > 0 ? 'coral' : 'teal']">{{ levelText(c, data.gap.displayAs, c.currentLevel) }} / {{ levelText(c, data.gap.displayAs, c.requiredLevel) }}</span>
             </div>
             <div class="scale">
               <span v-for="n in c.maxLevel" :key="n" :class="['dot', { cur: n <= c.currentLevel, req: n === c.requiredLevel }]" />
             </div>
+            <p v-if="c.source" class="sub">{{ t('dev.sourceLabel') }}: {{ t(`dev.source.${c.source}`, c.source) }}<span v-if="c.expiringSoon" class="crit"> · {{ t('dev.expiringSoon') }}</span></p>
             <p v-if="c.gap > 0 && c.whatToLearn.length" class="sub">{{ t('dev.whatToLearn') }}: <NuxtLink v-for="w in c.whatToLearn" :key="w.id" :to="`/learn/catalog?course=${w.id}`">{{ w.title }} </NuxtLink></p>
             <p v-else-if="c.gap > 0" class="sub">{{ t('dev.gapN', { n: c.gap }) }}</p>
           </div>
@@ -103,6 +107,7 @@ const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().
         <button class="primary" @click="createPlan">{{ t('dev.createPlan') }}</button>
       </div>
       <div v-else class="card">
+        <p v-if="data.plan.summary" class="sub">{{ t('dev.planGoal') }}: <b>{{ data.plan.summary }}</b></p>
         <div class="row">
           <span class="card-title">{{ t('dev.plan') }} {{ data.plan.periodFrom }} — {{ data.plan.periodTo }}</span>
           <span class="badge muted">{{ t(`dev.planStatus.${data.plan.status}`) }}</span>
@@ -125,7 +130,7 @@ const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().
           </div>
           <span v-if="g.returnComment && !g.approvedAt" class="sub">{{ g.returnComment }}</span>
           <div class="progress"><span :style="{ width: `${g.progressPct}%` }" /></div>
-          <span :class="['sub', { overdue: isOverdue(g) }]">{{ t('dev.due') }} {{ g.dueAt }}{{ isOverdue(g) ? ` · ${t('dev.overdue')}` : '' }}</span>
+          <span :class="['sub', { overdue: isOverdue(g) }]">{{ t(`dev.kind.${g.kind}`) }} · {{ t('dev.due') }} {{ g.dueAt }}{{ isOverdue(g) ? ` · ${t('dev.overdue')}` : '' }}</span>
         </NuxtLink>
       </div>
       <button v-if="!showGoalForm" class="chip" data-testid="goal-add" @click="showGoalForm = true">+ {{ t('dev.addGoal') }}</button>

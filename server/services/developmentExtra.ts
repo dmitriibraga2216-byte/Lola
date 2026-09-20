@@ -1,18 +1,19 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import {
-  assignments, competencies, competencyAssessments, competencyCategories, courses, developmentGoals, developmentPlans, goalStatuses,
+  assignmentCompetencies, assignments, competencies, competencyAssessments, competencyCategories, courses, developmentGoals, developmentPlans, goalStatuses,
   positionProfiles, strategicPlans, userPlacements,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import { currentLevels } from './development'
+import { currentLevels, defaultValidUntil, effectiveRequirements } from './development'
+import type { Requirement } from './development'
 import { scopeSql } from './access'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
+import type { DisplayAs } from '../../shared/enums'
 
 interface Ctx { tenantId: string, actorId: string }
-interface Requirement { competencyId: string, requiredLevel: number, isCritical?: boolean }
 
 /**
  * Развитие, часть 2 (docs/19): матрица компетенций, отчёты, применение профиля к людям,
@@ -26,8 +27,9 @@ export interface DevelopmentSettings {
   goalsNeedApproval: boolean // docs/19 §7.4
   externalTrainingThreshold: number // §7.7: сумма, выше которой в маршруте появляется администратор
   careerAssessmentFormId: string | null // §7.9: анкета оценки готовности для карьерной заявки
+  competencyDisplayAs: DisplayAs // §14.1 «Шкала компетенцій»: показывать рівень як назву чи як число
 }
-const DEFAULTS: DevelopmentSettings = { goalsNeedApproval: false, externalTrainingThreshold: 5000, careerAssessmentFormId: null }
+const DEFAULTS: DevelopmentSettings = { goalsNeedApproval: false, externalTrainingThreshold: 5000, careerAssessmentFormId: null, competencyDisplayAs: 'label' }
 
 export async function developmentSettings(tx: TenantTx, tenantId: string): Promise<DevelopmentSettings> {
   const [t] = await tx.execute(sql`select coalesce(settings->'development', '{}'::jsonb) as d from tenants where id = ${tenantId}::uuid`) as unknown as { d: Partial<DevelopmentSettings> }[]
@@ -71,22 +73,23 @@ export async function deleteCategory(ctx: Ctx, id: string) {
 export async function competencyMatrix(ctx: Ctx, filter: { locationId?: string, scope?: string[] | null } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const people = await tx.execute(sql`
-      select u.id, u.full_name, up.position_id, p.name as position, l.name as location, up.location_id
+      select u.id, u.full_name, up.position_id, up.position_level_id, p.name as position, l.name as location, up.location_id
       from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       join positions p on p.id = up.position_id join locations l on l.id = up.location_id
       where u.status = 'active' and not u.is_hidden
         ${filter.locationId ? sql`and up.location_id = ${filter.locationId}::uuid` : sql``}
         ${scopeSql(filter.scope ?? null, sql`up.location_id`)}
       order by l.name, u.full_name limit 300
-    `) as unknown as { id: string, full_name: string, position_id: string, position: string, location: string, location_id: string }[]
+    `) as unknown as { id: string, full_name: string, position_id: string, position_level_id: string | null, position: string, location: string, location_id: string }[]
     const profiles = await tx.select().from(positionProfiles).where(eq(positionProfiles.isActive, true))
-    const byPosition = new Map(profiles.map(p => [p.positionId, p.competencyRequirements as Requirement[]]))
+    const byPosition = new Map(profiles.map(p => [p.positionId, p]))
     const compIds = [...new Set(profiles.flatMap(p => (p.competencyRequirements as Requirement[]).map(r => r.competencyId)))]
     const comps = compIds.length ? await tx.select({ id: competencies.id, name: competencies.name, kind: competencies.kind, linkedCourses: competencies.linkedCourses }).from(competencies).where(sql`${competencies.id} in ${compIds}`) : []
     const columns = comps.map(c => ({ id: c.id, name: c.name, kind: c.kind }))
     const rows = []
     for (const u of people) {
-      const reqs = byPosition.get(u.position_id) ?? []
+      const profile = byPosition.get(u.position_id)
+      const reqs = profile ? effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, u.position_level_id) : []
       const levels = await currentLevels(tx, u.id)
       const cells = reqs.map((r) => {
         const cur = levels.get(r.competencyId)?.level ?? 0
@@ -168,7 +171,8 @@ export async function promotionReadiness(ctx: Ctx, positionId: string, scope: st
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, positionId), eq(positionProfiles.isActive, true)))
     if (!profile) return { profile: null, people: [] }
-    const reqs = profile.competencyRequirements as Requirement[]
+    // Кандидат ещё не на этой должности — берём общее требование (без привязки к уровню посади).
+    const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, null)
     const people = await tx.execute(sql`
       select u.id, u.full_name, p.name as position, l.name as location
       from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
@@ -222,11 +226,12 @@ export async function profileCoverage(ctx: Ctx, profileId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [p] = await tx.select().from(positionProfiles).where(eq(positionProfiles.id, profileId))
     if (!p) return null
-    const reqs = p.competencyRequirements as Requirement[]
-    const people = await tx.select({ userId: userPlacements.userId }).from(userPlacements).where(and(eq(userPlacements.positionId, p.positionId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    const allReqs = p.competencyRequirements as Requirement[]
+    const people = await tx.select({ userId: userPlacements.userId, positionLevelId: userPlacements.positionLevelId }).from(userPlacements).where(and(eq(userPlacements.positionId, p.positionId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
     let fit = 0
     const ids: string[] = []
     for (const u of people) {
+      const reqs = effectiveRequirements(allReqs, p.usePositionLevels, u.positionLevelId)
       const levels = await currentLevels(tx, u.userId)
       const ok = reqs.every(r => (levels.get(r.competencyId)?.level ?? 0) >= r.requiredLevel)
       if (ok) { fit++; ids.push(u.userId) }
@@ -250,8 +255,41 @@ export async function onCourseCompletedCompetency(tenantId: string, userId: stri
     if (!passed) return false
     const levels = await currentLevels(tx, userId)
     if ((levels.get(c.competencyId)?.level ?? 0) >= c.level) return false
-    await tx.insert(competencyAssessments).values({ tenantId, userId, competencyId: c.competencyId, level: c.level, source: 'test', evidenceId: enrollmentId, comment: 'Курс завершено, підсумковий тест складено' })
+    // docs/19 Г-19.2: завершённое задание — source=task, срок дії за замовчуванням 12 місяців.
+    await tx.insert(competencyAssessments).values({ tenantId, userId, competencyId: c.competencyId, level: c.level, source: 'task', evidenceId: enrollmentId, comment: 'Курс завершено, підсумковий тест складено', validUntil: defaultValidUntil() })
     return true
+  })
+}
+
+/**
+ * Компетенції завдання (docs/15 Г-15.3 `assignment_competencies`, docs/19 Г-19.2) — долг Spec 15,
+ * закрытый в Spec 19: завершённое назначение з привʼязаними компетенціями частково підтверджує їх
+ * (`source=task`) — не вище ніж на 1 щабель і лише якщо поточний рівень нижчий за вимогу профілю.
+ * Без вимоги профілю (компетенція не потрібна на посаді людини) — підтвердження не ставиться.
+ */
+export async function onAssignmentCompletedCompetencies(tenantId: string, userId: string, assignmentId: string | null, enrollmentId: string): Promise<number> {
+  if (!assignmentId) return 0
+  return withTenant(tenantId, null, async (tx) => {
+    const compIds = (await tx.select({ id: assignmentCompetencies.competencyId }).from(assignmentCompetencies).where(eq(assignmentCompetencies.assignmentId, assignmentId))).map(r => r.id)
+    if (!compIds.length) return 0
+    const [pl] = await tx.select({ positionId: userPlacements.positionId, positionLevelId: userPlacements.positionLevelId })
+      .from(userPlacements).where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    if (!pl) return 0
+    const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.positionId), eq(positionProfiles.isActive, true)))
+    if (!profile) return 0
+    const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.positionLevelId)
+      .filter(r => compIds.includes(r.competencyId))
+    if (!reqs.length) return 0
+    const levels = await currentLevels(tx, userId)
+    let n = 0
+    for (const r of reqs) {
+      const cur = levels.get(r.competencyId)?.level ?? 0
+      if (cur >= r.requiredLevel) continue
+      const level = Math.min(cur + 1, r.requiredLevel)
+      await tx.insert(competencyAssessments).values({ tenantId, userId, competencyId: r.competencyId, level, source: 'task', evidenceId: enrollmentId, comment: 'Завершено призначення з привʼязаною компетенцією', validUntil: defaultValidUntil() })
+      n++
+    }
+    return n
   })
 }
 
@@ -259,16 +297,58 @@ export async function onCourseCompletedCompetency(tenantId: string, userId: stri
 
 export async function gapDetectedOnPlacement(tenantId: string, userId: string) {
   return withTenant(tenantId, null, async (tx) => {
-    const [pl] = await tx.execute(sql`select up.position_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, manager_id: string | null, full_name: string }[]
+    const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, manager_id: string | null, full_name: string }[]
     if (!pl?.manager_id) return 0
     const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.position_id), eq(positionProfiles.isActive, true)))
     if (!profile) return 0
     const levels = await currentLevels(tx, userId)
-    const critical = (profile.competencyRequirements as Requirement[]).filter(r => r.isCritical && (levels.get(r.competencyId)?.level ?? 0) < r.requiredLevel)
+    const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.position_level_id)
+    const critical = reqs.filter(r => r.isCritical && (levels.get(r.competencyId)?.level ?? 0) < r.requiredLevel)
     if (!critical.length) return 0
     const names = await tx.select({ name: competencies.name }).from(competencies).where(sql`${competencies.id} in ${critical.map(c => c.competencyId)}`)
     await enqueueNotification(tx, { tenantId, userId: pl.manager_id, code: 'competency_gap_detected', payload: { name: pl.full_name, competencies: names.map(n => n.name).join(', ') }, dedupKey: `gap:${userId}:${pl.position_id}` })
     return critical.length
+  })
+}
+
+// ── Истечение срока действия оценки (docs/19 Г-19.2, §8) ──────────────
+
+/**
+ * Ежедневно: за 14 дней до `valid_until` — предупреждение человеку; в день истечения — уведомление
+ * и, если это открыло критический разрыв по профилю должности, `competency_gap_detected` руководителю.
+ * Снятие подтверждения не требует отдельного действия — просроченная запись уже не участвует
+ * в `currentLevels()` (docs/19 Г-19.2 «оцінка старша за 12 місяців … не вважається підтвердженою»).
+ */
+export async function competencyExpiryScan(tenantId: string): Promise<{ warned: number, expired: number }> {
+  return withTenant(tenantId, null, async (tx) => {
+    const out = { warned: 0, expired: 0 }
+    const day = new Date().toISOString().slice(0, 10)
+    const warning = await tx.execute(sql`
+      select a.id, a.user_id, a.competency_id, c.name from competency_assessments a join competencies c on c.id = a.competency_id
+      where a.tenant_id = ${tenantId}::uuid and a.valid_until::date = current_date + 14
+    `) as unknown as { id: string, user_id: string, competency_id: string, name: string }[]
+    for (const w of warning) {
+      if (await enqueueNotification(tx, { tenantId, userId: w.user_id, code: 'competency_expiring', payload: { name: w.name }, dedupKey: `comp_exp_warn:${w.id}:${day}` })) out.warned++
+    }
+    const expired = await tx.execute(sql`
+      select distinct a.user_id, a.competency_id, c.name from competency_assessments a join competencies c on c.id = a.competency_id
+      where a.tenant_id = ${tenantId}::uuid and a.valid_until::date = current_date - 1
+    `) as unknown as { user_id: string, competency_id: string, name: string }[]
+    for (const e of expired) {
+      if (await enqueueNotification(tx, { tenantId, userId: e.user_id, code: 'competency_expired', payload: { name: e.name }, dedupKey: `comp_exp:${e.user_id}:${e.competency_id}:${day}` })) out.expired++
+      // Истечение могло открыть критический разрыв по профилю должности — та же логика, что при смене должности (docs/19 §12).
+      const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${e.user_id}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, manager_id: string | null, full_name: string }[]
+      if (!pl?.manager_id) continue
+      const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.position_id), eq(positionProfiles.isActive, true)))
+      if (!profile) continue
+      const req = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.position_level_id).find(r => r.competencyId === e.competency_id)
+      if (!req?.isCritical) continue
+      const levels = await currentLevels(tx, e.user_id)
+      if ((levels.get(e.competency_id)?.level ?? 0) < req.requiredLevel) {
+        await enqueueNotification(tx, { tenantId, userId: pl.manager_id, code: 'competency_gap_detected', payload: { name: pl.full_name, competencies: e.name }, dedupKey: `gap_exp:${e.user_id}:${e.competency_id}:${day}` })
+      }
+    }
+    return out
   })
 }
 

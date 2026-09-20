@@ -62,7 +62,7 @@ export default defineNitroPlugin(async () => {
       const { birthdayScan } = await import('../services/hubPeople')
       const { programScan } = await import('../services/programs')
       const { inactiveScan } = await import('../services/people')
-      const { planPeriodScan, requestReportScan } = await import('../services/developmentExtra')
+      const { planPeriodScan, requestReportScan, competencyExpiryScan } = await import('../services/developmentExtra')
       const { reviewScan } = await import('../services/knowledge')
       const { weeklyDigest } = await import('../services/reportsExtra')
       const { retentionScan } = await import('../services/logs')
@@ -74,6 +74,7 @@ export default defineNitroPlugin(async () => {
         const inactive = await inactiveScan(tenantId) // docs/16 §11 people.inactive_scan
         const plans = await planPeriodScan(tenantId) // docs/19 §7.6 plan.period_scan
         const reqReports = await requestReportScan(tenantId) // docs/19 §7.8 request.report_reminder
+        const compExpiry = await competencyExpiryScan(tenantId) // docs/19 Г-19.2 valid_until: попередження за 14 днів + зняття підтвердження
         const kbReview = await reviewScan(tenantId) // docs/21 §11 knowledge.review_scan
         const digest = monday ? await weeklyDigest(tenantId) : 0 // docs/22 §10 digest.weekly
         const retention = await retentionScan(tenantId) // docs/22 §10 logs.retention
@@ -88,7 +89,7 @@ export default defineNitroPlugin(async () => {
         const pr = await programScan(tenantId)
         const { trajectoryScan } = await import('../services/trajectories')
         const tr = await trajectoryScan(tenantId) // docs/17: отложенные правилом прохождения, подстраховка таймеров
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, trajectories: tr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired, rolesExpired })
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, trajectories: tr, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpired })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync

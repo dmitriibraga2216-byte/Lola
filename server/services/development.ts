@@ -12,10 +12,40 @@ import { enqueueNotification } from './notifications'
 interface Ctx { tenantId: string, actorId: string }
 
 export interface CompetencyLevel { level: number, title: string, behavior: string }
-export interface Requirement { competencyId: string, requiredLevel: number, isCritical?: boolean }
+export interface Requirement { competencyId: string, requiredLevel: number, isCritical?: boolean, positionLevelId?: string | null }
 
-/** Приоритет источника оценки (docs/19 §3.3): certification > assessment > test > manager > self. */
-const SOURCE_PRIORITY: Record<string, number> = { certification: 5, assessment: 4, test: 3, workshop: 3, manager: 2, self: 1 }
+/** Приоритет источника оценки (docs/19 Г-19.2, docs/02 `user_competencies.source`): assessment > task > manual. */
+const SOURCE_PRIORITY: Record<string, number> = { assessment: 3, task: 2, manual: 1 }
+
+/** Срок действия оценки по умолчанию — 12 месяцев (docs/19 Г-19.2); `months=null` — безстроково. */
+export function defaultValidUntil(months: number | null = 12): Date | null {
+  return months == null ? null : new Date(Date.now() + months * 30 * 86_400_000)
+}
+
+/**
+ * Требования профиля, действующие для конкретного человека (docs/19 §14.2 «Використовувати
+ * рівні посади»): если тумблер выключен — уровень требования игнорируется, требование общее
+ * для всей должности; если включён — для компетенции берётся требование с `positionLevelId`,
+ * совпадающим с фактическим уровнем должности человека, а при его отсутствии — требование
+ * без `positionLevelId` (общее). Требования, заданные только под другой уровень, не применяются.
+ */
+export function effectiveRequirements(reqs: Requirement[], usePositionLevels: boolean, userPositionLevelId: string | null): Requirement[] {
+  if (!usePositionLevels) return reqs.map(r => ({ ...r, positionLevelId: undefined }))
+  const byCompetency = new Map<string, Requirement[]>()
+  for (const r of reqs) {
+    const list = byCompetency.get(r.competencyId) ?? []
+    list.push(r)
+    byCompetency.set(r.competencyId, list)
+  }
+  const out: Requirement[] = []
+  for (const list of byCompetency.values()) {
+    const forLevel = userPositionLevelId ? list.find(r => r.positionLevelId === userPositionLevelId) : undefined
+    const generic = list.find(r => !r.positionLevelId)
+    const chosen = forLevel ?? generic
+    if (chosen) out.push(chosen)
+  }
+  return out
+}
 
 // ── Компетенции ────────────────────────────────────────────────────────
 
@@ -53,21 +83,25 @@ export async function listPositionProfiles(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.select({
       id: positionProfiles.id, positionId: positionProfiles.positionId, positionName: positions.name, positionLevelId: positionProfiles.positionLevelId,
-      description: positionProfiles.description, competencyRequirements: positionProfiles.competencyRequirements, mandatoryContent: positionProfiles.mandatoryContent,
+      description: positionProfiles.description, goals: positionProfiles.goals, responsibilities: positionProfiles.responsibilities, usePositionLevels: positionProfiles.usePositionLevels,
+      competencyRequirements: positionProfiles.competencyRequirements, mandatoryContent: positionProfiles.mandatoryContent,
       probationDays: positionProfiles.probationDays, isActive: positionProfiles.isActive, updatedAt: positionProfiles.updatedAt,
       people: sql<number>`(select count(*)::int from ${userPlacements} up where up.position_id = ${positionProfiles.positionId} and up.ended_at is null)`,
     }).from(positionProfiles).innerJoin(positions, eq(positions.id, positionProfiles.positionId)).orderBy(asc(positions.name))
   })
 }
 
-export async function upsertPositionProfile(ctx: Ctx, input: { positionId: string, positionLevelId?: string | null, description?: string, competencyRequirements: Requirement[], mandatoryContent?: { subjectType: string, subjectId: string, dueDays: number }[], probationDays?: number | null }) {
+export async function upsertPositionProfile(ctx: Ctx, input: { positionId: string, positionLevelId?: string | null, description?: string, goals?: unknown, responsibilities?: unknown, usePositionLevels?: boolean, competencyRequirements: Requirement[], mandatoryContent?: { subjectType: string, subjectId: string, dueDays: number }[], probationDays?: number | null }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [p] = await tx.insert(positionProfiles).values({
-      tenantId: ctx.tenantId, positionId: input.positionId, positionLevelId: input.positionLevelId ?? null, description: input.description ?? null,
+    const values = {
+      description: input.description ?? null, goals: input.goals ?? null, responsibilities: input.responsibilities ?? null, usePositionLevels: input.usePositionLevels ?? false,
       competencyRequirements: input.competencyRequirements, mandatoryContent: input.mandatoryContent ?? [], probationDays: input.probationDays ?? null, updatedBy: ctx.actorId,
+    }
+    const [p] = await tx.insert(positionProfiles).values({
+      tenantId: ctx.tenantId, positionId: input.positionId, positionLevelId: input.positionLevelId ?? null, ...values,
     }).onConflictDoUpdate({
       target: [positionProfiles.tenantId, positionProfiles.positionId, positionProfiles.positionLevelId],
-      set: { description: input.description ?? null, competencyRequirements: input.competencyRequirements, mandatoryContent: input.mandatoryContent ?? [], probationDays: input.probationDays ?? null, updatedBy: ctx.actorId, updatedAt: new Date() },
+      set: { ...values, updatedAt: new Date() },
     }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'position_profile.upsert', entity: 'position_profile', entityId: p!.id })
     return p!
@@ -76,65 +110,80 @@ export async function upsertPositionProfile(ctx: Ctx, input: { positionId: strin
 
 // ── Оценки уровня и разрыв ─────────────────────────────────────────────
 
-export async function assessCompetency(ctx: Ctx, input: { userId: string, competencyId: string, level: number, source: string, evidenceId?: string, comment?: string, validMonths?: number }) {
+export type AssessCompetencyResult = { ok: true, assessment: typeof competencyAssessments.$inferSelect } | { ok: false, code: 'not_found' | 'level_out_of_scale' | 'self' }
+
+/**
+ * Ручная оценка компетенции (docs/19 Г-19.2 «Ручна установка керівником — з причиною та в аудит»):
+ * всегда `source=manual`, причина обязательна, самому себе — нельзя (иначе теряется смысл «в аудит»).
+ */
+export async function assessCompetency(ctx: Ctx, input: { userId: string, competencyId: string, level: number, reason: string, evidenceId?: string, validMonths?: number | null }): Promise<AssessCompetencyResult> {
+  if (input.userId === ctx.actorId) return { ok: false, code: 'self' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [c] = await tx.select({ levels: competencies.levels }).from(competencies).where(eq(competencies.id, input.competencyId))
-    if (!c) return null
+    if (!c) return { ok: false as const, code: 'not_found' as const }
     const max = Math.max(...(c.levels as CompetencyLevel[]).map(l => l.level))
-    if (input.level < 1 || input.level > max) return null
+    if (input.level < 1 || input.level > max) return { ok: false as const, code: 'level_out_of_scale' as const }
     const [a] = await tx.insert(competencyAssessments).values({
-      tenantId: ctx.tenantId, userId: input.userId, competencyId: input.competencyId, level: input.level, source: input.source,
-      evidenceId: input.evidenceId ?? null, assessedBy: ctx.actorId, comment: input.comment ?? null,
-      validUntil: input.validMonths ? new Date(Date.now() + input.validMonths * 30 * 86_400_000) : null,
+      tenantId: ctx.tenantId, userId: input.userId, competencyId: input.competencyId, level: input.level, source: 'manual',
+      evidenceId: input.evidenceId ?? null, assessedBy: ctx.actorId, comment: input.reason,
+      validUntil: input.validMonths === undefined ? defaultValidUntil() : defaultValidUntil(input.validMonths),
     }).returning()
-    return a!
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'competency.assess_manual', entity: 'user', entityId: input.userId, after: { competencyId: input.competencyId, level: input.level, reason: input.reason } })
+    return { ok: true as const, assessment: a! }
   })
 }
 
-/** Текущие уровни человека: последняя действующая оценка с наивысшим приоритетом источника. */
-export async function currentLevels(tx: TenantTx, userId: string): Promise<Map<string, { level: number, source: string, assessedAt: Date }>> {
+/** Текущие уровни человека: последняя действующая оценка с наивысшим приоритетом источника (просроченные `validUntil` игнорируются). */
+export async function currentLevels(tx: TenantTx, userId: string): Promise<Map<string, { level: number, source: string, assessedAt: Date, validUntil: Date | null }>> {
   const rows = await tx.select().from(competencyAssessments)
     .where(and(eq(competencyAssessments.userId, userId), sql`(${competencyAssessments.validUntil} is null or ${competencyAssessments.validUntil} > now())`))
     .orderBy(desc(competencyAssessments.assessedAt))
-  const best = new Map<string, { level: number, source: string, assessedAt: Date, prio: number }>()
+  const best = new Map<string, { level: number, source: string, assessedAt: Date, validUntil: Date | null, prio: number }>()
   for (const r of rows) {
     const prio = SOURCE_PRIORITY[r.source] ?? 0
     const cur = best.get(r.competencyId)
-    if (!cur || prio > cur.prio) best.set(r.competencyId, { level: r.level, source: r.source, assessedAt: r.assessedAt, prio })
+    if (!cur || prio > cur.prio) best.set(r.competencyId, { level: r.level, source: r.source, assessedAt: r.assessedAt, validUntil: r.validUntil, prio })
   }
-  return new Map([...best].map(([k, v]) => [k, { level: v.level, source: v.source, assessedAt: v.assessedAt }]))
+  return new Map([...best].map(([k, v]) => [k, { level: v.level, source: v.source, assessedAt: v.assessedAt, validUntil: v.validUntil }]))
 }
 
 /** «Мій розвиток» блок 1 (docs/19 §5.1): профиль должности с текущим/требуемым уровнем и разрывом. */
 export async function competencyGap(ctx: Ctx, userId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [pl] = await tx.select({ positionId: userPlacements.positionId, positionName: positions.name })
+    const [pl] = await tx.select({ positionId: userPlacements.positionId, positionName: positions.name, positionLevelId: userPlacements.positionLevelId })
       .from(userPlacements).innerJoin(positions, eq(positions.id, userPlacements.positionId))
       .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-    if (!pl) return { position: null, profile: null, items: [] }
+    if (!pl) return { position: null, profile: null, items: [], displayAs: 'label' as const }
     const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.positionId), eq(positionProfiles.isActive, true)))
-    if (!profile) return { position: pl, profile: null, items: [] }
+    if (!profile) return { position: pl, profile: null, items: [], displayAs: 'label' as const }
 
-    const reqs = profile.competencyRequirements as Requirement[]
+    const allReqs = profile.competencyRequirements as Requirement[]
+    const reqs = effectiveRequirements(allReqs, profile.usePositionLevels, pl.positionLevelId)
     const comps = reqs.length ? await tx.select().from(competencies).where(inArray(competencies.id, reqs.map(r => r.competencyId))) : []
     const levels = await currentLevels(tx, userId)
     const courseIds = [...new Set(comps.flatMap(c => c.linkedCourses))]
     const courseRows = courseIds.length ? await tx.select({ id: courses.id, title: courses.title }).from(courses).where(inArray(courses.id, courseIds)) : []
     const courseById = new Map(courseRows.map(c => [c.id, c.title]))
+    const { developmentSettings } = await import('./developmentExtra')
+    const settings = await developmentSettings(tx, ctx.tenantId)
 
     const items = reqs.map((r) => {
       const c = comps.find(x => x.id === r.competencyId)
       const cur = levels.get(r.competencyId)
-      const maxLevel = c ? Math.max(...(c.levels as CompetencyLevel[]).map(l => l.level)) : 5
+      const compLevels = (c?.levels ?? []) as CompetencyLevel[]
+      const maxLevel = compLevels.length ? Math.max(...compLevels.map(l => l.level)) : 5
+      const expiringInDays = cur?.validUntil ? Math.ceil((+cur.validUntil - Date.now()) / 86_400_000) : null
       return {
         competencyId: r.competencyId, name: c?.name ?? '?', kind: c?.kind, requiredLevel: r.requiredLevel, isCritical: r.isCritical ?? false,
         currentLevel: cur?.level ?? 0, source: cur?.source ?? null, maxLevel,
+        currentLevelLabel: cur ? compLevels.find(l => l.level === cur.level)?.title ?? String(cur.level) : null,
+        validUntil: cur?.validUntil ?? null, expiringSoon: expiringInDays != null && expiringInDays <= 14,
         gap: Math.max(0, r.requiredLevel - (cur?.level ?? 0)),
-        levels: c?.levels ?? [],
+        levels: compLevels,
         whatToLearn: (c?.linkedCourses ?? []).map(id => ({ id, title: courseById.get(id) ?? '?' })),
       }
     })
-    return { position: pl, profile: { id: profile.id, probationDays: profile.probationDays }, items }
+    return { position: pl, profile: { id: profile.id, probationDays: profile.probationDays, goals: profile.goals, responsibilities: profile.responsibilities }, items, displayAs: settings.competencyDisplayAs }
   })
 }
 
@@ -303,9 +352,9 @@ export async function transitionGoal(ctx: Ctx, goalId: string, toCode: string, o
     }).where(eq(developmentGoals.id, goalId))
     await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId, fromStatus: g.statusCode, toStatus: toCode, actorId: ctx.actorId, comment: opts.comment ?? null, requestContext: currentRequestContext() })
 
-    // Достигнутая цель по компетенции → оценка уровня от руководителя
+    // Достигнутая цель по компетенции → ручная оценка уровня от руководителя (docs/19 Г-19.2: source=manual, с причиной)
     if (to.isSuccess && g.competencyId && g.targetLevel && !isOwner) {
-      await tx.insert(competencyAssessments).values({ tenantId: ctx.tenantId, userId: g.userId, competencyId: g.competencyId, level: g.targetLevel, source: 'manager', evidenceId: goalId, assessedBy: ctx.actorId, comment: `Ціль «${g.title}» досягнута` })
+      await tx.insert(competencyAssessments).values({ tenantId: ctx.tenantId, userId: g.userId, competencyId: g.competencyId, level: g.targetLevel, source: 'manual', evidenceId: goalId, assessedBy: ctx.actorId, comment: `Ціль «${g.title}» досягнута`, validUntil: defaultValidUntil() })
     }
     const notifyTo = isOwner ? await managerOf(tx, g.userId) : g.userId
     if (notifyTo && notifyTo !== ctx.actorId) {

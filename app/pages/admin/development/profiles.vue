@@ -1,21 +1,28 @@
 <script setup lang="ts">
+import type { ContentBlock } from '../../../../shared/schemas/content'
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'position_profile.manage' })
 const { t } = useI18n()
 const { api } = useApi()
-interface Req { competencyId: string, requiredLevel: number, isCritical?: boolean }
-interface P { id: string, positionId: string, positionName: string, description: string | null, competencyRequirements: Req[], mandatoryContent: { subjectType: string, subjectId: string, dueDays: number }[], probationDays: number | null }
+interface Req { competencyId: string, requiredLevel: number, isCritical?: boolean, positionLevelId?: string | null }
+interface P { id: string, positionId: string, positionName: string, description: string | null, goals: ContentBlock[] | null, responsibilities: ContentBlock[] | null, usePositionLevels: boolean, competencyRequirements: Req[], mandatoryContent: { subjectType: string, subjectId: string, dueDays: number }[], probationDays: number | null }
 const items = ref<P[]>([])
 const positions = ref<{ id: string, name: string }[]>([])
+const positionLevels = ref<{ id: string, name: string }[]>([])
 const comps = ref<{ id: string, name: string, levels: { level: number }[] }[]>([])
 const courses = ref<{ id: string, title: string }[]>([])
 const error = ref('')
 const notice = ref('')
-const form = reactive({ positionId: '', description: '', probationDays: 90 as number | null, competencyRequirements: [] as Req[], mandatoryContent: [] as { subjectType: string, subjectId: string, dueDays: number }[] })
+const emptyBlocks: ContentBlock[] = [{ id: 'b1', type: 'text', html: '<p></p>' } as unknown as ContentBlock]
+const form = reactive({
+  positionId: '', description: '', goals: [...emptyBlocks] as ContentBlock[], responsibilities: [...emptyBlocks] as ContentBlock[], usePositionLevels: false,
+  probationDays: 90 as number | null, competencyRequirements: [] as Req[], mandatoryContent: [] as { subjectType: string, subjectId: string, dueDays: number }[],
+})
 
 async function load() {
   try {
     items.value = await api<P[]>('/position-profiles')
     positions.value = await api('/refs/positions')
+    positionLevels.value = await api('/refs/position-levels')
     comps.value = await api('/competencies')
     courses.value = (await api<{ id: string, title: string, status: string }[]>('/courses')).filter(c => c.status === 'published')
   } catch (err) { error.value = apiErrorOf(err).message }
@@ -25,6 +32,9 @@ function pick(positionId: string) {
   form.positionId = positionId
   const p = items.value.find(x => x.positionId === positionId)
   form.description = p?.description ?? ''
+  form.goals = p?.goals?.length ? p.goals.map(b => ({ ...b })) : [...emptyBlocks]
+  form.responsibilities = p?.responsibilities?.length ? p.responsibilities.map(b => ({ ...b })) : [...emptyBlocks]
+  form.usePositionLevels = p?.usePositionLevels ?? false
   form.probationDays = p?.probationDays ?? 90
   form.competencyRequirements = p ? p.competencyRequirements.map(r => ({ ...r })) : []
   form.mandatoryContent = p ? p.mandatoryContent.map(m => ({ ...m })) : []
@@ -63,14 +73,25 @@ async function applyToPeople() {
         <p v-if="coverage" class="sub">{{ t('dev.coverage', { fit: coverage.fit, people: coverage.people }) }} <NuxtLink v-if="coverage.people" :to="{ path: '/admin/people', query: { positionId: form.positionId } }" class="link">→</NuxtLink></p>
         <textarea v-model="form.description" class="field" rows="2" :placeholder="t('dev.profileDesc')" />
         <label class="sub">{{ t('dev.probation') }} <input v-model.number="form.probationDays" class="field short" type="number" min="1" max="365"></label>
+        <h3>{{ t('dev.positionGoals') }}</h3>
+        <BlockEditor v-model="form.goals" />
+        <h3>{{ t('dev.responsibilities') }}</h3>
+        <BlockEditor v-model="form.responsibilities" />
+        <label class="check"><input v-model="form.usePositionLevels" type="checkbox"> {{ t('dev.usePositionLevels') }}</label>
+        <p class="sub">{{ t('dev.usePositionLevelsHint') }}</p>
         <h3>{{ t('dev.requirements') }}</h3>
         <div v-for="(r, i) in form.competencyRequirements" :key="i" class="row">
           <select v-model="r.competencyId" class="field grow"><option v-for="c in comps" :key="c.id" :value="c.id">{{ c.name }}</option></select>
           <select v-model.number="r.requiredLevel" class="field"><option v-for="l in (comps.find(c => c.id === r.competencyId)?.levels ?? [{ level: 1 }, { level: 2 }, { level: 3 }])" :key="l.level" :value="l.level">{{ t('dev.level') }} {{ l.level }}</option></select>
+          <select v-if="form.usePositionLevels" v-model="r.positionLevelId" class="field">
+            <option :value="null">{{ t('dev.anyLevel') }}</option>
+            <option v-for="pl in positionLevels" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
+          </select>
           <label class="check"><input v-model="r.isCritical" type="checkbox"> {{ t('dev.critical') }}</label>
           <button class="chip" @click="form.competencyRequirements.splice(i, 1)">✕</button>
         </div>
-        <button class="chip" data-testid="req-add" @click="form.competencyRequirements.push({ competencyId: comps[0]?.id ?? '', requiredLevel: 2 })">+ {{ t('dev.competency') }}</button>
+        <button class="chip" data-testid="req-add" @click="form.competencyRequirements.push({ competencyId: comps[0]?.id ?? '', requiredLevel: 2, positionLevelId: null })">+ {{ t('dev.competency') }}</button>
+        <p class="sub sourcehint">{{ t('dev.sourceHint') }}<br>{{ t('dev.sourceHintExpiry') }}<br>1. {{ t('dev.source.assessment') }} — {{ t('dev.sourceHintAssessment') }}<br>2. {{ t('dev.source.task') }} — {{ t('dev.sourceHintTask') }}<br>3. {{ t('dev.source.manual') }} — {{ t('dev.sourceHintManual') }}</p>
         <h3>{{ t('dev.mandatory') }}</h3>
         <div v-for="(m, i) in form.mandatoryContent" :key="i" class="row">
           <select v-model="m.subjectId" class="field grow"><option v-for="c in courses" :key="c.id" :value="c.id">{{ c.title }}</option></select>

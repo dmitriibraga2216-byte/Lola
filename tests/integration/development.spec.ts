@@ -53,15 +53,16 @@ describe('этап 7: компетенции, профиль должности,
       { competencyId: espresso.id, requiredLevel: 3, isCritical: true }, { competencyId: service.id, requiredLevel: 2 },
     ], probationDays: 60 })
 
-    // Самооценка 1 и оценка руководителя 2 — приоритет у руководителя
-    await dev.assessCompetency(asBarista(), { userId: baristaId, competencyId: espresso.id, level: 1, source: 'self' })
-    await dev.assessCompetency(asAdmin(), { userId: baristaId, competencyId: espresso.id, level: 2, source: 'manager' })
+    // Ручна оцінка — тільки керівник, собі не можна (docs/19 Г-19.2)
+    expect(await dev.assessCompetency(asBarista(), { userId: baristaId, competencyId: espresso.id, level: 1, reason: 'Самооцінка' })).toMatchObject({ ok: false, code: 'self' })
+    expect(await dev.assessCompetency(asAdmin(), { userId: baristaId, competencyId: espresso.id, level: 2, reason: 'Спостереження на зміні' })).toMatchObject({ ok: true })
 
     const gap = await dev.competencyGap(asBarista(), baristaId)
     expect(gap.position?.positionName).toContain('Бариста')
     expect(gap.profile?.probationDays).toBe(60)
     const e = gap.items.find(i => i.competencyId === espresso.id)!
-    expect(e).toMatchObject({ currentLevel: 2, requiredLevel: 3, gap: 1, source: 'manager', isCritical: true })
+    expect(e).toMatchObject({ currentLevel: 2, requiredLevel: 3, gap: 1, source: 'manual', isCritical: true })
+    expect(e.validUntil).not.toBeNull()
     const s = gap.items.find(i => i.competencyId === service.id)!
     expect(s).toMatchObject({ currentLevel: 0, requiredLevel: 2, gap: 2 })
 
@@ -110,7 +111,7 @@ describe('этап 7: компетенции, профиль должности,
     const gap = await dev.competencyGap(asAdmin(), baristaId)
     // Профиль не требует «Молоко», но уровень зафиксирован в оценках
     const [a] = await admin`select level, source, evidence_id from competency_assessments where user_id = ${baristaId} and competency_id = ${espresso.id}`
-    expect(a).toMatchObject({ level: 2, source: 'manager', evidence_id: goal.id })
+    expect(a).toMatchObject({ level: 2, source: 'manual', evidence_id: goal.id })
     expect(gap.items.length).toBeGreaterThan(0)
 
     const team = await dev.teamGoals(asAdmin(), { status: 'achieved' })
@@ -188,8 +189,9 @@ describe('docs/19 часть 2: матрица, курс → компетенц�
       expect(await onCourseCompletedCompetency(tenantId, baristaId, course!.id as string, enr!.id as string)).toBe(false)
       await admin`insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, passed, started_at, submitted_at) values (${tenantId}, ${quiz!.id}, ${baristaId}, 1, '{}', '{}', 'passed', true, now(), now())`
       expect(await onCourseCompletedCompetency(tenantId, baristaId, course!.id as string, enr!.id as string)).toBe(true)
-      const [a] = await admin`select level, source from competency_assessments where user_id = ${baristaId} and competency_id = ${comp!.id}`
-      expect(a).toMatchObject({ level: 2, source: 'test' })
+      const [a] = await admin`select level, source, valid_until from competency_assessments where user_id = ${baristaId} and competency_id = ${comp!.id}`
+      expect(a).toMatchObject({ level: 2, source: 'task' })
+      expect(a!.valid_until).not.toBeNull()
       // Повторно — уровень уже есть, новой оценки нет
       expect(await onCourseCompletedCompetency(tenantId, baristaId, course!.id as string, enr!.id as string)).toBe(false)
     }
@@ -199,6 +201,95 @@ describe('docs/19 часть 2: матрица, курс → компетенц�
       await admin`delete from lessons where module_id = ${mod!.id}`; await admin`delete from modules where id = ${mod!.id}`
       await admin`update courses set published_version_id = null where id = ${course!.id}`; await admin`delete from course_versions where id = ${ver!.id}`
       await admin`delete from courses where id = ${course!.id}`; await admin`delete from quizzes where id = ${quiz!.id}`
+    }
+  })
+
+  it('долг Spec 15 (Г-19.2): завершённое назначение с assignment_competencies частично подтверждает компетенцию — source=task, +1 крок, не вище вимоги', async () => {
+    const { onAssignmentCompletedCompetencies } = await X()
+    const [comp] = await admin`insert into competencies (tenant_id, name, kind, levels) values (${tenantId}, ${`Гостинність-${Date.now()}`}, 'soft', ${JSON.stringify(levels)}) returning id`
+    compIds.push(comp!.id as string)
+    const [profile] = await admin`select id, competency_requirements from position_profiles where position_id = ${baristaPosId}`
+    const rawReqs = profile!.competency_requirements as unknown
+    const before = (typeof rawReqs === 'string' ? JSON.parse(rawReqs) : rawReqs) as { competencyId: string, requiredLevel: number }[]
+    const reqs = [...before, { competencyId: comp!.id, requiredLevel: 3 }]
+    await admin`update position_profiles set competency_requirements = ${JSON.stringify(reqs)} where id = ${profile!.id}`
+    const [assignment] = await admin`insert into assignments (tenant_id, title, subject_type, subject_id, audience, created_by) values (${tenantId}, 'Тест завдання', 'course', ${comp!.id}, '{"rules":[],"match":"any"}', ${adminId}) returning id`
+    await admin`insert into assignment_competencies (tenant_id, assignment_id, competency_id) values (${tenantId}, ${assignment!.id}, ${comp!.id})`
+    try {
+      expect(await onAssignmentCompletedCompetencies(tenantId, baristaId, null, crypto.randomUUID())).toBe(0)
+      expect(await onAssignmentCompletedCompetencies(tenantId, baristaId, assignment!.id as string, crypto.randomUUID())).toBe(1)
+      const [a] = await admin`select level, source from competency_assessments where user_id = ${baristaId} and competency_id = ${comp!.id} order by assessed_at desc limit 1`
+      expect(a).toMatchObject({ level: 1, source: 'task' }) // з 0 до 1, вимога 3 — крок не вище одиниці
+      await onAssignmentCompletedCompetencies(tenantId, baristaId, assignment!.id as string, crypto.randomUUID())
+      const [a2] = await admin`select level from competency_assessments where user_id = ${baristaId} and competency_id = ${comp!.id} order by assessed_at desc limit 1`
+      expect(a2!.level).toBe(2)
+    }
+    finally {
+      await admin`delete from assignment_competencies where assignment_id = ${assignment!.id}`
+      await admin`delete from assignments where id = ${assignment!.id}`
+      await admin`update position_profiles set competency_requirements = ${JSON.stringify(before)} where id = ${profile!.id}`
+    }
+  })
+
+  it('Г-19.2 §8: valid_until — попередження за 14 днів і зняття підтвердження після спливання', async () => {
+    const { competencyExpiryScan } = await X()
+    const [comp] = await admin`insert into competencies (tenant_id, name, kind, levels) values (${tenantId}, ${`Прострочка-${Date.now()}`}, 'hard', ${JSON.stringify(levels)}) returning id`
+    compIds.push(comp!.id as string)
+    const [warn] = await admin`insert into competency_assessments (tenant_id, user_id, competency_id, level, source, comment, assessed_by, valid_until) values (${tenantId}, ${baristaId}, ${comp!.id}, 2, 'manual', 'причина', ${adminId}, current_date + 14) returning id`
+    const [expired] = await admin`insert into competency_assessments (tenant_id, user_id, competency_id, level, source, comment, assessed_by, valid_until) values (${tenantId}, ${baristaId}, ${comp!.id}, 2, 'manual', 'причина', ${adminId}, current_date - 1) returning id`
+    try {
+      const r = await competencyExpiryScan(tenantId)
+      expect(r.warned).toBeGreaterThanOrEqual(1)
+      expect(r.expired).toBeGreaterThanOrEqual(1)
+      const [nWarn] = await admin`select count(*)::int as c from notifications where user_id = ${baristaId} and code = 'competency_expiring'`
+      const [nExp] = await admin`select count(*)::int as c from notifications where user_id = ${baristaId} and code = 'competency_expired'`
+      expect(nWarn!.c).toBeGreaterThanOrEqual(1)
+      expect(nExp!.c).toBeGreaterThanOrEqual(1)
+      // Просрочена оцінка більше не бере участі у поточному рівні
+      const gap = await dev.competencyGap(asAdmin(), baristaId)
+      const item = gap.items.find(i => i.competencyId === comp!.id)
+      expect(item?.currentLevel ?? 0).toBe(0)
+    }
+    finally {
+      await admin`delete from competency_assessments where id in (${warn!.id}, ${expired!.id})`
+      await admin`delete from notifications where user_id = ${baristaId} and code in ('competency_expiring', 'competency_expired')`
+    }
+  })
+
+  it('§14.1: display_as — тумблер «назва рівня / число» у налаштуваннях модуля', async () => {
+    const { getDevelopmentSettings, updateDevelopmentSettings } = await X()
+    expect((await getDevelopmentSettings(asAdmin())).competencyDisplayAs).toBe('label')
+    await updateDevelopmentSettings(asAdmin(), { competencyDisplayAs: 'value' })
+    try {
+      expect((await getDevelopmentSettings(asAdmin())).competencyDisplayAs).toBe('value')
+      const gap = await dev.competencyGap(asAdmin(), baristaId)
+      expect(gap.displayAs).toBe('value')
+    }
+    finally {
+      await updateDevelopmentSettings(asAdmin(), { competencyDisplayAs: 'label' })
+    }
+  })
+
+  it('§14.2: «Використовувати рівні посади» — один профіль задає різні вимоги за position_level_id', async () => {
+    const [levelJunior] = await admin`insert into position_levels (tenant_id, name) values (${tenantId}, ${`Молодший-${Date.now()}`}) returning id`
+    const [levelSenior] = await admin`insert into position_levels (tenant_id, name) values (${tenantId}, ${`Старший-${Date.now()}`}) returning id`
+    const [comp] = await admin`insert into competencies (tenant_id, name, kind, levels) values (${tenantId}, ${`Рівні посади-${Date.now()}`}, 'hard', ${JSON.stringify(levels)}) returning id`
+    compIds.push(comp!.id as string)
+    const [profile] = await admin`select id, competency_requirements from position_profiles where position_id = ${baristaPosId}`
+    const rawReqs = profile!.competency_requirements as unknown
+    const before = (typeof rawReqs === 'string' ? JSON.parse(rawReqs) : rawReqs) as unknown[]
+    const reqs = [...before, { competencyId: comp!.id, requiredLevel: 1, positionLevelId: levelJunior!.id }, { competencyId: comp!.id, requiredLevel: 3, positionLevelId: levelSenior!.id }]
+    await admin`update position_profiles set competency_requirements = ${JSON.stringify(reqs)}, use_position_levels = true where id = ${profile!.id}`
+    await admin`update user_placements set position_level_id = ${levelSenior!.id} where user_id = ${baristaId} and position_id = ${baristaPosId}`
+    try {
+      const gap = await dev.competencyGap(asAdmin(), baristaId)
+      const item = gap.items.find(i => i.competencyId === comp!.id)
+      expect(item?.requiredLevel).toBe(3) // старший рівень — вимога 3, не 1
+    }
+    finally {
+      await admin`update position_profiles set competency_requirements = ${JSON.stringify(before)}, use_position_levels = false where id = ${profile!.id}`
+      await admin`update user_placements set position_level_id = null where user_id = ${baristaId} and position_id = ${baristaPosId}`
+      await admin`delete from position_levels where id in (${levelJunior!.id}, ${levelSenior!.id})`
     }
   })
 
@@ -276,5 +367,36 @@ describe('docs/19 часть 2: матрица, курс → компетенц�
     expect(p!.status).toBe('draft')
     expect((await listStrategicPlans(asAdmin())).some(x => x.id === p!.id)).toBe(true)
     expect(await deleteStrategicPlan(asAdmin(), p!.id)).toBe(true)
+  })
+})
+
+describe('docs/22 §13.5, docs/04 `/me/study-history`: історія навчання і рейтинг у кабінеті', () => {
+  it('список охоплює курс, тест і завершену заявку на зовнішнє навчання; рейтинг — кількість виконаного', async () => {
+    const { studyHistory } = await import('../../server/services/reportsExtra')
+    const stamp = Date.now()
+    const [course] = await admin`insert into courses (tenant_id, title, slug, status) values (${tenantId}, ${`Історія курс ${stamp}`}, ${`hist-${stamp}`}, 'published') returning id`
+    const [ver] = await admin`insert into course_versions (tenant_id, course_id, version) values (${tenantId}, ${course!.id}, 1) returning id`
+    const [enr] = await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status, completed_at) values (${tenantId}, ${baristaId}, ${course!.id}, ${ver!.id}, 'self', 1, 'done', now()) returning id`
+    const [quiz] = await admin`insert into quizzes (tenant_id, title, status) values (${tenantId}, ${`Історія тест ${stamp}`}, 'published') returning id`
+    const [att] = await admin`insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, passed, score, started_at, submitted_at) values (${tenantId}, ${quiz!.id}, ${baristaId}, 1, '{}', '{}', 'passed', true, 80, now(), now()) returning id`
+    const req = await import('../../server/services/requests')
+    const r = await req.createExternalRequest(asBarista(), { title: `Історія заявка ${stamp}`, format: 'offline', cost: 1000 })
+    await admin`update external_training_requests set status = 'completed', decided_at = now() where id = ${r.id}`
+    try {
+      const h = await studyHistory(asBarista(), baristaId)
+      expect(h.profile).toMatchObject({ full_name: 'Бариста Тестовий' })
+      expect(h.items.some(i => i.contentType === 'course' && i.status === 'done')).toBe(true)
+      expect(h.items.some(i => i.contentType === 'test' && i.status === 'done')).toBe(true)
+      expect(h.items.some(i => i.external && i.status === 'done')).toBe(true)
+      expect(h.currentRating).toBeGreaterThanOrEqual(2) // курс + тест, заявка в рейтинг не входить (тільки в зовнішній ряд)
+      expect(h.series.length).toBe(8)
+      expect(h.series.at(-1)!.mine).toBeGreaterThanOrEqual(2)
+      expect(h.series.at(-1)!.external).toBeGreaterThanOrEqual(1)
+    }
+    finally {
+      await admin`delete from external_training_requests where id = ${r.id}`
+      await admin`delete from attempts where id = ${att!.id}`; await admin`delete from quizzes where id = ${quiz!.id}`
+      await admin`delete from enrollments where id = ${enr!.id}`; await admin`delete from course_versions where id = ${ver!.id}`; await admin`delete from courses where id = ${course!.id}`
+    }
   })
 })

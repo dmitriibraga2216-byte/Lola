@@ -121,6 +121,7 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
       <NuxtLink to="/learn/events" class="row-link">{{ t('events.title') }}</NuxtLink>
       <label class="toggle row-link"><input type="checkbox" :checked="birthdayConsent" @change="setBirthdayConsent(($event.target as HTMLInputElement).checked)"><span>{{ t('profile.birthdayConsent') }}<span class="hint">{{ t('profile.birthdayConsentHint') }}</span></span></label>
       <NuxtLink to="/learn/development" class="row-link">{{ t('dev.short') }}</NuxtLink>
+      <NuxtLink to="/learn/profile/study-history" class="row-link">{{ t('studyHistory.title') }}</NuxtLink>
       <NuxtLink to="/learn/surveys" class="row-link">{{ t('survey.title') }}</NuxtLink>
       <button class="row-link" :aria-expanded="pwd.open" @click="pwd.open = !pwd.open">{{ meUser?.hasPassword ? t('profile.changePassword') : t('profile.setPassword') }}</button>
       <form v-if="pwd.open" class="pwd" @submit.prevent="changePassword">

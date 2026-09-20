@@ -938,6 +938,13 @@ external_training_requests(user_id, title, provider, cost numeric, currency text
 career_requests(user_id, target_position_id, status, approved_by, comment)
 ```
 
+Spec 19: `position_profiles` (в коде — `competency_requirements jsonb` вместо отдельной таблицы) получила
+`use_position_levels boolean`, `goals jsonb`, `responsibilities jsonb` (`19` §14.2: «Цілі посади»,
+«Обов'язки посади»); элементы `competency_requirements[]` — необязательный `position_level_id`
+(разные требования для «Бариста» и «Бариста 2 рівня» в одном профиле, применяется только при
+`use_position_levels = true`). `[решение]`: один профиль — одна должность (`positionId`), «несколько
+посад на профіль» эталона (`19` §14.2) не делали — долг `28` «Spec 19».
+
 ## Оценка и чек-листы
 
 ```sql
@@ -1053,6 +1060,9 @@ scale_levels(scale_id, label, value numeric,
        sort_order int)
 -- Spec 24: обе таблицы созданы (0035, RLS, scale_levels.tenant_id ради политики). Spec 20: rating_scales анкет/чек-листов
 -- перенесена сюда (0039, kind=levels), таблица удалена; порог «норма» живёт в assessment_items.norm, а не в шкале.
+-- Spec 19: «Шкала компетенцій» (`19` §14.1) — не строка `scales` (у компетенции уже свои levels jsonb
+-- с названием и поведением на уровень), а один тумблер на тенанта: tenants.settings.development.competencyDisplayAs
+-- (display_as: label | value) — показывать рівень как «Досвідчений» или как «4» в гэпах, матрице, ІПР.
 badges / user_badges / points_ledger            -- см. §2.10
 leaderboard_snapshots(scope_type, scope_id, period, rows jsonb)
 ```
@@ -1173,6 +1183,11 @@ user_competencies(
   source_ref_id uuid, reason text,
   assessed_at timestamptz, valid_until timestamptz
 )
+-- Spec 19: в коде — существовавшая с этапа 4 `competency_assessments` (лог оценок, не одна строка
+-- на пару человек+компетенция — приоритет источника считается на чтении, `currentLevels()`).
+-- `evidence_id` играет роль `source_ref_id`, `comment` — роль `reason` (обязателен при source=manual).
+-- Миграция 0040: старые значения source нормализованы (self|manager → manual, test → task,
+-- assessment не менялся), CHECK на состав, `valid_until` по умолчанию 12 месяцев на всех источниках.
 
 -- Группы доступа базы знаний и каталога (`21` §14.1, `10` §14.1)
 access_groups(id, tenant_id, name, description, applies_to text)  -- knowledge | catalog
@@ -1249,6 +1264,12 @@ poll_mode: linear | conditional
 
 -- Типы вопросов опроса (`20` §14.7: «Одиночне» · «Множинне» · «Вільна відповідь» · «По шкалі»); Spec 20
 poll_question_kind: single | multi | free | scale
+
+-- Источник уровня компетенции человека (`19` Г-19.2): приоритет assessment > task > manual; Spec 19
+competency_source: assessment | task | manual
+
+-- Спосіб відображення рівня компетенції (`19` §14.1 «Шкала компетенцій»): назва рівня чи число; Spec 19
+display_as: label | value
 ```
 
 ## Что проверяет тест схемы

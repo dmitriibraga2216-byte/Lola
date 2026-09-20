@@ -587,7 +587,8 @@ export async function finishCycle(ctx: Ctx | { tenantId: string, actorId: null }
           // Маппинг шкалы на уровни компетенции (docs/19 §3.3): доля от диапазона шкалы × число уровней
           const levelsMax = compMax.get(cr.competencyId) ?? 5
           const level = Math.max(1, Math.min(levelsMax, Math.round(((avg - min) / Math.max(max - min, 1)) * levelsMax)))
-          await tx.insert(competencyAssessments).values({ tenantId: ctx.tenantId, userId: s, competencyId: cr.competencyId, level, source: 'assessment', evidenceId: cycleId, assessedBy: ctx.actorId, comment: `Цикл «${c.title}»` })
+          const { defaultValidUntil } = await import('./development')
+          await tx.insert(competencyAssessments).values({ tenantId: ctx.tenantId, userId: s, competencyId: cr.competencyId, level, source: 'assessment', evidenceId: cycleId, assessedBy: ctx.actorId, comment: `Цикл «${c.title}»`, validUntil: defaultValidUntil() })
           n++
         }
       }

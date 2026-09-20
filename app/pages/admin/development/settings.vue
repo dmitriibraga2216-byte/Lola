@@ -3,17 +3,17 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'dev
 const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
-const form = reactive({ goalsNeedApproval: false, externalTrainingThreshold: 5000, careerAssessmentFormId: '' as string })
+const form = reactive({ goalsNeedApproval: false, externalTrainingThreshold: 5000, careerAssessmentFormId: '' as string, competencyDisplayAs: 'label' as 'label' | 'value' })
 const forms = ref<{ id: string, title: string }[]>([])
 const error = ref('')
 const notice = ref('')
 onMounted(async () => {
-  try { const s = await api<{ goalsNeedApproval: boolean, externalTrainingThreshold: number, careerAssessmentFormId: string | null }>('/settings/development'); Object.assign(form, { ...s, careerAssessmentFormId: s.careerAssessmentFormId ?? '' }) } catch (err) { error.value = apiErrorOf(err).message }
+  try { const s = await api<{ goalsNeedApproval: boolean, externalTrainingThreshold: number, careerAssessmentFormId: string | null, competencyDisplayAs: 'label' | 'value' }>('/settings/development'); Object.assign(form, { ...s, careerAssessmentFormId: s.careerAssessmentFormId ?? '' }) } catch (err) { error.value = apiErrorOf(err).message }
   try { forms.value = await api('/assessment/forms') } catch { /* нет прав на анкеты */ }
 })
 async function save() {
   error.value = ''; notice.value = ''
-  try { await api('/settings/development', { method: 'PATCH', body: { goalsNeedApproval: form.goalsNeedApproval, externalTrainingThreshold: Number(form.externalTrainingThreshold), careerAssessmentFormId: form.careerAssessmentFormId || null } }); notice.value = t('common.saved') }
+  try { await api('/settings/development', { method: 'PATCH', body: { goalsNeedApproval: form.goalsNeedApproval, externalTrainingThreshold: Number(form.externalTrainingThreshold), careerAssessmentFormId: form.careerAssessmentFormId || null, competencyDisplayAs: form.competencyDisplayAs } }); notice.value = t('common.saved') }
   catch (err) { error.value = apiErrorOf(err).message }
 }
 </script>
@@ -29,6 +29,8 @@ async function save() {
       <p class="sub">{{ t('dev.thresholdHint') }}</p>
       <label>{{ t('dev.careerForm') }}<select v-model="form.careerAssessmentFormId" :disabled="!hasScope('settings.tenant')"><option value="">—</option><option v-for="f in forms" :key="f.id" :value="f.id">{{ f.title }}</option></select></label>
       <p class="sub">{{ t('dev.careerFormHint') }}</p>
+      <label>{{ t('dev.displayAs') }}<select v-model="form.competencyDisplayAs" :disabled="!hasScope('settings.tenant')"><option value="label">{{ t('dev.displayAsLabel') }}</option><option value="value">{{ t('dev.displayAsValue') }}</option></select></label>
+      <p class="sub">{{ t('dev.displayAsHint') }}</p>
       <button v-if="hasScope('settings.tenant')" type="submit" class="primary">{{ t('common.save') }}</button>
     </form>
   </div>

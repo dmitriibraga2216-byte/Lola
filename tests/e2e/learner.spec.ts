@@ -21,8 +21,8 @@ test('1. Вход по OTP за два экрана; неверный код п�
   await expect(page.getByText(/Код невірний. Залишилось 4/)).toBeVisible()
 
   await page.getByLabel('Введіть код').fill(data.devCode)
-  await expect(page).toHaveURL(/\/$/)
-  await expect(page.getByText(/Ви увійшли як/)).toBeVisible()
+  await expect(page).toHaveURL(/\/learn$/) // корень ведёт на домашний экран роли
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 })
 
 test('2. Прохождение урока с телефона: закрыть на втором уроке, вернуться — открывается второй', async ({ page, request }) => {

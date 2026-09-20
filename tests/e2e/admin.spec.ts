@@ -14,15 +14,20 @@ test.afterAll(async () => {
 test('5. Методист создаёт курс из редактора и публикует за один сеанс', async ({ page }) => {
   await loginViaUi(page, ADMIN_PHONE)
   await page.goto('/admin/courses')
-  await page.getByPlaceholder(/Назва нового курсу/).fill(`${PREFIX}Редактор`)
+  // Карточка курса (docs/11 §14.1): назва, код, «Визначати результат по»
+  await page.getByRole('button', { name: /^Додати$/ }).click()
+  await page.getByLabel(/Назва нового курсу/).fill(`${PREFIX}Редактор`)
+  await page.getByLabel(/^Код$/).fill('E2E-01')
   await page.getByRole('button', { name: /Створити/ }).click()
   await expect(page).toHaveURL(/\/admin\/courses\/[0-9a-f-]+$/)
 
+  // Раздел обязателен: без него элементы плана не подключить
+  await expect(page.getByText(/Спочатку додайте розділ/)).toBeVisible()
   await page.getByPlaceholder(/Назва розділу/).fill('Розділ 1')
-  await page.getByRole('button', { name: /\+ Розділ/ }).click()
-  await expect(page.getByText('Розділ 1')).toBeVisible()
+  await page.getByRole('button', { name: /Додати розділ/ }).click()
+  await expect(page.locator('.section-title', { hasText: 'Розділ 1' })).toBeVisible()
   await page.getByPlaceholder(/Новий урок/).fill('Перший урок')
-  await page.getByPlaceholder(/Новий урок/).press('Enter')
+  await page.getByRole('button', { name: /Створити і підключити ресурс/ }).click()
   await expect(page.getByRole('button', { name: /Перший урок/ })).toBeVisible()
 
   // Вводим текст в блок и ждём автосохранения

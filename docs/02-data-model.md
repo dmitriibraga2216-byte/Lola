@@ -215,6 +215,59 @@ create table course_items (
   sort_order int not null default 0
 );
 
+-- Ресурс как тип контента (`11` §3.1, §14, Г-11.3): рабочая редакция + опубликованные снимки.
+-- Правил прохождения нет; правило зачёта по типу — свойство типа (`11` Г-11.5), не строки.
+create table resources (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  title text not null,
+  slug text not null,
+  kind text not null default 'article',       -- article | file | video | link (scorm — R3)
+  summary text,
+  body jsonb not null default '[]',           -- блоки, `11` §3.3 (для article)
+  plain_text text not null default '',
+  media_id uuid,                              -- file | video
+  external_url text,                          -- link
+  category_ids uuid[] not null default '{}',  -- «Категорії», несколько (resource_categories)
+  tags text[] not null default '{}',
+  language text not null default 'uk',
+  estimated_minutes int,
+  cover_key text,                             -- «Обкладинка ресурсу», 16:9
+  card_image_key text,                        -- «Зображення для картки завдання», 16:9
+  allow_print boolean not null default true,  -- «Дозволити друк»; политика «Вимкнути друк у ресурсах» сильнее
+  status text not null default 'draft',       -- draft | published | archived
+  author_ids uuid[] not null default '{}',
+  version int not null default 1,             -- номер последней опубликованной версии
+  published_version_id uuid,                  -- → resource_versions.id
+  views_count int not null default 0,         -- «Переглядів: N» (`21` §14.1)
+  unique (tenant_id, slug)
+);
+
+create table resource_versions (              -- снимок на момент публикации (Г-11.3)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  resource_id uuid not null references resources(id) on delete cascade,
+  version int not null,
+  title text not null,
+  kind text not null,
+  body jsonb not null default '[]',
+  plain_text text not null default '',
+  media_id uuid,
+  external_url text,
+  changelog text,
+  published_at timestamptz not null default now(),
+  published_by uuid references users(id),
+  unique (tenant_id, resource_id, version)
+);
+
+create table resource_categories (            -- справочник категорий ресурсов, свой порядок (`30`)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  parent_id uuid references resource_categories(id) on delete set null,
+  name text not null,
+  sort_order int not null default 0
+);
+
 create table course_categories (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -253,7 +306,8 @@ create table lessons (
   body jsonb,                                  -- структурированный контент (см. 2.5)
   quiz_id uuid references quizzes(id),
   min_seconds int,                             -- минимальное время на уроке
-  is_required boolean not null default true
+  is_required boolean not null default true,
+  resource_version_id uuid references resource_versions(id) on delete set null  -- снимок ресурса, закреплённый публикацией курса (Г-11.3)
 );
 ```
 
@@ -448,6 +502,10 @@ create table lesson_progress (
   lesson_id uuid not null references lessons(id),
   status text not null default 'opened',      -- opened | completed
   seconds_spent int not null default 0,
+  video_pct int not null default 0,           -- максимум просмотра
+  scroll_pct int not null default 0,          -- докуда доскроллил (страница, документ) — `11` Г-11.5
+  acknowledged_at timestamptz,                -- «Я ознайомився» (ссылка)
+  downloaded_at timestamptz,                  -- документ скачан
   completed_at timestamptz,
   unique (tenant_id, enrollment_id, lesson_id)
 );
@@ -1020,8 +1078,8 @@ user_competencies(
 
 -- Группы доступа базы знаний и каталога (`21` §14.1, `10` §14.1)
 access_groups(id, tenant_id, name, description, applies_to text)  -- knowledge | catalog
-access_group_members(group_id, subject_type text, subject_id uuid) -- position | org_unit | user | role
-content_access_groups(content_type, content_id, group_id)
+access_group_members(id, tenant_id, group_id, subject_type text, subject_id uuid) -- position | org_unit | user | role (tenant_id — ради RLS)
+content_access_groups(id, tenant_id, content_type, content_id, group_id)          -- ресурс без групп открыт всем
 
 -- Единая лента комментариев (`10` §14.2)
 comments(

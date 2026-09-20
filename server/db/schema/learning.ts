@@ -67,7 +67,10 @@ export const lessonProgress = pgTable('lesson_progress', {
   status: text('status').notNull().default('opened'), // opened | completed
   secondsSpent: integer('seconds_spent').notNull().default(0),
   blocksState: jsonb('blocks_state').notNull().default('{}'), // чек-листы, видео
-  videoPct: integer('video_pct').notNull().default(0),
+  videoPct: integer('video_pct').notNull().default(0), // максимум просмотра
+  scrollPct: integer('scroll_pct').notNull().default(0), // докуда доскроллил (страница, документ) — Г-11.5
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }), // «Я ознайомився» для ссылки
+  downloadedAt: timestamp('downloaded_at', { withTimezone: true }), // документ скачан
   lastTickAt: timestamp('last_tick_at', { withTimezone: true }),
   firstOpenedAt: timestamp('first_opened_at', { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true }),

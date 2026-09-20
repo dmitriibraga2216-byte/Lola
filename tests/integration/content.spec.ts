@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { backdateOpen, readThrough } from './_lesson'
 
 const { createCourse, addModule, addLesson, updateLesson, publishChecks, publishCourse, getCourseEditor, slugify }
   = await import('../../server/services/courses')
@@ -87,7 +88,8 @@ describe('курс: создание → публикация → прохожд
         minSeconds: i === 3 ? 60 : null,
         videoThresholdPct: 90,
       })
-      lessonIds.push(lesson!.id)
+      if (!lesson.ok) throw new Error(lesson.code)
+      lessonIds.push(lesson.lesson.id)
     }
 
     const editor = await getCourseEditor(author(), courseId)
@@ -143,6 +145,14 @@ describe('курс: создание → публикация → прохожд
     let tree = await enrollmentTree(learner(), enrollmentId)
     expect(tree!.enrollment.status).toBe('in_progress')
 
+    // Г-11.5: страница — доскроллена + время чтения (минимум 20 с); сразу после открытия зачёта нет
+    const early = await completeLesson(learner(), enrollmentId, lessonIds[0]!)
+    expect(early.ok).toBe(false)
+    if (!early.ok) expect(early.reasons).toContain('Прочитай сторінку до кінця')
+    await backdateOpen(admin, enrollmentId, lessonIds[0]!, 30)
+    const tick = await tickLesson(learner(), enrollmentId, lessonIds[0]!, { seconds: 20, scrollPct: 100 })
+    expect(tick!.ready).toBe(true)
+
     const done = await completeLesson(learner(), enrollmentId, lessonIds[0]!)
     expect(done.ok).toBe(true)
     if (done.ok) expect(done.progressPct).toBe(33)
@@ -154,11 +164,13 @@ describe('курс: создание → публикация → прохожд
 
   it('min_seconds: завершить нельзя, пока не прошло время; тики режутся до 20с', async () => {
     await openLesson(learner(), enrollmentId, lessonIds[1]!)
+    await readThrough(admin, enrollmentId, lessonIds[1]!)
     await completeLesson(learner(), enrollmentId, lessonIds[1]!)
 
     const opened = await openLesson(learner(), enrollmentId, lessonIds[2]!)
     expect(opened.ok).toBe(true)
 
+    await tickLesson(learner(), enrollmentId, lessonIds[2]!, { seconds: 0, scrollPct: 100 })
     const early = await completeLesson(learner(), enrollmentId, lessonIds[2]!)
     expect(early.ok).toBe(false)
     if (!early.ok) {
@@ -166,7 +178,8 @@ describe('курс: создание → публикация → прохожд
       expect(early.reasons![0]).toMatch(/Ще 60 секунд/)
     }
 
-    // Тик 60 секунд режется до 20; второй тик сразу — игнорируется
+    // Тик 60 секунд режется до 20 и не больше реально прошедшего времени; второй тик сразу — игнорируется
+    await backdateOpen(admin, enrollmentId, lessonIds[2]!, 25)
     const t1 = await tickLesson(learner(), enrollmentId, lessonIds[2]!, { seconds: 60 })
     expect(t1!.secondsSpent).toBe(20)
     const t2 = await tickLesson(learner(), enrollmentId, lessonIds[2]!, { seconds: 20 })

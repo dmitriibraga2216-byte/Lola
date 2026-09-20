@@ -13,6 +13,7 @@ export default defineEventHandler(async (event) => {
     { tenantId: access.tenantId, actorId: access.userId },
     getRouterParam(event, 'id')!,
     parsed.data.changelog,
+    parsed.data.notifyAssigned,
   )
   if (!result.ok) {
     if (result.code === 'not_found') return apiError(event, 404, 'not_found', 'Курс не знайдено')

@@ -26,6 +26,7 @@ test('1. Вход по OTP за два экрана; неверный код п�
 })
 
 test('2. Прохождение урока с телефона: закрыть на втором уроке, вернуться — открывается второй', async ({ page, request }) => {
+  test.slow() // ждём минимальное время чтения страницы (Г-11.5)
   const { csrf } = await apiLogin(request, ADMIN_PHONE)
   const course = await api<{ id: string }>(request, csrf, 'post', '/courses', { title: `${PREFIX}Гарячий цех`, isCatalogVisible: true })
   const mod = await api<{ id: string }>(request, csrf, 'post', `/courses/${course.id}/modules`, { title: 'Основи' })
@@ -49,7 +50,9 @@ test('2. Прохождение урока с телефона: закрыть �
   await expect(next).toBeDisabled()
   await expect(page.getByText('Познач усі пункти')).toBeVisible()
   await page.getByRole('checkbox').check()
-  await expect(next).toBeEnabled()
+  // Г-11.5: страница засчитывается после минимального времени чтения (20 с) — решает сервер по тикам
+  await expect(page.getByText(/Ще \d+ секунд до кінця уроку/)).toBeVisible()
+  await expect(next).toBeEnabled({ timeout: 45_000 })
   await next.click()
   await expect(page.getByText('Урок 2 з 3')).toBeVisible()
 

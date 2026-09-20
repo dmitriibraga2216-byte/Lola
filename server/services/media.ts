@@ -1,45 +1,59 @@
 import { randomUUID } from 'node:crypto'
 import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { eq } from 'drizzle-orm'
-import { mediaAssets } from '../db/schema'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import type { ContentBlock } from '../../shared/schemas/content'
 
 /**
- * Медиа (docs/11 §3.4, docs/06 §6.2): presigned PUT в S3, ключ — uuid
+ * Медиа (docs/11 §3.4, Г-11.4, docs/04 §4.15): presigned PUT в S3, ключ — uuid
  * (имя файла на ключ не влияет), подписанные ссылки на чтение 10 минут.
+ * Лимиты: изображение ≤ 10 МБ, документ ≤ 50 МБ, аудио ≤ 100 МБ, видео ≤ 500 МБ,
+ * на ресурс суммарно ≤ 1 ГБ. Отказ — до начала передачи, с понятным текстом.
  */
 
-const ALLOWED: Record<string, { kind: 'image' | 'video' | 'audio' | 'file', maxMb: number }> = {
-  'image/jpeg': { kind: 'image', maxMb: 15 },
-  'image/png': { kind: 'image', maxMb: 15 },
-  'image/gif': { kind: 'image', maxMb: 15 },
-  'image/webp': { kind: 'image', maxMb: 15 },
-  'video/mp4': { kind: 'video', maxMb: 500 },
-  'video/quicktime': { kind: 'video', maxMb: 500 },
-  'video/webm': { kind: 'video', maxMb: 500 },
-  'audio/mpeg': { kind: 'audio', maxMb: 50 },
-  'audio/mp4': { kind: 'audio', maxMb: 50 },
-  'application/pdf': { kind: 'file', maxMb: 50 },
-  'text/csv': { kind: 'file', maxMb: 50 },
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { kind: 'file', maxMb: 50 },
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { kind: 'file', maxMb: 50 },
+export type MediaKind = 'image' | 'video' | 'audio' | 'file'
+
+export const MEDIA_LIMITS_MB: Record<MediaKind, number> = { image: 10, file: 50, audio: 100, video: 500 }
+export const RESOURCE_TOTAL_LIMIT_MB = 1024
+
+const KIND_LABEL: Record<MediaKind, string> = { image: 'зображення', file: 'документа', audio: 'аудіо', video: 'відео' }
+
+/** Allowlist форматов (docs/11 §3.4): jpg/jpeg/png/gif/webp/svg · mp4/mov/webm · mp3/m4a · pdf/docx/xlsx/pptx/csv/txt. */
+const ALLOWED: Record<string, { kind: MediaKind, ext: string }> = {
+  'image/jpeg': { kind: 'image', ext: 'jpg' },
+  'image/png': { kind: 'image', ext: 'png' },
+  'image/gif': { kind: 'image', ext: 'gif' },
+  'image/webp': { kind: 'image', ext: 'webp' },
+  'image/svg+xml': { kind: 'image', ext: 'svg' }, // принимается только после санитизации (media.process)
+  'video/mp4': { kind: 'video', ext: 'mp4' },
+  'video/quicktime': { kind: 'video', ext: 'mov' },
+  'video/webm': { kind: 'video', ext: 'webm' },
+  'audio/mpeg': { kind: 'audio', ext: 'mp3' },
+  'audio/mp4': { kind: 'audio', ext: 'm4a' },
+  'application/pdf': { kind: 'file', ext: 'pdf' },
+  'text/csv': { kind: 'file', ext: 'csv' },
+  'text/plain': { kind: 'file', ext: 'txt' },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { kind: 'file', ext: 'xlsx' },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { kind: 'file', ext: 'docx' },
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': { kind: 'file', ext: 'pptx' },
 }
 
-const EXT: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4',
-  'video/quicktime': 'mov',
-  'video/webm': 'webm',
-  'audio/mpeg': 'mp3',
-  'audio/mp4': 'm4a',
-  'application/pdf': 'pdf',
-  'text/csv': 'csv',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+export type LimitCheck = { ok: true, kind: MediaKind } | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big', message: string }
+
+/** Проверка лимитов без обращения к хранилищу — чистая функция, чтобы отказ был до начала передачи. */
+export function checkFileLimits(mime: string, bytes: number, resourceBytes = 0): LimitCheck {
+  const rule = ALLOWED[mime]
+  if (!rule) return { ok: false, code: 'mime_not_allowed', message: 'Формат не підтримується' }
+  const maxMb = MEDIA_LIMITS_MB[rule.kind]
+  if (bytes > maxMb * 1024 * 1024) {
+    return { ok: false, code: 'too_big', message: `Файл завеликий. Максимум для ${KIND_LABEL[rule.kind]} — ${maxMb} МБ` }
+  }
+  if (resourceBytes + bytes > RESOURCE_TOTAL_LIMIT_MB * 1024 * 1024) {
+    return { ok: false, code: 'resource_too_big', message: `Файли ресурсу разом не можуть перевищувати ${RESOURCE_TOTAL_LIMIT_MB / 1024} ГБ` }
+  }
+  return { ok: true, kind: rule.kind }
 }
 
 let s3Client: S3Client | undefined
@@ -78,28 +92,39 @@ interface Ctx { tenantId: string, actorId: string }
 
 export type UploadUrlResult
   = | { ok: true, mediaId: string, uploadUrl: string, key: string }
-    | { ok: false, code: 'mime_not_allowed' | 'too_big', message: string }
+    | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big', message: string }
+
+/** Сколько байт уже занимают файлы ресурса (основной файл + медиа в блоках) — для лимита «на ресурс ≤ 1 ГБ». */
+export async function resourceBytes(ctx: Ctx, resourceId: string): Promise<number> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [r] = await tx.select({ mediaId: resources.mediaId, body: resources.body }).from(resources).where(eq(resources.id, resourceId))
+    if (!r) return 0
+    const ids = [...new Set([...(r.mediaId ? [r.mediaId] : []), ...(r.body as ContentBlock[]).flatMap(b => ('mediaId' in b ? [b.mediaId] : []))])]
+    if (!ids.length) return 0
+    const rows = await tx.select({ bytes: mediaAssets.bytes }).from(mediaAssets).where(and(inArray(mediaAssets.id, ids), isNull(mediaAssets.deletedAt)))
+    return rows.reduce((sum, m) => sum + m.bytes, 0)
+  })
+}
 
 export async function createUploadUrl(ctx: Ctx, input: {
   filename: string
   mime: string
   bytes: number
+  resourceId?: string
 }): Promise<UploadUrlResult> {
-  const rule = ALLOWED[input.mime]
-  if (!rule) return { ok: false, code: 'mime_not_allowed', message: 'Формат не підтримується' }
-  if (input.bytes > rule.maxMb * 1024 * 1024) {
-    return { ok: false, code: 'too_big', message: `Файл більший за ${rule.maxMb} МБ` }
-  }
+  const used = input.resourceId ? await resourceBytes(ctx, input.resourceId) : 0
+  const check = checkFileLimits(input.mime, input.bytes, used)
+  if (!check.ok) return check
 
   const now = new Date()
-  const key = `t/${ctx.tenantId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${randomUUID()}.${EXT[input.mime]}`
+  const key = `t/${ctx.tenantId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${randomUUID()}.${ALLOWED[input.mime]!.ext}`
 
   const mediaId = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [row] = await tx.insert(mediaAssets).values({
       tenantId: ctx.tenantId,
       key,
       originalName: input.filename,
-      kind: rule.kind,
+      kind: check.kind,
       mime: input.mime,
       bytes: input.bytes,
       status: 'uploading',

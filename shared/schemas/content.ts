@@ -22,6 +22,9 @@ export const bodySchema = z.array(blockSchema).max(100)
 
 const slugSchema = z.string().regex(/^[a-z0-9-]{3,80}$/)
 
+/** «Визначати результат проходження курсу по» (docs/11 §14.1, docs/02 §2.4): % успішності · середній бал · підсумковий тест. */
+export const COURSE_RESULT_MODES = ['pct', 'avg_score', 'final_test'] as const
+
 export const courseCreateSchema = z.object({
   title: z.string().min(3).max(200),
   slug: slugSchema.optional(),
@@ -36,6 +39,12 @@ export const courseCreateSchema = z.object({
   competencyLevel: z.number().int().min(1).max(5).nullable().optional(),
   tags: z.array(z.string().min(1).max(50)).max(20).default([]),
   coverKey: z.string().max(300).optional(),
+  // Карточка курса по эталону (docs/11 §14.1): код, иконка, длительность в днях, оценка занятости, способ подсчёта результата
+  code: z.string().max(40).nullable().optional(),
+  iconKey: z.string().max(300).nullable().optional(),
+  durationDays: z.number().int().min(1).max(3650).nullable().optional(),
+  workload: z.string().max(200).nullable().optional(),
+  resultMode: z.enum(COURSE_RESULT_MODES).optional(), // по умолчанию pct
 })
 
 export const courseUpdateSchema = courseCreateSchema.partial()
@@ -50,15 +59,16 @@ export const lessonCreateSchema = z.object({
   itemType: z.enum(['resource', 'quiz', 'workshop']).default('resource'),
   resource: z.object({
     body: bodySchema,
-  }).optional(),
+  }).optional(), // «Створити і підключити ресурс»: новый ресурс из тела
+  resourceId: z.string().uuid().optional(), // подключить существующий опубликованный ресурс из библиотеки (CoursePlan)
   quizId: z.string().uuid().optional(),
   workshopId: z.string().uuid().optional(),
   isRequired: z.boolean().default(true),
   minSeconds: z.number().int().min(10).max(3600).nullable().optional(),
   videoThresholdPct: z.number().int().min(50).max(100).default(90),
   passScorePct: z.number().min(1).max(100).nullable().optional(), // порог теста в плане курса (docs/11 §14.1); назначение перекрывает
-}).refine(l => l.itemType === 'quiz' ? !!l.quizId : l.itemType === 'workshop' ? !!l.workshopId : !!l.resource, {
-  message: 'Для уроку-тесту вкажіть quizId, для практикуму — workshopId, для матеріалу — resource',
+}).refine(l => l.itemType === 'quiz' ? !!l.quizId : l.itemType === 'workshop' ? !!l.workshopId : !!l.resource || !!l.resourceId, {
+  message: 'Для уроку-тесту вкажіть quizId, для практикуму — workshopId, для матеріалу — resource або resourceId',
 })
 
 export const lessonUpdateSchema = z.object({
@@ -80,20 +90,25 @@ export const reorderSchema = z.object({
 
 export const publishSchema = z.object({
   changelog: z.string().min(5).max(500),
+  notifyAssigned: z.boolean().default(false), // «Сповістити про оновлення» (docs/11 §14.2, docs/04 §4.8)
 })
 
 export const uploadUrlSchema = z.object({
   filename: z.string().min(1).max(300),
   mime: z.string().min(3).max(100),
   bytes: z.number().int().min(1),
+  resourceId: z.string().uuid().optional(), // для лимита «на ресурс суммарно ≤ 1 ГБ» (Г-11.4)
 })
 
+/** Тик прохождения (docs/04 §4.5, docs/11 §7.4): клиент шлёт факты (секунды, скролл, видео), сервер решает зачёт. */
 export const tickSchema = z.object({
   seconds: z.number().int().min(0).max(60),
-  blocksState: z.record(z.unknown()).optional(),
+  scrollPct: z.number().int().min(0).max(100).optional(),
   videoPct: z.number().int().min(0).max(100).optional(),
+  blocksState: z.record(z.unknown()).optional(),
   device: z.enum(['mobile', 'desktop']).optional(),
 })
+export type TickInput = z.infer<typeof tickSchema>
 
 export const enrollSchema = z.object({
   courseId: z.string().uuid(),

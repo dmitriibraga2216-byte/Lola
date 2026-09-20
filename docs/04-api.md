@@ -98,7 +98,7 @@
 | --- | --- | --- |
 | GET | `/enrollments/:id` | состояние прохождения: дерево, прогресс, доступность элементов |
 | GET | `/enrollments/:id/items/:itemId` | тело урока или ресурса, если элемент доступен |
-| POST | `/enrollments/:id/items/:itemId/tick` | `{seconds, scrollPct, videoPct}` идемпотентно, окно 15 с |
+| POST | `/enrollments/:id/items/:itemId/tick` | `{seconds, scrollPct, videoPct, blocksState}` идемпотентно, окно 15 с; ответ `{secondsSpent, scrollPct, videoPct, ready, reasons, requiredSeconds}`. Сегодня — `/learning/enrollments/:id/lessons/:lessonId/tick`, рядом `/acknowledge` и `/download` |
 | POST | `/enrollments/:id/items/:itemId/complete` | завершение; сервер сам проверяет условия зачёта (`11` Г-11.5) |
 | POST | `/enrollments/:id/items/:itemId/acknowledge` | «Я ознайомився» для ссылок и объявлений |
 | POST | `/enrollments/:id/migrate-version` | перейти на новую версию материала (`10` Г-10.1) |
@@ -145,7 +145,15 @@
 | POST | `/content/:id/versions` | новая черновая версия |
 | POST | `/content/:id/publish` | публикация; `{notifyAssigned: bool}` — «Сповістити про оновлення» (`11` §14.2) |
 | POST | `/content/:id/duplicate` | копия |
-| CRUD | `/courses/:id/sections`, `/courses/:id/items` | план курса: разделы и элементы, у теста в плане свой `passScorePct` |
+| CRUD | `/courses/:id/sections`, `/courses/:id/items` | план курса: разделы и элементы, у теста в плане свой `passScorePct`; сегодня — `/courses/:id/modules`, `/courses/:id/lessons` (`resourceId` подключает опубликованный ресурс; без раздела — 422 `course.section_required`) |
+| GET/POST | `/resources` | библиотека ресурсов: `?status=all\|draft\|published\|archived`, `kind`, `authorId`, `tag`, `categoryId`, `q`, `page`, `perPage` (`11` §5.1) |
+| GET/PATCH/DELETE | `/resources/:id` | рабочая редакция + `versions`, `accessGroupIds`, `usedInCourses`; удаление используемого — 422 `resource.in_use` |
+| POST | `/resources/:id/publish` | `{changelog?, notifyAssigned}` → снимок версии; 422 `resource.not_publishable` с `checks` |
+| GET | `/resources/:id/versions` | снимки (Г-11.3) |
+| POST | `/resources/:id/duplicate`, `/archive`, `/restore` | копия; архив ↔ чернетка |
+| CRUD | `/resource-categories`, `POST /resource-categories/reorder` | категории ресурсов с порядком (`{ids[]}`) |
+| CRUD | `/access-groups` | группы доступа (`?appliesTo=knowledge\|catalog`), члены `{subjectType, subjectId}` |
+| GET | `/learning/resources/:id` | ресурс для ученика: текущая версия, только при доступе; иначе 404 |
 | CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3): `GET/POST /tests/:id/question-groups`, `PATCH/DELETE /question-groups/:id` |
 | POST | `/tests/:id/questions/import` | «Питання з іншого тесту» (копия) и «з банку» (ссылка) |
 | CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа) |
@@ -259,7 +267,7 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| POST | `/media/upload-url` | `{filename, mime, bytes}` → presigned PUT, `mediaId` |
+| POST | `/media/upload-url` | `{filename, mime, bytes, resourceId?}` → presigned PUT, `mediaId`; отказ 400 `media.too_big \| media.mime_not_allowed \| media.resource_too_big` до передачи |
 | POST | `/media/:id/complete` | подтверждение загрузки, запуск обработки |
 | GET | `/media/:id` | статус и подписанная ссылка на чтение (10 минут) |
 | DELETE | `/media/:id` | мягкое удаление |

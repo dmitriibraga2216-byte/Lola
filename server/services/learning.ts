@@ -1,12 +1,15 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import {
-  courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons, modules, resources,
+  courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons, mediaAssets, modules, resources,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
-import type { ContentBlock } from '../../shared/schemas/content'
+import type { ContentBlock, TickInput } from '../../shared/schemas/content'
+import type { ResourceKind } from '../../shared/schemas/resources'
+import { evaluateLesson, type Evaluation } from './lessonRules'
+import { currentVersion, printAllowed } from './resources'
 import { TASK_GROUPS, deriveTaskState, notCancelled, taskGroupWhere } from './enrollmentStatus'
 import type { TaskGroup } from './enrollmentStatus'
 
@@ -278,11 +281,9 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
       await tx.update(enrollments).set({ lastActivityAt: now }).where(eq(enrollments.id, enrollmentId))
     }
 
-    let body: ContentBlock[] = []
-    if (lesson.itemType === 'resource') {
-      const [resource] = await tx.select().from(resources).where(eq(resources.id, lesson.itemId))
-      body = (resource?.body ?? []) as ContentBlock[]
-    }
+    const material = await lessonMaterial(tx, lesson)
+    const [mod] = await tx.select({ title: modules.title, sort: modules.sort }).from(modules).where(eq(modules.id, lesson.moduleId))
+    const evaluation = material ? evaluateLesson(material.facts, progressFacts(current!)) : null
 
     return {
       ok: true as const,
@@ -294,27 +295,90 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
         minSeconds: lesson.minSeconds,
         videoThresholdPct: lesson.videoThresholdPct,
         isRequired: lesson.isRequired,
-        body,
+        body: material?.facts.body ?? [],
+        kind: material?.facts.kind ?? null,
+        mediaId: material?.mediaId ?? null,
+        externalUrl: material?.externalUrl ?? null,
+        resourceVersion: material?.version ?? null,
+        requiredSeconds: evaluation?.requiredSeconds ?? lesson.minSeconds,
+        canPrint: material ? await printAllowed(tx, ctx.tenantId, material.allowPrint) : false,
+        section: mod ? { title: mod.title, number: mod.sort + 1 } : null,
       },
       progress: {
         status: current!.status,
         secondsSpent: current!.secondsSpent,
         blocksState: current!.blocksState,
         videoPct: current!.videoPct,
+        scrollPct: current!.scrollPct,
+        acknowledged: !!current!.acknowledgedAt,
+        downloaded: !!current!.downloadedAt,
+        ready: evaluation?.ready ?? false,
+        reasons: evaluation?.reasons ?? [],
       },
     }
   })
 }
 
 /**
- * Тик времени (docs/11 §7.4): не больше 20 секунд за тик,
- * тики чаще раза в 10 секунд игнорируются.
+ * Материал урока-ресурса: закреплённый снимок (Г-11.3), иначе текущая опубликованная версия,
+ * иначе рабочая редакция (курс, опубликованный до появления версий). Возвращает факты для правила зачёта.
  */
-export async function tickLesson(ctx: Ctx, enrollmentId: string, lessonId: string, input: {
-  seconds: number
-  blocksState?: Record<string, unknown>
-  videoPct?: number
-}) {
+async function lessonMaterial(tx: TenantTx, lesson: typeof lessons.$inferSelect) {
+  if (lesson.itemType !== 'resource') return null
+  const [resource] = await tx.select().from(resources).where(eq(resources.id, lesson.itemId))
+  if (!resource) return null
+  const v = await currentVersion(tx, lesson.itemId, lesson.resourceVersionId)
+  const kind = (v?.kind ?? resource.kind) as ResourceKind
+  const mediaId = v ? v.mediaId : resource.mediaId
+  let pages: number | null = null
+  if (kind === 'file' && mediaId) {
+    const [m] = await tx.select({ pages: sql<number | null>`(${mediaAssets.variants}->>'pages')::int` }).from(mediaAssets).where(eq(mediaAssets.id, mediaId))
+    pages = m?.pages ?? null
+  }
+  return {
+    version: v?.version ?? null,
+    mediaId,
+    externalUrl: v ? v.externalUrl : resource.externalUrl,
+    allowPrint: resource.allowPrint,
+    facts: {
+      kind,
+      body: (v?.body ?? resource.body ?? []) as ContentBlock[],
+      plainText: v?.plainText ?? resource.plainText,
+      pages,
+      minSeconds: lesson.minSeconds,
+      videoThresholdPct: lesson.videoThresholdPct,
+    },
+  }
+}
+
+function progressFacts(p: typeof lessonProgress.$inferSelect) {
+  return {
+    secondsSpent: p.secondsSpent,
+    scrollPct: p.scrollPct,
+    videoPct: p.videoPct,
+    acknowledged: !!p.acknowledgedAt,
+    downloaded: !!p.downloadedAt,
+    blocksState: p.blocksState as Record<string, unknown>,
+  }
+}
+
+export const TICK_MAX_SECONDS = 20
+export const TICK_MIN_INTERVAL_MS = 10_000
+
+export interface TickResult extends Evaluation {
+  secondsSpent: number
+  videoPct: number
+  scrollPct: number
+}
+
+/**
+ * Тик (docs/11 §7.4, docs/04 §4.5): клиент присылает факты — секунды, докуда доскроллил, сколько видео
+ * просмотрено; сервер решает. Идемпотентно и защищено от накрутки: за тик засчитывается не больше
+ * 20 секунд и не больше реально прошедшего с прошлого тика времени; тики чаще раза в 10 секунд
+ * времени не добавляют; проценты только растут (максимум). Ответ — состояние и готовность к зачёту
+ * по правилу типа (Г-11.5): клиент показывает подпись, завершает `complete`.
+ */
+export async function tickLesson(ctx: Ctx, enrollmentId: string, lessonId: string, input: TickInput): Promise<TickResult | null> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [enrollment] = await tx.select().from(enrollments)
       .where(and(eq(enrollments.id, enrollmentId), eq(enrollments.userId, ctx.actorId)))
@@ -323,10 +387,16 @@ export async function tickLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
     const [progress] = await tx.select().from(lessonProgress)
       .where(and(eq(lessonProgress.enrollmentId, enrollmentId), eq(lessonProgress.lessonId, lessonId)))
     if (!progress) return null
+    const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId))
+    if (!lesson) return null
 
     const now = new Date()
-    const tooSoon = progress.lastTickAt && now.getTime() - progress.lastTickAt.getTime() < 10_000
-    const addSeconds = tooSoon ? 0 : Math.min(input.seconds, 20)
+    const since = progress.lastTickAt ?? progress.firstOpenedAt
+    const elapsedSec = Math.round((now.getTime() - since.getTime()) / 1000)
+    const tooSoon = !!progress.lastTickAt && now.getTime() - progress.lastTickAt.getTime() < TICK_MIN_INTERVAL_MS
+    const addSeconds = tooSoon || progress.status === 'completed'
+      ? 0
+      : Math.max(0, Math.min(input.seconds, TICK_MAX_SECONDS, elapsedSec))
 
     const [updated] = await tx.update(lessonProgress).set({
       secondsSpent: progress.secondsSpent + addSeconds,
@@ -334,18 +404,56 @@ export async function tickLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
       ...(input.blocksState
         ? { blocksState: { ...(progress.blocksState as Record<string, unknown>), ...input.blocksState } }
         : {}),
-      ...(input.videoPct !== undefined
-        ? { videoPct: Math.max(progress.videoPct, input.videoPct) }
-        : {}),
+      ...(input.videoPct !== undefined ? { videoPct: Math.max(progress.videoPct, input.videoPct) } : {}),
+      ...(input.scrollPct !== undefined ? { scrollPct: Math.max(progress.scrollPct, input.scrollPct) } : {}),
+      ...(input.device ? { device: input.device } : {}),
       updatedAt: now,
     }).where(eq(lessonProgress.id, progress.id)).returning()
 
-    await tx.update(enrollments).set({
-      lastActivityAt: now,
-      timeSpentSec: enrollment.timeSpentSec + addSeconds,
-    }).where(eq(enrollments.id, enrollmentId))
+    if (addSeconds > 0) {
+      await tx.update(enrollments).set({
+        lastActivityAt: now,
+        timeSpentSec: enrollment.timeSpentSec + addSeconds,
+      }).where(eq(enrollments.id, enrollmentId))
+    }
 
-    return { secondsSpent: updated!.secondsSpent, videoPct: updated!.videoPct }
+    const material = await lessonMaterial(tx, lesson)
+    const evaluation: Evaluation = material
+      ? evaluateLesson(material.facts, progressFacts(updated!))
+      : { ready: false, reasons: [], requiredSeconds: lesson.minSeconds }
+    return { secondsSpent: updated!.secondsSpent, videoPct: updated!.videoPct, scrollPct: updated!.scrollPct, ...evaluation }
+  })
+}
+
+/** «Я ознайомився» для ссылки (docs/04 §4.5 acknowledge, Г-11.5); идемпотентно. */
+export async function acknowledgeLesson(ctx: Ctx, enrollmentId: string, lessonId: string): Promise<TickResult | null> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [enrollment] = await tx.select({ id: enrollments.id }).from(enrollments)
+      .where(and(eq(enrollments.id, enrollmentId), eq(enrollments.userId, ctx.actorId)))
+    if (!enrollment) return null
+    const [progress] = await tx.update(lessonProgress).set({ acknowledgedAt: sql`coalesce(${lessonProgress.acknowledgedAt}, now())`, updatedAt: new Date() })
+      .where(and(eq(lessonProgress.enrollmentId, enrollmentId), eq(lessonProgress.lessonId, lessonId))).returning()
+    if (!progress) return null
+    const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId))
+    const material = lesson ? await lessonMaterial(tx, lesson) : null
+    const evaluation: Evaluation = material ? evaluateLesson(material.facts, progressFacts(progress)) : { ready: false, reasons: [], requiredSeconds: null }
+    return { secondsSpent: progress.secondsSpent, videoPct: progress.videoPct, scrollPct: progress.scrollPct, ...evaluation }
+  })
+}
+
+/** Документ скачан (Г-11.5: «пролистан до конца либо скачан»); отметка идемпотентна. */
+export async function markDownloaded(ctx: Ctx, enrollmentId: string, lessonId: string): Promise<TickResult | null> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [enrollment] = await tx.select({ id: enrollments.id }).from(enrollments)
+      .where(and(eq(enrollments.id, enrollmentId), eq(enrollments.userId, ctx.actorId)))
+    if (!enrollment) return null
+    const [progress] = await tx.update(lessonProgress).set({ downloadedAt: sql`coalesce(${lessonProgress.downloadedAt}, now())`, updatedAt: new Date() })
+      .where(and(eq(lessonProgress.enrollmentId, enrollmentId), eq(lessonProgress.lessonId, lessonId))).returning()
+    if (!progress) return null
+    const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId))
+    const material = lesson ? await lessonMaterial(tx, lesson) : null
+    const evaluation: Evaluation = material ? evaluateLesson(material.facts, progressFacts(progress)) : { ready: false, reasons: [], requiredSeconds: null }
+    return { secondsSpent: progress.secondsSpent, videoPct: progress.videoPct, scrollPct: progress.scrollPct, ...evaluation }
   })
 }
 
@@ -374,26 +482,10 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       if (lesson.itemType === 'workshop') {
         return { ok: false as const, code: 'conditions_not_met' as const, reasons: ['Здайте практикум'] }
       }
-      if (lesson.minSeconds && progress.secondsSpent < lesson.minSeconds) {
-        reasons.push(`Ще ${lesson.minSeconds - progress.secondsSpent} секунд`)
-      }
-
-      let body: ContentBlock[] = []
-      if (lesson.itemType === 'resource') {
-        const [resource] = await tx.select().from(resources).where(eq(resources.id, lesson.itemId))
-        body = (resource?.body ?? []) as ContentBlock[]
-      }
-      const blocksState = progress.blocksState as Record<string, unknown>
-
-      for (const block of body) {
-        if (block.type === 'video' && progress.videoPct < lesson.videoThresholdPct) {
-          reasons.push('Подивись відео до кінця')
-        }
-        if (block.type === 'checklist' && block.requireAll) {
-          const checked = (blocksState[block.id] as number[] | undefined) ?? []
-          if (checked.length < block.items.length) reasons.push('Познач усі пункти')
-        }
-      }
+      // Правило зачёта по типу материала (Г-11.5) + min_seconds, чек-листы, видео-блоки (docs/11 §7.3)
+      const material = await lessonMaterial(tx, lesson)
+      if (material) reasons.push(...evaluateLesson(material.facts, progressFacts(progress)).reasons)
+      else if (lesson.minSeconds && progress.secondsSpent < lesson.minSeconds) reasons.push(`Ще ${lesson.minSeconds - progress.secondsSpent} секунд`)
 
       if (reasons.length > 0) {
         return { ok: false as const, code: 'conditions_not_met' as const, reasons: [...new Set(reasons)] }

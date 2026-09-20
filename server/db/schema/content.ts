@@ -22,29 +22,100 @@ export const courseCategories = pgTable('course_categories', {
   index().on(t.tenantId),
 ])
 
-/** Материал — единица контента (статья из блоков; file/video/link — через media). */
+/** Справочник категорий ресурсов (docs/11 §14, docs/21 §14.1, docs/30): своё дерево с порядком, не категории каталога. */
+export const resourceCategories = pgTable('resource_categories', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  parentId: uuid('parent_id').references((): AnyPgColumn => resourceCategories.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+}, t => [
+  index().on(t.tenantId, t.sortOrder),
+])
+
+/**
+ * Материал — единица контента (docs/11 §3.1, §14): страница из блоков, файл, видео или ссылка.
+ * Строка хранит рабочую (черновую) редакцию; опубликованные снимки — resource_versions (Г-11.3).
+ * Правил прохождения здесь нет (CLAUDE.md п. 11) — только материал, доступ и обложки.
+ */
 export const resources = pgTable('resources', {
   ...baseColumns,
   tenantId: tenantId(),
   title: text('title').notNull(),
   slug: text('slug').notNull(),
-  kind: text('kind').notNull().default('article'), // article | file | video | link
+  kind: text('kind').notNull().default('article'), // article | file | video | link (CHECK; scorm — R3, Г-11.6)
   summary: text('summary'),
   body: jsonb('body').notNull().default('[]'), // блоки, docs/11 §3.3
   plainText: text('plain_text').notNull().default(''), // извлечённый текст для FTS
-  mediaId: uuid('media_id'),
-  externalUrl: text('external_url'),
-  categoryId: uuid('category_id').references(() => courseCategories.id),
+  mediaId: uuid('media_id'), // file | video
+  externalUrl: text('external_url'), // link
+  categoryId: uuid('category_id').references(() => courseCategories.id), // устарело: категория каталога; ресурс использует category_ids
+  categoryIds: uuid('category_ids').array().notNull().default(sql`'{}'::uuid[]`), // «Категорії» — множественный выбор из resource_categories (docs/11 §14)
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   language: text('language').notNull().default('uk'),
   estimatedMinutes: integer('estimated_minutes'),
-  coverKey: text('cover_key'),
+  coverKey: text('cover_key'), // «Обкладинка ресурсу», 16:9
+  cardImageKey: text('card_image_key'), // «Зображення для картки завдання», 16:9
+  allowPrint: boolean('allow_print').notNull().default(true), // «Дозволити друк»; политика «Вимкнути друк у ресурсах» сильнее
   status: text('status').notNull().default('draft'), // draft | published | archived
   authorIds: uuid('author_ids').array().notNull().default(sql`'{}'::uuid[]`),
-  version: integer('version').notNull().default(1),
+  version: integer('version').notNull().default(1), // номер текущей (последней опубликованной) версии; черновик — version + 1
+  publishedVersionId: uuid('published_version_id'), // → resource_versions.id
+  viewsCount: integer('views_count').notNull().default(0), // «Переглядів: N» (docs/21 §14.1)
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, t => [
   unique().on(t.tenantId, t.slug),
+  index().on(t.tenantId, t.status),
+])
+
+/** Опубликованный снимок ресурса (Г-11.3): ученик доучивается на той версии, что начал; курс и назначение ссылаются на версию. */
+export const resourceVersions = pgTable('resource_versions', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  resourceId: uuid('resource_id').notNull().references(() => resources.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  title: text('title').notNull(),
+  kind: text('kind').notNull(),
+  body: jsonb('body').notNull().default('[]'),
+  plainText: text('plain_text').notNull().default(''),
+  mediaId: uuid('media_id'),
+  externalUrl: text('external_url'),
+  changelog: text('changelog'),
+  publishedAt: timestamp('published_at', { withTimezone: true }).notNull().defaultNow(),
+  publishedBy: uuid('published_by').references(() => users.id),
+}, t => [
+  unique().on(t.tenantId, t.resourceId, t.version),
+])
+
+/** Группы доступа базы знаний и каталога (docs/02, docs/21 §14.1): ресурс без групп открыт всем. */
+export const accessGroups = pgTable('access_groups', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  description: text('description'),
+  appliesTo: text('applies_to').notNull().default('knowledge'), // knowledge | catalog
+}, t => [
+  unique().on(t.tenantId, t.name, t.appliesTo),
+])
+
+export const accessGroupMembers = pgTable('access_group_members', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  groupId: uuid('group_id').notNull().references(() => accessGroups.id, { onDelete: 'cascade' }),
+  subjectType: text('subject_type').notNull(), // position | org_unit | user | role (CHECK)
+  subjectId: uuid('subject_id').notNull(),
+}, t => [
+  unique().on(t.tenantId, t.groupId, t.subjectType, t.subjectId),
+])
+
+export const contentAccessGroups = pgTable('content_access_groups', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  contentType: text('content_type').notNull(), // content_type из docs/02
+  contentId: uuid('content_id').notNull(),
+  groupId: uuid('group_id').notNull().references(() => accessGroups.id, { onDelete: 'cascade' }),
+}, t => [
+  unique().on(t.tenantId, t.contentType, t.contentId, t.groupId),
 ])
 
 export const courses = pgTable('courses', {
@@ -63,6 +134,12 @@ export const courses = pgTable('courses', {
   isCatalogVisible: boolean('is_catalog_visible').notNull().default(false),
   validityMonths: integer('validity_months'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+  // Карточка курса по эталону (docs/11 §14.1, docs/02 §2.4)
+  code: text('code'), // «Код»
+  iconKey: text('icon_key'), // «Іконка»
+  durationDays: integer('duration_days'), // «Тривалість навчання», днів
+  workload: text('workload'), // «Оцінка зайнятості»
+  resultMode: text('result_mode').notNull().default('pct'), // pct | avg_score | final_test (CHECK); порог всё равно перекрывает назначение
   // docs/19 §7.3: курс закрывает разрыв — оценка уровня ставится при завершении, если есть сданный итоговый тест
   competencyId: uuid('competency_id'),
   competencyLevel: integer('competency_level'),
@@ -108,6 +185,7 @@ export const lessons = pgTable('lessons', {
   videoThresholdPct: integer('video_threshold_pct').notNull().default(90),
   availableFrom: timestamp('available_from', { withTimezone: true }),
   passScorePct: numeric('pass_score_pct', { precision: 5, scale: 2 }), // «Поріг проходження, %» у теста в плане курса (docs/11 §14.1); назначение перекрывает
+  resourceVersionId: uuid('resource_version_id').references(() => resourceVersions.id, { onDelete: 'set null' }), // снимок ресурса, закреплённый публикацией курса (Г-11.3)
 }, t => [
   index().on(t.tenantId, t.moduleId, t.sort),
 ])

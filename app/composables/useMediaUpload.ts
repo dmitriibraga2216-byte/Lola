@@ -1,8 +1,9 @@
 /** Загрузка файла через presigned PUT (docs/06 §6.1): upload-url → PUT → complete. Возвращает mediaId. */
 export function useMediaUpload() {
   const { api } = useApi()
-  async function upload(file: Blob, filename: string): Promise<string> {
-    const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename, mime: file.type, bytes: file.size } })
+  async function upload(file: Blob, filename: string, resourceId?: string): Promise<string> {
+    // resourceId — для лимита «на ресурс разом ≤ 1 ГБ» (docs/11 Г-11.4); отказ приходит до начала передачи
+    const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename, mime: file.type, bytes: file.size, ...(resourceId ? { resourceId } : {}) } })
     const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     if (!put.ok) throw new Error('upload failed')
     await api(`/media/${mediaId}/complete`, { method: 'POST' })

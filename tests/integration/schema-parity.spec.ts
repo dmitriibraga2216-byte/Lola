@@ -22,7 +22,7 @@ const admin = postgres(adminUrl, { max: 2, onnotice: () => {} })
 
 /** Таблицы контента (docs/08 §12.8): карточка содержит только материал. */
 const CONTENT_TABLES = [
-  'courses', 'course_versions', 'modules', 'lessons', 'resources', 'quizzes', 'questions', 'question_banks',
+  'courses', 'course_versions', 'modules', 'lessons', 'resources', 'resource_versions', 'quizzes', 'questions', 'question_banks',
   'complex_tests', 'workshops', 'meetups', 'webinars', 'programs', 'program_nodes', 'knowledge_articles', 'news', 'surveys',
 ]
 /**

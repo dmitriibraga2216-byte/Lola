@@ -22,8 +22,36 @@ create table tenants (
   trial_ends_at timestamptz,
   branding jsonb not null default '{}',      -- logo_key, accent, space_name
   settings jsonb not null default '{}',      -- флаги модулей, пороги, политика паролей
+  archived_at timestamptz,                   -- `25` §8: мягкое удаление, tenant.purge через 30 дней; Spec 25
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+-- status: CHECK на active | suspended | archived (Spec 25). suspended — вход закрыт (403 tenant_suspended),
+-- задачи стоят, данные целы; archived — команда оператора на удаление, исполняется задачей tenant.purge.
+
+-- Переопределение лимитов тенанту (`24` §4.4, `25` §10); null — лимит тарифа plans. С RLS. Spec 25
+create table tenant_limits (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null unique,
+  users int, storage_gb int, sms_per_month int, api_per_minute int, webhooks int,
+  active_jobs int,                           -- квота задач тенанта на круг воркера (`25` §5), по умолчанию 100
+  updated_by uuid references platform_admins(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Журнал действий оператора платформы (`25` §3.1, §7 п. 5): платформенная, без tenant_id и RLS. Spec 25
+create table platform_audit (
+  id bigserial primary key,
+  admin_id uuid references platform_admins(id) on delete set null,
+  admin_email text not null,                 -- 'worker' — запись фоновой задачи (tenant.purged)
+  action text not null,                      -- tenant.create | tenant.update | tenant.suspend | tenant.resume |
+                                             -- tenant.purge_schedule | tenant.purge_cancel | tenant.purged | tenant.limits | platform.request
+  subject_tenant_id uuid references tenants(id) on delete set null, -- после purge null, slug остаётся в after/before
+  entity text not null, entity_id text,
+  before jsonb, after jsonb,
+  request_context jsonb,                     -- как у остальных журналов
+  created_at timestamptz not null default now()
 );
 ```
 

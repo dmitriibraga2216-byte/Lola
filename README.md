@@ -15,6 +15,10 @@ pnpm dev           # http://localhost:3000
 Вход в dev: телефон `+380661864742` (админ); для OAuth задайте `GOOGLE_CLIENT_ID/SECRET`, `ZOOM_CLIENT_ID/SECRET` и `APP_URL` в `.env` — код OTP печатается в лог сервера (`[otp:sms] … → код 123456`).
 Другие сид-люди: `+380670000002` (наставник), `+380670000003` (сотрудник).
 Панель оператора — `/ops`, e-mail и пароль из `.env` (`PLATFORM_ADMIN_*`).
+Тенант по `Host` (docs/25 §16.1): задайте `TENANT_HOST_BASE=<базовый домен>` — тогда `<slug>.<домен>` ведёт в свой тенант,
+неизвестный поддомен отвечает 404, а хосты из `TENANT_HOST_DEFAULT` (через запятую) и всё вне домена — в `NUXT_PUBLIC_DEFAULT_TENANT`.
+Без `TENANT_HOST_BASE` тенант берётся только из сессии (dev, CI). На стенде: `TENANT_HOST_BASE=lmscappi.pp.ua` и
+`TENANT_HOST_DEFAULT=lms.lmscappi.pp.ua`.
 
 ```bash
 pnpm test          # unit + integration (127) — нужны поднятые контейнеры

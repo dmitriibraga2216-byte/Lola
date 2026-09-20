@@ -401,8 +401,104 @@
   за мокапом (ролі, «ВІДПОВІДАЛЬНИЙ», фільтри) — лишили карткову чергу «на розгляд»
   (`admin/development/requests.vue`), повний список усіх заявок таблицею — борг.
 
+### Spec 25 — задачи по тенантам с round-robin и лимитом, `suspended`/`purge`, `platform_audit`, резолв по `Host`, `tenancy.spec.ts` 1–10 (`25` §5, §7–8, §10, §14, §16.1; `24` §4.4, §7 п. 5; `32` §Б строка 17)
+
+- **Схема (0041).** `tenants.status` получил CHECK на `active | suspended | archived` (перечисление из `02` §2.1),
+  `tenants.archived_at` (`25` §8: мягкое удаление), индекс по `status`. `tenant_limits` (`24` §4.4) —
+  переопределение лимитов тенанту: `users`, `storage_gb`, `sms_per_month`, `api_per_minute`, `webhooks` (состав
+  таблицы `25` §10) и `active_jobs`; всё nullable — null значит «лимит тарифа `plans`»; с RLS как любая
+  таблица с `tenant_id`. `platform_audit` (`25` §3.1, §7 п. 5) — платформенная, без `tenant_id` и без RLS:
+  `admin_id`/`admin_email`, `action`, `subject_tenant_id` (FK `set null` — запись переживает purge, slug остаётся
+  в `after`), `entity`, `before/after`, `request_context`. `auth_users_by_phone` пересоздана: отдаёт
+  `tenant_status`, фильтр по статусу тенанта переехал в `authLookup.usersByPhone` — иначе приостановленный
+  тенант отвечал бы на вход «Код невірний» вместо понятного отказа.
+- **`active_jobs` — квота тенанта на круг воркера** (`25` §5 «партиями по тенантам по кругу», §10 «справедливость
+  ресурсов»). В ТЗ нет числа для «лимита активных задач» — принято: по умолчанию `DEFAULT_ACTIVE_JOBS = 100`
+  (совпадает с прежним `dispatchNotifications(limit = 100)`), переопределяется в `tenant_limits.active_jobs`.
+  Тот же лимит держит одновременные задачи тенанта в процессе (`withTenantSlot`: сверх лимита задача ждёт слот,
+  а не падает — иначе pg-boss тратил бы `retryLimit` на «занято»).
+- **Очередь (`services/tenantQueue.ts`).** `enqueueForTenant(queue, tenantId, data, opts)` — единственный способ
+  поставить задачу по тенанту (`tenantId` всегда в payload). `runPerTenant(queue, fn, source?)` — один круг
+  планировщика: список тенантов сортируется по id, поворачивается так, чтобы первым шёл тенант после обслуженного
+  в прошлый раз (курсор на очередь в памяти процесса), каждому даётся квота `active_jobs`, исключение одного
+  тенанта пишется в `errors` и круг продолжается (`25` §14 п. 7), не-`active` пропускается (п. 10).
+  `workByTenant(boss, queue, handler)` — регистрация обработчика задач с сущностью: проверка статуса тенанта,
+  слот лимита, затем handler (он обязан открыть `withTenant(data.tenantId, …)`). Воркер переведён целиком:
+  сканы по расписанию (`attempt.expire`, `notification.dispatch`, `assignment.sync`, `meetup.scan`,
+  `workshop.sla_scan`, `webhook.deliver`) — через `runPerTenant`; задачи с сущностью (`media.process`,
+  `report.export`, `certificate.render_pdf`, `trajectory.timer`, `assignment.expand`) — через `workByTenant`.
+  `due.scan` стал планировщиком: ставит `due.scan.tenant` на каждый работающий тенант (singletonKey
+  `due.scan:<tenant>:<день>`), обработчик — `jobs/dueScanTenant.ts` (`25` §5 «`due.scan` → N задач
+  `due.scan:tenant`»; в pg-boss имя очереди не может содержать «:», поэтому точка).
+- **Задачи приостановленного тенанта пропускаются, а не откладываются.** Сканы по расписанию перезапустятся сами;
+  задача с сущностью, поставленная до приостановки (например, `media.process`), завершится с
+  `{skipped: 'tenant_inactive'}` и после resume не повторится. Принято осознанно: в suspended никто не входит,
+  новых таких задач не появляется, а «отложить на час» с тем же `singletonKey` в pg-boss невозможно, пока текущая
+  задача активна. Долг: при resume ставить `media.process` заново для медиа в `status = 'processing'`.
+- **Статусы (`services/platformTenants.ts`, только под `PLATFORM_DATABASE_URL`).** `suspendTenant` — только из
+  `active`; сессии не отзываются: каждый запрос сессии и API-токена отвечает **403 `tenant_suspended`**
+  («Простір призупинено оператором платформи. Зверніться до підтримки Lola»), `logout` разрешён; `createSession`
+  бросает то же 403 для любого пути входа (код, пароль, Google, приглашение, «от имени»); `otp/request` для номера,
+  который есть только в приостановленных тенантах, отвечает 403 и код не шлёт. ТЗ код ответа не называет —
+  выбран 403 с кодом `tenant_suspended`, потому что 404 прятал бы причину от собственного администратора тенанта.
+  `resumeTenant` — из `suspended`. `schedulePurge(id, confirmSlug)` — только из `suspended` (`25` §8 «только после
+  приостановки и явной команды оператора»), оператор подтверждает **slug** (`24` §7 п. 5 «двухшаговое»); ставит
+  `status = archived`, `archived_at = now()` и задачу `tenant.purge` с `startAfter = archived_at + 30 дней`
+  (`TENANT_PURGE_DELAY_DAYS`, по умолчанию 30). `cancelPurge` — до срока: `archived → suspended`, `archived_at = null`,
+  задача снимается (`boss.cancel` по `jobId` из записи `tenant.purge_schedule`); обработчик `runTenantPurge`
+  сам проверяет «всё ещё archived и срок вышел», поэтому отменённое удаление не сработает даже если задача осталась.
+  `purgeTenantData` — партиями по 5000 строк (`25` §8 «партиями по таблицам»), таблицы с `tenant_id` в порядке
+  зависимостей (таблица, которую держит внешний ключ, откладывается на следующий проход; цикл — ошибка),
+  затем строка `tenants`, затем S3-префикс `t/<tenant_id>/`; отчёт (таблицы → строки, проходы, S3, длительность) —
+  в `platform_audit` `tenant.purged` (`subject_tenant_id` уже null, slug/название — в `before`).
+- **`platform_audit`.** Каждое действие панели (`tenant.create`, `tenant.update`, `tenant.suspend`, `tenant.resume`,
+  `tenant.purge_schedule`, `tenant.purge_cancel`, `tenant.limits`, `tenant.purged`) — своей записью с `before/after`
+  и `request_context`; плюс каждый запрос панели, кроме `login/me/logout`, — записью `platform.request`
+  (`25` §7 п. 5 «каждый запрос панели пишется»), тенант — из пути `/tenants/:id`. `GET /platform/audit?tenantId=&limit=`.
+- **Лимит людей (`25` §10 п. 1).** `checkPlanLimit` считает `users.status = 'active' and not is_blocked`
+  (было `invited + active`) и берёт лимит из `effectiveLimits` (`tenant_limits.users` → `plans.max_users`).
+  Проверка по-прежнему при создании человека (`POST /people`); мягкое предупреждение при активации и `limit_warning`
+  80% (`24` §8) — долг.
+- **Резолв по `Host` (`25` §16.1, `27` §27.3).** Middleware `01.host` (до сессии): `TENANT_HOST_BASE` — базовый
+  домен, `<slug>.<base>` → тенант в `event.context.hostTenant`; неизвестный поддомен — **404** и для API, и для
+  страниц (по `25` §16.1: не страница входа, чтобы перебором не узнать список клиентов). Хосты вне базы (localhost,
+  IP, docker-имя, сам базовый домен) и хосты из `TENANT_HOST_DEFAULT` (список через запятую) → тенант
+  `NUXT_PUBLIC_DEFAULT_TENANT`. Без `TENANT_HOST_BASE` резолв выключен — тенант только из сессии (dev, CI, e2e).
+  Решение для стенда: `lms.lmscappi.pp.ua` — не slug тенанта, поэтому `TENANT_HOST_BASE=lmscappi.pp.ua` +
+  `TENANT_HOST_DEFAULT=lms.lmscappi.pp.ua` (дефолт `kappi`), а `kappi.lmscappi.pp.ua` заработает как только появится
+  wildcard-запись DNS/сертификат (`27`). Сессия и Host обязаны совпадать: cookie другого тенанта на этом хосте
+  не действует (как без сессии → 401), Bearer чужого тенанта — 401; на хосте тенанта вход по номеру/паролю сужается
+  до этого тенанта (выбор пространства не предлагается, чужой номер — 401 без раскрытия). Вне резолва:
+  `/api/v1/platform`, `/ops`, `/health`, `/ready`, `/metrics`, статика, `/tg/*` и `/api/v1/telegram/*` (вебхук
+  приходит на хост платформы), `/c/*` (публичная проверка сертификата). `GET /public/guest-page` берёт тенант из
+  `hostTenant`, затем по старому `slugFromHost`, затем `?slug=`. Google-вход по-прежнему получает slug от клиента
+  (`?tenant=`/дефолт) — на хосте тенанта чужая сессия всё равно не примется.
+- **Панель оператора (`/ops`, мокап PlatformTenants).** Колонки по мокапу: тенант (название + `<slug>.<base>`),
+  тариф (бейдж, меняется на месте), активные / лимит (звёздочка — есть переопределение; клик — редактор лимитов),
+  диск (/ лимит), создано, стан (бирюза `Активний`, солнце `Тріал`, коралл `Призупинено` / `Чекає видалення` с датой
+  удаления). Действия с подтверждением: призупинити (причина), відновити, видалити (ввод slug, кнопка коралловая),
+  скасувати видалення, ліміти (шесть полей, пустое — из тарифа), увійти від імені (только у активного).
+  Страница переведена с тёмной темы на беж по мокапу; 320px — таблица складывается в карточки; клавиатура —
+  `button type="button"`, `role="dialog"`, Esc закрывает. `PATCH /platform/tenants/:id` больше не принимает
+  `status` — только suspend/resume/purge.
+- **Тесты.** `tests/integration/tenancy.spec.ts` — десять проверок `25` §14 с той же нумерацией и формулировками
+  (п. 4 и 6 — и сервисом, и по HTTP), round-robin и лимит слотов (прямой вызов планировщика), `tenant_limits`
+  (переопределение, RLS), suspended → 403 на входе/API и пропуск в воркере, purge (рано — не удаляет, отмена,
+  по сроку — все таблицы пусты, `tenants` без строки, отчёт в `platform_audit`), Host (чистая `decideHost`,
+  `resolveTenantByHost`, HTTP с заголовком `Host` через `node:http` — `fetch` этот заголовок не пропускает),
+  `platform_audit` с `request_context`. Тестовые тенанты создаются `createTenant` и убираются тем же
+  `purgeTenantData` — он и есть полный список таблиц.
+- **Открытые вопросы / долги:** (1) `tenant_usage`/`usage.collect` уже есть, но `limit_warning`/`limit_exceeded`
+  (`24` §8) и жёсткая блокировка загрузки/SMS по `tenant_limits` (`25` §10) не подключены — лимиты пока
+  только считаются и показываются; (2) `api_per_minute` и `webhooks` из `tenant_limits` не читаются лимитерами
+  (`validateBearer` держит константу 60/мин, вебхуки не ограничены); (3) повтор `media.process` после resume;
+  (4) собственный домен клиента (R2/R3) и Google-вход по `Host` вместо `?tenant=`; (5) `platform.request` пишется
+  на каждый GET панели — при росте числа операторов стоит ограничить действиями и чтением карточки тенанта;
+  (6) `scripts/extract-tenant.ts` (`25` §11) и обезличенный слепок (`25` §16.3) — не делались.
+
 ## 28.3 Переменные окружения, добавленные после docs/26
 
 `APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`,
-`NUXT_PUBLIC_DEFAULT_TENANT`, `NUXT_PUBLIC_SUPPORT_CONTACT`, `METRICS_TOKEN`, `SENTRY_DSN`, `VIDEO_TRANSCODE`, `COOKIE_SECURE`, `GEOIP_DB_PATH`.
+`NUXT_PUBLIC_DEFAULT_TENANT`, `NUXT_PUBLIC_SUPPORT_CONTACT`, `METRICS_TOKEN`, `SENTRY_DSN`, `VIDEO_TRANSCODE`, `COOKIE_SECURE`, `GEOIP_DB_PATH`,
+`TENANT_HOST_BASE`, `TENANT_HOST_DEFAULT`, `TENANT_PURGE_DELAY_DAYS` (Spec 25).
 Полный список — `.env.example` и `.env.production.example`.

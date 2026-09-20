@@ -5,6 +5,7 @@ import { sessions, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { sessionByTokenHash } from './authLookup'
 import { defaultRoleOf, effectiveRoles } from './activeRole'
+import { TenantClosedError, tenantById } from './tenantResolve'
 
 /**
  * Сессии (docs/01-roles.md §1.5): токен — 32 байта, в БД только sha256-хеш,
@@ -25,6 +26,9 @@ export async function createSession(input: {
   ip?: string | null
   impersonatedBy?: string | null
 }): Promise<{ token: string, sessionId: string, expiresAt: Date }> {
+  // docs/25 §8, §14 п. 10: в приостановленный или удаляемый тенант не входит никто — ни по коду, ни по паролю, ни «от имени»
+  const tenant = await tenantById(input.tenantId)
+  if (tenant && tenant.status !== 'active') throw new TenantClosedError()
   const token = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
 

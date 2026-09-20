@@ -42,3 +42,16 @@ export function clientIp(event: H3Event): string {
     || event.node.req.socket.remoteAddress
     || '0.0.0.0'
 }
+
+/**
+ * Тенант из Host (middleware `01.host`, docs/25 §16.1): на хосте `<slug>.<base>` вход возможен только в этот тенант —
+ * список пространств человека сужается до него, выбор пространства не предлагается.
+ */
+export function hostTenantIdOf(event: H3Event): string | null {
+  return (event.context.hostTenant as { id: string } | undefined)?.id ?? null
+}
+
+export function onHostTenant<T extends { tenant_id: string }>(event: H3Event, users: T[]): T[] {
+  const id = hostTenantIdOf(event)
+  return id ? users.filter(u => u.tenant_id === id) : users
+}

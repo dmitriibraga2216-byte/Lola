@@ -18,6 +18,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('attempt.expire', { retryLimit: 3, expireInSeconds: 300 })
       await b.createQueue('notification.dispatch', { retryLimit: 3, expireInSeconds: 300 })
       await b.createQueue('due.scan', { retryLimit: 3, expireInSeconds: 900 })
+      await b.createQueue('due.scan.tenant', { retryLimit: 3, expireInSeconds: 900 }) // docs/25 §5: due.scan → задача на тенант (в pg-boss имя без «:»)
+      await b.createQueue('tenant.purge', { retryLimit: 3, retryBackoff: true, expireInSeconds: 3600 }) // docs/25 §8: удаление через 30 дней
       await b.createQueue('assignment.sync', { retryLimit: 3, expireInSeconds: 900 })
       await b.createQueue('assignment.expand', { retryLimit: 5, retryBackoff: true, expireInSeconds: 900 })
       await b.createQueue('workshop.sla_scan', { retryLimit: 3, expireInSeconds: 600 })

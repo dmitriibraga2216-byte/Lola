@@ -4,7 +4,7 @@ import { usersByEmail } from '../../../../services/password'
 import { createSession, verifySelectToken } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
 import { apiData, apiError } from '../../../../utils/apiResponse'
-import { clientIp, setSessionCookies } from '../../../../utils/authCookies'
+import { clientIp, onHostTenant, setSessionCookies } from '../../../../utils/authCookies'
 
 export default defineEventHandler(async (event) => {
   const parsed = tenantSelectSchema.safeParse(await readBody(event))
@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
   // Токен выбора выдаётся и после кода (телефон), и после пароля (`email:<адрес>`, docs/04 §4.2)
   const byEmail = claim.phone.startsWith('email:')
   const users = byEmail ? (await usersByEmail(claim.phone.slice(6))).filter(u => u.password_login_enabled && !u.is_blocked) : await usersByPhone(claim.phone)
-  const user = users.find(u => u.tenant_id === parsed.data.tenantId)
+  const user = onHostTenant(event, users as { tenant_id: string, user_id: string }[]).find(u => u.tenant_id === parsed.data.tenantId)
   if (!user) {
     return apiError(event, 404, 'not_found', 'Простір не знайдено')
   }

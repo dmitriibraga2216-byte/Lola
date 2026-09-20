@@ -1,11 +1,25 @@
 <script setup lang="ts">
-/** Панель оператора платформы (docs/03 §3.12). Отдельный вход, отдельная сессия. */
+/**
+ * Панель оператора платформы — экран PlatformTenants (docs/24 §4.1, docs/25 §7–8, мокап PlatformTenants.html).
+ * Отдельный вход, отдельная сессия, отдельный префикс API. Показывает агрегаты, не содержимое (docs/25 §7 п. 4).
+ */
 definePageMeta({ layout: false })
 const { t } = useI18n()
 
-interface Me { adminId: string, email: string, fullName: string }
-interface Tenant { id: string, slug: string, name: string, status: string, plan: string, trial_ends_at: string | null, active_users: number, total_users: number, wau: number, media_bytes: string, completed_30d: number }
+interface Me { adminId: string, email: string, fullName: string, hostBase: string | null }
+interface Tenant {
+  id: string, slug: string, name: string, status: 'active' | 'suspended' | 'archived', plan: string, trial_ends_at: string | null, created_at: string, archived_at: string | null
+  users_limit: number | null, storage_gb_limit: number | null, sms_limit: number | null, active_jobs_limit: number | null, has_overrides: boolean
+  active_users: number, total_users: number, wau: number, media_bytes: string, completed_30d: number
+}
 interface Plan { code: string, name: string, maxUsers: number | null, priceUah: number | null }
+interface Limits {
+  plan: { code: string, users: number | null, storageGb: number | null, smsPerMonth: number | null }
+  overrides: { users: number | null, storageGb: number | null, smsPerMonth: number | null, apiPerMinute: number | null, webhooks: number | null, activeJobs: number | null }
+}
+type LimitKey = keyof Limits['overrides']
+const LIMIT_KEYS: LimitKey[] = ['users', 'storageGb', 'smsPerMonth', 'apiPerMinute', 'webhooks', 'activeJobs']
+const PURGE_DAYS = 30
 
 const me = ref<Me | null>(null)
 const login = reactive({ email: '', password: '' })
@@ -14,10 +28,18 @@ const plans = ref<Plan[]>([])
 const metrics = ref<Record<string, unknown> | null>(null)
 const error = ref('')
 const notice = ref('')
+const busy = ref(false)
+const showCreate = ref(false)
 const newTenant = reactive({ slug: '', name: '', adminName: '', adminPhone: '', plan: 'trial' })
 const impFor = ref<Tenant | null>(null)
 const impUsers = ref<{ id: string, fullName: string, phone: string | null, status: string }[]>([])
 const impForm = reactive({ userId: '', reason: '' })
+/** Диалог действия над тенантом: suspend — с причиной, purge — с подтверждением slug, resume/cancelPurge — просто подтвердить. */
+const action = ref<{ kind: 'suspend' | 'resume' | 'purge' | 'cancelPurge', tenant: Tenant } | null>(null)
+const actionForm = reactive({ reason: '', confirmSlug: '' })
+const limitsFor = ref<Tenant | null>(null)
+const limits = ref<Limits | null>(null)
+const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: '', smsPerMonth: '', apiPerMinute: '', webhooks: '', activeJobs: '' })
 
 // Нетипизированный вызов: типизированные роуты Nitro при сотнях эндпоинтов дают TS2589
 const rawFetch = $fetch as unknown as <T>(url: string, opts?: unknown) => Promise<T>
@@ -48,14 +70,60 @@ async function createTenant() {
     await ops('/tenants', { method: 'POST', body: { ...newTenant, adminPhone: `+380${newTenant.adminPhone.replace(/\D/g, '')}` } })
     notice.value = t('ops.created', { slug: newTenant.slug })
     Object.assign(newTenant, { slug: '', name: '', adminName: '', adminPhone: '' })
+    showCreate.value = false
     await load()
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-async function setTenant(tn: Tenant, patch: Record<string, unknown>) {
-  await ops(`/tenants/${tn.id}`, { method: 'PATCH', body: patch })
-  await load()
+async function setPlan(tn: Tenant, plan: string) {
+  error.value = ''
+  try { await ops(`/tenants/${tn.id}`, { method: 'PATCH', body: { plan } }); await load() }
+  catch (err) { error.value = apiErrorOf(err).message }
 }
+
+function openAction(kind: NonNullable<typeof action.value>['kind'], tenant: Tenant) {
+  actionForm.reason = ''
+  actionForm.confirmSlug = ''
+  action.value = { kind, tenant }
+}
+const actionReady = computed(() => !action.value || action.value.kind !== 'purge' || actionForm.confirmSlug.trim() === action.value.tenant.slug)
+async function runAction() {
+  if (!action.value || !actionReady.value || busy.value) return
+  const { kind, tenant } = action.value
+  error.value = ''
+  busy.value = true
+  try {
+    if (kind === 'suspend') await ops(`/tenants/${tenant.id}/suspend`, { method: 'POST', body: { reason: actionForm.reason || undefined } })
+    if (kind === 'resume') await ops(`/tenants/${tenant.id}/resume`, { method: 'POST' })
+    if (kind === 'purge') await ops(`/tenants/${tenant.id}/purge`, { method: 'POST', body: { confirmSlug: actionForm.confirmSlug.trim() } })
+    if (kind === 'cancelPurge') await ops(`/tenants/${tenant.id}/purge`, { method: 'DELETE' })
+    notice.value = t(`ops.done.${kind}`, { name: tenant.name })
+    action.value = null
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+
+async function openLimits(tn: Tenant) {
+  error.value = ''
+  limitsFor.value = tn
+  limits.value = await ops<Limits>(`/tenants/${tn.id}/limits`)
+  for (const k of LIMIT_KEYS) limitsForm[k] = limits.value.overrides[k] == null ? '' : String(limits.value.overrides[k])
+}
+async function saveLimits() {
+  if (!limitsFor.value) return
+  error.value = ''
+  const body = Object.fromEntries(LIMIT_KEYS.map(k => [k, limitsForm[k].trim() === '' ? null : Number(limitsForm[k])]))
+  try {
+    await ops(`/tenants/${limitsFor.value.id}/limits`, { method: 'PUT', body })
+    notice.value = t('ops.done.limits', { name: limitsFor.value.name })
+    limitsFor.value = null
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+
 async function openImpersonate(tn: Tenant) {
   impFor.value = tn
   impUsers.value = await ops(`/tenants/${tn.id}/users`)
@@ -72,112 +140,198 @@ async function impersonate() {
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const gb = (b: string) => (Number(b) / 1024 / 1024 / 1024).toFixed(2)
+
+const hostOf = (tn: Tenant) => me.value?.hostBase ? `${tn.slug}.${me.value.hostBase}` : tn.slug
+const gb = (b: string | number) => (Number(b) / 1024 / 1024 / 1024).toFixed(1)
 const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '—'
+const purgeAt = (tn: Tenant) => tn.archived_at ? fmt(new Date(new Date(tn.archived_at).getTime() + PURGE_DAYS * 86_400_000).toISOString()) : '—'
+const planName = (code: string) => plans.value.find(p => p.code === code)?.name ?? code
+/** Тріал показывается как состояние, если тариф trial и тенант активен (мокап: «Тріал») */
+const stateOf = (tn: Tenant) => tn.status === 'active' && tn.plan === 'trial' ? 'trial' : tn.status
+const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau', 'attempts_today', 'notifications_queued', 'notifications_failed_24h', 'webhooks_failed_24h']
 </script>
 
 <template>
   <div class="ops">
     <header class="top">
-      <b class="brand">Lola · {{ t('ops.title') }}</b>
-      <span v-if="me" class="who">{{ me.email }} <button class="chip" @click="logout">{{ t('home.logout') }}</button></span>
+      <div class="brand"><span class="dots"><i class="sun" /><i class="teal" /><i class="coral" /><i class="ink" /></span><b>Lola · {{ t('ops.title') }}</b></div>
+      <span v-if="me" class="who">{{ me.email }} <button type="button" class="chip" @click="logout">{{ t('home.logout') }}</button></span>
     </header>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="notice" class="notice">{{ notice }}</p>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }} <button type="button" class="link" @click="notice = ''">×</button></p>
 
     <main v-if="!me" class="login">
-      <input v-model="login.email" type="email" placeholder="e-mail" @keyup.enter="doLogin">
-      <input v-model="login.password" type="password" :placeholder="t('ops.password')" @keyup.enter="doLogin">
-      <button class="primary" @click="doLogin">{{ t('login.signIn') }}</button>
+      <label class="field"><span>E-mail</span><input v-model="login.email" type="email" autocomplete="username" @keyup.enter="doLogin"></label>
+      <label class="field"><span>{{ t('ops.password') }}</span><input v-model="login.password" type="password" autocomplete="current-password" @keyup.enter="doLogin"></label>
+      <button type="button" class="primary" @click="doLogin">{{ t('login.signIn') }}</button>
     </main>
 
     <main v-else class="body">
+      <div class="head">
+        <div><div class="eyebrow">{{ t('ops.platform') }}</div><h1>{{ t('ops.tenants') }}</h1></div>
+        <button type="button" class="primary" @click="showCreate = !showCreate">{{ t('ops.newTenant') }}</button>
+      </div>
+      <p class="hint">{{ t('ops.hint') }}</p>
+
       <div v-if="metrics" class="kpis">
-        <div v-for="k in ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau', 'attempts_today', 'notifications_queued', 'notifications_failed_24h', 'webhooks_failed_24h']" :key="k" :class="['kpi', { coral: k.includes('failed') && Number(metrics[k]) > 0 }]">
+        <div v-for="k in kpiKeys" :key="k" :class="['kpi', { coral: k.includes('failed') && Number(metrics[k]) > 0 }]">
           <b>{{ metrics[k] }}</b><span>{{ t(`ops.kpi.${k}`) }}</span>
         </div>
         <div class="kpi"><b>{{ gb(String(metrics.media_bytes)) }} GB</b><span>{{ t('ops.kpi.media') }}</span></div>
       </div>
 
-      <table class="table">
-        <thead><tr><th>{{ t('ops.col.tenant') }}</th><th>{{ t('ops.col.plan') }}</th><th>{{ t('ops.col.trial') }}</th><th>{{ t('ops.col.users') }}</th><th>WAU</th><th>{{ t('ops.col.completed') }}</th><th>{{ t('ops.col.status') }}</th><th /></tr></thead>
-        <tbody>
-          <tr v-for="tn in tenants" :key="tn.id">
-            <td><b>{{ tn.name }}</b> <span class="sub">{{ tn.slug }}</span></td>
-            <td><select :value="tn.plan" @change="setTenant(tn, { plan: ($event.target as HTMLSelectElement).value })"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select></td>
-            <td :class="{ coral: tn.trial_ends_at && new Date(tn.trial_ends_at) < new Date(Date.now() + 7 * 86400000) }">{{ tn.plan === 'trial' ? fmt(tn.trial_ends_at) : '—' }}</td>
-            <td>{{ tn.active_users }} / {{ tn.total_users }}</td><td>{{ tn.wau }}</td><td>{{ tn.completed_30d }}</td>
-            <td><span :class="['badge', tn.status]">{{ tn.status }}</span></td>
-            <td class="acts">
-              <button v-if="tn.status === 'active'" class="chip" @click="setTenant(tn, { status: 'suspended' })">{{ t('ops.suspend') }}</button>
-              <button v-else class="chip" @click="setTenant(tn, { status: 'active' })">{{ t('ops.activate') }}</button>
-              <button class="chip warn" @click="openImpersonate(tn)">{{ t('ops.impersonate') }}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <section class="card">
+      <section v-if="showCreate" class="card">
         <h2>{{ t('ops.newTenant') }}</h2>
         <div class="grid">
-          <input v-model="newTenant.name" :placeholder="t('ops.f.name')">
-          <input v-model="newTenant.slug" placeholder="slug (a-z, 0-9, -)">
-          <input v-model="newTenant.adminName" :placeholder="t('ops.f.adminName')">
-          <div class="phone"><span>+380</span><input v-model="newTenant.adminPhone" inputmode="numeric" maxlength="9" placeholder="__ ___ __ __"></div>
-          <select v-model="newTenant.plan"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select>
-          <button class="primary" :disabled="!newTenant.name || !newTenant.slug || !newTenant.adminName || newTenant.adminPhone.replace(/\D/g, '').length !== 9" @click="createTenant">{{ t('ops.create') }}</button>
+          <label class="field"><span>{{ t('ops.f.name') }}</span><input v-model="newTenant.name"></label>
+          <label class="field"><span>slug</span><input v-model="newTenant.slug" placeholder="a-z, 0-9, -"></label>
+          <label class="field"><span>{{ t('ops.f.adminName') }}</span><input v-model="newTenant.adminName"></label>
+          <label class="field"><span>{{ t('ops.f.adminPhone') }}</span><div class="phone"><span>+380</span><input v-model="newTenant.adminPhone" inputmode="numeric" maxlength="9" placeholder="__ ___ __ __"></div></label>
+          <label class="field"><span>{{ t('ops.col.plan') }}</span><select v-model="newTenant.plan"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select></label>
+          <div class="field end"><button type="button" class="primary" :disabled="!newTenant.name || !newTenant.slug || !newTenant.adminName || newTenant.adminPhone.replace(/\D/g, '').length !== 9" @click="createTenant">{{ t('ops.create') }}</button></div>
         </div>
         <p class="sub">{{ t('ops.createHint') }}</p>
       </section>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>{{ t('ops.col.tenant') }}</th><th>{{ t('ops.col.plan') }}</th><th>{{ t('ops.col.active') }}</th><th>{{ t('ops.col.disk') }}</th><th>{{ t('ops.col.created') }}</th><th>{{ t('ops.col.state') }}</th><th class="sr-only">{{ t('ops.col.actions') }}</th></tr></thead>
+          <tbody>
+            <tr v-for="tn in tenants" :key="tn.id" class="row">
+              <td data-label="tenant"><strong>{{ tn.name }}</strong><div class="sub">{{ hostOf(tn) }}</div></td>
+              <td :data-label="t('ops.col.plan')">
+                <label class="sr-only" :for="`plan-${tn.id}`">{{ t('ops.col.plan') }}</label>
+                <select :id="`plan-${tn.id}`" :class="['badge', 'plan', tn.plan]" :value="tn.plan" @change="setPlan(tn, ($event.target as HTMLSelectElement).value)"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select>
+              </td>
+              <td :data-label="t('ops.col.active')">
+                <button type="button" class="link" :title="t('ops.limits.title')" @click="openLimits(tn)">{{ tn.active_users }} / {{ tn.users_limit ?? '∞' }}<span v-if="tn.has_overrides" class="star" :title="t('ops.limits.overridden')">*</span></button>
+              </td>
+              <td :data-label="t('ops.col.disk')">{{ gb(tn.media_bytes) }} {{ t('ops.gb') }}<span v-if="tn.storage_gb_limit" class="sub"> / {{ tn.storage_gb_limit }}</span></td>
+              <td :data-label="t('ops.col.created')">{{ fmt(tn.created_at) }}</td>
+              <td :data-label="t('ops.col.state')">
+                <span :class="['badge', stateOf(tn)]">{{ t(`ops.state.${stateOf(tn)}`) }}</span>
+                <div v-if="tn.status === 'active' && tn.plan === 'trial'" class="sub">{{ t('ops.col.trial') }} {{ fmt(tn.trial_ends_at) }}</div>
+                <div v-if="tn.status === 'archived'" class="sub coral">{{ t('ops.purgeAt', { date: purgeAt(tn) }) }}</div>
+              </td>
+              <td class="acts">
+                <button v-if="tn.status === 'active'" type="button" class="chip" @click="openAction('suspend', tn)">{{ t('ops.suspend') }}</button>
+                <button v-if="tn.status === 'suspended'" type="button" class="chip" @click="openAction('resume', tn)">{{ t('ops.resume') }}</button>
+                <button v-if="tn.status === 'suspended'" type="button" class="chip warn" @click="openAction('purge', tn)">{{ t('ops.purge') }}</button>
+                <button v-if="tn.status === 'archived'" type="button" class="chip" @click="openAction('cancelPurge', tn)">{{ t('ops.cancelPurge') }}</button>
+                <button type="button" class="chip" @click="openLimits(tn)">{{ t('ops.limits.title') }}</button>
+                <button v-if="tn.status === 'active'" type="button" class="chip warn" @click="openImpersonate(tn)">{{ t('ops.impersonate') }}</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </main>
 
-    <div v-if="impFor" class="modal-backdrop" @click.self="impFor = null">
-      <div class="modal">
+    <div v-if="action" class="modal-backdrop" @click.self="action = null" @keydown.esc="action = null">
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="t(`ops.confirm.${action.kind}.title`)">
+        <h2>{{ t(`ops.confirm.${action.kind}.title`) }}: {{ action.tenant.name }}</h2>
+        <p class="sub">{{ t(`ops.confirm.${action.kind}.text`, { days: PURGE_DAYS }) }}</p>
+        <label v-if="action.kind === 'suspend'" class="field"><span>{{ t('ops.confirm.reason') }}</span><input v-model="actionForm.reason" maxlength="500"></label>
+        <label v-if="action.kind === 'purge'" class="field"><span>{{ t('ops.confirm.typeSlug', { slug: action.tenant.slug }) }}</span><input v-model="actionForm.confirmSlug" autocomplete="off" :placeholder="action.tenant.slug"></label>
+        <div class="actions">
+          <button type="button" class="chip" @click="action = null">{{ t('common.cancel') }}</button>
+          <button type="button" :class="action.kind === 'purge' ? 'danger' : 'primary'" :disabled="!actionReady || busy" @click="runAction">{{ t(`ops.confirm.${action.kind}.ok`) }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="limitsFor && limits" class="modal-backdrop" @click.self="limitsFor = null" @keydown.esc="limitsFor = null">
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="t('ops.limits.title')">
+        <h2>{{ t('ops.limits.title') }}: {{ limitsFor.name }}</h2>
+        <p class="sub">{{ t('ops.limits.hint', { plan: planName(limits.plan.code) }) }}</p>
+        <div class="grid two">
+          <label v-for="k in LIMIT_KEYS" :key="k" class="field">
+            <span>{{ t(`ops.limits.${k}`) }}<em v-if="k === 'users' || k === 'storageGb' || k === 'smsPerMonth'" class="sub"> · {{ t('ops.limits.plan') }}: {{ limits.plan[k] ?? '∞' }}</em></span>
+            <input v-model="limitsForm[k]" type="number" min="0" inputmode="numeric" :placeholder="t('ops.limits.fromPlan')">
+          </label>
+        </div>
+        <div class="actions"><button type="button" class="chip" @click="limitsFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" @click="saveLimits">{{ t('common.save') }}</button></div>
+      </div>
+    </div>
+
+    <div v-if="impFor" class="modal-backdrop" @click.self="impFor = null" @keydown.esc="impFor = null">
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="t('ops.impersonate')">
         <h2>{{ t('ops.impersonate') }}: {{ impFor.name }}</h2>
-        <select v-model="impForm.userId"><option value="" disabled>{{ t('ops.pickUser') }}</option><option v-for="u in impUsers.filter(x => x.status === 'active')" :key="u.id" :value="u.id">{{ u.fullName }} · {{ u.phone }}</option></select>
-        <input v-model="impForm.reason" :placeholder="t('ops.reasonHint')">
+        <label class="field"><span>{{ t('ops.pickUser') }}</span><select v-model="impForm.userId"><option value="" disabled>{{ t('ops.pickUser') }}</option><option v-for="u in impUsers.filter(x => x.status === 'active')" :key="u.id" :value="u.id">{{ u.fullName }} · {{ u.phone }}</option></select></label>
+        <label class="field"><span>{{ t('ops.reasonHint') }}</span><input v-model="impForm.reason" maxlength="500"></label>
         <p class="sub">{{ t('ops.impWarn') }}</p>
-        <div class="actions"><button class="chip" @click="impFor = null">{{ t('common.cancel') }}</button><button class="primary" :disabled="!impForm.userId || impForm.reason.length < 10" @click="impersonate">{{ t('ops.enter') }}</button></div>
+        <div class="actions"><button type="button" class="chip" @click="impFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" :disabled="!impForm.userId || impForm.reason.length < 10" @click="impersonate">{{ t('ops.enter') }}</button></div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.ops { min-height: 100dvh; background: var(--color-ink); color: var(--color-bg-soft); font-family: var(--font-family); }
-.top { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-5); border-bottom: 1px solid rgb(255 255 255 / 10%); }
-.brand { font-weight: 900; }
-.who { display: flex; gap: var(--space-3); align-items: center; font-size: var(--font-size-body-s); opacity: 0.8; }
+/* Мокап PlatformTenants: беж фон, карточки-строки, бирюза = активный, солнце = тріал, коралл = призупинено */
+.ops { min-height: 100dvh; background: var(--color-bg); color: var(--color-ink); font-family: var(--font-family); }
+.top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-5); background: var(--color-bg-soft); border-bottom: 2px solid var(--color-bg-line); }
+.brand { display: flex; align-items: center; gap: var(--space-2); font-weight: 900; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 12px; height: 12px; border-radius: 4px 2px 2px 2px; display: inline-block; }
+.dots .sun { background: var(--color-sun); }
+.dots .teal { background: var(--color-teal); border-radius: 2px 4px 2px 2px; }
+.dots .coral { background: var(--color-coral); border-radius: 2px 2px 2px 4px; }
+.dots .ink { background: var(--color-ink); border-radius: 2px 2px 4px 2px; }
+.who { display: flex; gap: var(--space-3); align-items: center; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .login { max-width: 360px; margin: 15vh auto; display: grid; gap: var(--space-3); padding: var(--space-4); }
-.body { padding: var(--space-5); display: grid; gap: var(--space-5); }
-input, select { font: inherit; border: 1px solid rgb(255 255 255 / 20%); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: rgb(255 255 255 / 6%); color: var(--color-bg-soft); }
-.phone { display: flex; align-items: center; gap: var(--space-1); border: 1px solid rgb(255 255 255 / 20%); border-radius: var(--radius-s); padding: 0 var(--space-3); }
-.phone input { border: none; background: none; flex: 1; }
-.kpis { display: flex; gap: var(--space-3); flex-wrap: wrap; }
-.kpi { background: rgb(255 255 255 / 6%); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); display: grid; text-align: center; min-width: 110px; }
-.kpi b { font-size: var(--font-size-title-l); font-weight: 900; color: var(--color-teal); }
-.kpi.coral b { color: var(--color-coral); }
-.kpi span { font-size: var(--font-size-body-s); opacity: 0.7; }
-.table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: var(--font-size-body-s); opacity: 0.6; padding: var(--space-2); border-bottom: 1px solid rgb(255 255 255 / 15%); }
-td { padding: var(--space-2); border-bottom: 1px solid rgb(255 255 255 / 8%); vertical-align: middle; }
-.acts { display: flex; gap: var(--space-1); }
-.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid rgb(255 255 255 / 25%); background: transparent; color: var(--color-bg-soft); border-radius: var(--radius-pill); padding: 2px var(--space-3); cursor: pointer; }
-.chip.warn { border-color: var(--color-coral); color: var(--color-coral); }
-.primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-5); cursor: pointer; }
-.primary:disabled { opacity: 0.4; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: rgb(255 255 255 / 15%); }
-.badge.active { background: var(--color-teal); color: var(--color-teal-deep); }
-.badge.suspended { background: var(--color-coral); color: var(--color-coral-deep); }
-.card { background: rgb(255 255 255 / 6%); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); }
-.card h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-2); }
-.coral { color: var(--color-coral); font-weight: 700; }
-.sub { font-size: var(--font-size-body-s); opacity: 0.6; margin: 0; }
-.error { color: var(--color-coral); padding: 0 var(--space-5); }
-.notice { color: var(--color-teal); padding: 0 var(--space-5); }
-.modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 60%); display: grid; place-items: center; padding: var(--space-4); }
-.modal { background: var(--color-ink); border: 1px solid rgb(255 255 255 / 20%); border-radius: var(--radius-xl); padding: var(--space-5); width: min(480px, 100%); display: grid; gap: var(--space-3); }
-.modal h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
-.actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.body { padding: var(--space-5) var(--space-4); display: grid; gap: var(--space-4); max-width: 1400px; margin: 0 auto; }
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.head h1 { margin: 0; font-size: 27px; font-weight: 900; letter-spacing: -0.02em; }
+.eyebrow, .hint { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); }
+.hint { margin: 0; }
+.field { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); }
+.field.end { align-self: end; }
+.field em { font-style: normal; font-weight: 600; }
+input, select { font: inherit; border: 2px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg-soft); color: var(--color-ink); min-height: 44px; width: 100%; }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 3px solid var(--color-sun); outline-offset: 2px; }
+.phone { display: flex; align-items: center; gap: var(--space-1); border: 2px solid var(--color-bg-line); border-radius: var(--radius-s); padding: 0 var(--space-3); background: var(--color-bg-soft); }
+.phone input { border: none; background: none; flex: 1; padding-left: 0; }
+.kpis { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.kpi { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); display: grid; text-align: center; min-width: 96px; flex: 1; }
+.kpi b { font-size: var(--font-size-title-l); font-weight: 900; color: var(--color-teal-ink); }
+.kpi.coral b { color: var(--color-coral-ink); }
+.kpi span { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: separate; border-spacing: 0 6px; }
+th { text-align: left; font-size: 12px; font-weight: 900; letter-spacing: 0.05em; color: var(--color-ink-muted); padding: 0 var(--space-3) var(--space-2); }
+td { padding: var(--space-3); background: var(--color-bg-soft); vertical-align: middle; font-size: 14px; line-height: 20px; }
+.row td:first-child { border-radius: var(--radius-s) 0 0 var(--radius-s); }
+.row td:last-child { border-radius: 0 var(--radius-s) var(--radius-s) 0; }
+.acts { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 2px solid var(--color-bg-line); background: var(--color-bg-soft); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; min-height: 32px; }
+.chip.warn { border-color: var(--color-coral); color: var(--color-coral-ink); }
+.primary, .danger { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-s); padding: var(--space-2) var(--space-4); cursor: pointer; min-height: 44px; }
+.danger { background: var(--color-coral); color: var(--color-coral-deep); }
+.primary:disabled, .danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.link { font: inherit; background: none; border: none; padding: 0; color: inherit; cursor: pointer; text-decoration: underline dotted; }
+.star { color: var(--color-coral-ink); font-weight: 900; }
+.badge { display: inline-block; padding: 4px 10px; border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-ink-muted); font-size: 12px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+.badge.active, .badge.plan.network, .badge.plan.custom { background: var(--color-teal); color: var(--color-ink); }
+.badge.trial { background: var(--color-sun); color: var(--color-ink); }
+.badge.suspended, .badge.archived { background: var(--color-coral); color: var(--color-coral-deep); }
+select.badge { width: auto; min-height: 0; border: none; padding-right: 22px; appearance: auto; }
+.card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); }
+.card h2, .modal h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.coral { color: var(--color-coral-ink); font-weight: 700; }
+.sub { font-size: 12px; color: var(--color-ink-muted); font-weight: 700; margin: 0; }
+.error { color: var(--color-coral-ink); padding: var(--space-2) var(--space-5); margin: 0; font-weight: 700; }
+.notice { color: var(--color-teal-ink); padding: var(--space-2) var(--space-5); margin: 0; font-weight: 700; }
+.modal-backdrop { position: fixed; inset: 0; background: rgb(12 15 20 / 55%); display: grid; place-items: center; padding: var(--space-4); z-index: 10; }
+.modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(520px, 100%); display: grid; gap: var(--space-3); max-height: 90dvh; overflow: auto; }
+.actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (max-width: 720px) {
+  .table thead { display: none; }
+  .table, .table tbody, .row { display: block; }
+  .row { background: var(--color-bg-soft); border-radius: var(--radius-s); margin-bottom: var(--space-2); padding: var(--space-2); }
+  .row td { display: block; border-radius: 0 !important; padding: var(--space-1) var(--space-2); }
+  .row td[data-label]:not([data-label='tenant'])::before { content: attr(data-label) ': '; font-size: 12px; color: var(--color-ink-muted); font-weight: 700; }
+}
 </style>

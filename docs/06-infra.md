@@ -31,7 +31,9 @@
 | `assignment.sync` | каждый час + событие смены позиции | сверяет фактическую аудиторию |
 | `notification.dispatch` | каждую минуту | ключ `notification_id` |
 | `notification.digest` | по понедельникам 09:00 по таймзоне точки | ключ `user_id+week` |
-| `due.scan` | ежедневно 08:00 | ключ `enrollment_id+stage` |
+| `due.scan` | ежедневно 08:00 | планировщик: ставит `due.scan.tenant` на каждый работающий тенант (`25` §5); Spec 25 |
+| `due.scan.tenant` | из `due.scan` | ключ `tenant_id+день`; ключ `enrollment_id+stage` внутри |
+| `tenant.purge` | через 30 дней после команды оператора (`25` §8) | ключ `tenant_id`; обработчик проверяет статус и срок |
 | `attempt.expire` | каждые 5 минут | по `time_limit_at` |
 | `media.process` | после загрузки | ключ `media_id` |
 | `certificate.issue` | после зачёта | ключ `enrollment_id` |
@@ -41,7 +43,8 @@
 | `cleanup.sessions` | ежедневно | — |
 
 Правила: у каждой задачи `retryLimit=5` с экспонентой, `expireInMinutes`, мёртвые задачи
-падают в `pgboss.archive` и попадают в алерт. Ни одна задача не шлёт уведомление напрямую —
+падают в `pgboss.archive` и попадают в алерт. Каждая задача несёт `tenantId`; сканы по расписанию
+раскладываются по тенантам круговым обходом с квотой `tenant_limits.active_jobs` (`25` §5, Spec 25). Ни одна задача не шлёт уведомление напрямую —
 только через `notifications`, чтобы был журнал и дедупликация.
 
 ## 6.4 Уведомления

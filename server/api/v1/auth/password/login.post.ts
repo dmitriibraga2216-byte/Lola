@@ -3,7 +3,7 @@ import { loginWithPassword } from '../../../../services/password'
 import { createSession, issueSelectToken } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
 import { apiData, apiError } from '../../../../utils/apiResponse'
-import { clientIp, setSessionCookies } from '../../../../utils/authCookies'
+import { clientIp, onHostTenant, setSessionCookies } from '../../../../utils/authCookies'
 
 /**
  * POST /auth/password/login (docs/04 §4.2): `{email, password}` — резервный вход для методистов и администраторов,
@@ -23,15 +23,17 @@ export default defineEventHandler(async (event) => {
     return apiError(event, 401, 'password_invalid', 'Невірна пошта або пароль')
   }
 
-  if (r.users.length > 1) {
+  const users = onHostTenant(event, r.users)
+  if (users.length === 0) return apiError(event, 401, 'password_invalid', 'Невірна пошта або пароль')
+  if (users.length > 1) {
     return apiData({
       requiresTenantSelect: true,
       selectToken: issueSelectToken(`email:${parsed.data.email.toLowerCase()}`),
-      tenants: r.users.map(u => ({ tenantId: u.tenant_id, slug: u.tenant_slug, name: u.tenant_name })),
+      tenants: users.map(u => ({ tenantId: u.tenant_id, slug: u.tenant_slug, name: u.tenant_name })),
     })
   }
 
-  const user = r.users[0]!
+  const user = users[0]!
   const { token } = await createSession({ tenantId: user.tenant_id, userId: user.user_id, userAgent: getHeader(event, 'user-agent'), ip: clientIp(event) })
   setSessionCookies(event, token)
   await logSecurity({ tenantId: user.tenant_id, userId: user.user_id, event: 'login.success', meta: { method: 'password' }, ip: clientIp(event), userAgent: getHeader(event, 'user-agent') })

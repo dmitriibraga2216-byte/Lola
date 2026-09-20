@@ -250,7 +250,8 @@ async function selectTenant(tenantId: string) {
         </button>
       </template>
 
-      <p v-if="error" class="error">{{ error }}</p>
+      <!-- Общий error рендерится сразу после активного шага (template v-else-if выше) — уже «рядом с полем»; docs/33 D-005 -->
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
       <section v-if="guest" class="guest" data-testid="guest-blocks">
         <div v-if="guest.blocks.welcome.length" class="guest-welcome"><LessonBlocks :blocks="guest.blocks.welcome as never" :blocks-state="{}" readonly /></div>
         <p v-if="guest.blocks.supportContact.name || guest.blocks.supportContact.phone || guest.blocks.supportContact.email || guest.blocks.supportContact.telegram" class="support">

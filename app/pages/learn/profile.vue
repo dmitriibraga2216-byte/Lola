@@ -55,16 +55,19 @@ async function setBirthdayConsent(v: boolean) {
 // Пароль (docs/16 §14.5 «Безпека → Зміна пароля»): два поля; форма раскрыта сразу, если политика требует смены после первого входа
 const route = useRoute()
 const meUser = computed(() => me.value?.user as { hasPassword?: boolean, mustChangePassword?: boolean } | undefined)
+const passwordMinLength = computed(() => me.value?.tenant?.passwordMinLength ?? 8)
 const pwd = reactive({ open: route.query.password === '1' || !!meUser.value?.mustChangePassword, current: '', next: '', repeat: '', done: false, busy: false })
+// Ошибка формы пароля — под полями, не в общем `error` вверху страницы (docs/33 D-005)
+const pwdError = ref('')
 async function changePassword() {
-  error.value = ''
+  pwdError.value = ''
   pwd.busy = true
   try {
     await api('/me/password', { method: 'POST', body: { ...(meUser.value?.hasPassword ? { currentPassword: pwd.current } : {}), password: pwd.next } })
     Object.assign(pwd, { open: false, current: '', next: '', repeat: '', done: true })
     await fetchMe()
   }
-  catch (err) { error.value = apiErrorOf(err).message }
+  catch (err) { pwdError.value = apiErrorOf(err).message }
   finally { pwd.busy = false }
 }
 const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk') : ''
@@ -123,16 +126,18 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
       <NuxtLink to="/learn/development" class="row-link">{{ t('dev.short') }}</NuxtLink>
       <NuxtLink to="/learn/profile/study-history" class="row-link">{{ t('studyHistory.title') }}</NuxtLink>
       <NuxtLink to="/learn/surveys" class="row-link">{{ t('survey.title') }}</NuxtLink>
-      <button class="row-link" :aria-expanded="pwd.open" @click="pwd.open = !pwd.open">{{ meUser?.hasPassword ? t('profile.changePassword') : t('profile.setPassword') }}</button>
+      <button class="row-link" :aria-expanded="pwd.open" @click="pwd.open = !pwd.open; pwdError = ''; pwd.done = false">{{ meUser?.hasPassword ? t('profile.changePassword') : t('profile.setPassword') }}</button>
       <form v-if="pwd.open" class="pwd" @submit.prevent="changePassword">
         <p v-if="meUser?.mustChangePassword" class="muted">{{ t('profile.mustChangePassword') }}</p>
+        <p class="hint">{{ t('profile.passwordHint', { n: passwordMinLength }) }}</p>
         <label v-if="meUser?.hasPassword"><span>{{ t('profile.currentPassword') }}</span><input v-model="pwd.current" type="password" autocomplete="current-password" required></label>
-        <label><span>{{ t('person.newPassword') }}</span><input v-model="pwd.next" type="password" minlength="8" autocomplete="new-password" required></label>
-        <label><span>{{ t('person.repeatPassword') }}</span><input v-model="pwd.repeat" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label><span>{{ t('person.newPassword') }}</span><input v-model="pwd.next" type="password" :minlength="passwordMinLength" autocomplete="new-password" required></label>
+        <label><span>{{ t('person.repeatPassword') }}</span><input v-model="pwd.repeat" type="password" :minlength="passwordMinLength" autocomplete="new-password" required></label>
         <p v-if="pwd.repeat && pwd.repeat !== pwd.next" class="error">{{ t('person.passwordsDiffer') }}</p>
-        <button type="submit" class="row-link primary" :disabled="pwd.busy || pwd.next.length < 8 || pwd.next !== pwd.repeat">{{ t('common.save') }}</button>
+        <p v-if="pwdError" class="error" role="alert">{{ pwdError }}</p>
+        <button type="submit" class="row-link primary" :disabled="pwd.busy || pwd.next.length < passwordMinLength || pwd.next !== pwd.repeat">{{ t('common.save') }}</button>
       </form>
-      <p v-if="pwd.done" class="muted" role="status">{{ t('profile.passwordChanged') }}</p>
+      <p v-if="pwd.done" class="success" role="status">{{ t('profile.passwordSaved') }}</p>
       <button class="row-link" @click="linkTelegram">{{ t('home.linkTelegram') }}</button>
       <p v-if="tgLink" class="muted tg">
         <a v-if="tgLink.url" :href="tgLink.url" target="_blank" rel="noopener" class="link">{{ t('home.openTelegram') }}</a>
@@ -171,5 +176,7 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
 .pwd label { display: grid; gap: 2px; font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
 .pwd input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .pwd .error { margin: 0; color: var(--color-coral-ink); font-size: var(--font-size-body-s); }
+.pwd .hint { margin: 0; color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
+.success { margin: var(--space-2) var(--space-4) 0; color: var(--color-teal-ink); font-size: var(--font-size-body-s); font-weight: 700; }
 .tg { margin: 0 var(--space-2); }
 </style>

@@ -73,7 +73,7 @@ describe('настройки: единая схема с дефолтами, п�
     const s = tenantSettingsSchema.parse({})
     expect(s.policies.session.lengthDays).toBe(30)
     expect(s.policies.session.otpLength).toBe(6)
-    expect(s.policies.passwords.minLength).toBe(12)
+    expect(s.policies.passwords.minLength).toBe(8) // docs/33 D-004: дефолт 12 → 8, решение заказчика 20.09.2026
     expect(s.policies.roles.defaultRoleCode).toBe('employee')
     expect(s.modules.wiki).toBe(false)
     expect(s.modules.workshops).toBe(true)

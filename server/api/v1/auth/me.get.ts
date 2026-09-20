@@ -52,14 +52,18 @@ export default defineEventHandler(async (event) => {
   }).from(tenants).where(eq(tenants.id, auth.tenantId))
   // Модули и акцент нужны клиенту для меню и CSS-переменной (docs/24 §3.1, §3.2); политики наружу не отдаём
   const modules = await tenantModules(auth.tenantId)
-  const space = tenantSettingsSchema.parse(tenant?.settings ?? {}).space
+  const parsedSettings = tenantSettingsSchema.parse(tenant?.settings ?? {})
+  const space = parsedSettings.space
+  // Единственное поле политики паролей, отдаваемое клиенту (docs/33 D-005): подпись-требование в форме
+  // «Задати пароль» до ввода. Остальные политики наружу не отдаются (см. `/settings/policies`, скоуп `settings.tenant`).
+  const passwordMinLength = parsedSettings.policies.passwords.minLength
 
   // Скоупы — по активной роли (docs/01 §1.9.2); roles — все действующие, для переключателя
   const scopes = [...new Set(access.grants.flatMap(g => g.scopes))].sort()
 
   return apiData({
     user: { ...profile, roles: access.roles },
-    tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, localesEnabled: space.localesEnabled } : null,
+    tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, localesEnabled: space.localesEnabled, passwordMinLength } : null,
     scopes,
     activeRole: access.activeRole,
     roles: access.roles,

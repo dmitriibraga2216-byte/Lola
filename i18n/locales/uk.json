@@ -2907,7 +2907,8 @@
     "changePassword": "Змінити пароль",
     "setPassword": "Задати пароль",
     "currentPassword": "Поточний пароль",
-    "passwordChanged": "Пароль змінено. Інші сесії закрито",
+    "passwordHint": "Не коротший за {n} знаків, літери та цифри",
+    "passwordSaved": "Пароль збережено",
     "mustChangePassword": "Потрібно змінити пароль перед подальшою роботою"
   },
   "notif": {

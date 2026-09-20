@@ -83,6 +83,29 @@ export async function listTenants() {
   `) as unknown as Promise<Record<string, unknown>[]>
 }
 
+/** Карточка одного тенанта (docs/33 D-064: `GET /platform/tenants/:id` из `04` не было — только список и PATCH). */
+export async function getTenantCard(id: string): Promise<Record<string, unknown> | null> {
+  const db = platformDb()
+  const rows = await db.execute(sql`
+    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at,
+           coalesce(tl.users, p.max_users) as users_limit,
+           coalesce(tl.storage_gb, p.max_storage_gb) as storage_gb_limit,
+           coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
+           tl.active_jobs as active_jobs_limit,
+           (tl.id is not null) as has_overrides,
+           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked) as active_users,
+           (select count(*)::int from users u where u.tenant_id = t.id) as total_users,
+           (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
+           (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
+           (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
+    from tenants t
+    left join plans p on p.code = t.plan
+    left join tenant_limits tl on tl.tenant_id = t.id
+    where t.id = ${id}::uuid
+  `) as unknown as Record<string, unknown>[]
+  return rows[0] ?? null
+}
+
 export interface CreateTenantInput {
   slug: string
   name: string

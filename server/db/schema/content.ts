@@ -61,6 +61,12 @@ export const resources = pgTable('resources', {
   version: integer('version').notNull().default(1), // номер текущей (последней опубликованной) версии; черновик — version + 1
   publishedVersionId: uuid('published_version_id'), // → resource_versions.id
   viewsCount: integer('views_count').notNull().default(0), // «Переглядів: N» (docs/21 §14.1)
+  // Каталог навчання (docs/10 §5.2, борг «28» Spec 10 відк. (1) / docs/33 D-060): за замовчуванням
+  // ресурс у каталозі не показується; коли показується — той самий словник assign_mode, що й у
+  // курсів (`catalog_free` | `catalog_request`, узгоджено з docs/10 §14.1). Доступ до самого перегляду
+  // ресурсу — це окремий тумблер бази знань (`canAccessResource`), тут лише видимість картки каталогу.
+  isCatalogVisible: boolean('is_catalog_visible').notNull().default(false),
+  assignMode: text('assign_mode').notNull().default('catalog_free'), // catalog_free | catalog_request
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, t => [
   unique().on(t.tenantId, t.slug),

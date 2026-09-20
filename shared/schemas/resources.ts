@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { bodySchema } from './content'
+import { COURSE_CATALOG_MODES } from './catalog'
 
 /**
  * Ресурс как тип контента (docs/11 §3.1, §14, Г-11.3, Г-11.5; docs/32 Б.7).
@@ -35,6 +36,11 @@ const resourceBase = {
   allowPrint: z.boolean().default(true),
   authorIds: z.array(z.string().uuid()).max(20).optional(), // по умолчанию — создатель
   accessGroupIds: z.array(z.string().uuid()).max(50).optional(), // пусто — открыт всем
+  // Каталог навчання (docs/10 §5.2, docs/33 D-060) — той самий словник, що й у курсу (shared/schemas/catalog.ts).
+  // Без .default() навмисно (на відміну від courses.isCatalogVisible) — інакше поле стає обов'язковим
+  // у z.infer для CreateInput і ламає всі наявні виклики createResource() без цього поля; дефолт — у сервісі.
+  isCatalogVisible: z.boolean().optional(),
+  assignMode: z.enum(COURSE_CATALOG_MODES).optional(),
 }
 
 /** Файл — для file/video, ссылка — для link. Проверяется при публикации, черновик может быть неполным. */

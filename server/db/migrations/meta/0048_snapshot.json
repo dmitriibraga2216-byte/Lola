@@ -1,6 +1,6 @@
 {
-  "id": "a6d8fb8a-6dcf-4653-97b2-9c37636207ca",
-  "prevId": "bdeeb32a-5fbf-440e-8af9-7d7de3a47cb1",
+  "id": "9a01d328-d1b8-47a5-8911-6004b361447b",
+  "prevId": "a6d8fb8a-6dcf-4653-97b2-9c37636207ca",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4008,6 +4008,20 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "is_catalog_visible": {
+          "name": "is_catalog_visible",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "assign_mode": {
+          "name": "assign_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'catalog_free'"
         },
         "deleted_at": {
           "name": "deleted_at",

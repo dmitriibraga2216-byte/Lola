@@ -24,11 +24,16 @@ export default defineEventHandler(async (event) => {
     if (ops) {
       const { validatePlatformSession } = await import('../services/platform')
       event.context.platform = await validatePlatformSession(ops)
-      // docs/25 §7 п. 5: каждый запрос панели — в platform_audit (кто, что, по какому тенанту); login/me/logout — не про тенантов
-      if (event.context.platform && !/^\/api\/v1\/platform\/(me|login|logout)$/.test(event.path.split('?')[0]!)) {
+      // docs/25 §7 п. 5, долг «28» Spec 25 отк. (5): не каждый GET панели — только действия (не-GET)
+      // и просмотр карточки конкретного тенанта (GET .../tenants/:id и .../tenants/:id/...); список
+      // тенантов, планы, метрики, общий журнал — не пишутся, иначе журнал платформы захлёбывается
+      // при росте числа операторов.
+      const platformPath = event.path.split('?')[0]!
+      const isTenantCardView = event.method === 'GET' && /^\/api\/v1\/platform\/tenants\/[0-9a-f-]{36}(\/|$)/.test(platformPath)
+      if (event.context.platform && !/^\/api\/v1\/platform\/(me|login|logout)$/.test(platformPath) && (event.method !== 'GET' || isTenantCardView)) {
         const { recordPlatformAudit } = await import('../services/platformTenants')
-        const tenantId = event.path.match(/\/tenants\/([0-9a-f-]{36})/)?.[1] ?? null
-        event.waitUntil(recordPlatformAudit(event.context.platform, { action: 'platform.request', tenantId, entity: 'request', entityId: `${event.method} ${event.path.split('?')[0]}` }).catch(err => console.error('platform_audit', err)))
+        const tenantId = platformPath.match(/\/tenants\/([0-9a-f-]{36})/)?.[1] ?? null
+        event.waitUntil(recordPlatformAudit(event.context.platform, { action: 'platform.request', tenantId, entity: 'request', entityId: `${event.method} ${platformPath}` }).catch(err => console.error('platform_audit', err)))
       }
     }
     return

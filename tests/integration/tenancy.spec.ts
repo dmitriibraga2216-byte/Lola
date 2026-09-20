@@ -192,6 +192,9 @@ describe('docs/25 §14 — критерии приёмки', () => {
   })
 
   it('10. Дано тенант приостановлен, тоді вход закрыт, фоновые задачи по нему не идут, уведомления не отправляются, данные целы', async () => {
+    // долг «28» Spec 25 отк. (3): медиа, застрявшее в processing на момент приостановки, ставится
+    // заново в media.process при resume (сама задача не переставляется, пока тенант suspended)
+    const [stuckMedia] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status) values (${tenantA.id}, ${`t/${tenantA.id}/stuck-${stamp}.jpg`}, 'stuck.jpg', 'image', 'image/jpeg', 10, 'processing') returning id`
     const before = await rowsOf(tenantA.id)
     const r = await suspendTenant(tenantA.id, 'тест приостановки', opsAuth)
     expect(r.ok && r.status).toBe('suspended')
@@ -219,6 +222,11 @@ describe('docs/25 §14 — критерии приёмки', () => {
     expect(back.ok && back.status).toBe('active')
     const sess = await createSession({ tenantId: tenantA.id, userId: tenantA.adminUserId })
     expect(sess.token).toBeTruthy()
+    // resume переставил media.process для застрявшего в processing медиа (журнал — requeuedMedia в after)
+    const resumeAudit = await listPlatformAudit({ tenantId: tenantA.id })
+    expect(resumeAudit.find(x => x.action === 'tenant.resume')?.after).toMatchObject({ requeuedMedia: 1 })
+    const job = await admin`select 1 from pgboss.job where name = 'media.process' and data->>'mediaId' = ${stuckMedia!.id}`
+    expect(job.length).toBe(1)
     // повторный resume — не тот статус
     expect(await resumeTenant(tenantA.id, opsAuth)).toEqual({ ok: false, code: 'wrong_status' })
   })
@@ -520,5 +528,18 @@ describe.skipIf(!BUILT)('docs/25 по HTTP (собранное приложен�
     // список тенантов через API — без персональных строк (п. 9)
     const list = await hfetch(`${BASE}/api/v1/platform/tenants`, { headers: { cookie: opsCookie } })
     expect(await list.text()).not.toMatch(/\+380/)
+  })
+
+  it('долг «28» Spec 25 отк. (5): platform.request не пишется на список тенантов, но пишется на просмотр карточки конкретного тенанта', async () => {
+    const before = await (await hfetch(`${BASE}/api/v1/platform/audit?tenantId=${kappiId}&limit=200`, { headers: { cookie: opsCookie } })).json() as { data: { id: string }[] }
+    const seenIds = new Set(before.data.map(r => r.id))
+    // список — не карточка конкретного тенанта, GET, не должен писаться
+    expect((await hfetch(`${BASE}/api/v1/platform/tenants`, { headers: { cookie: opsCookie } })).status).toBe(200)
+    // просмотр карточки — лимиты конкретного тенанта, GET, должен писаться
+    expect((await hfetch(`${BASE}/api/v1/platform/tenants/${kappiId}/limits`, { headers: { cookie: opsCookie } })).status).toBe(200)
+    const after = await (await hfetch(`${BASE}/api/v1/platform/audit?tenantId=${kappiId}&limit=200`, { headers: { cookie: opsCookie } })).json() as { data: { id: string, action: string, entityId: string }[] }
+    const fresh = after.data.filter(r => !seenIds.has(r.id))
+    expect(fresh.some(r => r.action === 'platform.request' && r.entityId.includes('/limits'))).toBe(true)
+    expect(fresh.some(r => r.action === 'platform.request' && r.entityId === 'GET /api/v1/platform/tenants')).toBe(false)
   })
 })

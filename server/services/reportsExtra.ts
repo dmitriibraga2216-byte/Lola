@@ -108,7 +108,7 @@ export async function content(ctx: Ctx, f: Period = {}) {
            count(e.id) filter (where e.status = 'done')::int as completed,
            round(100.0 * count(e.id) filter (where e.status = 'done') / nullif(count(e.id), 0))::int as completion_pct,
            round(avg(e.time_spent_sec) filter (where e.status = 'done') / 60)::int as avg_minutes,
-           (select round(avg((r.answers->0->>'value')::numeric), 1) from survey_responses r join surveys s on s.id = r.survey_id where s.kind = 'course_feedback' and s.trigger_course_id = c.id) as rating,
+           (select round(avg((r.answers->(s.questions->0->>'id')->>'value')::numeric), 1) from survey_responses r join surveys s on s.id = r.survey_id where s.kind = 'course_feedback' and s.trigger_course_id = c.id) as rating,
            (select l.title from lessons l join modules m on m.id = l.module_id join lesson_progress lp on lp.lesson_id = l.id
               where m.course_version_id = c.published_version_id and lp.status <> 'completed' group by l.id, l.title, m.sort, l.sort order by count(*) desc, m.sort, l.sort limit 1) as dropoff_lesson
     from courses c

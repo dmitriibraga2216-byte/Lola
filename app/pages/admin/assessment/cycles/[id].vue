@@ -9,6 +9,8 @@ const data = ref<Data | null>(null)
 const error = ref('')
 const notice = ref('')
 const report = ref<Record<string, unknown>[]>([])
+const byGroupText = (v: unknown) => v ? Object.entries(v as Record<string, number>).map(([g, n]) => `${g}: ${n}`).join(' · ') : '—'
+const gapsOf = (v: unknown) => (v as { criterion: string, gap: number }[] | null) ?? []
 async function load() {
   try { data.value = await api<Data>(`/assessment/cycles/${route.params.id}`); report.value = await api(`/reports/assessment?cycleId=${route.params.id}`) } catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -55,8 +57,15 @@ const notSubmitted = computed(() => data.value?.tasks.filter(tk => ['pending', '
       <section v-if="report.length" class="card">
         <h2>{{ t('assess.reportTitle') }}</h2>
         <table class="table plain">
-          <thead><tr><th>{{ t('people.col.name') }}</th><th>{{ t('assess.kind.self') }}</th><th>{{ t('assess.kind.manager') }}</th><th>{{ t('assess.kind.peer') }}</th><th>{{ t('assess.gap') }}</th></tr></thead>
-          <tbody><tr v-for="r in report" :key="String(r.full_name)"><td>{{ r.full_name }}</td><td>{{ r.self ?? '—' }}</td><td>{{ r.manager ?? '—' }}</td><td>{{ r.peer ?? '—' }}</td><td :class="{ red: Math.abs(Number(r.gap ?? 0)) > 1 }">{{ r.gap ?? '—' }}</td></tr></tbody>
+          <thead><tr><th>{{ t('assess.report.subject') }}</th><th>{{ t('assess.report.raterKind') }}</th><th>{{ t('assess.report.filled') }}</th><th>{{ t('assess.report.filledAt') }}</th><th>{{ t('assess.report.avg') }}</th><th>{{ t('assess.report.byGroup') }}</th><th>{{ t('assess.report.normGap') }}</th></tr></thead>
+          <tbody>
+            <tr v-for="r in report" :key="String(r.task_id)">
+              <td>{{ r.full_name }}</td><td>{{ t(`assess.kind.${r.rater_kind}`) }}</td><td>{{ r.filled ? t('common.yes') : t('common.no') }}</td>
+              <td>{{ r.completed_at ? new Date(String(r.completed_at)).toLocaleDateString('uk') : '—' }}</td><td>{{ r.avg_score ?? '—' }}</td>
+              <td class="sub">{{ byGroupText(r.by_group) }}</td>
+              <td class="gaps"><span v-for="g in gapsOf(r.gaps)" :key="g.criterion" :class="['gap', { red: g.gap < 0 }]" :title="g.criterion">{{ g.gap > 0 ? '+' : '' }}{{ g.gap }}</span><span v-if="!gapsOf(r.gaps).length">—</span></td>
+            </tr>
+          </tbody>
         </table>
       </section>
     </template>
@@ -85,4 +94,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin: 0; }
 .error { color: var(--color-coral-ink); }
 .notice { color: var(--color-teal-ink); }
+.gaps { display: flex; flex-wrap: wrap; gap: 4px; }
+.gap { font-size: var(--font-size-body-s); font-weight: 700; padding: 0 6px; border-radius: var(--radius-pill); background: var(--color-bg-line-soft); }
+.gap.red { background: var(--color-coral-soft); color: var(--color-coral-ink); }
 </style>

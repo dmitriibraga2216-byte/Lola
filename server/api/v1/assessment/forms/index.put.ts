@@ -1,13 +1,18 @@
-import { z } from 'zod'
 import { requireScope } from '../../../../services/access'
-import { upsertForm } from '../../../../services/assessment'
+import { saveForm } from '../../../../services/assessment'
+import { assessmentFormSchema } from '../../../../../shared/schemas/assessment'
 import { apiData, apiError } from '../../../../utils/apiResponse'
-const schema = z.object({ id: z.string().uuid().optional(), title: z.string().min(3).max(200), description: z.string().max(1000).optional(), groupIds: z.array(z.string().uuid()).min(1).max(30), isActive: z.boolean().optional() })
+/** Анкета оценки (docs/20 §14.2, §14.4): после первого заполнения правка шкалы, состава и норм — 409. */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'assessment.manage')
-  const p = schema.safeParse(await readBody(event))
-  if (!p.success) return apiError(event, 400, 'validation_failed', 'Анкета: назва і хоча б одна група', { issues: p.error.issues })
-  const r = await upsertForm({ tenantId: a.tenantId, actorId: a.userId }, p.data)
-  if (!r) return apiError(event, 404, 'not_found', 'Анкету не знайдено')
-  return apiData(r)
+  const p = assessmentFormSchema.safeParse(await readBody(event))
+  if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Анкета: назва, шкала і хоча б один критерій з нормою', { issues: p.error.issues })
+  const r = await saveForm({ tenantId: a.tenantId, actorId: a.userId }, p.data)
+  if (!r.ok) {
+    if (r.code === 'locked') return apiError(event, 409, 'form.locked', 'Заповнення вже почалось. Шкалу, склад критеріїв і норми змінювати не можна — тільки назву, опис та інструкцію', { fields: r.fields })
+    if (r.code === 'bad_scale') return apiError(event, 422, 'form.bad_scale', 'Оберіть шкалу рівнів із числовими значеннями')
+    if (r.code === 'bad_norm') return apiError(event, 422, 'form.bad_norm', `Норма має бути в межах шкали (до ${r.max})`, { criterionIds: r.fields })
+    return apiError(event, 404, 'not_found', 'Анкету не знайдено')
+  }
+  return apiData(r.form)
 })

@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { and, eq, sql } from 'drizzle-orm'
-import { checklistRuns, checklists, locations, mysteryLinks, mysteryWaves, ratingScales } from '../db/schema'
+import { checklistRuns, checklists, locations, mysteryLinks, mysteryWaves } from '../db/schema'
 import { db } from '../db/client'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { scoreRun } from './checklists'
 import type { ActionItem, ChecklistItem, RunAnswer } from './checklists'
-import type { ScaleOption } from './assessment'
+import { loadScale } from './assessment'
 import { scopeSql } from './access'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -90,12 +90,12 @@ export async function publicForm(token: string) {
   return withTenant(l.tenant_id, l.created_by, async (tx) => {
     const [w] = await tx.select().from(mysteryWaves).where(eq(mysteryWaves.id, l.wave_id))
     if (!w || w.status !== 'active') return { ok: false as const, code: 'expired' as const }
-    const [c] = await tx.select({ id: checklists.id, title: checklists.title, items: checklists.items, requireSignature: checklists.requireSignature }).from(checklists).where(eq(checklists.id, w.checklistId))
+    const [c] = await tx.select({ id: checklists.id, title: checklists.title, items: checklists.items, scaleId: checklists.scaleId, allowSkip: checklists.allowSkip, allowItemComment: checklists.allowItemComment, requireSignature: checklists.requireSignature }).from(checklists).where(eq(checklists.id, w.checklistId))
     if (!c) return { ok: false as const, code: 'not_found' as const }
     const [loc] = await tx.select({ name: locations.name, address: locations.address }).from(locations).where(eq(locations.id, l.location_id))
     const items = c.items as ChecklistItem[]
-    const scales = await tx.select({ id: ratingScales.id, options: ratingScales.options, allowNa: ratingScales.allowNa }).from(ratingScales).where(sql`${ratingScales.id} in ${[...new Set(items.map(i => i.scaleId))]}`)
-    return { ok: true as const, form: { wave: w.title, checklist: { id: c.id, title: c.title, items }, scales, location: loc ?? null, expiresAt: l.expires_at } }
+    const scale = await loadScale(tx, c.scaleId)
+    return { ok: true as const, form: { wave: w.title, checklist: { id: c.id, title: c.title, items, allowSkip: c.allowSkip, allowItemComment: c.allowItemComment }, scale, location: loc ?? null, expiresAt: l.expires_at } }
   })
 }
 
@@ -110,10 +110,11 @@ export async function publicSubmit(token: string, input: { answers: RunAnswer[],
     const [c] = await tx.select().from(checklists).where(eq(checklists.id, w.checklistId))
     if (!c) return { ok: false as const, code: 'not_found' as const }
     const items = c.items as ChecklistItem[]
-    const scaleRows = await tx.select().from(ratingScales).where(sql`${ratingScales.id} in ${[...new Set(items.map(i => i.scaleId))]}`)
-    const scales = new Map(scaleRows.map(s => [s.id, { options: s.options as ScaleOption[], passThreshold: s.passThreshold != null ? Number(s.passThreshold) : null }]))
-    const score = scoreRun({ items, scoring: c.scoring, passScore: Number(c.passScore), criticalFailRule: c.criticalFailRule }, input.answers, scales)
-    if (score.answered < score.total) return { ok: false as const, code: 'incomplete' as const, itemIds: items.filter(i => !input.answers.some(a => a.itemId === i.id && (a.value != null || a.isNa))).map(i => i.id) }
+    const scale = await loadScale(tx, c.scaleId)
+    if (!scale) return { ok: false as const, code: 'not_found' as const }
+    const score = scoreRun({ items, scoring: c.scoring, passScore: Number(c.passScore), criticalFailRule: c.criticalFailRule, allowSkip: c.allowSkip }, input.answers, scale)
+    const unanswered = items.filter(i => !input.answers.some(a => a.itemId === i.id && (a.value != null || (a.isNa && c.allowSkip)))).map(i => i.id)
+    if (unanswered.length) return { ok: false as const, code: 'incomplete' as const, itemIds: unanswered }
     const plan: ActionItem[] = []
     const [r] = await tx.insert(checklistRuns).values({
       tenantId: l.tenant_id, checklistId: c.id, subjectKind: 'location', locationId: l.location_id, observerId: l.created_by, status: 'finished',

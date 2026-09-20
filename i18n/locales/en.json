@@ -125,7 +125,8 @@
       "usage": "Usage",
       "certificates": "Certificates",
       "tags": "Tags",
-      "orgConflicts": "Org structure conflicts"
+      "orgConflicts": "Org structure conflicts",
+      "assessForms": "Assessment forms"
     },
     "section": {
       "learning": "Learning",
@@ -1546,7 +1547,55 @@
     },
     "hiddenThreshold": "Anonymous data shown from {n} responses",
     "avg": "Average",
-    "short": "Surveys"
+    "short": "Surveys",
+    "col": {
+      "questions": "Questions",
+      "mode": "Mode",
+      "privacy": "Privacy"
+    },
+    "mode": {
+      "linear": "Linear",
+      "conditional": "Conditional"
+    },
+    "privacy": {
+      "anonymous": "Anonymous",
+      "confidential": "Confidential",
+      "open": "Open"
+    },
+    "lockedBanner": "Filling has already started. Questions, mode and privacy cannot be changed — only title, description, tags and dates.",
+    "descriptionHint": "Briefly about the poll",
+    "modeLabel": "Execution mode",
+    "confidential": "Confidential",
+    "confidentialHint": "Only the poll owner sees answers with names",
+    "anonymousLabel": "Anonymous poll",
+    "anonymousHint": "The author of an answer is not stored at all",
+    "showResults": "Allow viewing summary results",
+    "questionsTitle": "Questions",
+    "qType": "Question type",
+    "qtype": {
+      "single": "Single choice",
+      "multi": "Multiple choice",
+      "free": "Free answer",
+      "scale": "By scale"
+    },
+    "required": "required",
+    "option": "Option",
+    "addOption": "Add option",
+    "ownOption": "Own answer",
+    "allowFiles": "Allow attaching files to the answer",
+    "goTo": "Go to",
+    "goToNext": "next in order",
+    "goToEnd": "finish the poll",
+    "defaultNext": "If no condition matched",
+    "confidentialNote": "The poll is confidential: only the owner sees respondent names",
+    "ownShort": "own answer",
+    "respondents": "Respondents",
+    "noName": "no name",
+    "resultsTitle": "Summary results",
+    "continue": "continue",
+    "questionOf": "Question {n} of {total}",
+    "or": "or",
+    "freeHint": "Your answer"
   },
   "workshop": {
     "reviewTitle": "Workshop review",
@@ -1952,7 +2001,7 @@
     "scaleOptionsHint": "value:label, comma-separated",
     "passFrom": "pass from",
     "weight": "weight",
-    "commentBelow": "comment below",
+    "commentBelow": "Comment when the score is below the norm",
     "critText": "What we rate",
     "critHow": "How to read it",
     "noCompetency": "No competency",
@@ -2000,7 +2049,82 @@
     "notFilled": "Not filled",
     "subject": "Subject",
     "raters": "Raters",
-    "reportTitle": "Results: self vs manager"
+    "reportTitle": "Results: self vs manager",
+    "sectionTitle": "Assessment",
+    "dictionary": "Dictionary",
+    "createForm": "Create form",
+    "newForm": "New form",
+    "col": {
+      "title": "Title",
+      "kind": "Type",
+      "criteria": "Criteria",
+      "scale": "Scale",
+      "updated": "Updated",
+      "published": "Published"
+    },
+    "formKind": {
+      "by_criteria": "By criteria",
+      "by_competencies": "By competencies"
+    },
+    "lockedShort": "filling started",
+    "noForms": "No forms yet — create the first one",
+    "lockedBanner": "Filling has already started. Scale, criteria and norms cannot be changed — only title, description and instruction.",
+    "criterionIndicator": "Criterion — indicator",
+    "titleField": "Title",
+    "norm": "Norm",
+    "pickCriteria": "Pick criteria from the library on the left",
+    "addCluster": "Add cluster",
+    "clusterName": "Cluster name",
+    "description": "Description",
+    "instruction": "Instruction for respondents",
+    "instructionHint": "How to fill in the form, what to pay attention to",
+    "tags": "Tags",
+    "tagsHint": "Tags, comma-separated",
+    "groups": "Criteria groups",
+    "libraryEmpty": "All criteria are in the form or nothing found",
+    "params": "Form parameters",
+    "type": "Type",
+    "scaleField": "Rating scale",
+    "allowCommentGroups": "Allow commenting criteria groups",
+    "makeRequired": "Make the field required",
+    "commentBelowHint": "A poor score without explanation helps no one",
+    "commentAbove": "Allow a comment when the score is above the norm",
+    "commentEqual": "Allow a comment when the score equals the norm",
+    "zeroNoGrade": "Value 0 means no grade",
+    "published": "Published",
+    "ratersHint": "Anonymous roles are hidden until there are at least three answers",
+    "rateTitle": "360 assessment",
+    "youRate": "You are rating {name} as {role}.",
+    "anonNote": "Answers are anonymous: they are hidden until there are at least {n}.",
+    "kindAs": {
+      "self": "yourself",
+      "manager": "manager",
+      "peer": "peer",
+      "subordinate": "subordinate",
+      "mentor": "mentor"
+    },
+    "commentBelowNorm": "Score below the norm — please explain",
+    "groupComment": "Comment on the criteria group",
+    "groupCommentRequired": "Group comment is required",
+    "criteriaGroups": "Criteria groups",
+    "criteriaN": "{n} criteria",
+    "noCriteria": "No criteria yet",
+    "usedIn": "In forms: {forms} · in checklists: {checklists}",
+    "addGroup": "Add group",
+    "whereUsed": "Where used",
+    "oneLibrary": "One library for the whole installation: a form only references a criterion",
+    "inForms": "In assessment forms",
+    "inChecklists": "In checklists",
+    "linkedCompetencies": "Linked to competencies",
+    "report": {
+      "subject": "Subject",
+      "raterKind": "Rater role",
+      "filled": "Filled",
+      "filledAt": "Filled at",
+      "avg": "Average score",
+      "byGroup": "Score by criteria group",
+      "normGap": "Gap to norm"
+    }
   },
   "cl": {
     "title": "Checklists",
@@ -2071,7 +2195,26 @@
     "signature": "Signature",
     "signatureHint": "Ask the employee to sign with a finger",
     "signatureClear": "Clear",
-    "na": "N/A"
+    "na": "N/A",
+    "create": "Create checklist",
+    "weightVsNorm": "A checklist has item weights, an assessment form has norms. These are different scoring mechanics",
+    "col": {
+      "items": "Items",
+      "scoring": "Scoring"
+    },
+    "scoringLabel": {
+      "percent": "Percent",
+      "points": "By weights",
+      "pass_fail": "Pass/fail"
+    },
+    "lockedBanner": "Checklist filling has already started. Scale, items and weights cannot be changed — only title, description and instruction.",
+    "allowSkip": "Allow skipping items",
+    "allowItemComment": "Allow a comment on every criterion",
+    "fromLibrary": "From the criteria library…",
+    "pointsOf": "of {max} points",
+    "skip": "Skip",
+    "commentRequired": "Comment required",
+    "finishRun": "Finish the check"
   },
   "mt": {
     "title": "Schedule",

@@ -616,14 +616,20 @@ create table knowledge_articles (
 create index on knowledge_articles using gin (search_tsv);
 create index on knowledge_articles using ivfflat (embedding vector_cosine_ops);
 
+-- Spec 20 (`20` §14.5, §14.7): режим, конфиденциальность, четыре типа вопроса, заморозка
 create table surveys (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
   title text not null,
-  kind text not null default 'survey',        -- survey | feedback_360 | poll
+  kind text not null default 'survey',        -- survey | course_feedback | poll
+  mode text not null default 'linear',        -- poll_mode: linear | conditional («з умовами»)
+  -- [{id, type poll_question_kind, text, options [{id, text}], allowOwnOption, allowFiles, scaleId, required, next [{optionId?, goTo}]}]
   questions jsonb not null,
-  is_anonymous boolean not null default false,
-  status text not null default 'draft',
+  is_anonymous boolean not null default false,     -- «Анонімне»: автор ответа не хранится вовсе
+  is_confidential boolean not null default false,  -- «Конфіденційно»: ответы с именами видит только владелец
+  show_results boolean not null default false,     -- «Дозволити перегляд підсумкових результатів»
+  is_locked boolean not null default false,        -- после первого ответа (`20` §14.4)
+  tags text[], status text not null default 'draft',
   opens_at timestamptz, closes_at timestamptz
 );
 
@@ -631,9 +637,22 @@ create table survey_responses (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
   survey_id uuid not null references surveys(id) on delete cascade,
-  user_id uuid references users(id),           -- null, если анонимно
-  answers jsonb not null,
+  user_id uuid references users(id),           -- null, если анонимно; других колонок, ведущих к человеку, нет
+  answers jsonb not null,                      -- {questionId: {optionId} | {own} | {optionIds, own?} | {text, fileIds?} | {value}}
+  path jsonb not null default '[]',            -- порядок показанных вопросов (режим з умовами)
   submitted_at timestamptz not null default now()
+);
+
+-- Участие: дедуп и черновик по ходу заполнения; связи с survey_responses нет (анонимность на уровне данных)
+create table survey_participations (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  survey_id uuid not null references surveys(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  status text not null default 'in_progress',  -- in_progress | submitted
+  draft jsonb not null default '{}',           -- {answers, path}; стирается при отправке
+  enrollment_id uuid, submitted_at timestamptz,
+  unique (tenant_id, survey_id, user_id)
 );
 ```
 
@@ -928,7 +947,8 @@ criteria_groups(id, tenant_id, name, description jsonb, tags text[])
 criteria(id, tenant_id, group_id, name, description jsonb,
          competency_id uuid references competencies(id))   -- наше
 
--- Анкета оценки (сверено `20` §14.2)
+-- Анкета оценки (сверено `20` §14.2). Spec 20: реализована как assessment_forms (0039) — состав в assessment_items,
+-- шкала — scales(kind=levels), is_locked при первом заполнении; комментарии к группам — assessment_tasks.group_comments jsonb
 assessments(
   id, tenant_id, title, description jsonb, instruction jsonb, attachments jsonb,
   kind text not null,               -- by_criteria | by_competencies
@@ -939,7 +959,7 @@ assessments(
   is_locked boolean not null default false,  -- после первого заполнения (§14.4)
   tags text[], status text
 )
-assessment_items(assessment_id, criterion_id, norm numeric(6,2), cluster text, sort_order int)
+assessment_items(assessment_id, criterion_id, norm numeric(6,2), cluster text, sort_order int)   -- Spec 20: form_id, RLS
 
 -- Чек-лист (сверено `20` §14.3): у пункта ВЕС, а не норма
 checklists(
@@ -951,6 +971,8 @@ checklists(
   tags text[], status text
 )
 checklist_items(checklist_id, criterion_id, weight numeric(6,2), sort_order int)
+-- Spec 20: пункты по-прежнему в checklists.items jsonb [{id, text, criterionId?, weight, isCritical, requiresPhoto, hint}] — criterionId
+-- ссылается на словарь; шкала одна (checklists.scale_id → scales); фото — на пункте, не на чек-листе (`20` §3.5)
 
 -- Циклы и ответы — общие для обеих анкет
 assessment_cycles(assessment_id, task_id, period_from, period_to, status, min_raters int)
@@ -1029,7 +1051,8 @@ scale_levels(scale_id, label, value numeric,
        characteristic text,                     -- «Характеристика оцінки»
        show_in_reports boolean,                 -- «Відображати у звітах»
        sort_order int)
--- Spec 24: обе таблицы созданы (0035, RLS, scale_levels.tenant_id ради политики); rating_scales анкет/чек-листов пока живёт отдельно — долг docs/28.
+-- Spec 24: обе таблицы созданы (0035, RLS, scale_levels.tenant_id ради политики). Spec 20: rating_scales анкет/чек-листов
+-- перенесена сюда (0039, kind=levels), таблица удалена; порог «норма» живёт в assessment_items.norm, а не в шкале.
 badges / user_badges / points_ledger            -- см. §2.10
 leaderboard_snapshots(scope_type, scope_id, period, rows jsonb)
 ```
@@ -1217,6 +1240,15 @@ security_event: login.success | login.failed | login.blocked | otp.sent | otp.fa
               | password.changed | password.reset_by_admin
               | roles.changed | contacts.changed | impersonation.started | impersonation.ended
               | export.personal_data | settings.security_changed | api_token.created | api_token.revoked
+
+-- Тип анкеты оценки (`20` §14.2: «Оцінка за критеріями» | «Оцінка за компетенціями»); Spec 20
+assessment_kind: by_criteria | by_competencies
+
+-- Режим опроса (`20` §14.5: «Лінійне опитування» | «Опитування з умовами»); Spec 20
+poll_mode: linear | conditional
+
+-- Типы вопросов опроса (`20` §14.7: «Одиночне» · «Множинне» · «Вільна відповідь» · «По шкалі»); Spec 20
+poll_question_kind: single | multi | free | scale
 ```
 
 ## Что проверяет тест схемы

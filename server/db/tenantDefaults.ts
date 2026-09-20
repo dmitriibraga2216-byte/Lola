@@ -15,9 +15,11 @@ export const DEFAULT_GOAL_STATUSES = [
   { code: 'cancelled', name: 'Скасовано', color: 'muted', sort: 5, isInitial: false, isFinal: true, isSuccess: false, requiresComment: true, transitions: [], who: ['development.own', 'development.team'] },
 ]
 
-export const DEFAULT_RATING_SCALES = [
-  { name: 'Зараховано / Не зараховано', kind: 'binary', options: [{ value: 0, label: 'Не зараховано', color: 'coral' }, { value: 1, label: 'Зараховано', color: 'teal' }], pass: 1 },
-  { name: '1–5', kind: 'ordinal', options: [{ value: 1, label: 'Не відповідає', color: 'coral' }, { value: 2, label: 'Частково', color: 'coral' }, { value: 3, label: 'Відповідає', color: 'sun' }, { value: 4, label: 'Вище очікувань', color: 'teal' }, { value: 5, label: 'Взірець', color: 'teal' }], pass: 3 },
+/** Шкалы анкет по умолчанию — `scales(kind=levels)` + `scale_levels` (docs/24 Г-24.4; Spec 20 свёл сюда прежнюю rating_scales). */
+export const DEFAULT_LEVEL_SCALES = [
+  { name: 'Зараховано / Не зараховано', levels: [{ value: 0, label: 'Не зараховано' }, { value: 1, label: 'Зараховано' }] },
+  { name: '1–5', levels: [{ value: 1, label: 'Не відповідає' }, { value: 2, label: 'Частково' }, { value: 3, label: 'Відповідає' }, { value: 4, label: 'Вище очікувань' }, { value: 5, label: 'Взірець' }] },
+  { name: 'Шкала від 0 до 10', levels: Array.from({ length: 11 }, (_, i) => ({ value: i, label: String(i) })) },
 ]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,10 +31,15 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
       values (${tenantId}::uuid, ${s.code}, ${s.name}, ${s.color}, ${s.sort}, ${s.isInitial}, ${s.isFinal}, ${s.isSuccess}, ${s.requiresComment}, ${arr(s.transitions)}, ${arr(s.who)})
       on conflict (tenant_id, code) do nothing`)
   }
-  for (const s of DEFAULT_RATING_SCALES) {
-    await tx.execute(sql`
-      insert into rating_scales (tenant_id, name, kind, options, pass_threshold, allow_na)
-      values (${tenantId}::uuid, ${s.name}, ${s.kind}, ${JSON.stringify(s.options)}::jsonb, ${s.pass}, true)
-      on conflict (tenant_id, name) do nothing`)
+  for (const s of DEFAULT_LEVEL_SCALES) {
+    const rows = await tx.execute(sql`
+      insert into scales (tenant_id, name, kind, display_as)
+      values (${tenantId}::uuid, ${s.name}, 'levels', 'label')
+      on conflict (tenant_id, name) do nothing returning id`) as unknown as { id: string }[]
+    const id = rows[0]?.id
+    if (!id) continue
+    for (const [i, l] of s.levels.entries()) {
+      await tx.execute(sql`insert into scale_levels (tenant_id, scale_id, label, value, sort_order) values (${tenantId}::uuid, ${id}::uuid, ${l.label}, ${l.value}, ${i})`)
+    }
   }
 }

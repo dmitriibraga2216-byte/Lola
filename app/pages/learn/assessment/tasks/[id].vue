@@ -4,12 +4,14 @@ const { t } = useI18n()
 const { api } = useApi()
 const route = useRoute()
 const router = useRouter()
-interface Opt { value: number, label: string, color?: string }
-interface Crit { id: string, text: string, description: string | null, requiresCommentBelow: number | null, scale: { options: Opt[], allowNa: boolean } | null }
+interface Opt { value: number, label: string }
+interface Crit { id: string, text: string, description: string | null, norm: number }
 interface Group { id: string, name: string, description: string | null, criteria: Crit[] }
-interface Data { task: { id: string, status: string, raterKind: string }, cycle: { title: string, anonymousForSubject: boolean }, subject: { fullName: string }, structure: { groups: Group[] }, answers: { criterionId: string, value: number | null, comment: string | null, isNa: boolean }[], commentsVisibleTo: string }
+interface FormRules { allowCommentGroups: boolean, commentGroupsRequired: boolean, commentWhenAboveNorm: boolean, commentWhenBelowNorm: boolean, commentWhenEqual: boolean, zeroMeansNoGrade: boolean }
+interface Data { task: { id: string, status: string, raterKind: string }, cycle: { title: string, anonymousForSubject: boolean }, subject: { fullName: string }, structure: { form: FormRules, scale: { options: Opt[] }, groups: Group[] }, answers: { criterionId: string, value: number | null, comment: string | null, isNa: boolean }[], groupComments: Record<string, string>, commentsVisibleTo: string, isAnonymous: boolean, minRatersToShow: number }
 const data = ref<Data | null>(null)
 const answers = reactive<Record<string, { value: number | null, comment: string, isNa: boolean }>>({})
+const groupComments = reactive<Record<string, string>>({})
 const error = ref('')
 const flagged = ref<string[]>([])
 const saving = ref(false)
@@ -22,6 +24,7 @@ onMounted(async () => {
     data.value = await api<Data>(`/assessment/tasks/${route.params.id}`)
     for (const g of data.value.structure.groups) for (const c of g.criteria) answers[c.id] = { value: null, comment: '', isNa: false }
     for (const a of data.value.answers) answers[a.criterionId] = { value: a.value, comment: a.comment ?? '', isNa: a.isNa }
+    Object.assign(groupComments, data.value.groupComments ?? {})
   } catch (err) { error.value = apiErrorOf(err).message }
 })
 const all = computed(() => data.value?.structure.groups.flatMap(g => g.criteria) ?? [])
@@ -40,7 +43,7 @@ async function save() {
   if (readOnly.value) return
   saving.value = true
   try {
-    await api(`/assessment/tasks/${route.params.id}`, { method: 'PUT', body: { answers: Object.entries(answers).map(([criterionId, a]) => ({ criterionId, value: a.value, comment: a.comment || null, isNa: a.isNa })) } })
+    await api(`/assessment/tasks/${route.params.id}`, { method: 'PUT', body: { answers: Object.entries(answers).map(([criterionId, a]) => ({ criterionId, value: a.value, comment: a.comment || null, isNa: a.isNa })), groupComments } })
     savedAt.value = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
   } catch (err) { error.value = apiErrorOf(err).message } finally { saving.value = false }
 }
@@ -68,13 +71,25 @@ async function decline() {
   try { await api(`/assessment/tasks/${route.params.id}/decline`, { method: 'POST', body: { reason } }); router.push('/learn/assessment') }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const needsComment = (c: Crit) => c.requiresCommentBelow != null && answers[c.id]?.value != null && answers[c.id]!.value! < c.requiresCommentBelow && !answers[c.id]!.comment.trim()
+/** Правило комментирования против нормы (docs/20 §14.2): ниже нормы — обязателен, выше/при совпадении — разрешён. Считает сервер, клиент лишь показывает поле. */
+function commentRule(c: Crit): 'required' | 'allowed' | 'none' {
+  const f = data.value?.structure.form
+  const v = answers[c.id]?.value
+  if (!f || v == null || (f.zeroMeansNoGrade && v === 0)) return 'none'
+  if (v < c.norm) return f.commentWhenBelowNorm ? 'required' : 'none'
+  if (v > c.norm) return f.commentWhenAboveNorm ? 'allowed' : 'none'
+  return f.commentWhenEqual ? 'allowed' : 'none'
+}
+const needsComment = (c: Crit) => commentRule(c) === 'required' && !answers[c.id]!.comment.trim()
+const showComment = (c: Crit) => commentRule(c) !== 'none' || !!answers[c.id]?.comment
+function setGroupComment(id: string, v: string) { groupComments[id] = v; if (timer) clearTimeout(timer); timer = setTimeout(save, 800) }
 </script>
 <template>
   <div v-if="data">
     <NuxtLink to="/learn/assessment" class="back">← {{ t('assess.title') }}</NuxtLink>
-    <h1>{{ data.subject.fullName }}</h1>
-    <p class="sub">{{ data.cycle.title }} · {{ t(`assess.kind.${data.task.raterKind}`) }}</p>
+    <h1>{{ t('assess.rateTitle') }}</h1>
+    <p class="who">{{ t('assess.youRate', { name: data.subject.fullName, role: t(`assess.kindAs.${data.task.raterKind}`) }) }}<template v-if="data.isAnonymous"> {{ t('assess.anonNote', { n: data.minRatersToShow }) }}</template></p>
+    <p class="sub">{{ data.cycle.title }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <div class="sticky">
       <span>{{ t('assess.progress', { n: done, total: all.length }) }}</span>
@@ -83,17 +98,18 @@ const needsComment = (c: Crit) => c.requiresCommentBelow != null && answers[c.id
 
     <template v-if="!summary">
       <section v-for="g in data.structure.groups" :key="g.id" class="group">
-        <h2>{{ g.name }}</h2>
+        <h2 class="gname">{{ g.name }}</h2>
         <p v-if="g.description" class="sub">{{ g.description }}</p>
         <div v-for="c in g.criteria" :key="c.id" :class="['crit', { flag: flagged.includes(c.id) }]" :data-testid="`crit-${c.id}`">
           <div class="crit-text">{{ c.text }}</div>
           <div v-if="c.description" class="hint">{{ c.description }}</div>
-          <div class="scale">
-            <button v-for="o in c.scale?.options ?? []" :key="o.value" :class="['opt', o.color, { on: answers[c.id]?.value === o.value }]" :disabled="readOnly" @click="set(c.id, { value: o.value })">{{ o.value }}<small>{{ o.label }}</small></button>
-            <button v-if="c.scale?.allowNa" :class="['opt', 'na', { on: answers[c.id]?.isNa }]" :disabled="readOnly" @click="set(c.id, { isNa: true })">{{ t('assess.na') }}</button>
+          <div class="scale" role="radiogroup" :aria-label="c.text">
+            <button v-for="o in data.structure.scale.options" :key="o.value" type="button" role="radio" :aria-checked="answers[c.id]?.value === o.value" :class="['opt', { on: answers[c.id]?.value === o.value }]" :disabled="readOnly" :title="o.label" @click="set(c.id, { value: o.value })">{{ o.value }}<small v-if="o.label !== String(o.value)">{{ o.label }}</small></button>
+            <button type="button" :class="['opt', 'na', { on: answers[c.id]?.isNa }]" :disabled="readOnly" @click="set(c.id, { isNa: true })">{{ t('assess.na') }}</button>
           </div>
-          <textarea v-if="!readOnly || answers[c.id]?.comment" :value="answers[c.id]?.comment" :class="{ req: needsComment(c) }" :readonly="readOnly" rows="1" :placeholder="needsComment(c) ? t('assess.commentRequired') : t('assess.comment')" @input="set(c.id, { comment: ($event.target as HTMLTextAreaElement).value })" />
+          <textarea v-if="(!readOnly && showComment(c)) || answers[c.id]?.comment" :value="answers[c.id]?.comment" :class="{ req: needsComment(c) }" :readonly="readOnly" rows="1" :placeholder="needsComment(c) ? t('assess.commentBelowNorm') : t('assess.comment')" :aria-label="t('assess.comment')" @input="set(c.id, { comment: ($event.target as HTMLTextAreaElement).value })" />
         </div>
+        <textarea v-if="data.structure.form.allowCommentGroups && (!readOnly || groupComments[g.id])" :value="groupComments[g.id] ?? ''" :class="['gcomment', { req: data.structure.form.commentGroupsRequired && !(groupComments[g.id] ?? '').trim() }]" :readonly="readOnly" rows="2" :placeholder="data.structure.form.commentGroupsRequired ? t('assess.groupCommentRequired') : t('assess.groupComment')" :aria-label="t('assess.groupComment')" @input="setGroupComment(g.id, ($event.target as HTMLTextAreaElement).value)" />
       </section>
       <div v-if="!readOnly" class="actions">
         <button v-if="data.task.raterKind === 'peer'" class="chip" @click="decline">{{ t('assess.decline') }}</button>
@@ -123,6 +139,9 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .crit { display: grid; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--color-bg-line-soft); }
 .crit.flag { outline: 2px solid var(--color-coral); border-radius: var(--radius-m); padding: var(--space-2); }
 .crit-text { font-weight: 700; }
+.who { margin: var(--space-2) 0 0; font-weight: 700; line-height: 1.4; }
+.gname { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.gcomment { margin-top: var(--space-2); }
 .hint { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
 .scale { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .opt { font: inherit; font-weight: 800; border: 1px solid var(--color-bg-line); background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-1) var(--space-2); min-width: 44px; display: grid; cursor: pointer; }

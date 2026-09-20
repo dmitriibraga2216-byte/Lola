@@ -96,16 +96,28 @@ export const knowledgeLinks = pgTable('knowledge_links', {
   unique().on(t.tenantId, t.articleId, t.targetType, t.targetId),
 ])
 
-// ── Опросы (docs/03 §3.8) ──────────────────────────────────────────────
+// ── Опросы (docs/03 §3.8; docs/20 §14.5, §14.7 — Spec 20) ──────────────────
 
+/**
+ * Опрос: четыре типа вопроса (`poll_question_kind`: single | multi | free | scale), «свій варіант»,
+ * режим `poll_mode` (linear | conditional — следующий вопрос зависит от ответа, граф знает только сервер).
+ * «Конфіденційно» — ответы с именами видит только владелец; «Анонімне» — автор не хранится вовсе
+ * (`survey_responses.user_id` null, связи с `survey_participations` нет). `is_locked` — после первого ответа.
+ */
 export const surveys = pgTable('surveys', {
   ...baseColumns,
   tenantId: tenantId(),
   title: text('title').notNull(),
   description: text('description'),
   kind: text('kind').notNull().default('survey'), // survey | course_feedback | poll
-  questions: jsonb('questions').notNull(), // [{id, type: scale|yesno|choice|text, text, options?, required}]
+  // [{id, type, text, options?: [{id, text}], allowOwnOption?, allowFiles?, scaleId?, required?, next?: [{optionId?, goTo}]}]
+  questions: jsonb('questions').notNull(),
+  mode: text('mode').notNull().default('linear'), // poll_mode: linear | conditional
   isAnonymous: boolean('is_anonymous').notNull().default(false),
+  isConfidential: boolean('is_confidential').notNull().default(false),
+  showResults: boolean('show_results').notNull().default(false), // «Дозволити перегляд підсумкових результатів»
+  isLocked: boolean('is_locked').notNull().default(false),
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   status: text('status').notNull().default('draft'), // draft | active | closed
   opensAt: timestamp('opens_at', { withTimezone: true }),
   closesAt: timestamp('closes_at', { withTimezone: true }),
@@ -115,17 +127,37 @@ export const surveys = pgTable('surveys', {
   index().on(t.tenantId),
 ])
 
+/** Ответ. У анонимного опроса `user_id` пуст и никакой колонки, ведущей к человеку, нет. */
 export const surveyResponses = pgTable('survey_responses', {
   ...baseColumns,
   tenantId: tenantId(),
   surveyId: uuid('survey_id').notNull().references(() => surveys.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }), // null если анонимно
-  respondentHash: text('respondent_hash'), // для дедупа анонимных без раскрытия
   enrollmentId: uuid('enrollment_id').references(() => enrollments.id, { onDelete: 'set null' }),
   answers: jsonb('answers').notNull(),
+  path: jsonb('path').notNull().default('[]'), // порядок показанных вопросов (режим з умовами)
   submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [
-  unique().on(t.tenantId, t.surveyId, t.respondentHash),
+  index().on(t.tenantId, t.surveyId),
+])
+
+/**
+ * Участие: «этот человек проходит/прошёл опрос» — для дедупа и черновика по ходу заполнения.
+ * После отправки черновик стирается; связи с `survey_responses` нет — у анонимного опроса
+ * восстановить автора ответа нельзя.
+ */
+export const surveyParticipations = pgTable('survey_participations', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  surveyId: uuid('survey_id').notNull().references(() => surveys.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('in_progress'), // in_progress | submitted
+  draft: jsonb('draft').notNull().default('{}'), // {answers, path}
+  enrollmentId: uuid('enrollment_id'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+}, t => [
+  unique().on(t.tenantId, t.surveyId, t.userId),
+  index().on(t.tenantId, t.userId),
 ])
 
 // ── Новости (docs/03 §3.22, R1). Объявления — `notices` в hub.ts (Spec 21) ──

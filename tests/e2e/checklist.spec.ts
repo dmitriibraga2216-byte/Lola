@@ -14,14 +14,14 @@ test.afterAll(async () => {
 
 test('9. Чек-лист заполняется с телефона на точке: критический провал → план действий → отчёт (docs/20 §13.3–13.4)', async ({ page, request }) => {
   const { csrf } = await apiLogin(request, ADMIN_PHONE)
-  const scales = await api<{ id: string, kind: string }[]>(request, csrf, 'get', '/rating-scales')
-  const scaleId = scales.find(s => s.kind === 'binary')!.id
+  const scales = await api<{ id: string, name: string }[]>(request, csrf, 'get', '/scales?kind=levels')
+  const scaleId = scales.find(s => s.name === 'Зараховано / Не зараховано')!.id
   const cl = await api<{ id: string }>(request, csrf, 'put', '/checklists', {
-    title: `${PREFIX}Відкриття`, kind: 'observation', subjectKind: 'location', scoring: 'percent', passScore: 80, criticalFailRule: 'any_critical_fails_all', whoCanRun: { roles: ['manager', 'admin'] },
+    title: `${PREFIX}Відкриття`, kind: 'observation', subjectKind: 'location', scaleId, scoring: 'percent', passScore: 80, criticalFailRule: 'any_critical_fails_all', whoCanRun: { roles: ['manager', 'admin'] },
     items: [
-      { id: 'a', group: 'Зал', text: 'Столи протерті', scaleId, weight: 1 },
-      { id: 'b', group: 'Кухня', text: 'Холодильник ≤ 4°C', scaleId, weight: 2, isCritical: true },
-      { id: 'c', group: 'Кухня', text: 'Маркування', scaleId, weight: 1 },
+      { id: 'a', group: 'Зал', text: 'Столи протерті', weight: 1 },
+      { id: 'b', group: 'Кухня', text: 'Холодильник ≤ 4°C', weight: 2, isCritical: true },
+      { id: 'c', group: 'Кухня', text: 'Маркування', weight: 1 },
     ],
   })
 
@@ -33,15 +33,15 @@ test('9. Чек-лист заполняется с телефона на точ�
   await expect(page).toHaveURL(/\/learn\/checklists\/run\//)
 
   // Два пункта зараховано, критический — провален
-  await page.getByTestId('item-a').getByRole('button', { name: 'Зараховано', exact: true }).click()
-  await page.getByTestId('item-b').getByRole('button', { name: 'Не зараховано', exact: true }).click()
-  await page.getByTestId('item-c').getByRole('button', { name: 'Зараховано', exact: true }).click()
+  await page.getByTestId('item-a').getByRole('radio', { name: 'Зараховано', exact: true }).click()
+  await page.getByTestId('item-b').getByRole('radio', { name: 'Не зараховано', exact: true }).click()
+  await page.getByTestId('item-c').getByRole('radio', { name: 'Зараховано', exact: true }).click()
   await expect(page.getByText('Виконано 3 з 3')).toBeVisible()
   await page.getByTestId('run-finish').click()
 
   // Не пройдено → план действий обязателен
   await expect(page.getByText(/додайте план дій/)).toBeVisible()
-  await expect(page.getByText('0%')).toBeVisible()
+  await expect(page.getByText('0%').first()).toBeVisible()
   await page.getByPlaceholder('Що виправити').fill('Викликати майстра')
   await page.locator('input[type=date]').fill('2026-12-31')
   await page.getByTestId('run-send').click()

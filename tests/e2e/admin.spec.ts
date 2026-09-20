@@ -90,7 +90,7 @@ test('7. Импорт: предпросмотр с ошибками, приме�
 test('8. Доступ: employee не открывает админку ни по ссылке, ни по API', async ({ page, request }) => {
   await loginViaUi(page, EMPLOYEE_PHONE)
   await page.goto('/admin/people')
-  await expect(page).toHaveURL(/\/$/) // гард увёл на главную
+  await expect(page).toHaveURL(/\/learn$/) // гард увёл на главную, корень — в кабинет
   await expect(page.getByRole('link', { name: 'Управління' })).toHaveCount(0)
 
   await apiLogin(request, EMPLOYEE_PHONE)

@@ -52,11 +52,8 @@
     "policy": "Політика обробки даних"
   },
   "home": {
-    "signedInAs": "Ви увійшли як {name}",
-    "space": "Простір: {name}",
     "logout": "Вийти",
     "adminLink": "Управління",
-    "learnLink": "Моє навчання",
     "linkTelegram": "Підключити Telegram",
     "openTelegram": "Відкрити бота →",
     "tgToken": "Бот не налаштований. Токен: {token}"

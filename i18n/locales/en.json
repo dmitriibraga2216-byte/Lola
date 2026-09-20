@@ -52,11 +52,8 @@
     "policy": "Data policy"
   },
   "home": {
-    "signedInAs": "Signed in as {name}",
-    "space": "Space: {name}",
     "logout": "Sign out",
     "adminLink": "Manage",
-    "learnLink": "My learning",
     "linkTelegram": "Connect Telegram",
     "openTelegram": "Open bot →",
     "tgToken": "Bot not configured. Token: {token}"

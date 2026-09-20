@@ -1,11 +1,12 @@
 import { and, desc, eq, ilike, inArray, isNull, ne, sql } from 'drizzle-orm'
-import { assessmentForms, checklists, complexTests, courses, meetups, programs, quizzes, resources, surveys, workshops } from '../db/schema'
+import { assessmentForms, checklists, complexTests, courses, meetups, notices, programs, quizzes, resources, surveys, workshops } from '../db/schema'
 import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
 import type { ContentType } from '../../shared/enums'
 
 /**
- * Назначаемый контент — одиннадцать типов эталона (docs/15 §14.1, docs/02 content_type).
+ * Назначаемый контент — одиннадцать типов эталона (docs/15 §14.1, docs/02 content_type)
+ * плюс объявление `notice` (docs/21 §14.5, Spec 21): назначается как обучение, подтверждение = прохождение.
  * Здесь один ответ на два вопроса: «что можно выбрать» (список для блока «Контент»)
  * и «существует ли и доступен ли контент» (проверка при создании назначения).
  * Правил прохождения контент не содержит (CLAUDE.md п. 11) — только название и состояние.
@@ -64,6 +65,11 @@ export async function findContent(tx: TenantTx, contentType: ContentType, id: st
         .where(and(eq(meetups.id, id), contentType === 'webinar' ? eq(meetups.kind, 'webinar') : inArray(meetups.kind, ['meetup', 'event'])))
       return m && m.status !== 'cancelled' ? { id: m.id, title: m.title, summary: m.startsAt ? m.startsAt.toISOString() : null } : null
     }
+    case 'notice': {
+      const [n] = await tx.select({ id: notices.id, title: notices.title, status: notices.status, kind: notices.kind }).from(notices)
+        .where(and(eq(notices.id, id), isNull(notices.deletedAt)))
+      return n && n.status !== 'archived' ? { id: n.id, title: n.title, summary: n.kind } : null
+    }
   }
 }
 
@@ -107,6 +113,9 @@ export async function listContent(ctx: Ctx, contentType: ContentType, q?: string
             ne(meetups.status, 'cancelled'),
             ...(like ? [ilike(meetups.title, like)] : []),
           )).orderBy(desc(meetups.startsAt)).limit(200)
+      case 'notice':
+        return tx.select({ id: notices.id, title: notices.title, summary: notices.kind }).from(notices)
+          .where(and(isNull(notices.deletedAt), ne(notices.status, 'archived'), ...(like ? [ilike(notices.title, like)] : []))).orderBy(desc(notices.createdAt)).limit(200)
     }
   })
 }

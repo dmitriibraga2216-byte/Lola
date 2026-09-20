@@ -21,6 +21,7 @@ export default defineEventHandler(async (event) => {
       email: users.email,
       locale: users.locale,
       status: users.status,
+      birthdayConsent: users.birthdayConsent, // 29 Б.16: тумблер в профиле
     }).from(users).where(eq(users.id, auth.userId))
     if (!u) return null
     // Основное размещение — для карточки человека в меню и профиля (мокапы Main, Profile)

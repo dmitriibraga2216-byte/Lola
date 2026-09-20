@@ -236,18 +236,20 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/knowledge/search` | единый поиск: `?in=all\|resources\|news\|forum\|wiki` |
-| CRUD | `/knowledge/access-groups` | группы доступа к ресурсам |
-| POST | `/knowledge/:id/bookmark` | закладка |
-| CRUD | `/news`, `/notices`, `/simple-notices` | лента и объявления |
-| POST | `/notices/:id/acknowledge` | «Ознайомлений» — подтверждение (`21` §14.5) |
-| GET | `/notices/:id/coverage` | кто подтвердил, кто нет |
+| GET | `/knowledge/search` | единый поиск: `?q=&in=all\|resources\|news\|notices` (форума и wiki нет — `30`); результаты помечены источником и закладкой |
+| CRUD | `/access-groups` | группы доступа к ресурсам (`?appliesTo=knowledge`); `GET/PATCH /settings/knowledge` — тумблер «Використовувати обмеження доступу» |
+| POST | `/knowledge/:id/bookmark` | закладка-переключатель, тело `{contentType: resource\|article\|news\|notice}`; `GET /knowledge/bookmarks` — «Мої закладки» |
+| CRUD | `/news`, `/notices`, `/simple-notices` | лента и объявления; `GET/POST /news/categories`; `GET /notices/pending` — что показать при входе, `GET /notices/mine`; `POST /simple-notices/:id/view` |
+| POST | `/notices/:id/acknowledge` | «Ознайомлений» — подтверждение (`21` §14.5); объявление назначается через `POST /tasks {subjectType: notice}` |
+| GET | `/notices/:id/coverage` | кто подтвердил, кто нет, по точкам; `POST /notices/:id/remind` — «Нагадати тим, хто не підтвердив» |
+| GET | `/birthdays`, `/contacts`, `/events` | дни рождения (`?tab=upcoming\|past&from=&to=`), контакты (`?q=&orgUnitId=&positionId=&cityId=`), события; `POST /events`, `PATCH /events/:id`, `POST /events/:id/register`; `PATCH /me/birthday-consent` |
+| GET | `/public/guest-page` | гостевая страница без входа: тенант по поддомену `Host` или `?slug=`; неизвестный — 404 |
 | CRUD | `/gift-store/items` | товары магазина |
 | POST | `/gift-store/items/:id/order` | покупка → резерв |
 | POST | `/gift-store/orders/:id/status` | `ready` \| `issued` \| `cancelled` (`21` Г-21.1) |
 | GET | `/bonuses/ledger` | книга операций с остатком в строке |
 | POST | `/bonuses/adjust` | ручное начисление или списание с причиной |
-| CRUD | `/guest-blocks` | гостевая страница |
+| GET/PUT | `/guest-blocks` | гостевая страница тенанта: три блока (`21` Г-21.3) |
 | GET | `/comments` | единая лента комментариев со всех источников |
 | POST | `/comments/:id/read`, `/comments/:id/reply` | пометка и ответ автору материала |
 

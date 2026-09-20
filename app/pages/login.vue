@@ -30,6 +30,13 @@ const resendIn = ref(0)
 const codeHelp = ref(false)
 const codeInput = ref<HTMLInputElement | null>(null)
 const supportContact = String(useRuntimeConfig().public.supportContact || '')
+// Гостевая страница (docs/21 Г-21.3, docs/25 §4): три блока тенанта до входа; тенант — по поддомену Host, в dev — ?tenant=
+interface Guest { name: string, slug: string, blocks: { welcome: unknown[], supportContact: { name?: string, phone?: string, email?: string, telegram?: string }, policyUrl: string | null } }
+const guest = ref<Guest | null>(null)
+onMounted(async () => {
+  try { guest.value = (await rawFetch<{ data: Guest }>(`/api/v1/public/guest-page?slug=${encodeURIComponent(tenantSlug.value)}`)).data }
+  catch { guest.value = null }
+})
 const maskedPhone = computed(() => {
   const d = phone.value.replace(/\D/g, '')
   return `+380 ${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 7)} ${d.slice(7, 9)}`.trim()
@@ -208,6 +215,13 @@ async function selectTenant(tenantId: string) {
       </template>
 
       <p v-if="error" class="error">{{ error }}</p>
+      <section v-if="guest" class="guest" data-testid="guest-blocks">
+        <div v-if="guest.blocks.welcome.length" class="guest-welcome"><LessonBlocks :blocks="guest.blocks.welcome as never" :blocks-state="{}" readonly /></div>
+        <p v-if="guest.blocks.supportContact.name || guest.blocks.supportContact.phone || guest.blocks.supportContact.email || guest.blocks.supportContact.telegram" class="support">
+          {{ t('login.guestSupport') }}<template v-if="guest.blocks.supportContact.name"> {{ guest.blocks.supportContact.name }}</template><template v-if="guest.blocks.supportContact.phone"> · <a :href="`tel:${guest.blocks.supportContact.phone}`">{{ guest.blocks.supportContact.phone }}</a></template><template v-if="guest.blocks.supportContact.email"> · <a :href="`mailto:${guest.blocks.supportContact.email}`">{{ guest.blocks.supportContact.email }}</a></template><template v-if="guest.blocks.supportContact.telegram"> · {{ guest.blocks.supportContact.telegram }}</template>
+        </p>
+        <p v-if="guest.blocks.policyUrl" class="support"><a :href="guest.blocks.policyUrl" target="_blank" rel="noopener">{{ t('login.policy') }}</a></p>
+      </section>
       <p class="support">
         {{ t('login.support') }}<template v-if="supportContact"> {{ t('login.supportOr') }} <a :href="`mailto:${supportContact}`">{{ supportContact }}</a></template>
       </p>
@@ -326,6 +340,8 @@ button:disabled {
 .linkish { background: none; color: var(--color-teal-ink); padding: 0; text-align: left; font-weight: 800; }
 .help-box { display: grid; gap: var(--space-2); background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .help-box p { margin: 0; }
+.guest { margin-top: var(--space-3); display: grid; gap: var(--space-1); }
+.guest-welcome { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .support { margin: var(--space-2) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--color-bg-line-soft); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .support a { color: var(--color-teal-ink); }
 

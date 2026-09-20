@@ -1,15 +1,82 @@
 import { sql } from 'drizzle-orm'
 import {
-  index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
+  boolean, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 
 /**
  * Корпоративный хаб, R2-часть (docs/03 §3.22, §3.26): wiki с иерархией и историей правок,
- * конструктор сводных отчётов с расписанием. Объявления живут в `news` (kind=announcement),
- * события — в `meetups` (kind=event).
+ * конструктор сводных отчётов с расписанием, объявления (Spec 21). События — в `meetups` (kind=event).
  */
+
+/**
+ * Объявление (docs/02 «Корпоративный хаб», docs/21 §3.3, §14.5) — назначаемая сущность, не лента:
+ * контент типа `notice` назначается через `assignments` (аудитория, срок, напоминания — там,
+ * CLAUDE.md п. 11), подтверждение «Ознайомлений» — строка в `notice_acks`.
+ * `starts_at/ends_at` — «Термін оголошення», период показа, а не срок подтверждения.
+ */
+export const notices = pgTable('notices', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  title: text('title').notNull(),
+  body: jsonb('body').notNull().default('[]'),
+  attachments: jsonb('attachments').notNull().default('[]'), // [{mediaId, name, bytes}]
+  kind: text('kind').notNull().default('acknowledge'), // notice_kind (docs/02): acknowledge | event | notification
+  startsAt: timestamp('starts_at', { withTimezone: true }),
+  endsAt: timestamp('ends_at', { withTimezone: true }),
+  // docs/21 §3.3, §5.4: как показывать
+  showMode: text('show_mode').notNull().default('modal'), // modal | banner | both
+  priority: text('priority').notNull().default('normal'), // normal | important | critical
+  blockUntilAck: boolean('block_until_ack').notNull().default(false), // нельзя работать, пока не подтвердил (docs/21 §7.4)
+  ackText: text('ack_text'), // текст кнопки, по умолчанию «Ознайомився»
+  status: text('status').notNull().default('draft'), // draft | published | archived; scheduled/active/expired — признаки по starts_at/ends_at (docs/32 В.4)
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  viewsCount: integer('views_count').notNull().default(0), // раз на человека в день
+  authorId: uuid('author_id').references(() => users.id),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, t => [
+  index().on(t.tenantId, t.status, t.publishedAt.desc()),
+])
+
+/** «Ознайомлений N (всього M)» — подтверждение одного человека; охват считается по аудитории назначений. */
+export const noticeAcks = pgTable('notice_acks', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  noticeId: uuid('notice_id').notNull().references(() => notices.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  ackedAt: timestamp('acked_at', { withTimezone: true }).notNull().defaultNow(),
+  requestContext: jsonb('request_context'), // {ip, geo, user_agent, browser, os, device} — отметка «с датой и устройством» (docs/21 §3.3 device)
+}, t => [
+  unique().on(t.tenantId, t.noticeId, t.userId),
+])
+
+/** «Прості оголошення» (docs/21 §14.5, docs/02): без назначения и подтверждения — просто плашка. */
+export const simpleNotices = pgTable('simple_notices', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  title: text('title').notNull(),
+  body: jsonb('body').notNull().default('[]'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  endsAt: timestamp('ends_at', { withTimezone: true }), // «Діє до»
+  status: text('status').notNull().default('draft'), // draft | published | archived
+  viewsCount: integer('views_count').notNull().default(0), // «Реакцій» в мокапе — просмотры
+  authorId: uuid('author_id').references(() => users.id),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, t => [
+  index().on(t.tenantId, t.status),
+])
+
+/** «Мої закладки» (docs/21 §14.1, docs/04 §4.13): закладка человека на ресурс, новость или объявление. */
+export const bookmarks = pgTable('bookmarks', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  contentType: text('content_type').notNull(), // resource | article | news | notice (источники поиска)
+  contentId: uuid('content_id').notNull(),
+}, t => [
+  unique().on(t.tenantId, t.userId, t.contentType, t.contentId),
+])
 
 export const wikiPages = pgTable('wiki_pages', {
   ...baseColumns,

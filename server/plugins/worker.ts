@@ -53,7 +53,8 @@ export default defineNitroPlugin(async () => {
       const { goalDueScan } = await import('../services/development')
       const { assessmentScan } = await import('../services/assessment')
       const { actionDueScan, frequencyScan } = await import('../services/checklists')
-      const { announcementScan } = await import('../services/news')
+      const { noticeScan } = await import('../services/notices')
+      const { birthdayScan } = await import('../services/hubPeople')
       const { programScan } = await import('../services/programs')
       const { inactiveScan } = await import('../services/people')
       const { planPeriodScan, requestReportScan } = await import('../services/developmentExtra')
@@ -77,11 +78,12 @@ export default defineNitroPlugin(async () => {
         const a = await assessmentScan(tenantId)
         const ai = await actionDueScan(tenantId)
         const cf = monday ? await frequencyScan(tenantId) : 0
-        const an = await announcementScan(tenantId)
+        const an = await noticeScan(tenantId)
+        const bd = await birthdayScan(tenantId)
         const pr = await programScan(tenantId)
         const { trajectoryScan } = await import('../services/trajectories')
         const tr = await trajectoryScan(tenantId) // docs/17: отложенные правилом прохождения, подстраховка таймеров
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, trajectories: tr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired, rolesExpired })
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, trajectories: tr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired, rolesExpired })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync

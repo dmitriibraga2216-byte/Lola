@@ -46,6 +46,12 @@ async function linkTelegram() {
   try { tgLink.value = await api('/telegram/link', { method: 'POST' }) }
   catch (err) { error.value = apiErrorOf(err).message }
 }
+// Дни рождения (docs/21 §7.8, 29 Б.16): согласие показывать — opt-out, тумблер здесь
+const birthdayConsent = ref((me.value?.user as { birthdayConsent?: boolean } | undefined)?.birthdayConsent ?? true)
+async function setBirthdayConsent(v: boolean) {
+  try { birthdayConsent.value = (await api<{ birthdayConsent: boolean }>('/me/birthday-consent', { method: 'PATCH', body: { birthdayConsent: v } })).birthdayConsent }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk') : ''
 </script>
 
@@ -96,6 +102,9 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
     <h2 class="section-title">{{ t('profile.more') }}</h2>
     <div class="links">
       <NuxtLink to="/learn/notifications" class="row-link">{{ t('notif.title') }}</NuxtLink>
+      <NuxtLink to="/learn/notices" class="row-link">{{ t('notices.title') }}</NuxtLink>
+      <NuxtLink to="/learn/events" class="row-link">{{ t('events.title') }}</NuxtLink>
+      <label class="toggle row-link"><input type="checkbox" :checked="birthdayConsent" @change="setBirthdayConsent(($event.target as HTMLInputElement).checked)"><span>{{ t('profile.birthdayConsent') }}<span class="hint">{{ t('profile.birthdayConsentHint') }}</span></span></label>
       <NuxtLink to="/learn/development" class="row-link">{{ t('dev.short') }}</NuxtLink>
       <NuxtLink to="/learn/surveys" class="row-link">{{ t('survey.title') }}</NuxtLink>
       <button class="row-link" @click="linkTelegram">{{ t('home.linkTelegram') }}</button>

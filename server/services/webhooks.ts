@@ -16,6 +16,7 @@ interface Ctx { tenantId: string, actorId: string }
 
 export const WEBHOOK_EVENTS = [
   'enrollment.completed', 'attempt.passed', 'attempt.failed', 'certificate.issued', 'assignment.overdue', 'user.created',
+  'notice.acknowledged', // docs/04 §4.15 (Spec 21)
 ] as const
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number]
 

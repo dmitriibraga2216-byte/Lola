@@ -21,6 +21,7 @@ export const meetups = pgTable('meetups', {
   title: text('title').notNull(),
   coverKey: text('cover_key'), // обложка события (docs/21 §3.4)
   registrationRequired: boolean('registration_required').notNull().default(true), // событие без регистрации — просто в афише
+  audience: jsonb('audience'), // кого запрошено на событие (docs/02 events.audience; null = все активные)
   description: jsonb('description').notNull().default('[]'), // блоки
   courseId: uuid('course_id').references(() => courses.id),
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),

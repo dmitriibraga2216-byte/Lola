@@ -22,6 +22,13 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/profiles', label: t('admin.nav.profiles'), show: hasScope('assignment.create') },
     { to: '/admin/knowledge', label: t('admin.nav.knowledge'), show: hasScope('knowledge.manage') },
     { to: '/admin/news', label: t('admin.nav.news'), show: hasScope('knowledge.manage') },
+    // Інформація (docs/21 §14, Spec 21)
+    { to: '/admin/notices', label: t('admin.nav.notices'), show: hasScope('knowledge.manage') },
+    { to: '/admin/simple-notices', label: t('admin.nav.simpleNotices'), show: hasScope('knowledge.manage') },
+    { to: '/admin/events', label: t('admin.nav.events'), show: hasScope('meetup.manage') },
+    { to: '/admin/birthdays', label: t('admin.nav.birthdays'), show: hasScope('people.view') },
+    { to: '/admin/contacts', label: t('admin.nav.contacts'), show: hasScope('people.view') },
+    { to: '/admin/knowledge/access', label: t('admin.nav.kbAccess'), show: hasScope('knowledge.manage') },
     { to: '/admin/assessment/cycles', label: t('admin.nav.assessCycles'), show: hasScope('assessment.run') },
     { to: '/admin/checklists', label: t('admin.nav.checklists'), show: hasScope('checklist.manage') },
   ] },
@@ -67,6 +74,7 @@ const sections = computed<Section[]>(() => [
   { key: 'settings', label: t('admin.section.settings'), icon: 'gear', items: [
     { to: '/admin/settings/notifications', label: t('admin.nav.notifications'), show: hasScope('settings.notifications') },
     { to: '/admin/settings/integrations', label: t('admin.nav.integrations'), show: hasScope('settings.integrations') },
+    { to: '/admin/settings/guest-page', label: t('admin.nav.guestPage'), show: hasScope('settings.tenant') },
   ] },
 ].map(s => ({ ...s, items: s.items.filter(i => i.show) })).filter(s => s.items.length > 0))
 

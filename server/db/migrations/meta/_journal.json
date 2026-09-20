@@ -239,6 +239,13 @@
       "when": 1789868366036,
       "tag": "0033_spec22_reports_frame",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789871293802,
+      "tag": "0034_spec21_notices",
+      "breakpoints": true
     }
   ]
 }

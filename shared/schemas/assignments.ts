@@ -104,7 +104,7 @@ const testGeneral = {
   proctoring: z.enum(['none', 'photo', 'webcam']).optional(),
 }
 
-/** Схема параметров по типу контента — одиннадцать вариантов, дискриминатор contentType. */
+/** Схема параметров по типу контента — одиннадцать вариантов эталона + notice, дискриминатор contentType. */
 export const taskParamsSchema = z.discriminatedUnion('contentType', [
   z.object({ contentType: z.literal('course'), ...common, strictOrder: z.boolean().optional(), allowEarlyFinish: z.boolean().optional() }).strict(),
   z.object({ contentType: z.literal('training_program'), ...common, strictOrder: z.boolean().optional() }).strict(),
@@ -117,6 +117,7 @@ export const taskParamsSchema = z.discriminatedUnion('contentType', [
   z.object({ contentType: z.literal('check_list'), ...common }).strict(),
   z.object({ contentType: z.literal('meetup'), ...common }).strict(),
   z.object({ contentType: z.literal('webinar'), ...common, webinarMinWatchPct: z.number().int().min(1).max(100).optional() }).strict(), // docs/18 Г-18.2
+  z.object({ contentType: z.literal('notice'), ...common }).strict(), // объявление (docs/21 §14.5, Spec 21): только Термін · Нагадування · Метод призначення
 ])
 export type TaskParams = z.infer<typeof taskParamsSchema>
 

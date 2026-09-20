@@ -587,19 +587,30 @@ export async function canAccessResource(tx: TenantTx, userId: string, resourceId
   return members.some(m => (subjects[m.subjectType as keyof typeof subjects] ?? []).includes(m.subjectId))
 }
 
-/** Просмотр ресурса учеником (вне курса): текущая опубликованная версия, если есть доступ; чужой тенант/нет доступа — null (404). */
-export async function viewResource(ctx: Ctx, id: string) {
+/**
+ * Просмотр ресурса учеником (вне курса): текущая опубликованная версия, если есть доступ; чужой тенант/нет
+ * доступа — null (404). По назначению (`assignmentId`, D-007) — версия, закреплённая при выдаче
+ * (`assignments.subject_version_id`); назначение другого ресурса или чужого тенанта — 404.
+ */
+export async function viewResource(ctx: Ctx, id: string, opts: { assignmentId?: string } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted(), eq(resources.status, 'published')))
     if (!r) return null
     if (!(await canAccessResource(tx, ctx.actorId, id))) return null
-    const v = await currentVersion(tx, id)
+    let pinnedVersionId: string | null = null
+    if (opts.assignmentId) {
+      const [a] = await tx.select({ subjectId: assignments.subjectId, subjectType: assignments.subjectType, versionId: assignments.subjectVersionId })
+        .from(assignments).where(eq(assignments.id, opts.assignmentId))
+      if (!a || a.subjectType !== 'resource' || a.subjectId !== id) return null
+      pinnedVersionId = a.versionId
+    }
+    const v = await currentVersion(tx, id, pinnedVersionId)
     if (!v) return null
     await tx.update(resources).set({ viewsCount: sql`${resources.viewsCount} + 1` }).where(eq(resources.id, id))
     await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'resource', contentId: id, title: v.title }) // docs/22 §13.4
     return {
       id: r.id, title: v.title, kind: v.kind, body: v.body as ContentBlock[], mediaId: v.mediaId, externalUrl: v.externalUrl,
-      version: v.version, estimatedMinutes: r.estimatedMinutes, canPrint: await printAllowed(tx, ctx.tenantId, r.allowPrint),
+      version: v.version, versionId: v.id, pinned: !!pinnedVersionId, estimatedMinutes: r.estimatedMinutes, canPrint: await printAllowed(tx, ctx.tenantId, r.allowPrint),
     }
   })
 }

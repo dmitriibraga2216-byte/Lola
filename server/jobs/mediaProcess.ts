@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { mediaAssets } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { S3_BUCKET, s3 } from '../services/media'
+import { sanitizeSvg } from '../services/svgSanitize'
 
 export interface MediaProcessJob {
   tenantId: string
@@ -12,6 +13,21 @@ export interface MediaProcessJob {
 }
 
 const VARIANT_WIDTHS = [320, 768, 1600] as const
+
+/**
+ * Число страниц PDF без разбора структуры (docs/28 Spec 11, D-006): максимум из `/Count N`
+ * у узлов `/Type /Pages` (у корневого — общее число), иначе — счётчик объектов `/Type /Page`.
+ * У PDF ≥ 1.5 с объектными потоками (сжатый каталог) оба маркера могут быть спрятаны —
+ * тогда null, и правило зачёта берёт 1 страницу (Г-11.5). Точный разбор — долг.
+ */
+export function countPdfPages(buffer: Buffer): number | null {
+  const text = buffer.toString('latin1')
+  let max = 0
+  for (const m of text.matchAll(/\/Type\s*\/Pages\b[^>]*?\/Count\s+(\d+)|\/Count\s+(\d+)[^>]*?\/Type\s*\/Pages\b/g)) max = Math.max(max, Number(m[1] ?? m[2]))
+  if (max > 0) return max
+  const single = text.match(/\/Type\s*\/Page(?![s\w])/g)?.length ?? 0
+  return single > 0 ? single : null
+}
 
 let ffmpegChecked: boolean | undefined
 function hasFfmpeg(): boolean {
@@ -37,7 +53,15 @@ export async function processMedia(job: MediaProcessJob): Promise<void> {
   try {
     if (media.kind === 'image') {
       const obj = await s3().send(new GetObjectCommand({ Bucket: S3_BUCKET(), Key: media.key }))
-      const buffer = Buffer.from(await obj.Body!.transformToByteArray())
+      let buffer = Buffer.from(await obj.Body!.transformToByteArray())
+
+      if (media.mime === 'image/svg+xml') {
+        // D-011: SVG отдаётся из S3 как есть — очищенный документ пишется поверх оригинала до вариантов
+        const clean = sanitizeSvg(buffer.toString('utf8'))
+        if (!clean.ok) throw new Error('SVG не пройшов перевірку: немає кореневого <svg>')
+        buffer = Buffer.from(clean.svg, 'utf8')
+        await s3().send(new PutObjectCommand({ Bucket: S3_BUCKET(), Key: media.key, Body: buffer, ContentType: 'image/svg+xml' }))
+      }
 
       const meta = await sharp(buffer).metadata()
       const variants: Record<string, string> = {}
@@ -124,9 +148,18 @@ export async function processMedia(job: MediaProcessJob): Promise<void> {
       return
     }
 
+    // PDF: число страниц для правила зачёта документа (Г-11.5, D-006) — в variants.pages;
+    // docx/pptx страниц не считаем (1 страница = 15 с), см. docs/28 Spec 11.
+    let variants = media.variants as Record<string, unknown>
+    if (media.mime === 'application/pdf') {
+      const obj = await s3().send(new GetObjectCommand({ Bucket: S3_BUCKET(), Key: media.key }))
+      const pages = countPdfPages(Buffer.from(await obj.Body!.transformToByteArray()))
+      if (pages) variants = { ...variants, pages }
+    }
+
     // Видео без ffmpeg, аудио, документы — принимаем как есть
     await withTenant(job.tenantId, null, async (tx) => {
-      await tx.update(mediaAssets).set({ status: 'ready', updatedAt: new Date() })
+      await tx.update(mediaAssets).set({ status: 'ready', variants, updatedAt: new Date() })
         .where(eq(mediaAssets.id, job.mediaId))
     })
   }

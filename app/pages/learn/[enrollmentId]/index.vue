@@ -7,8 +7,8 @@ const route = useRoute()
 const enrollmentId = route.params.enrollmentId as string
 
 interface Tree {
-  enrollment: { status: string, progressPct: string, requiredTotal: number, requiredDone: number }
-  course: { id: string, title: string, strictOrder: boolean }
+  enrollment: { status: string, progressPct: string, requiredTotal: number, requiredDone: number, score: string | null }
+  course: { id: string, title: string, strictOrder: boolean, resultMode: string }
   modules: { id: string, title: string, lessons: { id: string, title: string, itemType: string, isRequired: boolean, status: string }[] }[]
   resumeLessonId: string | null
 }
@@ -40,6 +40,9 @@ function icon(status: string, itemType: string) {
     <p class="meta">
       {{ t('learner.progressOf', { done: tree.enrollment.requiredDone, total: tree.enrollment.requiredTotal }) }}
       <span v-if="tree.enrollment.status === 'done'" class="badge teal">{{ t('learner.badge.completed') }}</span>
+    </p>
+    <p v-if="tree.enrollment.status === 'done' && tree.enrollment.score != null" class="meta">
+      {{ t('learner.result', { score: Math.round(Number(tree.enrollment.score)), mode: t(`course.resultMode.${tree.course.resultMode}`) }) }}
     </p>
 
     <NuxtLink

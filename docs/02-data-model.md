@@ -442,7 +442,8 @@ create table assignments (                    -- «кому что назнач�
   content_type text not null,                 -- course|training_program|resource|test|complex_test|
                                               -- workshop|meetup|webinar|poll|poll360|check_list
   content_id uuid not null,                   -- ссылка в таблицу по content_type
-  content_version_id uuid,                    -- фиксация версии на момент назначения
+  content_version_id uuid,                    -- фиксация версии на момент назначения (в коде — subject_version_id:
+                                              -- курс — при «зафиксировать версию», ресурс — всегда, D-007)
   audience jsonb not null,                    -- {type: user|position|location|org_unit|role|segment, ids:[…]}
   params jsonb not null default '{}',         -- ПРАВИЛА ПРОХОЖДЕНИЯ, см. ниже
   automation_rule_id uuid references automation_rules(id),

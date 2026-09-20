@@ -90,6 +90,11 @@ export async function updateSurvey(ctx: Ctx, id: string, input: PollPatch): Prom
       updatedAt: new Date(),
     }).where(eq(surveys.id, id)).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'survey.update', entity: 'survey', entityId: id, before: { title: before.title, status: before.status }, after: { title: s!.title, status: s!.status, fields: Object.keys(input) } })
+    // D-019: изменился состав вопросов опроса → баннер «N завдань змінено» у назначений (docs/15 §14.6)
+    if (input.questions !== undefined && JSON.stringify(before.questions) !== JSON.stringify(s!.questions)) {
+      const { markContentChanged } = await import('./tasks')
+      await markContentChanged(tx, 'poll', id)
+    }
     return { ok: true as const, survey: s! }
   })
 }

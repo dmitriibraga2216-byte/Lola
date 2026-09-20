@@ -15,7 +15,7 @@ import {
   type GradeResult, type QuizParams, type SnapshotQuestion,
 } from '../../shared/domain/grading'
 import type { ScoringMethod } from '../../shared/enums'
-import { completeLesson } from './learning'
+import { completeLesson, rollbackLessonCompletion, type RollbackResult } from './learning'
 import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
 
@@ -511,7 +511,7 @@ export async function addAnswerFile(ctx: Ctx, attemptId: string, questionId: str
 // ── «Перерахувати» (docs/22 §13.7, docs/04 §4.6) ──────────────────────
 
 export type RecalcResult
-  = | { ok: true, before: { status: string, score: number | null, passed: boolean | null }, after: { status: string, score: number, passed: boolean | null }, changed: boolean }
+  = | { ok: true, before: { status: string, score: number | null, passed: boolean | null }, after: { status: string, score: number, passed: boolean | null }, changed: boolean, rollback?: RollbackResult | null }
     | { ok: false, code: 'not_found' | 'in_progress' }
 
 /**
@@ -584,9 +584,13 @@ export async function recalculateAttempt(ctx: Ctx, attemptId: string, comment?: 
     }).where(eq(attempts.id, attemptId))
     await writeResult(tx, ctx, attemptId, 'recalculate', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, comment ?? null, ctx.actorId)
     const after = { status, score: totals.score, passed: totals.passed }
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.recalculate', entity: 'attempt', entityId: attemptId, before, after: { ...after, comment: comment ?? null } })
+    // D-013: зачёт снят (passed → failed/review) — откат урока, записи и сертификата (docs/28 Spec 12 «Перерахувати»)
+    const rollback = before.status === 'passed' && status !== 'passed' && attempt.enrollmentId && attempt.lessonId
+      ? await rollbackLessonCompletion(tx, ctx, attempt.enrollmentId, attempt.lessonId)
+      : null
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.recalculate', entity: 'attempt', entityId: attemptId, before, after: { ...after, comment: comment ?? null, ...(rollback?.lessonReopened ? { rollback } : {}) } })
     if (status === 'passed' && before.status !== 'passed') await onAttemptPassed(tx, ctx, attempt)
-    return { ok: true as const, before, after, changed: before.status !== status || before.score !== totals.score, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, userId: attempt.userId }
+    return { ok: true as const, before, after, changed: before.status !== status || before.score !== totals.score, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, userId: attempt.userId, rollback }
   })
   if (result.ok && result.after.status === 'passed' && result.before.status !== 'passed' && result.enrollmentId && result.lessonId) {
     await completeLesson({ tenantId: ctx.tenantId, actorId: result.userId }, result.enrollmentId, result.lessonId).catch(() => {})
@@ -796,6 +800,7 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
 /** Аннулирование руководителем (docs/12 §7.10): не считается использованной попыткой. */
 export async function annulAttempt(ctx: Ctx, attemptId: string, reason: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [before] = await tx.select({ status: attempts.status, enrollmentId: attempts.enrollmentId, lessonId: attempts.lessonId }).from(attempts).where(eq(attempts.id, attemptId))
     const [attempt] = await tx.update(attempts).set({
       status: 'annulled',
       annulledBy: ctx.actorId,
@@ -803,7 +808,11 @@ export async function annulAttempt(ctx: Ctx, attemptId: string, reason: string) 
       updatedAt: new Date(),
     }).where(and(eq(attempts.id, attemptId), sql`${attempts.status} <> 'annulled'`)).returning({ id: attempts.id })
     if (!attempt) return null
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.annul', entity: 'attempt', entityId: attemptId, after: { reason } })
+    // D-013: аннулированная зачтённая попытка снимает зачёт урока так же, как пересчёт (docs/12 §7 п. 10, docs/14 §12)
+    const rollback = before?.status === 'passed' && before.enrollmentId && before.lessonId
+      ? await rollbackLessonCompletion(tx, ctx, before.enrollmentId, before.lessonId)
+      : null
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.annul', entity: 'attempt', entityId: attemptId, before: { status: before?.status }, after: { reason, ...(rollback?.lessonReopened ? { rollback } : {}) } })
     return attempt
   })
 }

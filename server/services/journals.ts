@@ -13,7 +13,7 @@ import type { ContentType } from '../../shared/enums'
 export interface TaskAccessInput {
   tenantId: string
   userId: string
-  contentType: ContentType
+  contentType: ContentType | 'news' | 'simple_notice' | 'article' // хаб (Spec 21): просмотры новостей, плашек и статей — тем же журналом
   contentId: string
   title?: string | null
   assignmentId?: string | null

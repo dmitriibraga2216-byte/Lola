@@ -9,6 +9,9 @@ import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import { slugify } from './courses'
+import { canAccessResource } from './resources'
+import { countView, noticeAudience } from './notices'
+import { bookmarkKeys } from './hubExtra'
 import type { ContentBlock } from '../../shared/schemas/content'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -80,7 +83,7 @@ export async function getArticle(ctx: Ctx, idOrSlug: string, opts: { countView?:
       isNull(knowledgeArticles.deletedAt),
     ))
     if (!a) return null
-    if (opts.countView) await tx.update(knowledgeArticles).set({ viewCount: a.viewCount + 1 }).where(eq(knowledgeArticles.id, a.id))
+    if (opts.countView) await countView(tx, ctx, 'article', a.id, a.title) // раз на человека в день (Spec 21)
     const links = await tx.select().from(knowledgeLinks).where(eq(knowledgeLinks.articleId, a.id))
     const [my] = await tx.select({ helpful: knowledgeFeedback.helpful }).from(knowledgeFeedback).where(and(eq(knowledgeFeedback.articleId, a.id), eq(knowledgeFeedback.userId, ctx.actorId)))
     const related = a.relatedArticles.length ? await tx.select({ id: knowledgeArticles.id, title: knowledgeArticles.title, slug: knowledgeArticles.slug }).from(knowledgeArticles).where(and(sql`${knowledgeArticles.id} in ${a.relatedArticles}`, eq(knowledgeArticles.status, 'published'), isNull(knowledgeArticles.deletedAt))) : []
@@ -183,7 +186,7 @@ export function stem(word: string): string {
   return w
 }
 
-export interface SearchHit { kind: 'article' | 'lesson' | 'question', id: string, title: string, snippet: string, score: number, slug?: string }
+export interface SearchHit { kind: 'article' | 'lesson' | 'question' | 'news' | 'notice', id: string, title: string, snippet: string, score: number, slug?: string, bookmarked?: boolean, views?: number }
 
 /** Статья доступна человеку по аудитории (docs/21 §7.1): visibility.scope=tenant — всем; иначе конструктор аудитории. */
 async function visibleArticleIds(tx: TenantTx, actorId: string, ids: string[]): Promise<Set<string>> {
@@ -200,18 +203,24 @@ async function visibleArticleIds(tx: TenantTx, actorId: string, ids: string[]): 
 }
 
 /**
- * Поиск (docs/21 §5.2, §7.1): точное совпадение по заголовку ×3, полнотекст ×2, семантика ×1;
- * источники — статья, урок, вопрос теста; недоступное по аудитории не показывается; пустые запросы — в журнал.
+ * Поиск (docs/21 §5.2, §7.1, §14.1; docs/04 §4.13 `?in=`): точное совпадение по заголовку ×3, полнотекст ×2,
+ * семантика ×1; источники — `resources` (статья базы знаний, урок-ресурс, вопрос теста), `news`, `notices`
+ * (объявления, назначенные человеку); ресурсы — только доступные по группам доступа, статьи — по аудитории;
+ * недоступное не показывается даже заголовком; каждый запрос — в журнал (пустые — отчёт).
  */
-export async function search(ctx: Ctx, q: string, limit = 20): Promise<SearchHit[]> {
+export async function search(ctx: Ctx, q: string, limit = 20, source: 'all' | 'resources' | 'news' | 'notices' = 'all'): Promise<SearchHit[]> {
   const words = q.trim().split(/\s+/).filter(w => w.length >= 2).slice(0, 8)
   if (words.length === 0) return []
   const tsq = words.map(w => `${stem(w.replace(/[':&|!()]/g, ''))}:*`).join(' & ')
-  const vec = await embed(q)
+  const vec = source === 'all' || source === 'resources' ? await embed(q) : null
   const like = `%${q.trim()}%`
+  const want = (k: 'resources' | 'news' | 'notices') => source === 'all' || source === k
+  // Новости и объявления без FTS-индекса: каждое слово — ilike по заголовку или тексту, все слова обязательны
+  const wordsLike = (title: ReturnType<typeof sql>, body: ReturnType<typeof sql>) => sql.join(words.map(w => sql`(${title} ilike ${`%${w}%`} or ${body} ilike ${`%${w}%`})`), sql` and `)
 
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const articles = await tx.execute(sql`
+    const none: never[] = []
+    const articles = !want('resources') ? none : await tx.execute(sql`
       select id, title, slug, ts_headline('simple', plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
              ts_rank(search_tsv, to_tsquery('simple', ${tsq})) as score, (title ilike ${like}) as title_hit
       from knowledge_articles
@@ -219,16 +228,16 @@ export async function search(ctx: Ctx, q: string, limit = 20): Promise<SearchHit
       order by title_hit desc, score desc limit ${limit}
     `) as unknown as { id: string, title: string, slug: string, snippet: string, score: number, title_hit: boolean }[]
 
-    const lessons = await tx.execute(sql`
-      select r.id, r.title, ts_headline('simple', r.plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
+    const lessons = !want('resources') ? none : await tx.execute(sql`
+      select r.id, r.title, r.views_count, ts_headline('simple', r.plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
              ts_rank(r.search_tsv, to_tsquery('simple', ${tsq})) as score, (r.title ilike ${like}) as title_hit
       from resources r
       where r.status = 'published' and r.deleted_at is null and (r.search_tsv @@ to_tsquery('simple', ${tsq}) or r.title ilike ${like})
       order by title_hit desc, score desc limit ${limit}
-    `) as unknown as { id: string, title: string, snippet: string, score: number, title_hit: boolean }[]
+    `) as unknown as { id: string, title: string, views_count: number, snippet: string, score: number, title_hit: boolean }[]
 
     // Вопросы тестов: текст из блоков stem (без FTS-индекса — ilike по извлечённому тексту)
-    const qrows = await tx.execute(sql`
+    const qrows = !want('resources') ? none : await tx.execute(sql`
       select q.id, left(regexp_replace(coalesce(string_agg(b->>'html', ' ' order by 1), ''), '<[^>]+>', ' ', 'g'), 300) as text
       from ${questions} q cross join lateral jsonb_array_elements(q.stem) b
       where q.status = 'active' group by q.id
@@ -246,9 +255,34 @@ export async function search(ctx: Ctx, q: string, limit = 20): Promise<SearchHit
       semantic = semantic.filter(s => Number(s.score) > 0.75)
     }
 
+    // Новости (Spec 21): заголовок ×3, анонс/текст — ilike (FTS-индекса у новостей нет); только опубликованные и по аудитории
+    const newsRows = !want('news') ? none : await tx.execute(sql`
+      select n.id, n.title, n.views_count, n.audience, left(coalesce(n.lead, regexp_replace(n.body::text, '<[^>]+>', ' ', 'g')), 160) as snippet, (n.title ilike ${like}) as title_hit
+      from news n where n.status = 'published' and n.deleted_at is null and (${wordsLike(sql`n.title`, sql`coalesce(n.lead, '') || ' ' || n.body::text`)})
+      order by title_hit desc, n.published_at desc limit ${limit}
+    `) as unknown as { id: string, title: string, views_count: number, audience: Audience | null, snippet: string, title_hit: boolean }[]
+
+    // Объявления (Spec 21): только назначенные человеку — чужое не показывается даже заголовком
+    const noticeRows = !want('notices') ? none : await tx.execute(sql`
+      select o.id, o.title, o.views_count, left(regexp_replace(o.body::text, '<[^>]+>', ' ', 'g'), 160) as snippet, (o.title ilike ${like}) as title_hit
+      from notices o where o.status = 'published' and o.deleted_at is null and (${wordsLike(sql`o.title`, sql`o.body::text`)})
+      order by title_hit desc, o.published_at desc limit ${limit}
+    `) as unknown as { id: string, title: string, views_count: number, snippet: string, title_hit: boolean }[]
+
     const merged = new Map<string, SearchHit>()
     for (const a of articles) merged.set(`article:${a.id}`, { kind: 'article', id: a.id, slug: a.slug, title: a.title, snippet: a.snippet, score: (a.title_hit ? 3 : 0) + Number(a.score) * 2 })
-    for (const l of lessons) merged.set(`lesson:${l.id}`, { kind: 'lesson', id: l.id, title: l.title, snippet: l.snippet, score: (l.title_hit ? 3 : 0) + Number(l.score) * 2 })
+    for (const l of lessons) {
+      if (!(await canAccessResource(tx, ctx.actorId, l.id))) continue // группы доступа (docs/21 §14.1)
+      merged.set(`lesson:${l.id}`, { kind: 'lesson', id: l.id, title: l.title, snippet: l.snippet, score: (l.title_hit ? 3 : 0) + Number(l.score) * 2, views: l.views_count })
+    }
+    for (const n of newsRows) {
+      if (n.audience && !(await resolveAudience(tx, n.audience)).has(ctx.actorId)) continue
+      merged.set(`news:${n.id}`, { kind: 'news', id: n.id, title: n.title, snippet: n.snippet, score: n.title_hit ? 3 : 1, views: n.views_count })
+    }
+    for (const o of noticeRows) {
+      if (!(await noticeAudience(tx, o.id)).userIds.has(ctx.actorId)) continue
+      merged.set(`notice:${o.id}`, { kind: 'notice', id: o.id, title: o.title, snippet: o.snippet, score: o.title_hit ? 3 : 1, views: o.views_count })
+    }
     for (const qq of qrows) merged.set(`question:${qq.id}`, { kind: 'question', id: qq.id, title: qq.text.slice(0, 120), snippet: qq.text, score: 1 })
     for (const s of semantic) {
       const key = `article:${s.id}`
@@ -258,7 +292,10 @@ export async function search(ctx: Ctx, q: string, limit = 20): Promise<SearchHit
     }
     // Недоступные по аудитории статьи — вон, даже заголовком (docs/21 §12)
     const visible = await visibleArticleIds(tx, ctx.actorId, [...merged.values()].filter(h => h.kind === 'article').map(h => h.id))
+    const marks = await bookmarkKeys(tx, ctx.actorId)
+    const keyOf = (h: SearchHit) => `${h.kind === 'lesson' ? 'resource' : h.kind}:${h.id}`
     const hits = [...merged.values()].filter(h => h.kind !== 'article' || visible.has(h.id)).sort((a, b) => b.score - a.score).slice(0, limit)
+      .map(h => ({ ...h, bookmarked: marks.has(keyOf(h)) }))
     await tx.insert(searchQueries).values({ tenantId: ctx.tenantId, userId: ctx.actorId, query: q.trim().slice(0, 200), results: hits.length })
     return hits
   })

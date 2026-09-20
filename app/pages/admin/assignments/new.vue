@@ -26,7 +26,7 @@ const refs = reactive<{ positions: Ref[], locations: Ref[], orgUnits: Ref[], rol
 const initialType = (CONTENT_TYPES as readonly string[]).includes(String(route.query.type)) ? route.query.type as ContentType : 'course'
 const form = reactive({
   subjectType: initialType as ContentType,
-  subjectId: '',
+  subjectId: /^[0-9a-f-]{36}$/i.test(String(route.query.subjectId ?? '')) ? String(route.query.subjectId) : '', // из «Зберегти і призначити» объявления (Spec 21)
   lockVersion: false,
   match: 'any' as 'any' | 'all',
   rules: [] as Rule[],

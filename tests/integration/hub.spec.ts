@@ -1,7 +1,6 @@
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-const nw = await import('../../server/services/news')
 const wk = await import('../../server/services/wiki')
 const rb = await import('../../server/services/reportBuilder')
 const org = await import('../../server/services/orgTree')
@@ -11,10 +10,8 @@ const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () =
 let tenantId: string
 let adminId: string
 let lazarevaId: string
-let segedskaId: string
 let posId: string
 const userIds: string[] = []
-const newsIds: string[] = []
 const pageIds: string[] = []
 const reportIds: string[] = []
 
@@ -33,13 +30,11 @@ beforeAll(async () => {
   tenantId = (await admin`select id from tenants where slug = 'kappi'`)[0]!.id as string
   adminId = (await admin`select id from users where tenant_id = ${tenantId} and phone = '+380661864742'`)[0]!.id as string
   lazarevaId = (await admin`select id from locations where tenant_id = ${tenantId} and name = 'Лазарева'`)[0]!.id as string
-  segedskaId = (await admin`select id from locations where tenant_id = ${tenantId} and name = 'Сегедська'`)[0]!.id as string
   posId = (await admin`insert into positions (tenant_id, name, code) values (${tenantId}, ${`Бариста-hub-${Date.now()}`}, 'barista-hub') returning id`)[0]!.id as string
   await admin`update locations set manager_id = ${adminId} where id = ${lazarevaId}`
 })
 
 afterAll(async () => {
-  if (newsIds.length) await admin`delete from news where id in ${admin(newsIds)}`
   if (pageIds.length) await admin`delete from wiki_pages where id in ${admin(pageIds)}`
   if (reportIds.length) await admin`delete from saved_reports where id in ${admin(reportIds)}`
   if (userIds.length) { await admin`delete from notifications where user_id in ${admin(userIds)}`; await admin`delete from users where id in ${admin(userIds)}` }
@@ -48,46 +43,7 @@ afterAll(async () => {
   await admin.end()
 })
 
-describe('этап 10: объявления (приёмка: доходит до 100% смены, видно кто прочитал)', () => {
-  it('объявление для смены точки: показывается при входе, до подтверждения не исчезает, отчёт по точкам и поимённо', async () => {
-    const a = await makePerson('Зміна А', lazarevaId)
-    const b = await makePerson('Зміна Б', lazarevaId)
-    const c = await makePerson('Інша точка', segedskaId)
-    const n = await nw.createNews(ctx(), { title: 'Нові правила відкриття зміни', body: text('<p>З понеділка відкриваємо о 7:30.</p>'), kind: 'announcement', ackDueAt: new Date(Date.now() - 3_600_000).toISOString(), audience: { rules: [{ type: 'user', ids: [a, b] }], match: 'any' }, publish: true })
-    newsIds.push(n.id)
-    expect(n.requiresAck).toBe(true)
-
-    // При входе — у смены Лазаревой висит, у другой точки нет
-    expect((await nw.pendingAnnouncements(ctx(a))).map(x => x.id)).toContain(n.id)
-    expect((await nw.pendingAnnouncements(ctx(c))).map(x => x.id)).not.toContain(n.id)
-
-    // Просмотр ≠ подтверждение
-    await nw.getNews(ctx(a), n.id)
-    expect((await nw.pendingAnnouncements(ctx(a))).map(x => x.id)).toContain(n.id)
-    let rep = await nw.announcementReport(ctx(), n.id)
-    expect(rep).toMatchObject({ total: 2, viewed: 1, acked: 0 })
-    expect(rep!.byLocation.find(x => x.location === 'Лазарева')).toMatchObject({ total: 2, acked: 0, pct: 0 })
-
-    // Подтверждение
-    await nw.ackNews(ctx(a), n.id, { force: true })
-    expect((await nw.pendingAnnouncements(ctx(a))).map(x => x.id)).not.toContain(n.id)
-    rep = await nw.announcementReport(ctx(), n.id)
-    expect(rep?.acked).toBe(1)
-    expect((rep?.readers ?? []).map(r => r.fullName)).toEqual(['Зміна А'])
-    expect((rep?.notAcked ?? []).map(r => r.fullName)).toEqual(['Зміна Б'])
-
-    // Сканер: напоминание Б, срок прошёл → руководителю список
-    const s = await nw.announcementScan(tenantId)
-    expect(s.reminded).toBeGreaterThanOrEqual(1)
-    expect(s.escalated).toBeGreaterThanOrEqual(1)
-    const [esc] = await admin`select payload from notifications where user_id = ${adminId} and code = 'announcement_overdue_manager' and payload->>'title' = 'Нові правила відкриття зміни'`
-    expect((esc!.payload as { names: string }).names).toContain('Зміна Б')
-
-    await nw.ackNews(ctx(b), n.id, { force: true })
-    rep = await nw.announcementReport(ctx(), n.id)
-    expect((rep?.byLocation ?? []).find(x => x.location === 'Лазарева')?.pct).toBe(100)
-  })
-})
+// Объявления: tests/integration/spec21-hub.spec.ts (Spec 21 — назначаемый тип notice)
 
 describe('этап 10: wiki с историей и правами по веткам', () => {
   it('иерархия, ревизии, восстановление, права ветки', async () => {
@@ -149,6 +105,8 @@ describe('этап 10: оргструктура и конструктор отч
   })
 
   it('публичное дерево содержит точки с людьми и руководителем', async () => {
+    await makePerson('Зміна А', lazarevaId) // люди точки для дерева и отчёта ниже
+    await makePerson('Зміна Б', lazarevaId)
     const t = await org.orgTree(ctx())
     const flat = JSON.stringify(t.units)
     expect(flat).toContain('Лазарева')

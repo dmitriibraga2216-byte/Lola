@@ -81,8 +81,12 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   meetup_missed_manager: 'Не прийшли на «{{title}}»: {{names}}',
   meetup_feedback_request: 'Оцініть заняття «{{title}}»',
   webinar_record_ready: 'Запис вебінару «{{title}}» доступний',
-  announcement_reminder: 'Оголошення «{{title}}» чекає на підтвердження{{#due}} до {{due}}{{/due}}',
+  // docs/23 §13: notice.assigned (обязательное), notice.not_acknowledged; birthday.today, birthday.upcoming (Spec 21)
+  notice_assigned: 'Вам оголошення «{{title}}» — прочитайте і натисніть «Ознайомився»{{#due}} до {{due}}{{/due}}',
+  notice_not_acknowledged: 'Оголошення «{{title}}» чекає на підтвердження{{#due}} до {{due}}{{/due}}',
   announcement_overdue_manager: 'Не підтвердили оголошення «{{title}}»: {{names}}',
+  birthday_upcoming: 'За {{days}} дн. день народження у {{name}} ({{date}}) — час подбати про привітання',
+  birthday_today: 'Сьогодні день народження у {{name}} — привітайте!',
   scheduled_report: 'Звіт «{{name}}» готовий: {{rows}} рядків. {{url}}',
   program_assigned: 'Вам призначено програму «{{title}}»{{#due}}. Термін: {{due}}{{/due}}',
   program_node_unlocked: '«{{title}}»: відкрився наступний крок{{#step}} — {{step}}{{/step}}',
@@ -159,7 +163,7 @@ export interface EnqueueInput {
  * Коды, которые обходят дневной лимит (docs/23 §6.4, решение Б.9): дедлайны, аттестации,
  * блокирующие объявления, безопасность. OTP в очередь не попадает вовсе.
  */
-export const BYPASS_DAILY_LIMIT = (code: string) => /(_due_today|_overdue|_expiring|^assessment_|^announcement_|^security_|^user_invited$|^import_)/.test(code)
+export const BYPASS_DAILY_LIMIT = (code: string) => /(_due_today|_overdue|_expiring|^assessment_|^announcement_|^notice_|^security_|^user_invited$|^import_)/.test(code)
 export const DAILY_LIMIT = 10
 
 /** Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален). */
@@ -200,7 +204,7 @@ async function templateFor(tx: TenantTx, tenantId: string, code: string, channel
   return body ? { body, version: 0, isMandatory: MANDATORY_DEFAULT(code), throttle: null, buttons: [] } : null
 }
 /** Обязательные по умолчанию: дедлайны, аттестации, объявления, безопасность, приглашение. */
-export const MANDATORY_DEFAULT = (code: string) => BYPASS_DAILY_LIMIT(code) || /_due_soon$|^user_blocked$|^user_role_granted$/.test(code)
+export const MANDATORY_DEFAULT = (code: string) => (BYPASS_DAILY_LIMIT(code) && code !== 'notice_not_acknowledged') || /_due_soon$|^user_blocked$|^user_role_granted$/.test(code) // docs/23 §13: notice.assigned обязательное, напоминание — нет
 
 /** Общие переменные шаблонов (docs/23 §3.4): user.*, location.name, position.name, tenant.name, link. */
 async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promise<Record<string, unknown>> {
@@ -367,7 +371,7 @@ export function groupOf(code: string): 'learning' | 'assessment' | 'reminders' |
   if (/^(assignment|enrollment|program|attempt|workshop|review|certificate)/.test(code)) return 'learning'
   if (/^(assessment|checklist|action_item|competency|goal|plan|request)/.test(code)) return 'assessment'
   if (/_due|_overdue|reminder|meetup|webinar|digest/.test(code)) return 'reminders'
-  if (/^(news|announcement|knowledge|survey|event|wiki)/.test(code)) return 'hub'
+  if (/^(news|announcement|notice|knowledge|survey|event|wiki|birthday)/.test(code)) return 'hub'
   return 'other'
 }
 

@@ -534,6 +534,26 @@ export async function deleteAccessGroup(ctx: Ctx, id: string): Promise<boolean> 
   })
 }
 
+/** «Управління Базою знань» (docs/21 §14, мокап KnowledgeAdmin): тумблер ограничения доступа — tenants.settings.knowledge. */
+export interface KnowledgeSettings { restrictAccess: boolean }
+export async function knowledgeSettings(tx: TenantTx, tenantId: string): Promise<KnowledgeSettings> {
+  const [t] = await tx.select({ settings: tenants.settings }).from(tenants).where(eq(tenants.id, tenantId))
+  const k = ((t?.settings ?? {}) as { knowledge?: Partial<KnowledgeSettings> }).knowledge ?? {}
+  return { restrictAccess: k.restrictAccess ?? true }
+}
+export async function getKnowledgeSettings(ctx: Ctx) {
+  return withTenant(ctx.tenantId, ctx.actorId, tx => knowledgeSettings(tx, ctx.tenantId))
+}
+export async function updateKnowledgeSettings(ctx: Ctx, patch: Partial<KnowledgeSettings>) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const before = await knowledgeSettings(tx, ctx.tenantId)
+    const next = { ...before, ...patch }
+    await tx.execute(sql`update tenants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{knowledge}', ${JSON.stringify(next)}::jsonb) where id = ${ctx.tenantId}::uuid`)
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'settings.knowledge', entity: 'tenant', entityId: ctx.tenantId, before, after: next })
+    return next
+  })
+}
+
 /** Чем человек «является» для групп доступа: свои должности, подразделения, роли и он сам. */
 export async function userAccessSubjects(tx: TenantTx, userId: string) {
   const placements = await tx.select({ positionId: userPlacements.positionId, orgUnitId: userPlacements.orgUnitId })
@@ -554,9 +574,10 @@ export async function userAccessSubjects(tx: TenantTx, userId: string) {
  * Авторы ресурса видят его всегда.
  */
 export async function canAccessResource(tx: TenantTx, userId: string, resourceId: string): Promise<boolean> {
-  const [r] = await tx.select({ authorIds: resources.authorIds }).from(resources).where(and(eq(resources.id, resourceId), notDeleted()))
+  const [r] = await tx.select({ authorIds: resources.authorIds, tenantId: resources.tenantId }).from(resources).where(and(eq(resources.id, resourceId), notDeleted()))
   if (!r) return false
   if (r.authorIds.includes(userId)) return true
+  if (!(await knowledgeSettings(tx, r.tenantId)).restrictAccess) return true // тумблер «Використовувати обмеження доступу до ресурсів» выключен (docs/21 §14, KnowledgeAdmin)
   const groups = await tx.select({ groupId: contentAccessGroups.groupId }).from(contentAccessGroups)
     .where(and(eq(contentAccessGroups.contentType, 'resource'), eq(contentAccessGroups.contentId, resourceId)))
   if (!groups.length) return true

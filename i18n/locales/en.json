@@ -14,7 +14,10 @@
     "deactivate": "Deactivate",
     "back": "Back",
     "next": "Next",
-    "close": "Close"
+    "close": "Close",
+    "add": "Add",
+    "delete": "Delete",
+    "confirmDelete": "Delete? This cannot be undone"
   },
   "login": {
     "phoneLabel": "Phone number",
@@ -41,7 +44,9 @@
     "noCodeSms": "SMS can take up to a minute. If there is no code, resend or check the number.",
     "changePhone": "Change number",
     "support": "Can't sign in — contact your location manager",
-    "supportOr": "or"
+    "supportOr": "or",
+    "guestSupport": "Cannot sign in? Contact:",
+    "policy": "Data policy"
   },
   "home": {
     "signedInAs": "Signed in as {name}",
@@ -100,14 +105,22 @@
       "resourceCategories": "Categories",
       "trajectories": "Trajectories",
       "summaryReport": "Summary report",
-      "taskReports": "Task reports"
+      "taskReports": "Task reports",
+      "notices": "Notices",
+      "simpleNotices": "Simple notices",
+      "events": "Events",
+      "birthdays": "Birthdays",
+      "contacts": "Contacts",
+      "kbAccess": "Knowledge base access",
+      "guestPage": "Guest page"
     },
     "section": {
       "learning": "Learning",
       "content": "Content",
       "people": "People",
       "reports": "Reports",
-      "settings": "Settings"
+      "settings": "Settings",
+      "info": "Information"
     },
     "menu": {
       "learner": "My cabinet",
@@ -1327,7 +1340,9 @@
     "kind": {
       "article": "Article",
       "lesson": "Lesson",
-      "question": "Quiz question"
+      "question": "Quiz question",
+      "news": "News",
+      "notice": "Notice"
     },
     "newTitle": "New article title",
     "views": "views",
@@ -1357,7 +1372,18 @@
     "poorFeedback": "Poor feedback",
     "overdueReview": "Overdue review",
     "emptyQueries": "Queries with no results",
-    "emptyQueriesHint": "Requests for new articles — last 90 days"
+    "emptyQueriesHint": "Requests for new articles — last 90 days",
+    "searchAll": "Search resources, news and notices",
+    "source": {
+      "all": "All",
+      "resources": "Resources",
+      "news": "News",
+      "notices": "Notices"
+    },
+    "bookmarks": "My bookmarks",
+    "noBookmarks": "No bookmarks yet — star what you come back to",
+    "bookmark": "Bookmark",
+    "bookmarked": "Bookmarked"
   },
   "news": {
     "title": "News",
@@ -1377,7 +1403,11 @@
     "col": {
       "date": "Date",
       "views": "Views",
-      "acks": "Acked"
+      "acks": "Acked",
+      "topic": "Topic",
+      "actual": "Valid",
+      "reactions": "Reactions",
+      "published": "Published"
     },
     "kind": {
       "news": "News",
@@ -1413,7 +1443,20 @@
     "blockUntilAck": "Block work until acknowledged",
     "blockWarn": "People will not be able to use the system until they press the button",
     "blockHint": "Important announcement: you can continue after acknowledging",
-    "open": "Open"
+    "open": "Open",
+    "add": "Add news",
+    "category": "Category",
+    "authorCol": "Author",
+    "categoryLine": "Category: {c}",
+    "until": "until {d}",
+    "text": "Text",
+    "allowReactions": "Allow reactions",
+    "term": "Term",
+    "termHint": "After this date the news leaves the feed but stays in the knowledge base",
+    "actualUntil": "Valid until",
+    "cover": "Main image",
+    "coverHint": "jpg, png, jpeg, gif, svg, webp",
+    "newCategory": "New category"
   },
   "survey": {
     "title": "Surveys",
@@ -2526,7 +2569,8 @@
     "assessment": "Assessment",
     "check_list": "Checklist",
     "meetup": "Meetup",
-    "webinar": "Webinar"
+    "webinar": "Webinar",
+    "notice": "Notice"
   },
   "profile": {
     "tiles": {
@@ -2538,7 +2582,9 @@
     "noCertificates": "No certificates yet",
     "validUntil": "valid until {date}",
     "more": "More",
-    "weekActivity": "Activity this week"
+    "weekActivity": "Activity this week",
+    "birthdayConsent": "Show my birthday",
+    "birthdayConsentHint": "Colleagues will see the date in “Birthdays”; turn off and you will not be listed"
   },
   "notif": {
     "title": "Notifications",
@@ -2625,7 +2671,6 @@
       "meetup_missed_manager": "Meetup missed manager",
       "meetup_feedback_request": "Meetup feedback request",
       "webinar_record_ready": "Webinar record ready",
-      "announcement_reminder": "Announcement reminder",
       "announcement_overdue_manager": "Announcement overdue manager",
       "scheduled_report": "Scheduled report",
       "program_assigned": "Program assigned",
@@ -2653,7 +2698,11 @@
       "trajectory_finished": "Trajectory finished",
       "trajectory_access_closed": "Step access closed",
       "trajectory_mentor_confirm": "Mentee awaits your confirmation",
-      "trajectory_request": "Trajectory request"
+      "trajectory_request": "Trajectory request",
+      "notice_assigned": "New notice",
+      "notice_not_acknowledged": "Notice reminder",
+      "birthday_upcoming": "Colleague birthday soon",
+      "birthday_today": "Birthday today"
     }
   },
   "ntpl": {
@@ -3171,5 +3220,154 @@
     "selectionHint": "The report is an intersection of two selections, not a per-course view",
     "peoplePicked": "People picked",
     "tasksPicked": "Tasks picked"
+  },
+  "notices": {
+    "title": "Notices",
+    "add": "Add notice",
+    "edit": "Edit notice",
+    "empty": "No notices yet",
+    "emptyMine": "Nothing assigned to you yet",
+    "kind": {
+      "acknowledge": "Acknowledgement",
+      "event": "Event",
+      "notification": "Notification"
+    },
+    "kindHint": {
+      "acknowledge": "Everyone must press “Acknowledged” — you see who confirmed",
+      "event": "Invitation to an event with confirmation",
+      "notification": "Just a message to those assigned"
+    },
+    "assignMode": {
+      "manual": "Assigned manually",
+      "automation": "By automation rule",
+      "catalog_free": "Via catalog",
+      "none": "Not assigned yet"
+    },
+    "phase": {
+      "draft": "Draft",
+      "scheduled": "Scheduled",
+      "active": "Active",
+      "expired": "Expired",
+      "archived": "Archived"
+    },
+    "publishedOn": "Published {d}",
+    "activeUntil": "active until {d}",
+    "ackUntil": "acknowledge by {d}",
+    "author": "by {name}",
+    "views": "views: {n}",
+    "remind": "Remind those who have not acknowledged",
+    "reminded": "Reminders sent: {n} of {total}",
+    "assign": "Assign",
+    "saveAndAssign": "Save and assign",
+    "coverage": "Acknowledged {acked} of {total}",
+    "notAcked": "Not acknowledged",
+    "acked": "Acknowledged",
+    "byLocation": "By location",
+    "ackHint": "Press to confirm you have read this. The mark is stored with the date.",
+    "ackedOn": "Acknowledged {d}",
+    "notAckedYet": "Needs acknowledgement",
+    "kb": "KB",
+    "f": {
+      "title": "Title",
+      "body": "Notice text",
+      "files": "Attached files",
+      "kind": "Type",
+      "term": "Notice period",
+      "from": "Start",
+      "to": "End"
+    },
+    "termHint": "Display period. The acknowledgement deadline and audience are set by the assignment.",
+    "assignHint": "After saving, the notice is assigned like a task: audience, deadline and reminders live in the assignment.",
+    "col": {
+      "title": "Title",
+      "published": "Published",
+      "reactions": "Reactions",
+      "state": "State"
+    },
+    "simple": {
+      "title": "Simple notices",
+      "hint": "No assignment and no acknowledgement — just a banner",
+      "note": "Not everything needs a signature: everyone sees a simple notice while it is active",
+      "until": "Active until",
+      "untilDate": "until {d}"
+    }
+  },
+  "kbAdmin": {
+    "title": "Knowledge base management",
+    "addGroup": "Add group",
+    "restrict": "Use access restrictions for resources",
+    "restrictHint": "Off — all resources are open to everyone, groups do not apply",
+    "col": {
+      "name": "Access group",
+      "description": "Description",
+      "resources": "Resources",
+      "access": "Access"
+    },
+    "restricted": "Restricted",
+    "open": "Open",
+    "members": "members: {n}",
+    "positions": "Positions",
+    "units": "Units",
+    "empty": "No access groups yet — resources are open to everyone"
+  },
+  "birthdays": {
+    "title": "Birthdays",
+    "upcoming": "Upcoming",
+    "past": "Past",
+    "period": "From {from} to {to}",
+    "empty": "No birthdays in this period",
+    "reminderHint": "The location manager is reminded three days ahead — time to buy a cake."
+  },
+  "contacts": {
+    "title": "Contacts",
+    "search": "Search by name",
+    "unit": "Unit",
+    "position": "Position",
+    "city": "City",
+    "work": "Work",
+    "personal": "Personal",
+    "empty": "Nobody found"
+  },
+  "events": {
+    "title": "Events",
+    "add": "Add event",
+    "empty": "No events yet",
+    "allLocations": "All locations",
+    "registered": "registered: {n}",
+    "published": "Published",
+    "draft": "Draft",
+    "cancelled": "Cancelled",
+    "register": "Register",
+    "youAreIn": "You are registered",
+    "col": {
+      "title": "Title",
+      "when": "When",
+      "where": "Where",
+      "invited": "Invited",
+      "published": "Published"
+    },
+    "f": {
+      "title": "Title",
+      "text": "Event text",
+      "starts": "Starts",
+      "ends": "Ends",
+      "where": "Where",
+      "address": "Address",
+      "capacity": "Seats",
+      "invited": "Who is invited",
+      "registration": "Registration required"
+    },
+    "invitedHint": "No location selected — everyone is invited"
+  },
+  "guest": {
+    "title": "Guest page",
+    "hint": "What a person sees before signing in: a greeting, whom to contact if login fails, and the data policy",
+    "welcome": "Greeting",
+    "support": "Whom to contact",
+    "supportName": "Name",
+    "supportPhone": "Phone",
+    "supportEmail": "E-mail",
+    "supportTelegram": "Telegram",
+    "policyUrl": "Data policy link"
   }
 }

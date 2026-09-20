@@ -5,7 +5,7 @@ definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
 
-interface N { id: string, title: string, body: ContentBlock[], isPinned: boolean, requiresAck: boolean, publishedAt: string | null, authorName: string | null, viewed: boolean, acked: boolean, lead: string | null, ackText: string | null }
+interface N { id: string, title: string, body: ContentBlock[], isPinned: boolean, requiresAck: boolean, publishedAt: string | null, authorName: string | null, viewed: boolean, acked: boolean, lead: string | null }
 const items = ref<N[]>([])
 const open = ref<N | null>(null)
 const error = ref('')
@@ -74,7 +74,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk', { day
         <h2>{{ open.title }}</h2>
         <div ref="bodyEl" class="scroller" @scroll="checkScroll"><LessonBlocks :blocks="open.body" :blocks-state="{}" readonly /></div>
         <p v-if="ackError" class="error" role="alert">{{ ackError }}</p>
-        <button v-if="open.requiresAck && !open.acked" class="primary" :disabled="seconds < 10 || !scrolled" @click="ack(open)">{{ open.ackText || t('news.ack') }}<span v-if="seconds < 10" class="sub"> · {{ 10 - seconds }}</span></button>
+        <button v-if="open.requiresAck && !open.acked" class="primary" :disabled="seconds < 10 || !scrolled" @click="ack(open)">{{ t('news.ack') }}<span v-if="seconds < 10" class="sub"> · {{ 10 - seconds }}</span></button>
         <button v-else class="ghost" @click="close">{{ t('news.close') }}</button>
       </div>
     </div>

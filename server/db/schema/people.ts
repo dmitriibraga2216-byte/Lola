@@ -24,6 +24,7 @@ export const users = pgTable('users', {
   comment: text('comment'), // внутренняя заметка, человеку не видна
   isBlocked: boolean('is_blocked').notNull().default(false), // вход запрещён, обучение не снимается
   isHidden: boolean('is_hidden').notNull().default(false), // не виден в списках, рейтингах и публичной оргструктуре
+  birthdayConsent: boolean('birthday_consent').notNull().default(true), // согласие показывать день рождения (docs/21 §3.8, §7.8; 29 Б.16 — opt-out)
   avatarKey: text('avatar_key'),
   locale: text('locale'), // null → локаль тенанта
   status: text('status').notNull().default('invited'), // invited | active | suspended | archived

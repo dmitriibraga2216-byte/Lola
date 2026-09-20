@@ -24,16 +24,16 @@ const admin = postgres(adminUrl, { max: 2, onnotice: () => {} })
 const CONTENT_TABLES = [
   'courses', 'course_versions', 'modules', 'lessons', 'resources', 'resource_versions', 'quizzes', 'questions', 'question_banks',
   'complex_tests', 'workshops', 'meetups', 'webinars', 'programs', 'program_nodes', 'trajectories', 'trajectory_nodes', 'knowledge_articles', 'news', 'surveys',
+  'notices', 'simple_notices', // Spec 21: объявление — контент, срок подтверждения — в назначении
 ]
 /**
  * Исключения, заданные самим ТЗ:
  * - lessons.pass_score_pct — порог теста в плане курса (docs/02 §2.4 course_items.pass_score_pct, docs/11 §14.1);
  * - questions.time_limit_sec — свойство вопроса (docs/12 §3.2), включается параметром назначения question_time_limit.
  * Анкеты (checklists, assessment_forms) в список контента не входят: docs/08 §12.8 — их параметры неотделимы от состава.
- * Долг: news.ack_due_at — срок ознакомления в объявлении; уезжает в назначение, когда объявление
- * станет назначаемым типом (docs/30 §4, PR spec-21-notices). До этого — явное исключение.
+ * Долг news.ack_due_at закрыт в Spec 21: срок подтверждения объявления — assignments.due_at.
  */
-const CONTENT_COLUMN_EXCEPTIONS = new Set(['lessons.pass_score_pct', 'questions.time_limit_sec', 'news.ack_due_at'])
+const CONTENT_COLUMN_EXCEPTIONS = new Set(['lessons.pass_score_pct', 'questions.time_limit_sec'])
 const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
 
 /** Журналы (docs/22 §13.4): технический контекст пишется одинаково во все. */

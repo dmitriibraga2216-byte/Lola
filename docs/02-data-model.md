@@ -75,6 +75,7 @@ create table users (
   first_name text, last_name text, patronymic text,  -- эталон хранит ПІБ по частям
   gender text,                                -- поле есть в карточке эталона
   birth_date date,                            -- нужна для поздравлений (`23`)
+  birthday_consent boolean not null default true, -- согласие показывать в «Дні народження» (`21` §7.8; `29` Б.16 — opt-out)
   avatar_key text,
   locale text,                                -- null → берём локаль тенанта
   status text not null default 'invited',     -- invited | active | suspended | archived
@@ -949,21 +950,26 @@ assessment_answers(cycle_id, rater_id, item_id, value numeric(6,2), comment text
 
 ```sql
 news(title, body jsonb, category_id, cover_key, is_pinned boolean, requires_ack boolean,
-          published_at, author_id)
+          published_at, author_id, views_count int)   -- срока ознакомления у новости нет (п. 11): срок — у объявления, назначением
 news_views(news_id, user_id, viewed_at, acked_at)
--- Объявление (сверено `21` §14.5) — назначаемая сущность, а не лента.
+-- Объявление (сверено `21` §14.5) — назначаемая сущность, а не лента: контент типа `notice`
+-- назначается через `assignments` (аудитория, срок подтверждения `due_at`, напоминания,
+-- `assign_mode` = `via_catalog`/`automation_rule_id` назначения). Spec 21.
 notices(
   id, tenant_id, title, body jsonb, attachments jsonb,
   kind text not null,               -- acknowledge | event | notification («Ознайомлення/Подія/Сповіщення»)
-  starts_at, ends_at,               -- «Термін оголошення»
-  assign_mode text,                 -- manual | automation
-  automation_rule_id uuid,
-  status text
+  starts_at, ends_at,               -- «Термін оголошення» — период показа, не срок подтверждения
+  show_mode text, priority text, block_until_ack boolean, ack_text text,  -- показ (`21` §3.3, §5.4)
+  status text,                      -- draft | published | archived; scheduled/active/expired — признаки по датам
+  published_at, views_count int, author_id
 )
-notice_acks(notice_id, user_id, acked_at)   -- «Ознайомлений N (всього M)»
+notice_acks(notice_id, user_id, acked_at, request_context jsonb)   -- «Ознайомлений N (всього M)»
 
 -- Простое объявление: без назначения и подтверждения
-simple_notices(title, body jsonb, published_at, ends_at, status)
+simple_notices(title, body jsonb, published_at, ends_at, status, views_count int)
+-- «Мої закладки» (`21` §14.1): content_type — resource | article | news | notice
+bookmarks(user_id, content_type, content_id)
+-- События живут в meetups(kind=event) + meetups.audience jsonb (Spec 21); отдельной таблицы нет
 events(title, description, starts_at, ends_at, location_id, audience jsonb, capacity int)
 event_registrations(event_id, user_id, status)
 wiki_pages(parent_id, title, slug, body jsonb, access jsonb, updated_by)
@@ -972,6 +978,7 @@ forum_topics(category_id, title, author_id, is_locked boolean, is_pinned boolean
 forum_posts(topic_id, author_id, body text, reply_to_id, is_hidden boolean, moderated_by)
 chat_threads(kind text, title, member_ids uuid[])
 chat_messages(thread_id, author_id, body text, attachments jsonb, read_by uuid[])
+-- Контакты (`21` §14.8): витрина над users/user_placements/work_contacts, отдельной таблицы нет (Spec 21)
 contacts(user_id, phone_public text, email_public text, room text, notes text)
 -- Товар (сверено `21` Г-21.1): у эталона нет ни точки выдачи, ни лимита — это наше.
 shop_items(title, description, image_key, category_id, price_bonuses int, stock int,
@@ -1148,9 +1155,10 @@ enrollment_status: not_assigned | not_started | in_progress | done | failed
 -- Тип назначения (вкладки списка эталона)
 task_type: manual | auto | catalog | trajectory | archive
 
--- Тип контента, одиннадцать значений
+-- Тип контента: одиннадцать значений эталона + notice (Lola: объявление назначается
+-- как обучение, `21` §14.5; срок и аудитория — в назначении, не в объявлении)
 content_type: course | training_program | resource | test | complex_test | workshop
-            | poll | assessment | check_list | meetup | webinar
+            | poll | assessment | check_list | meetup | webinar | notice
 
 -- Режим назначения траектории и объявления
 assign_mode: manual | catalog_free | catalog_request | automation

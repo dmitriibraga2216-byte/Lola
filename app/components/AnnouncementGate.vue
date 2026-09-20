@@ -1,51 +1,36 @@
 <script setup lang="ts">
 /**
- * Объявления (docs/21 §5.4, §7.4): модально при входе, баннер сверху или оба; цвет по приоритету;
- * `block_until_ack` — закрыть крестиком нельзя, интерфейс перекрыт до подтверждения (кроме входа и профиля).
- * Подтверждение — только после 10 с и прокрутки (Б.5).
+ * Объявления (docs/21 §5.4, §7.4, §14.5; Spec 21): назначенные человеку и не подтверждённые —
+ * модально при входе, баннер сверху или оба; цвет по приоритету; `block_until_ack` — закрыть
+ * крестиком нельзя, интерфейс перекрыт до подтверждения (кроме входа и профиля).
+ * «Ознайомився» — один тап, отметка хранится с датой (мокап Notice).
  */
 const { t } = useI18n()
 const { api } = useApi()
 const { me } = useAuth()
 const route = useRoute()
-interface A { id: string, title: string, body: unknown[], ackDueAt: string | null, publishedAt: string | null, showMode: 'modal' | 'banner' | 'both', priority: 'normal' | 'important' | 'critical', blockUntilAck: boolean, ackText: string | null, requiresAck: boolean }
+interface A { id: string, title: string, body: unknown[], kind: string, dueAt: string | null, endsAt: string | null, publishedAt: string | null, showMode: 'modal' | 'banner' | 'both', priority: 'normal' | 'important' | 'critical', blockUntilAck: boolean, ackText: string | null, attachments: { mediaId: string, name: string, bytes?: number }[] }
 const items = ref<A[]>([])
 const busy = ref(false)
 const error = ref('')
 const dismissed = ref<Set<string>>(new Set())
-const seconds = ref(0)
-const scrolled = ref(false)
-const bodyEl = ref<HTMLElement | null>(null)
-let timer: ReturnType<typeof setInterval> | undefined
 
 async function load() {
   if (!me.value) return
-  try { items.value = await api<A[]>('/news/pending-announcements') } catch { items.value = [] }
+  try { items.value = await api<A[]>('/notices/pending') } catch { items.value = [] }
 }
 onMounted(load)
 watch(() => me.value?.user.id as string | undefined, () => { load() })
 
 const modal = computed(() => items.value.find(a => (a.showMode === 'modal' || a.showMode === 'both') && !dismissed.value.has(a.id)) ?? null)
 const banners = computed(() => items.value.filter(a => (a.showMode === 'banner' || a.showMode === 'both') && a.id !== modal.value?.id))
-const blocked = computed(() => !!modal.value?.blockUntilAck && !route.path.startsWith('/profile'))
+const blocked = computed(() => !!modal.value?.blockUntilAck && !route.path.startsWith('/profile') && !route.path.startsWith('/learn/profile'))
+watch(modal, () => { error.value = '' })
 
-watch(modal, (m) => {
-  clearInterval(timer); seconds.value = 0; scrolled.value = false; error.value = ''
-  if (!m) return
-  timer = setInterval(async () => { seconds.value++; if (seconds.value % 5 === 0) await api(`/news/${m.id}/view`, { method: 'POST', body: { seconds: 5, scrolledToEnd: scrolled.value } }).catch(() => null) }, 1000)
-  nextTick(checkScroll)
-}, { immediate: true })
-onUnmounted(() => clearInterval(timer))
-function checkScroll() {
-  const el = bodyEl.value
-  if (!el || !modal.value) return
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 8 && !scrolled.value) { scrolled.value = true; api(`/news/${modal.value.id}/view`, { method: 'POST', body: { seconds: 0, scrolledToEnd: true } }).catch(() => null) }
-}
 async function ack(a: A) {
   busy.value = true; error.value = ''
   try {
-    await api(`/news/${a.id}/view`, { method: 'POST', body: { seconds: seconds.value % 5, scrolledToEnd: scrolled.value } })
-    await api<unknown>(`/news/${a.id}/ack`, { method: 'POST' })
+    await api<unknown>(`/notices/${a.id}/acknowledge`, { method: 'POST' })
     items.value = items.value.filter(x => x.id !== a.id)
   }
   catch (err) { error.value = apiErrorOf(err).message }
@@ -66,11 +51,15 @@ function dismiss(a: A) { if (a.blockUntilAck) return; dismissed.value = new Set(
           <button v-if="!modal.blockUntilAck" class="x" :aria-label="t('news.close')" @click="dismiss(modal)">×</button>
         </div>
         <h2>{{ modal.title }}</h2>
-        <p v-if="modal.ackDueAt" class="sub">{{ t('news.ackUntil', { at: new Date(modal.ackDueAt).toLocaleDateString('uk-UA') }) }}</p>
+        <p v-if="modal.dueAt" class="sub">{{ t('news.ackUntil', { at: new Date(modal.dueAt).toLocaleDateString('uk-UA') }) }}</p>
         <p v-if="modal.blockUntilAck" class="sub">{{ t('news.blockHint') }}</p>
-        <div ref="bodyEl" class="body" @scroll="checkScroll"><LessonBlocks :blocks="modal.body as never" :blocks-state="{}" readonly /></div>
+        <div class="body"><LessonBlocks :blocks="modal.body as never" :blocks-state="{}" readonly /></div>
+        <ul v-if="modal.attachments?.length" class="files">
+          <li v-for="f in modal.attachments" :key="f.mediaId">📎 {{ f.name }}<span v-if="f.bytes" class="hint"> · {{ Math.round(f.bytes / 1024) }} {{ t('notices.kb') }}</span></li>
+        </ul>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <button class="primary" :disabled="busy || seconds < 10 || !scrolled" data-testid="announcement-ack" @click="ack(modal)">{{ modal.ackText || t('news.iRead') }}<span v-if="seconds < 10 || !scrolled" class="hint"> · {{ seconds < 10 ? 10 - seconds : '↓' }}</span></button>
+        <p class="sub">{{ t('notices.ackHint') }}</p>
+        <button class="primary" :disabled="busy" data-testid="announcement-ack" @click="ack(modal)">{{ modal.ackText || t('news.iRead') }}</button>
       </div>
     </div>
   </div>
@@ -96,4 +85,5 @@ h2 { margin: 0; font-weight: 900; }
 .primary:disabled { opacity: 0.6; }
 .hint { font-weight: 400; }
 .error { color: var(--color-coral-ink); margin: 0; }
+.files { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); }
 </style>

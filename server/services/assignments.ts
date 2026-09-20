@@ -78,6 +78,11 @@ export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmen
   if (!created.ok) return created
 
   const expanded = created.ok && input.status === 'active' ? await expandAssignment(ctx.tenantId, created.assignmentId) : 0
+  // Объявление (Spec 21): записи не создаются, но `notice_assigned` обязательное (docs/23 §13) — шлём сразу
+  if (input.subjectType === 'notice' && input.status === 'active') {
+    const { notifyAssigned } = await import('./notices')
+    await notifyAssigned(ctx.tenantId, created.assignmentId)
+  }
   return { ok: true, assignmentId: created.assignmentId, expanded }
 }
 

@@ -13,10 +13,10 @@ export type EnrollmentStatus = typeof ENROLLMENT_STATUSES[number]
 export const TASK_TYPES = ['manual', 'auto', 'catalog', 'trajectory', 'archive'] as const
 export type TaskType = typeof TASK_TYPES[number]
 
-/** Тип контента, одиннадцать значений. */
+/** Тип контента: одиннадцать значений эталона + `notice` — объявление назначается как обучение (docs/21 §14.5, Spec 21). */
 export const CONTENT_TYPES = [
   'course', 'training_program', 'resource', 'test', 'complex_test', 'workshop',
-  'poll', 'assessment', 'check_list', 'meetup', 'webinar',
+  'poll', 'assessment', 'check_list', 'meetup', 'webinar', 'notice',
 ] as const
 export type ContentType = typeof CONTENT_TYPES[number]
 

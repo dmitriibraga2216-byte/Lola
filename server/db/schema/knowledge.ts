@@ -128,7 +128,7 @@ export const surveyResponses = pgTable('survey_responses', {
   unique().on(t.tenantId, t.surveyId, t.respondentHash),
 ])
 
-// ── Новости (docs/03 §3.22, R1) ────────────────────────────────────────
+// ── Новости (docs/03 §3.22, R1). Объявления — `notices` в hub.ts (Spec 21) ──
 
 export const news = pgTable('news', {
   ...baseColumns,
@@ -138,18 +138,13 @@ export const news = pgTable('news', {
   coverKey: text('cover_key'),
   categoryId: uuid('category_id').references(() => courseCategories.id),
   isPinned: boolean('is_pinned').notNull().default(false),
-  requiresAck: boolean('requires_ack').notNull().default(false),
-  kind: text('kind').notNull().default('news'), // news | announcement — объявление показывается модально при входе до подтверждения
-  ackDueAt: timestamp('ack_due_at', { withTimezone: true }), // до какого срока объявление должно быть прочитано
+  requiresAck: boolean('requires_ack').notNull().default(false), // «Обовʼязкове ознайомлення» (docs/21 §6.2); срок — только у объявления, назначением (Spec 21)
+  viewsCount: integer('views_count').notNull().default(0), // «Переглядів» (docs/21 §3.2): раз на человека в день
   // docs/21 §3.2–3.3
   lead: text('lead'), // анонс ≤300
   publishAt: timestamp('publish_at', { withTimezone: true }), // отложенная публикация (news.publish_scan)
   unpublishAt: timestamp('unpublish_at', { withTimezone: true }), // снятие
   commentsEnabled: boolean('comments_enabled').notNull().default(false),
-  showMode: text('show_mode').notNull().default('modal'), // modal | banner | both — для объявлений
-  priority: text('priority').notNull().default('normal'), // normal | important | critical
-  blockUntilAck: boolean('block_until_ack').notNull().default(false), // нельзя работать, пока не подтвердил (Б.6)
-  ackText: text('ack_text'), // текст кнопки, по умолчанию «Ознайомився»
   audience: jsonb('audience'), // null = все; иначе конструктор аудитории
   status: text('status').notNull().default('draft'), // draft | published | archived
   publishedAt: timestamp('published_at', { withTimezone: true }),

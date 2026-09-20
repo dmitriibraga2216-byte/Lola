@@ -885,11 +885,15 @@ complex_test_items(complex_test_id, quiz_id, topic text, sort_order int)
 meetups(title, announcement jsonb, description jsonb, attachments jsonb, tags text[], status)
 webinars(title, description jsonb, attachments jsonb, tags text[], status)
 
+-- Spec 18: в коде таблица называется `meetup_sessions`/`meetup_session_registrations` —
+-- имя `sessions` занято автентифікацією (`sessions.active_role_id`, parity-4-active-role).
+-- Старые поля даты/места/вместимости на `meetups`/`webinars` для kind=meetup|webinar не убраны
+-- (используются старыми записями и kind=event, Spec 21) — долг «полное разведение», `28` «Spec 18».
 sessions(                                  -- общая для очных занятий и вебинаров
   id, tenant_id, task_id,                  -- сессия принадлежит НАЗНАЧЕНИЮ, не карточке
   content_type text,                       -- meetup | webinar
   starts_at, ends_at,
-  location_id uuid, room text, trainer_id uuid,   -- очное
+  location_id uuid, room text, trainer_id uuid,   -- очное (в коде — trainer_ids uuid[], тренеров может быть несколько, `18` §3.1)
   join_url text, record_url text, provider text,  -- вебинар
   capacity int, waitlist_enabled boolean, status text
 )

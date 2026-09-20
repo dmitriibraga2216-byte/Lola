@@ -487,6 +487,11 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       if (lesson.itemType === 'workshop') {
         return { ok: false as const, code: 'conditions_not_met' as const, reasons: ['Здайте практикум'] }
       }
+      if (lesson.itemType === 'meetup') {
+        // Урок-заняття (docs/29 Б.3): закривається відміткою відвідування сесії
+        // (meetupSessions.ts markAttendance → completeLesson напряму), не кнопкою.
+        return { ok: false as const, code: 'conditions_not_met' as const, reasons: ['Відвідайте заняття'] }
+      }
       // Правило зачёта по типу материала (Г-11.5) + min_seconds, чек-листы, видео-блоки (docs/11 §7.3)
       const material = await lessonMaterial(tx, lesson)
       if (material) reasons.push(...evaluateLesson(material.facts, progressFacts(progress)).reasons)

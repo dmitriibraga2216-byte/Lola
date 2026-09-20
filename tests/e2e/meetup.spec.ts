@@ -16,7 +16,7 @@ test('10. Занятие создаётся, человек записывает
   const me = await api<{ user: { id: string } }>(request, csrf, 'get', '/auth/me')
   const inHour = new Date(Date.now() + 3_600_000).toISOString()
   const inThree = new Date(Date.now() + 3 * 3_600_000).toISOString()
-  const m = await api<{ id: string }>(request, csrf, 'post', '/meetups', { title: `${PREFIX}Латте-арт`, startsAt: inHour, endsAt: inThree, trainerIds: [me.user.id], capacity: 5, attendanceMode: 'qr', enrollDeadlineHours: 0 })
+  const m = await api<{ id: string }>(request, csrf, 'post', '/meetups', { title: `${PREFIX}Латте-арт`, announcement: [{ id: 'a', type: 'text', html: '<p>Приходь у формі</p>' }], startsAt: inHour, endsAt: inThree, trainerIds: [me.user.id], capacity: 5, attendanceMode: 'qr', enrollDeadlineHours: 0 })
 
   // Сотрудник записывается из карточки
   await loginViaUi(page, EMPLOYEE_PHONE)

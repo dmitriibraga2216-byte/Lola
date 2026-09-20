@@ -8,8 +8,45 @@ const { hasScope } = useAuth()
 const route = useRoute()
 interface P { id: string, userId: string, fullName: string, status: string, waitlistPosition: number | null, checkInMethod: string | null, checkedInAt: string | null, cancelReason: string | null }
 interface M { id: string, kind: string, title: string, startsAt: string, endsAt: string, status: string, attendanceMode: string, capacity: number | null, registered: number, waitlist: number, participants: P[], materials: string[], webinar: { joinUrl: string | null, hostUrl?: string, recordUrl: string | null } | null, location: { name: string } | null, room: string | null }
+interface Session { id: string, starts_at: string, ends_at: string, status: string, location: string | null, room: string | null, trainers: string[], capacity: number | null, registered: number, waitlist: number }
+interface SessionParticipant { id: string, userId: string, fullName: string, status: string, waitlistPosition: number | null, checkInMethod: string | null, checkedInAt: string | null }
 const m = ref<M | null>(null)
-const tab = ref<'participants' | 'qr' | 'materials' | 'summary'>('participants')
+const tab = ref<'participants' | 'qr' | 'materials' | 'summary' | 'sessions'>('participants')
+const sessions = ref<Session[]>([])
+const locations = ref<{ id: string, name: string }[]>([])
+const people = ref<{ id: string, fullName: string }[]>([])
+const sForm = reactive({ startsAt: '', endsAt: '', locationId: '', room: '', trainerIds: [] as string[], capacity: null as number | null, attendanceMode: 'both' })
+const openSessionId = ref('')
+const sessionParticipants = ref<SessionParticipant[]>([])
+async function loadSessions() { try { sessions.value = await api<Session[]>(`/meetups/${route.params.id}/sessions`) } catch (err) { error.value = apiErrorOf(err).message } }
+async function createSession() {
+  error.value = ''; notice.value = ''
+  try {
+    await api(`/meetups/${route.params.id}/sessions`, { method: 'POST', body: { startsAt: new Date(sForm.startsAt).toISOString(), endsAt: new Date(sForm.endsAt).toISOString(), locationId: sForm.locationId || null, room: sForm.room || null, trainerIds: sForm.trainerIds, capacity: sForm.capacity || null, attendanceMode: sForm.attendanceMode } })
+    notice.value = t('common.saved')
+    await loadSessions()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+async function openSession(id: string) {
+  openSessionId.value = id
+  try { sessionParticipants.value = (await api<{ participants: SessionParticipant[] }>(`/meetup-sessions/${id}`)).participants ?? [] } catch (err) { error.value = apiErrorOf(err).message }
+}
+/** Відмітка присутності: негайно — без причини; заднім числом (сесія вже завершилась) — причина обов'язкова (Г-18.1). */
+async function markSession(p: SessionParticipant, status: string) {
+  error.value = ''; notice.value = ''
+  let reason: string | null | undefined
+  if (status === 'excused' || (openSessionId.value && sessions.value.find(s => s.id === openSessionId.value) && new Date(sessions.value.find(s => s.id === openSessionId.value)!.ends_at).getTime() < Date.now())) {
+    reason = prompt(status === 'excused' ? t('mt.excuseReason') : t('mt.retroactiveReason'))
+    if (!reason) return
+  }
+  try {
+    await api(`/meetup-sessions/${openSessionId.value}/attendance`, { method: 'POST', body: { userId: p.userId, status, reason } })
+    notice.value = t('common.saved')
+    await openSession(openSessionId.value)
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 const error = ref('')
 const notice = ref('')
 const qrImg = ref('')
@@ -21,7 +58,7 @@ const minutes = reactive<Record<string, number>>({})
 const recordUrl = ref('')
 let qrTimer: ReturnType<typeof setInterval> | null = null
 async function load() { try { m.value = await api<M>(`/meetups/${route.params.id}`); recordUrl.value = m.value.webinar?.recordUrl ?? '' } catch (err) { error.value = apiErrorOf(err).message } }
-onMounted(async () => { await load(); others.value = await api('/people?limit=100') })
+onMounted(async () => { await load(); others.value = await api('/people?limit=100'); people.value = others.value; locations.value = await api('/refs/locations'); await loadSessions() })
 onUnmounted(() => { if (qrTimer) clearInterval(qrTimer) })
 async function refreshQr() {
   try { const r = await api<{ token: string, expiresInSec: number }>(`/meetups/${route.params.id}/qr`); qrImg.value = await QRCode.toDataURL(r.token, { width: 480, margin: 1 }); qrLeft.value = r.expiresInSec } catch (err) { error.value = apiErrorOf(err).message }
@@ -47,10 +84,57 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleTimeString('uk-UA', { 
       <div class="head"><h1>{{ m.title }}</h1><span :class="['badge', m.status]">{{ t(`mt.mstatus.${m.status}`) }}</span></div>
       <p class="sub">{{ new Date(m.startsAt).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' }) }}<template v-if="m.location"> · {{ m.location.name }}</template><template v-if="m.room">, {{ m.room }}</template> · {{ t('mt.registeredN', { n: m.registered, cap: m.capacity ?? '∞' }) }}<template v-if="m.waitlist"> · {{ t('mt.queue') }}: {{ m.waitlist }}</template></p>
       <div class="tabs">
-        <button v-for="tb in ['participants', 'qr', 'materials', 'summary']" :key="tb" :class="['tab', { on: tab === tb }]" :disabled="tb === 'qr' && m.attendanceMode === 'manual'" @click="tab = tb as never">{{ t(`mt.tab.${tb}`) }}</button>
+        <button v-for="tb in ['participants', 'qr', 'materials', 'summary', 'sessions']" :key="tb" :class="['tab', { on: tab === tb }]" :disabled="tb === 'qr' && m.attendanceMode === 'manual'" @click="tab = tb as never">{{ t(`mt.tab.${tb}`) }}</button>
         <span class="spacer" />
         <button v-if="hasScope('meetup.manage') && !['finished', 'cancelled'].includes(m.status)" class="chip danger" @click="cancel.open = true">{{ t('mt.cancelMeetup') }}</button>
       </div>
+
+      <section v-if="tab === 'sessions'" class="card">
+        <table class="table plain">
+          <thead><tr><th>{{ t('mt.when') }}</th><th>{{ t('assign.col.status') }}</th><th>{{ t('mt.participants') }}</th><th /></tr></thead>
+          <tbody>
+            <tr v-for="s in sessions" :key="s.id" :data-testid="`sess-${s.id}`">
+              <td>{{ new Date(s.starts_at).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }}<div class="sub">{{ s.location ?? '' }}{{ s.room ? `, ${s.room}` : '' }}</div></td>
+              <td><span :class="['badge', s.status]">{{ t(`mt.mstatus.${s.status}`) }}</span></td>
+              <td>{{ s.registered }}<template v-if="s.capacity"> / {{ s.capacity }}</template></td>
+              <td><button class="chip" @click="openSession(s.id)">{{ t('mt.markAttendance') }}</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <details open>
+          <summary class="sub">{{ t('mt.newSession') }}</summary>
+          <div class="row">
+            <label class="sub">{{ t('mt.start') }} <input v-model="sForm.startsAt" class="field" type="datetime-local"></label>
+            <label class="sub">{{ t('mt.end') }} <input v-model="sForm.endsAt" class="field" type="datetime-local"></label>
+          </div>
+          <div class="row">
+            <select v-model="sForm.locationId" class="field"><option value="">{{ t('mt.noLocation') }}</option><option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>
+            <input v-model="sForm.room" class="field" :placeholder="t('mt.room')" maxlength="120">
+            <label class="sub">{{ t('mt.capacity') }} <input v-model.number="sForm.capacity" class="field short" type="number" min="1" max="500"></label>
+          </div>
+          <label class="sub">{{ t('mt.trainers') }}</label>
+          <div class="row"><label v-for="p in people" :key="p.id" class="check"><input v-model="sForm.trainerIds" type="checkbox" :value="p.id"> {{ p.fullName }}</label></div>
+          <button class="primary" :disabled="!sForm.startsAt || !sForm.endsAt || !sForm.trainerIds.length" @click="createSession">{{ t('common.save') }}</button>
+        </details>
+
+        <div v-if="openSessionId" class="session-participants">
+          <h2>{{ t('mt.participants') }}</h2>
+          <table class="table plain">
+            <thead><tr><th>{{ t('people.col.name') }}</th><th>{{ t('assign.col.status') }}</th><th /></tr></thead>
+            <tbody>
+              <tr v-for="p in sessionParticipants.filter(x => x.status !== 'cancelled')" :key="p.id" :data-testid="`spt-${p.userId}`">
+                <td>{{ p.fullName }}</td>
+                <td><span :class="['badge', p.status]">{{ t(`mt.status.${p.status}`) }}</span></td>
+                <td class="acts">
+                  <button v-if="p.status !== 'attended'" class="chip" :data-testid="`sattend-${p.userId}`" @click="markSession(p, 'attended')">{{ t('mt.markPresent') }}</button>
+                  <button v-if="p.status !== 'missed'" class="chip" @click="markSession(p, 'missed')">{{ t('mt.markAbsent') }}</button>
+                  <button v-if="p.status !== 'excused'" class="chip" @click="markSession(p, 'excused')">{{ t('mt.excused') }}</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section v-if="tab === 'participants'" class="card">
         <div class="row"><button class="chip" :disabled="!active.some(p => p.status === 'registered')" @click="markAll">{{ t('mt.markAll') }}</button></div>
@@ -143,6 +227,7 @@ td { padding: var(--space-2); border-bottom: 1px solid var(--color-bg-line-soft)
 .badge.planned, .badge.attended, .badge.registered { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.ongoing, .badge.waitlist { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.cancelled, .badge.missed { background: var(--color-coral); color: var(--color-coral-deep); }
+.session-participants { margin-top: var(--space-3); display: grid; gap: var(--space-2); }
 .kpis { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .kpi { background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); display: grid; }
 .kpi b { font-size: var(--font-size-title-l); font-weight: 900; }

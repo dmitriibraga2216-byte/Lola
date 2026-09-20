@@ -7,6 +7,7 @@ import { users } from './people'
 import { locations } from './org'
 import { courses } from './content'
 import { surveys } from './knowledge'
+import { assignments } from './assignments'
 
 /**
  * Очные занятия, вебинары, комплексные тесты (docs/18-meetups-webinars.md).
@@ -23,6 +24,10 @@ export const meetups = pgTable('meetups', {
   registrationRequired: boolean('registration_required').notNull().default(true), // событие без регистрации — просто в афише
   audience: jsonb('audience'), // кого запрошено на событие (docs/02 events.audience; null = все активные)
   description: jsonb('description').notNull().default('[]'), // блоки
+  // «Анонс» (docs/18 §14, сверено с эталоном): текст, який людина читає ДО запису — обов'язковий
+  // для kind meetup|webinar; для kind=event не використовується (у події своя картка, Spec 21).
+  announcement: jsonb('announcement').notNull().default('[]'),
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   courseId: uuid('course_id').references(() => courses.id),
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
   endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
@@ -100,6 +105,75 @@ export const webinarParticipations = pgTable('webinar_participations', {
 }, t => [
   index().on(t.tenantId),
   unique().on(t.webinarId, t.userId),
+])
+
+/**
+ * Сесії (docs/18 §14.1, docs/02 «Комплексные тесты, очные занятия, вебинары»: `sessions`).
+ * Назва таблиці — `meetup_sessions`, бо `sessions` вже зайнята автентифікацією (parity-4).
+ * Сесія належить НАЗНАЧЕННЮ (`task_id`), а не картці: одне заняття/вебінар (`meetups`) може
+ * мати кілька сесій за датою/місцем, кожна зі своєю вмістимістю, чергою і відміткою.
+ * `task_id` — nullable: сесію можна створити і без формального призначення (як і раніше
+ * підтримується прямий запис через `meetupRegistrations` для kind=event, Spec 21).
+ */
+export const meetupSessions = pgTable('meetup_sessions', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  meetupId: uuid('meetup_id').notNull().references(() => meetups.id, { onDelete: 'cascade' }),
+  taskId: uuid('task_id').references(() => assignments.id, { onDelete: 'set null' }),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+  endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+  timezone: text('timezone').notNull().default('Europe/Kyiv'),
+  locationId: uuid('location_id').references(() => locations.id),
+  room: text('room'),
+  address: text('address'),
+  trainerIds: uuid('trainer_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  // Вебінар: посилання можуть відрізнятись від типових на картці — перевизначення на рівні сесії
+  joinUrl: text('join_url'),
+  hostUrl: text('host_url'),
+  recordUrl: text('record_url'),
+  provider: text('provider'), // zoom | meet | other; null = взяти з картки вебінару
+  capacity: integer('capacity'),
+  waitlistEnabled: boolean('waitlist_enabled').notNull().default(true),
+  enrollDeadlineHours: integer('enroll_deadline_hours').notNull().default(2),
+  cancelDeadlineHours: integer('cancel_deadline_hours').notNull().default(24),
+  attendanceMode: text('attendance_mode').notNull().default('manual'), // manual | qr | both
+  qrSecret: text('qr_secret').notNull(),
+  status: text('status').notNull().default('planned'), // planned | ongoing | finished | cancelled
+  cancelReason: text('cancel_reason'),
+  createdBy: uuid('created_by').references(() => users.id),
+}, t => [
+  index().on(t.tenantId, t.startsAt),
+  index().on(t.tenantId, t.meetupId),
+  index().on(t.tenantId, t.taskId),
+])
+
+export const meetupSessionRegistrations = pgTable('meetup_session_registrations', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  sessionId: uuid('session_id').notNull().references(() => meetupSessions.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('registered'), // registered | waitlist | attended | missed | cancelled | excused
+  registeredAt: timestamp('registered_at', { withTimezone: true }).notNull().defaultNow(),
+  registeredBy: uuid('registered_by').references(() => users.id),
+  waitlistPosition: integer('waitlist_position'),
+  checkedInAt: timestamp('checked_in_at', { withTimezone: true }),
+  checkInMethod: text('check_in_method'), // manual | qr | auto
+  checkedInBy: uuid('checked_in_by').references(() => users.id),
+  cancelReason: text('cancel_reason'),
+  guestsCount: integer('guests_count').notNull().default(0),
+  enrollmentId: uuid('enrollment_id'), // занятие як урок курсу (docs/29 Б.3): звідки прийшов запис
+  lessonId: uuid('lesson_id'),
+  // Вебінар: облік перегляду (docs/18 Г-18.2) — тіки з клієнта, зачёт по `webinarMinWatchPct`
+  secondsWatched: integer('seconds_watched').notNull().default(0),
+  watchPct: numeric('watch_pct', { precision: 5, scale: 2 }),
+  lastTickAt: timestamp('last_tick_at', { withTimezone: true }),
+  // Відмітка присутності заднім числом (Г-18.1): тільки з причиною, ≤7 днів після сесії, в аудит
+  markedRetroactively: boolean('marked_retroactively').notNull().default(false),
+  retroactiveReason: text('retroactive_reason'),
+}, t => [
+  unique().on(t.sessionId, t.userId),
+  index().on(t.tenantId, t.userId, t.status),
+  index().on(t.tenantId, t.sessionId),
 ])
 
 export const complexTests = pgTable('complex_tests', {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
-  assignments, courseVersions, courses, lessons, mediaAssets, modules, resourceVersions, resources, users,
+  assignments, courseVersions, courses, lessons, meetups, mediaAssets, modules, resourceVersions, resources, users,
 } from '../db/schema'
 import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
@@ -269,7 +269,7 @@ export async function addModule(ctx: Ctx, courseId: string, title: string) {
 
 export type AddLessonResult
   = | { ok: true, lesson: typeof lessons.$inferSelect }
-    | { ok: false, code: 'section_required' | 'resource_not_found' | 'resource_not_published' }
+    | { ok: false, code: 'section_required' | 'resource_not_found' | 'resource_not_published' | 'meetup_not_found' }
 
 /**
  * Элемент плана. Раздел — обязательный уровень (docs/11 §14.1): без раздела элемент не создаётся.
@@ -287,6 +287,14 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
     }
     else if (input.itemType === 'workshop') {
       itemId = input.workshopId!
+    }
+    else if (input.itemType === 'meetup') {
+      // Урок-заняття (docs/29 Б.3, docs/18 §14.1): itemId = meetups.id, дата/місце — у сесіях
+      // на призначенні, зачёт — по відвідуванню (learning.ts completeLesson).
+      const [meetup] = await tx.select({ id: meetups.id, status: meetups.status }).from(meetups)
+        .where(and(eq(meetups.id, input.meetupId!), inArray(meetups.kind, ['meetup', 'webinar'])))
+      if (!meetup) return { ok: false as const, code: 'meetup_not_found' as const }
+      itemId = meetup.id
     }
     else if (input.resourceId) {
       const [existing] = await tx.select({ id: resources.id, status: resources.status, title: resources.title }).from(resources)

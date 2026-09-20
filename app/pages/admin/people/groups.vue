@@ -4,7 +4,10 @@ const { t } = useI18n()
 const { api, apiRaw } = useApi()
 const { hasScope } = useAuth()
 
-interface Group { id: string, name: string, kind: 'static' | 'dynamic', members: string[], filter: Record<string, unknown> | null, isActive: boolean, recalcAt: string | null, size: number }
+interface Group { id: string, name: string, kind: 'static' | 'dynamic', members: string[], filter: Record<string, unknown> | null, isActive: boolean, recalcAt: string | null, size: number, isOrgDerived: boolean, updatedAt: string }
+// Мокап UserGroups: Усі · З оргструктури · Створені вручну; производные группы руками не правят (docs/16 §14.1)
+const source = ref<'all' | 'org' | 'manual'>('all')
+const shown = computed(() => groups.value.filter(g => source.value === 'all' || (source.value === 'org') === g.isOrgDerived))
 interface Ref { id: string, name: string }
 const groups = ref<Group[]>([])
 const error = ref('')
@@ -31,7 +34,7 @@ onMounted(async () => {
 })
 
 function openNew() {
-  editing.value = { id: '', name: '', kind: 'static', members: [], filter: null, isActive: true, recalcAt: null, size: 0 }
+  editing.value = { id: '', name: '', kind: 'static', members: [], filter: null, isActive: true, recalcAt: null, size: 0, isOrgDerived: false, updatedAt: '' }
   Object.assign(form, { id: '', name: '', kind: 'static', isActive: true, members: [], filter: { positionIds: [], locationIds: [], positionLevelIds: [], hiredFrom: '', hiredTo: '', certificateExpiringDays: '' } })
 }
 async function openEdit(g: Group) {
@@ -86,21 +89,32 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk') : '—'
 <template>
   <div>
     <header class="head">
-      <h1>{{ t('groups.title') }}</h1>
+      <div>
+        <h1>{{ t('groups.title') }}</h1>
+        <p class="sub">{{ t('groups.orgHint') }}</p>
+      </div>
       <button v-if="hasScope('people.edit')" class="btn primary" @click="openNew">{{ t('groups.new') }}</button>
     </header>
+    <div class="chips" role="tablist">
+      <button role="tab" :aria-selected="source === 'all'" :class="['chip', { on: source === 'all' }]" @click="source = 'all'">{{ t('groups.sourceAll') }} · {{ groups.length }}</button>
+      <button role="tab" :aria-selected="source === 'org'" :class="['chip', { on: source === 'org' }]" @click="source = 'org'">{{ t('groups.sourceOrg') }}</button>
+      <button role="tab" :aria-selected="source === 'manual'" :class="['chip', { on: source === 'manual' }]" @click="source = 'manual'">{{ t('groups.sourceManual') }}</button>
+    </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 
-    <div v-if="groups.length === 0" class="empty">{{ t('groups.empty') }}</div>
+    <div v-if="shown.length === 0" class="empty">{{ t('groups.empty') }}</div>
     <ul v-else class="list">
-      <li v-for="g in groups" :key="g.id" class="card row">
+      <li v-for="g in shown" :key="g.id" class="card row">
         <div class="grow">
-          <b>{{ g.name }}</b> <span class="badge">{{ t(`groups.${g.kind}`) }}</span> <span v-if="!g.isActive" class="sub">· {{ t('common.deactivate') }}</span>
-          <div class="sub">{{ t('groups.size', { n: g.size }) }}<template v-if="g.kind === 'dynamic'"> · {{ t('groups.recalc', { at: fmt(g.recalcAt) }) }}</template></div>
+          <b>{{ g.name }}</b>
+          <span :class="['badge', { teal: g.isOrgDerived }]">{{ g.isOrgDerived ? t('groups.sourceOrg') : t('groups.sourceManual') }}</span>
+          <span v-if="!g.isOrgDerived" class="badge">{{ t(`groups.${g.kind}`) }}</span>
+          <span v-if="!g.isActive" class="sub">· {{ t('common.deactivate') }}</span>
+          <div class="sub">{{ t('groups.size', { n: g.size }) }} · {{ t('groups.changedAt', { at: fmt(g.updatedAt) }) }}<template v-if="g.kind === 'dynamic' && !g.isOrgDerived"> · {{ t('groups.recalc', { at: fmt(g.recalcAt) }) }}</template></div>
         </div>
-        <button v-if="hasScope('people.edit')" class="btn" @click="openEdit(g)">{{ t('common.edit') }}</button>
-        <button v-if="hasScope('people.edit')" class="btn danger" @click="remove(g)">{{ t('groups.delete') }}</button>
+        <button v-if="hasScope('people.edit') && !g.isOrgDerived" class="btn" @click="openEdit(g)">{{ t('common.edit') }}</button>
+        <button v-if="hasScope('people.edit') && !g.isOrgDerived" class="btn danger" @click="remove(g)">{{ t('groups.delete') }}</button>
       </li>
     </ul>
 
@@ -141,6 +155,9 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk') : '—'
 </template>
 
 <style scoped>
+.chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
+.chip.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: wrap; }
 h1 { margin: 0; font-weight: 900; }
 h2 { margin: 0; font-weight: 800; }
@@ -150,6 +167,7 @@ h2 { margin: 0; font-weight: 800; }
 .grow { flex: 1; min-width: 160px; }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
 .badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .btn { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: var(--color-bg-soft); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .btn.primary { background: var(--color-sun); border-color: var(--color-sun); }
 .btn.danger { background: var(--color-coral); border-color: var(--color-coral); color: var(--color-coral-deep); }

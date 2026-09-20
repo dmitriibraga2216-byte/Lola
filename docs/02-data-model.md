@@ -88,7 +88,8 @@ create table users (
   translit text,                              -- «Транслітерація» для выгрузок
   work_contacts text,                         -- «Робочі контакти», отдельно от личного телефона
   is_hidden boolean not null default false,   -- «Прихований»: работает, но не виден в контактах
-  must_change_password boolean not null default false,
+  must_change_password boolean not null default false, -- «Змінити пароль після першого входу» (`24` §3.4.1); Spec 16
+  password_changed_at timestamptz,            -- для «Обмежити максимальний термін дії пароля»; Spec 16
   comment text,
   archived_at timestamptz,
   telegram_chat_id bigint,
@@ -1038,8 +1039,12 @@ leaderboard_snapshots(scope_type, scope_id, period, rows jsonb)
 ```sql
 -- Область действия обязательна: без неё список меток на форме курса показывает
 -- метки должностей. Значения области в эталоне: course | resource | user (и другие).
-tags(id, tenant_id, name, description, scope text not null)
+tags(id, tenant_id, name, description, color, scope text not null)   -- scope: tag_scope (CHECK), Spec 16 (было kind any|people|content|assignment)
 -- name ≤ 40 знаков, без угловых скобок; уникальна в паре (tenant_id, scope, name)
+-- метка живёт на сущностях строкой (users.tags, courses.tags, …): «где используется» считается по таблицам области
+user_groups.is_org_derived boolean not null default false,  -- группа «з оргструктури» (`16` §14.1): пересобирается, руками не правится; Spec 16
+user_groups.org_unit_id uuid references org_units on delete cascade,   -- узел-источник производной группы
+user_groups.location_id uuid references locations on delete cascade
 ```
 
 ## Интеграции и переводы
@@ -1086,10 +1091,10 @@ task_access_log(
 -- Протокол конфліктів в оргструктурі (`16` §7, §14): эталон не падает на конфликте, а пишет строку и продолжает. Spec 22.
 org_conflicts(
   id, tenant_id, user_id,
-  kind text not null,             -- double_unit | placement_replaced | manager_self | manager_cycle  [решение]
+  kind text not null,             -- org_conflict_kind: double_unit | placement_replaced | manager_self | manager_cycle | unit_missing (Spec 16, по мокапу)
   source text not null default 'manual',  -- manual | import
   import_job_id uuid, details jsonb, actor_id uuid,
-  request_context jsonb, resolved_at timestamptz, resolved_by uuid, created_at
+  request_context jsonb, resolved_at timestamptz, resolved_by uuid, created_at   -- разрешение: details.resolution {action acknowledge|close_placement, placementId, comment, by, at}
 )
 -- Протокол змін статусу завдань — это enrollment_events (payload {from, to, result}) ∪ attempt_results; отдельной таблицы нет.
 -- report_exports.active_role_id uuid — роль, активная в момент запроса выгрузки (`01` §1.9.2); область считается по ней.
@@ -1199,6 +1204,19 @@ scoring_method: formula | all_or_nothing
 
 -- Статус запроса дополнительной попытки (`12` §14.5: «Очікує» по умолчанию, «Надано»; «Відмовлено» — по кнопке «Відмовити» `12` §6.3)
 attempt_request_status: pending | approved | rejected
+
+-- Область действия метки (`16` §14.2; `30`): обязательна
+tag_scope: user | course | resource | question | task
+
+-- Вид конфликта оргструктуры (`16` §7, §14; Spec 22; unit_missing — по мокапу OrgConflicts, Spec 16)
+org_conflict_kind: double_unit | placement_replaced | manager_self | manager_cycle | unit_missing
+
+-- Коды событий журнала безопасности (`16` §15 Г-16.2); Spec 16
+security_event: login.success | login.failed | login.blocked | otp.sent | otp.failed | session.revoked
+              | user.created | user.blocked | user.unblocked | user.archived
+              | password.changed | password.reset_by_admin
+              | roles.changed | contacts.changed | impersonation.started | impersonation.ended
+              | export.personal_data | settings.security_changed | api_token.created | api_token.revoked
 ```
 
 ## Что проверяет тест схемы

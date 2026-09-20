@@ -56,7 +56,7 @@ onMounted(async () => {
   try {
     const [card, p, c, l, tg, lv, ou] = await Promise.all([
       api<{ title: string }>(`/tasks/${id}`),
-      api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/cities').catch(() => []), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/tags').catch(() => []),
+      api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/cities').catch(() => []), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/tags?scope=user').catch(() => []),
       api<Ref[]>('/refs/position-levels').catch(() => []), api<Ref[]>('/refs/org-units').catch(() => []),
     ])
     title.value = card.title

@@ -5,7 +5,7 @@ const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 
-const kinds = ['cities', 'position-levels', 'positions', 'org-units', 'locations', 'tags'] as const
+const kinds = ['cities', 'positions', 'position-levels', 'org-units', 'locations'] as const
 type Kind = typeof kinds[number]
 
 const kind = ref<Kind>('cities')
@@ -79,7 +79,9 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
       >
         {{ t(`refs.${k}`) }}
       </button>
+      <NuxtLink to="/admin/tags" class="tab">{{ t('refs.tags') }} →</NuxtLink>
     </div>
+    <p class="sub count">{{ t('refs.count', { n: rows.length }) }}</p>
 
     <p v-if="error" class="error">{{ error }}</p>
 
@@ -107,6 +109,7 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
           <span v-if="row.isActive === false" class="sub">· {{ t('refs.inactive') }}</span>
           <span v-if="row.levelName" class="sub">· {{ row.levelName }}</span>
           <span v-if="row.address" class="sub">· {{ row.address }}</span>
+          <span v-if="row.peopleCount !== undefined" class="sub">· {{ t('refs.people', { n: row.peopleCount }) }}</span>
           <span v-if="hasScope('settings.tenant')" class="row-actions">
             <button class="ghost small" @click="editId = String(row.id); editName = String(row.name)">{{ t('refs.edit') }}</button>
             <button v-if="hasActive" class="ghost small" @click="toggleActive(row)">{{ row.isActive === false ? t('common.activate') : t('common.deactivate') }}</button>
@@ -121,6 +124,8 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
 </template>
 
 <style scoped>
+.count { margin: 0 0 var(--space-2); }
+a.tab { text-decoration: none; }
 h1 {
   margin: 0 0 var(--space-4);
   font-weight: 900;

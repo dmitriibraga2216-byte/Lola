@@ -45,7 +45,7 @@ user ──< user_role >── role ──< role_scope >── scope
 - `survey.manage` — опросы
 
 **Люди и назначения**
-- `people.view`, `people.invite`, `people.edit`, `people.deactivate`, `people.import`
+- `people.view`, `people.invite`, `people.edit`, `people.deactivate`, `people.import`, `people.password` (смена пароля другому человеку — отдельный скоуп, `04` §4.11)
 - `assignment.create`, `assignment.cancel`
 - `role.assign`
 

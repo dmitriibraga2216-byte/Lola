@@ -113,7 +113,7 @@ export async function linkChat(token: string, chatId: bigint): Promise<{ ok: boo
     await enqueueNotification(tx, { tenantId: row.tenant_id, userId: row.user_id, code: 'telegram_linked', payload: {}, urgent: true })
     return u!.fullName
   })
-  await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'telegram.linked', meta: { chatId: String(chatId) } })
+  await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'contacts.changed', meta: { field: 'telegram', chatId: String(chatId) } })
   return { ok: true, fullName, tenantId: row.tenant_id }
 }
 
@@ -140,7 +140,7 @@ export async function consumeLoginToken(token: string, meta: { userAgent?: strin
     await tx.update(telegramTokens).set({ consumedAt: new Date() }).where(eq(telegramTokens.id, row.token_id))
   })
   const { token: sessionToken } = await createSession({ tenantId: row.tenant_id, userId: row.user_id, userAgent: meta.userAgent, ip: meta.ip })
-  await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'login.telegram', ip: meta.ip })
+  await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'login.success', meta: { method: 'telegram' }, ip: meta.ip })
   return { sessionToken }
 }
 

@@ -29,14 +29,33 @@ async function toggleEmailAlerts(v: boolean) {
 const rows = ref<Row[]>([])
 const retention = ref<number | null>(0)
 const error = ref('')
-const filters = reactive({ from: '', to: '', userId: '', type: '', severity: '', contentType: '' })
+const filters = reactive({ from: '', to: '', userId: '', type: '', severity: '', contentType: '', orgUnitId: '', state: '' })
 const CONTENT_TYPES = ['course', 'training_program', 'test', 'resource']
-const CONFLICT_KINDS = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle']
+const CONFLICT_KINDS = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing']
+// Коды событий журнала безпеки (docs/16 §15 Г-16.2) — фильтр «Подія»; подразделения — фильтр «Підрозділ» мокапа SecurityLog
+const SECURITY_EVENTS = ['login.success', 'login.failed', 'login.blocked', 'otp.sent', 'otp.failed', 'session.revoked', 'user.created', 'user.blocked', 'user.unblocked', 'user.archived', 'password.changed', 'password.reset_by_admin', 'roles.changed', 'contacts.changed', 'impersonation.started', 'impersonation.ended', 'export.personal_data', 'settings.security_changed', 'api_token.created', 'api_token.revoked']
+const units = ref<{ id: string, name: string }[]>([])
+onMounted(async () => {
+  try {
+    const tree = await api<{ units: { id: string, name: string, children: unknown[] }[] }>('/org/tree')
+    const walk = (u: { id: string, name: string, children: unknown[] }[], d: number) => { for (const x of u) { units.value.push({ id: x.id, name: `${'· '.repeat(d)}${x.name}` }); walk(x.children as never, d + 1) } }
+    walk(tree.units, 0)
+  }
+  catch { units.value = [] }
+})
+// Месяц одним полем (мокап SecurityLog: «вересень 2026») — раскладывается в from/to
+const month = ref('')
+watch(month, (m) => {
+  if (!m) { filters.from = ''; filters.to = ''; return }
+  const [y, mo] = m.split('-').map(Number)
+  filters.from = `${m}-01`
+  filters.to = new Date(Date.UTC(y!, mo!, 0)).toISOString().slice(0, 10)
+})
 const people = ref<{ id: string, fullName: string }[]>([])
 const search = ref('')
 const opened = ref<string | null>(null)
 
-const query = () => Object.fromEntries(Object.entries(filters).filter(([k, v]) => v && (k !== 'severity' || tab.value === 'security') && (k !== 'contentType' || tab.value === 'task-status' || tab.value === 'task-access')))
+const query = () => Object.fromEntries(Object.entries(filters).filter(([k, v]) => v && (k !== 'severity' || tab.value === 'security') && (k !== 'orgUnitId' || tab.value === 'security' || tab.value === 'org-conflicts') && (k !== 'state' || tab.value === 'org-conflicts') && (k !== 'contentType' || tab.value === 'task-status' || tab.value === 'task-access')))
 async function load() {
   error.value = ''
   try {
@@ -79,6 +98,7 @@ const eventText = (r: Row) => {
   const reason = (r.meta as { reason?: unknown } | undefined)?.reason
   return typeof reason === 'string' && reason && code.startsWith('impersonation') ? `${base} · ${t('journals.reason')}: ${reason}` : base
 }
+const statOf = (r: Row, k: string) => (r.stats as Record<string, number | undefined> | null | undefined)?.[k]
 const minutes = (r: Row) => isDate(r.created_at) && isDate(r.ended_at) ? Math.max(0, Math.round((parseDate(r.ended_at).getTime() - parseDate(r.created_at).getTime()) / 60000)) : 0
 const uniquePeople = computed(() => new Set(rows.value.map(r => String(r.user_id))).size)
 const exportUrl = computed(() => `/api/v1/logs/${tab.value}?${new URLSearchParams({ ...query(), limit: '500', format: 'xlsx' })}`)
@@ -96,8 +116,18 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
       <button v-for="k in KINDS" :key="k" role="tab" :aria-selected="tab === k" :class="['tab', { on: tab === k }]" @click="tab = k">{{ t(`journals.kind.${k}`) }}</button>
     </div>
     <div class="filters">
+      <label v-if="tab === 'security'">{{ t('journals.month') }} <input v-model="month" type="month"></label>
       <label>{{ t('reports.from') }} <input v-model="filters.from" type="date"></label>
       <label>{{ t('reports.to') }} <input v-model="filters.to" type="date"></label>
+      <label v-if="tab === 'security' || tab === 'org-conflicts'">{{ t('people.col.orgUnit') }}
+        <select v-model="filters.orgUnitId"><option value="">{{ t('journals.anyType') }}</option><option v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</option></select>
+      </label>
+      <label v-if="tab === 'security'">{{ t('journals.col.event') }}
+        <select v-model="filters.type"><option value="">{{ t('journals.anyType') }}</option><option v-for="e in SECURITY_EVENTS" :key="e" :value="e">{{ eventText({ id: e, event: e }) }}</option></select>
+      </label>
+      <label v-if="tab === 'org-conflicts'">{{ t('journals.col.state') }}
+        <select v-model="filters.state"><option value="">{{ t('journals.anyType') }}</option><option value="open">{{ t('conflicts.state.open') }}</option><option value="resolved">{{ t('conflicts.state.resolved') }}</option></select>
+      </label>
       <label v-if="tab === 'security'">{{ t('journals.col.severity') }}
         <select v-model="filters.severity">
           <option value="">{{ t('journals.severity.any') }}</option>
@@ -116,7 +146,7 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
           <option v-for="k in CONFLICT_KINDS" :key="k" :value="k">{{ t(`journals.conflict.${k}`) }}</option>
         </select>
       </label>
-      <label v-else-if="tab !== 'sessions' && tab !== 'task-access'">{{ t('journals.type') }} <input v-model="filters.type" :placeholder="t('journals.typeHint')"></label>
+      <label v-else-if="tab !== 'sessions' && tab !== 'task-access' && tab !== 'security' && tab !== 'import'">{{ t('journals.type') }} <input v-model="filters.type" :placeholder="t('journals.typeHint')"></label>
       <label v-if="tab === 'security' && hasScope('settings.tenant')" class="toggle"><input type="checkbox" :checked="emailAlerts" @change="toggleEmailAlerts(($event.target as HTMLInputElement).checked)"><span>{{ t('journals.emailAlerts') }}<span class="hint">{{ t('journals.emailAlertsHint') }}</span></span></label>
       <label>{{ t('people.col.name') }} <input v-model="search" :placeholder="t('orgAdmin.searchPerson')"></label>
       <div v-if="people.length" class="found"><button v-for="p in people" :key="p.id" class="chip" @click="filters.userId = p.id; search = p.fullName; people = []">{{ p.fullName }}</button></div>
@@ -163,7 +193,7 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
       </table>
       <!-- Протокол конфліктів в оргструктурі -->
       <table v-else-if="rows.length && tab === 'org-conflicts'" class="table">
-        <thead><tr><th>{{ t('journals.col.when') }}</th><ReportFrame part="head" :tail="false" /><th>{{ t('journals.col.kind') }}</th><th>{{ t('journals.col.source') }}</th><th>{{ t('journals.col.actor') }}</th><th /></tr></thead>
+        <thead><tr><th>{{ t('journals.col.when') }}</th><ReportFrame part="head" :tail="false" /><th>{{ t('journals.col.kind') }}</th><th>{{ t('journals.col.source') }}</th><th>{{ t('journals.col.actor') }}</th><th>{{ t('journals.col.state') }}</th><th /></tr></thead>
         <tbody>
           <template v-for="r in rows" :key="String(r.id)">
             <tr>
@@ -172,6 +202,7 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
               <td class="event">{{ t(`journals.conflict.${r.kind}`) }}</td>
               <td>{{ t(`journals.conflictSource.${r.source}`) }}</td>
               <td>{{ r.actor ?? '—' }}</td>
+              <td><NuxtLink v-if="!r.resolved_at" to="/admin/org-conflicts" class="pill pill-warning">{{ t('conflicts.state.open') }}</NuxtLink><span v-else class="pill pill-ok">{{ t('conflicts.state.resolved') }}</span></td>
               <td><button class="chip" :aria-expanded="opened === String(r.id)" @click="opened = opened === String(r.id) ? null : String(r.id)">{{ t('journals.details') }}</button></td>
             </tr>
             <tr v-if="opened === String(r.id)"><td colspan="10"><pre class="pre">{{ JSON.stringify(r.details, null, 2) }}</pre></td></tr>
@@ -194,6 +225,22 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
             </tr>
             <tr v-if="opened === String(r.id)"><td colspan="11"><pre class="pre">{{ JSON.stringify(r, null, 2) }}</pre></td></tr>
           </template>
+        </tbody>
+      </table>
+      <!-- Протокол імпорту — мокап ImportLog: дата · джерело · хто запустив · створено · оновлено · помилок · стан -->
+      <table v-else-if="rows.length && tab === 'import'" class="table">
+        <thead><tr><th>{{ t('journals.col.when') }}</th><th>{{ t('journals.col.source') }}</th><th>{{ t('journals.col.startedBy') }}</th><th>{{ t('import.toCreate') }}</th><th>{{ t('import.toUpdate') }}</th><th>{{ t('import.errors') }}</th><th>{{ t('journals.col.state') }}</th><th /></tr></thead>
+        <tbody>
+          <tr v-for="r in rows" :key="String(r.id)">
+            <td>{{ dateOf(r.created_at) }}<div class="sub">{{ timeOf(r.created_at) }}</div></td>
+            <td class="event">{{ String(r.source).toUpperCase() }} · {{ r.file_name }}</td>
+            <td>{{ r.created_by_name ?? t('journals.system') }}</td>
+            <td>{{ statOf(r, 'created') ?? '—' }}</td>
+            <td>{{ statOf(r, 'updated') ?? '—' }}</td>
+            <td>{{ statOf(r, 'errors') ?? 0 }}</td>
+            <td><span :class="['pill', r.status === 'applied' ? (statOf(r, 'errors') ? 'pill-warning' : 'pill-ok') : r.status === 'failed' ? 'pill-critical' : 'pill-info']">{{ t(`import.status.${r.status}`) }}</span></td>
+            <td><NuxtLink :to="`/admin/import?job=${r.id}`" class="chip">{{ t('journals.details') }}</NuxtLink></td>
+          </tr>
         </tbody>
       </table>
       <!-- Журнал сесій — колонки мокапа SessionsLog -->
@@ -254,6 +301,8 @@ td { padding: var(--space-3) var(--space-3); border-bottom: 1px solid var(--colo
 .pill-info { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .pill-warning { background: var(--color-sun); color: var(--color-ink); }
 .pill-critical { background: var(--color-coral); color: var(--color-ink); }
+.pill-ok { background: var(--color-teal); color: var(--color-teal-deep); }
+a.pill { text-decoration: none; }
 .pre { margin: 0; white-space: pre-wrap; font-size: var(--font-size-body-s); max-height: 300px; overflow: auto; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .error { color: var(--color-coral-ink); }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'admin', middleware: 'admin-scope' })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 const route = useRoute()
@@ -13,13 +13,15 @@ interface Person {
   phone: string | null, email: string | null, workContacts: Record<string, string>, birthDate: string | null, gender: string | null
   status: string, isBlocked: boolean, isHidden: boolean, tags: string[], cityId: string | null, hiredAt: string | null, positionSince: string | null
   externalId: string | null, comment: string | null, locale: string | null, lastSeenAt: string | null, createdAt: string, telegramChatId: string | null
+  hasPassword: boolean, mustChangePassword: boolean, passwordChangedAt: string | null
   placements: { id: string, isPrimary: boolean, startedAt: string, endedAt: string | null, locationName: string, positionName: string, locationId: string, positionId: string }[]
   roles: { id: string, code: string, name: string, scopeType: string, scopeId: string | null, validUntil: string | null, reason: string | null, isOrgDerived: boolean, createdAt: string }[]
   sessions: { id: string, createdAt: string, updatedAt?: string, userAgent: string | null, ip: string | null, revokedAt: string | null }[]
 }
 interface Ref { id: string, name: string }
-type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'activity' | 'notes'
-const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'activity', 'notes']
+// Вкладки мокапа PersonCard: Профіль · Ролі · Навчання · Безпека · Журнал (+ Атестації и Нотатки из docs/16 §5.2)
+type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity' | 'notes'
+const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity', 'notes']
 
 const person = ref<Person | null>(null)
 const error = ref('')
@@ -45,6 +47,16 @@ const activity = ref<Record<string, unknown>[]>([])
 const notes = ref<{ id: string, body: string, created_at: string, author: string | null }[]>([])
 const chiefs = ref<Record<string, unknown>[]>([])
 const noteBody = ref('')
+// Безпека (мокап PersonCard): последний вход, активные сессии, Telegram, пароль (docs/16 §14.5 — отдельно от должности)
+const securityEvents = ref<Record<string, unknown>[]>([])
+const pwdForm = reactive({ open: false, password: '', repeat: '', mustChange: true })
+const activeSessions = computed(() => person.value?.sessions.filter(s => !s.revokedAt).length ?? 0)
+const daysInCompany = computed(() => person.value?.hiredAt ? Math.max(0, Math.floor((Date.now() - new Date(person.value.hiredAt).getTime()) / 86_400_000)) : null)
+const learningSummary = computed(() => {
+  const e = learning.value?.enrollments ?? []
+  return { assigned: e.length, done: e.filter(x => x.status === 'done').length, overdue: e.filter(x => x.status !== 'done' && x.due_at && new Date(String(x.due_at)) < new Date()).length }
+})
+const eventLabel = (code: unknown) => { const key = `journals.eventText.${String(code).replace(/\./g, '_')}`; return te(key) ? t(key) : String(code) }
 
 async function load() {
   try { person.value = await api<Person>(`/people/${id}`) }
@@ -67,7 +79,8 @@ async function loadTab(v: Tab) {
     if (v === 'learning' || v === 'assessment') learning.value ??= await api(`/people/${id}/learning`)
     if (v === 'activity') activity.value = await api(`/people/${id}/activity`)
     if (v === 'notes' && hasScope('people.edit')) notes.value = await api(`/people/${id}/notes`)
-    if (v === 'profile') chiefs.value = await api('/functional-chiefs', { query: { userId: id } })
+    if (v === 'profile') { chiefs.value = await api('/functional-chiefs', { query: { userId: id } }); learning.value ??= await api<NonNullable<typeof learning.value>>(`/people/${id}/learning`).catch(() => null) }
+    if (v === 'security' && hasScope('audit.view')) securityEvents.value = (await api<{ rows: Record<string, unknown>[] }>('/logs/security', { query: { userId: id, limit: 20 } })).rows
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -93,6 +106,10 @@ const activate = () => act(() => api(`/people/${id}`, { method: 'PATCH', body: {
 const closeAll = () => act(() => api(`/people/${id}/sessions`, { method: 'DELETE' }), t('person.sessionsClosed'))
 const closeOne = (sid: string) => act(() => api(`/people/${id}/sessions/${sid}`, { method: 'DELETE' }), t('person.sessionsClosed'))
 const resetTelegram = () => act(() => api(`/people/${id}/reset-telegram`, { method: 'POST' }), t('person.telegramReset'))
+const setPassword = () => act(async () => {
+  await api(`/people/${id}/password`, { method: 'POST', body: { password: pwdForm.password, mustChange: pwdForm.mustChange } })
+  Object.assign(pwdForm, { open: false, password: '', repeat: '' })
+}, t('person.passwordSet'))
 const addPlacementAction = () => act(() => api(`/people/${id}/placements`, { method: 'POST', body: { ...placementForm, positionLevelId: placementForm.positionLevelId || null, isPrimary: true } }), t('common.saved'))
 const assignRoleAction = () => act(async () => {
   await api(`/people/${id}/roles`, { method: 'POST', body: { roleCode: roleForm.roleCode, scopeType: roleForm.scopeType, scopeId: roleForm.scopeType === 'tenant' ? null : roleForm.scopeId || null, validUntil: roleForm.validUntil || null, reason: roleForm.reason || null } })
@@ -129,7 +146,8 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       <div class="avatar" aria-hidden="true">{{ person.fullName.slice(0, 1) }}</div>
       <div class="title">
         <h1>{{ person.fullName }}</h1>
-        <p class="sub">{{ primary?.positionName || '—' }} · {{ primary?.locationName || '—' }}<template v-if="person.tags.length"> · {{ person.tags.join(', ') }}</template></p>
+        <p class="sub">{{ primary?.positionName || '—' }} · {{ primary?.locationName || '—' }}<template v-if="daysInCompany !== null"> · {{ t('person.daysInCompany', { n: daysInCompany }) }}</template></p>
+        <p v-if="person.tags.length" class="tags"><span v-for="tg in person.tags" :key="tg" class="tagchip">{{ tg }}</span></p>
       </div>
       <span :class="['badge', person.status]">{{ t(`people.status.${person.status}`) }}</span>
       <span v-if="person.isHidden" class="badge">{{ t('people.hiddenBadge') }}</span>
@@ -196,6 +214,24 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
             <li v-for="c in chiefs" :key="String(c.id)"><b>{{ c.user_id === id ? c.chief_name : c.user_name }}</b> <span class="sub">{{ t(`orgAdmin.${c.kind}`) }}{{ c.scope ? ` · ${c.scope}` : '' }}{{ c.user_id === id ? '' : ` · ${t('orgAdmin.subordinate')}` }}</span></li>
             <li v-if="chiefs.length === 0" class="sub">—</li>
           </ul>
+        </div>
+
+        <div class="card summary">
+          <h2>{{ t('person.tabs.learning') }}</h2>
+          <dl class="stats">
+            <div><dt>{{ t('person.assigned') }}</dt><dd>{{ learningSummary.assigned }}</dd></div>
+            <div><dt>{{ t('person.doneCount') }}</dt><dd class="teal">{{ learningSummary.done }}</dd></div>
+            <div><dt>{{ t('person.overdueCount') }}</dt><dd :class="{ coral: learningSummary.overdue > 0 }">{{ learningSummary.overdue }}</dd></div>
+            <div><dt>{{ t('person.certificates') }}</dt><dd>{{ learning?.certificates.length ?? 0 }}</dd></div>
+          </dl>
+          <h2 class="mt">{{ t('person.tabs.security') }}</h2>
+          <dl>
+            <dt>{{ t('person.lastLogin') }}</dt><dd>{{ fmtT(person.lastSeenAt) }}</dd>
+            <dt>{{ t('person.activeSessions') }}</dt><dd>{{ activeSessions }}</dd>
+            <dt>Telegram</dt><dd>{{ person.telegramChatId ? t('person.telegramLinked') : '—' }}</dd>
+            <dt>{{ t('person.password') }}</dt><dd>{{ person.hasPassword ? (person.mustChangePassword ? t('person.passwordMustChange') : t('person.passwordSetShort')) : t('person.passwordNone') }}</dd>
+          </dl>
+          <button class="btn small" @click="tab = 'security'">{{ t('person.tabs.security') }} →</button>
         </div>
 
         <div v-if="hasScope('people.deactivate')" class="card">
@@ -288,14 +324,53 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       </div>
     </section>
 
-    <!-- Активність -->
-    <section v-else-if="tab === 'activity'" class="panel">
-      <div class="card">
-        <h2>{{ t('person.sessions') }}</h2>
-        <table v-if="person.sessions.length" class="table"><thead><tr><th>{{ t('person.device') }}</th><th>{{ t('person.ip') }}</th><th>{{ t('person.signedIn') }}</th><th>{{ t('person.lastActive') }}</th><th /></tr></thead>
-          <tbody><tr v-for="s in person.sessions" :key="s.id" :class="{ ended: s.revokedAt }"><td class="ua">{{ s.userAgent || '—' }}</td><td class="sub">{{ s.ip || '—' }}</td><td class="sub">{{ fmtT(s.createdAt) }}</td><td class="sub">{{ fmtT(s.updatedAt ?? s.createdAt) }}</td><td><button v-if="!s.revokedAt && hasScope('people.edit')" class="btn small" :disabled="busy" @click="closeOne(s.id)">{{ t('person.closeSession') }}</button><span v-else-if="s.revokedAt" class="sub">{{ t('person.revoked') }}</span></td></tr></tbody></table>
-        <p v-else class="sub">{{ t('person.noData') }}</p>
+    <!-- Безпека (мокап PersonCard: останній вхід · сесій активних · Telegram · «Скинути пароль»; docs/16 §14.5) -->
+    <section v-else-if="tab === 'security'" class="panel">
+      <div class="grid">
+        <div class="card">
+          <h2>{{ t('person.tabs.security') }}</h2>
+          <dl>
+            <dt>{{ t('person.lastLogin') }}</dt><dd>{{ fmtT(person.lastSeenAt) }}</dd>
+            <dt>{{ t('person.activeSessions') }}</dt><dd>{{ activeSessions }}</dd>
+            <dt>Telegram</dt><dd>{{ person.telegramChatId ? t('person.telegramLinked') : '—' }}</dd>
+            <dt>{{ t('person.password') }}</dt><dd>{{ person.hasPassword ? `${t('person.passwordSetShort')} · ${fmt(person.passwordChangedAt)}` : t('person.passwordNone') }}<span v-if="person.mustChangePassword" class="badge sun">{{ t('person.passwordMustChange') }}</span></dd>
+          </dl>
+          <div class="form-row">
+            <button v-if="hasScope('people.password')" class="btn" :aria-expanded="pwdForm.open" @click="pwdForm.open = !pwdForm.open">{{ person.hasPassword ? t('person.resetPassword') : t('person.setPassword') }}</button>
+            <button v-if="hasScope('people.edit') && person.telegramChatId" class="btn" :disabled="busy" @click="resetTelegram">{{ t('person.resetTelegram') }}</button>
+            <button v-if="hasScope('people.edit')" class="btn" :disabled="busy" @click="closeAll">{{ t('person.closeSessions') }}</button>
+          </div>
+          <form v-if="pwdForm.open" class="pwd" @submit.prevent="setPassword">
+            <p class="sub">{{ t('person.passwordHint') }}</p>
+            <label class="field"><span>{{ t('person.newPassword') }}</span><input v-model="pwdForm.password" type="password" minlength="8" maxlength="200" autocomplete="new-password" required></label>
+            <label class="field"><span>{{ t('person.repeatPassword') }}</span><input v-model="pwdForm.repeat" type="password" minlength="8" maxlength="200" autocomplete="new-password" required></label>
+            <label class="check"><input v-model="pwdForm.mustChange" type="checkbox"> {{ t('person.mustChangeAfterLogin') }}</label>
+            <p v-if="pwdForm.repeat && pwdForm.repeat !== pwdForm.password" class="error">{{ t('person.passwordsDiffer') }}</p>
+            <div class="form-row">
+              <button type="submit" class="btn primary" :disabled="busy || pwdForm.password.length < 8 || pwdForm.password !== pwdForm.repeat">{{ t('common.save') }}</button>
+              <button type="button" class="btn" @click="pwdForm.open = false">{{ t('common.cancel') }}</button>
+            </div>
+          </form>
+        </div>
+        <div class="card">
+          <h2>{{ t('person.sessions') }}</h2>
+          <table v-if="person.sessions.length" class="table"><thead><tr><th>{{ t('person.device') }}</th><th>{{ t('person.ip') }}</th><th>{{ t('person.signedIn') }}</th><th /></tr></thead>
+            <tbody><tr v-for="s in person.sessions" :key="s.id" :class="{ ended: s.revokedAt }"><td class="ua">{{ s.userAgent || '—' }}</td><td class="sub">{{ s.ip || '—' }}</td><td class="sub">{{ fmtT(s.createdAt) }}</td><td><button v-if="!s.revokedAt && hasScope('people.edit')" class="btn small" :disabled="busy" @click="closeOne(s.id)">{{ t('person.closeSession') }}</button><span v-else-if="s.revokedAt" class="sub">{{ t('person.revoked') }}</span></td></tr></tbody></table>
+          <p v-else class="sub">{{ t('person.noData') }}</p>
+        </div>
+        <div v-if="hasScope('audit.view')" class="card">
+          <h2>{{ t('journals.title.security') }}</h2>
+          <ul v-if="securityEvents.length" class="list">
+            <li v-for="e in securityEvents" :key="String(e.id)"><span :class="['badge', String(e.severity) === 'critical' ? 'coral' : String(e.severity) === 'warning' ? 'sun' : 'muted']">{{ t(`journals.severity.${e.severity}`) }}</span> {{ eventLabel(e.event) }} <span class="sub">{{ fmtT(String(e.created_at).replace(' ', 'T')) }}{{ e.ip ? ` · ${e.ip}` : '' }}</span></li>
+          </ul>
+          <p v-else class="sub">{{ t('person.noData') }}</p>
+          <NuxtLink to="/admin/journals?tab=security" class="link">{{ t('journals.title.security') }} →</NuxtLink>
+        </div>
       </div>
+    </section>
+
+    <!-- Журнал (мокап PersonCard: «Журнал»; сессии — на вкладке «Безпека») -->
+    <section v-else-if="tab === 'activity'" class="panel">
       <div class="card">
         <h2>{{ t('person.log') }}</h2>
         <ul v-if="activity.length" class="list">
@@ -364,6 +439,18 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .field.grow { flex: 1 1 200px; min-width: 0; }
 .ended { opacity: 0.5; }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
+.tags { margin: var(--space-1) 0 0; display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.tagchip { background: var(--color-sun); border-radius: var(--radius-pill); padding: 0 var(--space-2); font-size: var(--font-size-body-s); font-weight: 800; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
+.stats div { display: grid; gap: 2px; }
+.stats dd { font-size: var(--font-size-title-l); font-weight: 900; }
+.stats dd.teal { color: var(--color-teal-ink); }
+.stats dd.coral { color: var(--color-coral-ink); }
+.pwd { display: grid; gap: var(--space-2); margin-top: var(--space-3); max-width: 360px; }
+.check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-body-s); }
+.badge.sun { background: var(--color-sun); color: var(--color-sun-ink); margin-left: var(--space-2); }
+.badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
+.badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .note { margin: 0; white-space: pre-wrap; }
 .form-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-start; }
 select, input, textarea { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); max-width: 100%; min-width: 0; box-sizing: border-box; }

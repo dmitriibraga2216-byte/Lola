@@ -12,8 +12,8 @@ export default defineEventHandler(async (event) => {
   await logSecurity({
     tenantId: auth.tenantId,
     userId: auth.userId,
-    event: 'logout.all',
-    meta: { revoked },
+    event: 'session.revoked',
+    meta: { reason: 'logout_all', revoked },
   })
   clearSessionCookies(event)
   return apiData({ revoked })

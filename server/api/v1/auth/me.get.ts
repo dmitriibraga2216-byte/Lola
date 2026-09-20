@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { locations, positions, tenants, userPlacements, users } from '../../../db/schema'
 import { db } from '../../../db/client'
 import { withTenant } from '../../../utils/withTenant'
@@ -26,6 +26,8 @@ export default defineEventHandler(async (event) => {
       locale: users.locale,
       status: users.status,
       birthdayConsent: users.birthdayConsent, // 29 Б.16: тумблер в профиле
+      mustChangePassword: users.mustChangePassword, // docs/24 §3.4.1 «Змінити пароль після першого входу»
+      hasPassword: sql<boolean>`${users.passwordHash} is not null`, // сам хеш наружу не уходит
     }).from(users).where(eq(users.id, auth.userId))
     if (!u) return null
     // Основное размещение — для карточки человека в меню и профиля (мокапы Main, Profile)

@@ -49,7 +49,12 @@
     "support": "Не виходить увійти — напишіть менеджеру точки",
     "supportOr": "або на",
     "guestSupport": "Не виходить увійти? Напишіть:",
-    "policy": "Політика обробки даних"
+    "policy": "Політика обробки даних",
+    "byPassword": "Увійти за паролем",
+    "byCode": "Увійти за кодом з телефону",
+    "byPasswordHint": "Для методистів і адміністраторів, якщо простір дозволяє вхід за паролем",
+    "email": "E-mail",
+    "password": "Пароль"
   },
   "home": {
     "logout": "Вийти",
@@ -118,7 +123,9 @@
       "scales": "Шкали оцінювання",
       "translations": "Переклади",
       "usage": "Статистика",
-      "certificates": "Сертифікати"
+      "certificates": "Сертифікати",
+      "tags": "Мітки",
+      "orgConflicts": "Конфлікти оргструктури"
     },
     "section": {
       "learning": "Навчання",
@@ -232,7 +239,8 @@
       "learning": "Навчання",
       "assessment": "Атестації",
       "activity": "Активність",
-      "notes": "Нотатки"
+      "notes": "Нотатки",
+      "security": "Безпека"
     },
     "lastName": "Прізвище",
     "firstName": "Імʼя",
@@ -333,7 +341,26 @@
     "tagsHint": "через кому",
     "locale": "Мова",
     "isBlockedHint": "Вхід буде заборонено",
-    "isHiddenHint": "Не зʼявлятиметься у списках і рейтингах"
+    "isHiddenHint": "Не зʼявлятиметься у списках і рейтингах",
+    "activeSessions": "Сесій активних",
+    "lastLogin": "Останній вхід",
+    "telegramLinked": "привʼязано",
+    "assigned": "Призначено",
+    "doneCount": "Виконано",
+    "overdueCount": "Прострочено",
+    "daysInCompany": "в компанії {n} дн.",
+    "password": "Пароль",
+    "passwordNone": "не задано",
+    "passwordSetShort": "задано",
+    "passwordMustChange": "змінити після входу",
+    "setPassword": "Задати пароль",
+    "resetPassword": "Скинути пароль",
+    "passwordSet": "Пароль збережено",
+    "passwordHint": "Пароль — резервний вхід за e-mail. Мінімальна довжина й заборона слабких паролів — у політиках простору",
+    "newPassword": "Новий пароль",
+    "repeatPassword": "Повторіть пароль",
+    "passwordsDiffer": "Паролі не збігаються",
+    "mustChangeAfterLogin": "Змінити пароль після першого входу"
   },
   "import": {
     "hint": "Файл xlsx або csv за шаблоном.",
@@ -380,7 +407,10 @@
       "validating": "перевірка",
       "archived": "архівовано"
     },
-    "archiveMissingWarn": "Обережно: всі активні люди, яких немає у файлі, будуть архівовані."
+    "archiveMissingWarn": "Обережно: всі активні люди, яких немає у файлі, будуть архівовані.",
+    "keepFields": "Не перезаписувати під час імпорту",
+    "keepFieldsNone": "Імпорт перезаписує всі поля файлу — «Не перезаписувати» не налаштовано",
+    "keepFieldsSettings": "Налаштувати"
   },
   "refs": {
     "cities": "Міста",
@@ -395,7 +425,9 @@
     "mergeInto": "Обʼєднати «{from}» у:",
     "inactive": "неактивний",
     "deleteConfirm": "Видалити «{name}»?",
-    "color": "Колір"
+    "color": "Колір",
+    "count": "{n} записів",
+    "people": "{n} людей"
   },
   "journals": {
     "audit": "Журнал дій",
@@ -463,7 +495,9 @@
       "task": "Завдання",
       "kind": "Вид конфлікту",
       "task_title": "Завдання",
-      "resolved_at": "Вирішено"
+      "resolved_at": "Вирішено",
+      "startedBy": "Хто запустив",
+      "state": "Стан"
     },
     "crumb": "Звіти · Журнали",
     "title": {
@@ -490,16 +524,26 @@
     "minutes": "{n} хв",
     "activeNow": "зараз",
     "eventText": {
-      "login_otp": "Вхід за кодом",
-      "login_google": "Вхід через Google",
-      "login_telegram": "Вхід через Telegram",
-      "login_invite": "Вхід за запрошенням",
-      "login_failed": "Невірний код входу",
-      "login_blocked": "Пʼять невдалих спроб входу поспіль",
-      "logout": "Вихід",
-      "logout_all": "Вихід на всіх пристроях",
-      "impersonation_start": "Вхід від імені користувача",
-      "telegram_linked": "Підключено Telegram"
+      "login_failed": "Невдалий вхід",
+      "login_blocked": "Пʼять невдалих спроб входу поспіль — вхід заблоковано",
+      "login_success": "Вхід",
+      "otp_sent": "Надіслано код входу",
+      "otp_failed": "Невірний код входу",
+      "session_revoked": "Сесію закрито",
+      "user_created": "Створено користувача",
+      "user_blocked": "Адміністратор заблокував користувача",
+      "user_unblocked": "Користувача розблоковано",
+      "user_archived": "Користувача архівовано",
+      "password_changed": "Змінено пароль",
+      "password_reset_by_admin": "Адміністратор скинув пароль",
+      "roles_changed": "Змінено ролі користувача",
+      "contacts_changed": "Змінено контакти",
+      "impersonation_started": "Вхід від імені користувача",
+      "impersonation_ended": "Вихід із сесії від імені",
+      "export_personal_data": "Вивантаження персональних даних",
+      "settings_security_changed": "Змінено налаштування безпеки",
+      "api_token_created": "Створено API-токен",
+      "api_token_revoked": "Відкликано API-токен"
     },
     "retentionForever": "Зберігається безстроково",
     "anyType": "Будь-який",
@@ -513,7 +557,8 @@
       "double_unit": "Людина у двох підрозділах",
       "placement_replaced": "Імпорт замінив ручне розміщення",
       "manager_self": "Керівник підпорядкований сам собі",
-      "manager_cycle": "Кільце керівників"
+      "manager_cycle": "Кільце керівників",
+      "unit_missing": "Підрозділ з імпорту відсутній у довіднику"
     },
     "conflictSource": {
       "manual": "Вручну",
@@ -538,7 +583,9 @@
       "attempt_recalculate_ok": "Перераховано: спроба {n} з {of} успішна",
       "attempt_recalculate_fail": "Перераховано: спроба {n} з {of} неуспішна",
       "attempt_recalculate_review": "Перераховано: спроба {n} з {of} на перевірці"
-    }
+    },
+    "month": "Місяць",
+    "system": "Система"
   },
   "learner": {
     "nav": {
@@ -2498,7 +2545,12 @@
     "empty": "Груп ще немає",
     "active": "Активна",
     "delete": "Видалити",
-    "confirmDelete": "Видалити групу «{name}»?"
+    "confirmDelete": "Видалити групу «{name}»?",
+    "orgHint": "Групи з оргструктури перебудовуються при імпорті, руками їх не правлять",
+    "sourceAll": "Усі",
+    "sourceOrg": "З оргструктури",
+    "sourceManual": "Створені вручну",
+    "changedAt": "змінено {at}"
   },
   "orgAdmin": {
     "title": "Оргструктура",
@@ -2606,7 +2658,12 @@
     "more": "Ще",
     "weekActivity": "Активність за тиждень",
     "birthdayConsent": "Показувати мій день народження",
-    "birthdayConsentHint": "Колеги побачать дату у «Днях народження»; вимкніть — і вас там не буде"
+    "birthdayConsentHint": "Колеги побачать дату у «Днях народження»; вимкніть — і вас там не буде",
+    "changePassword": "Змінити пароль",
+    "setPassword": "Задати пароль",
+    "currentPassword": "Поточний пароль",
+    "passwordChanged": "Пароль змінено. Інші сесії закрито",
+    "mustChangePassword": "Потрібно змінити пароль перед подальшою роботою"
   },
   "notif": {
     "title": "Сповіщення",
@@ -3643,7 +3700,8 @@
       "settings.tenant": "Налаштування простору",
       "settings.notifications": "Налаштування сповіщень",
       "settings.integrations": "Інтеграції",
-      "audit.view": "Журнали"
+      "audit.view": "Журнали",
+      "people.password": "Задавати паролі"
     },
     "roles": {
       "title": "Ролі та права",
@@ -3746,5 +3804,58 @@
       "assignments": "Активних призначень",
       "attemptsMonth": "Спроб цього місяця"
     }
+  },
+  "conflicts": {
+    "title": "Протокол конфліктів в оргструктурі",
+    "hint": "Імпорт не падає на конфлікті: пише рядок і продовжує. Вирішіть конфлікт — прийміть як є або закрийте зайве розміщення",
+    "col": {
+      "date": "Дата",
+      "person": "Людина",
+      "kind": "Конфлікт",
+      "details": "Деталі",
+      "source": "Джерело",
+      "state": "Стан"
+    },
+    "state": {
+      "open": "Не вирішено",
+      "resolved": "Вирішено",
+      "all": "Усі"
+    },
+    "resolve": "Вирішити",
+    "resolveTitle": "Вирішення конфлікту",
+    "resolved": "Конфлікт вирішено",
+    "acknowledge": "Прийняти як є",
+    "closePlacement": "Закрити одне з розміщень",
+    "whichPlacement": "Яке розміщення закрити",
+    "primary": "основне",
+    "empty": "Конфліктів немає",
+    "missing": "немає в довіднику",
+    "line": "рядок {n}",
+    "otherUnit": "інший підрозділ",
+    "replacedFrom": "попереднє розміщення"
+  },
+  "tags": {
+    "title": "Керування мітками",
+    "hint": "Область дії обовʼязкова: без неї на формі курсу зʼявляються мітки посад",
+    "add": "Додати мітку",
+    "col": {
+      "name": "Мітка",
+      "scope": "Область дії",
+      "description": "Опис",
+      "usage": "Використань"
+    },
+    "scope": {
+      "user": "Люди",
+      "course": "Курси",
+      "resource": "Ресурси",
+      "question": "Питання",
+      "task": "Завдання"
+    },
+    "allScopes": "Усі області",
+    "empty": "Міток ще немає",
+    "namePlaceholder": "до 40 знаків",
+    "nameRule": "Мітка — до 40 знаків без кутових дужок",
+    "deleteConfirm": "Видалити мітку «{name}»?",
+    "inUse": "Використовується ({n}) — спочатку зніміть з обʼєктів"
   }
 }

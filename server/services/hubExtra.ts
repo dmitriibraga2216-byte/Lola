@@ -168,12 +168,14 @@ export async function setGuestBlocks(ctx: Ctx, input: GuestBlocks): Promise<Gues
  * название пространства и три гостевых блока. Тенант — по поддомену Host (docs/25 §16.1) или `?slug=` (dev);
  * неизвестный slug — null → 404, список клиентов перебором не узнать.
  */
-export async function guestPage(slug: string): Promise<{ name: string, slug: string, blocks: GuestBlocks } | null> {
+export async function guestPage(slug: string): Promise<{ name: string, slug: string, blocks: GuestBlocks, passwordLogin: boolean } | null> {
   if (!/^[a-z0-9-]{3,40}$/.test(slug)) return null
   const [t] = await db.select({ name: tenants.name, slug: tenants.slug, settings: tenants.settings, status: tenants.status }).from(tenants).where(eq(tenants.slug, slug))
   if (!t || t.status === 'suspended') return null
-  const blocks = guestBlocksSchema.parse(((t.settings ?? {}) as { guestPage?: unknown }).guestPage ?? {})
-  return { name: t.name, slug: t.slug, blocks }
+  const settings = (t.settings ?? {}) as { guestPage?: unknown, policies?: { passwords?: { loginEnabled?: boolean } } }
+  const blocks = guestBlocksSchema.parse(settings.guestPage ?? {})
+  // Единственная политика, видимая до входа: показывать ли на экране входа «Увійти за паролем» (docs/24 §3.4)
+  return { name: t.name, slug: t.slug, blocks, passwordLogin: settings.policies?.passwords?.loginEnabled === true }
 }
 
 /** Slug тенанта из Host (`<slug>.lola.app`) — поддомен первого уровня; localhost/IP — нет. */

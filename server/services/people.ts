@@ -7,6 +7,8 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { recordAudit } from './audit'
+import { logSecurity } from './securityLog'
+import { ensureTags } from './tags'
 import { logOrgConflict } from './journals'
 import { scopeSql } from './access'
 import { hashToken } from './session'
@@ -170,8 +172,9 @@ export async function getPerson(ctx: Ctx, id: string) {
       .orderBy(desc(sessions.createdAt))
       .limit(20)
 
-    const { passwordHash: _ph, ...safe } = person
-    return { ...safe, placements, roles: roleRows, sessions: sessionRows }
+    // Хеш пароля в API не отдаётся никогда (docs/16 §3.1, CLAUDE.md п. 10); наружу — только факт наличия
+    const { passwordHash, ...safe } = person
+    return { ...safe, hasPassword: passwordHash != null, placements, roles: roleRows, sessions: sessionRows }
   })
 }
 
@@ -194,6 +197,8 @@ export async function isLastAdmin(tx: TenantTx, userId: string): Promise<boolean
 export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const parts = splitName(input)
+    // Метки человека — область `user` (docs/16 §14.2): неизвестные заводятся в справочнике
+    const personTags = await ensureTags(tx, ctx.tenantId, 'user', input.tags)
     const [person] = await tx.insert(users).values({
       tenantId: ctx.tenantId,
       fullName: parts.fullName,
@@ -209,7 +214,7 @@ export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
       phone: input.phone ?? null,
       email: input.email ?? null,
       cityId: input.cityId ?? null,
-      tags: input.tags,
+      tags: personTags,
       hiredAt: input.hiredAt ?? null,
       externalId: input.externalId ?? null,
       locale: input.locale ?? null,
@@ -225,6 +230,7 @@ export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
     })
     const { emitWebhook } = await import('./webhooks')
     await emitWebhook(tx, ctx.tenantId, 'user.created', { userId: person!.id, fullName: person!.fullName, externalId: person!.externalId })
+    await logSecurity({ tenantId: ctx.tenantId, userId: person!.id, event: 'user.created', meta: { by: ctx.actorId } })
     return person!
   })
 }
@@ -253,7 +259,7 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
       ...(input.phone !== undefined ? { phone: input.phone } : {}),
       ...(input.email !== undefined ? { email: input.email } : {}),
       ...(input.cityId !== undefined ? { cityId: input.cityId } : {}),
-      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.tags !== undefined ? { tags: await ensureTags(tx, ctx.tenantId, 'user', input.tags) } : {}),
       ...(input.hiredAt !== undefined ? { hiredAt: input.hiredAt } : {}),
       ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
       ...(input.locale !== undefined ? { locale: input.locale } : {}),
@@ -276,15 +282,22 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
       if (mgr?.manager_id) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr.manager_id, code: 'user_blocked', payload: { name: before.fullName }, dedupKey: `user_blocked:${id}:${Date.now()}` })
     }
 
+    // Аудит с diff по изменившимся полям (docs/16 §5.2 «Журнал»): before/after — только то, что поменялось
+    const changed = (Object.keys(after!) as (keyof typeof after)[]).filter(k => k !== 'updatedAt' && k !== 'passwordHash' && JSON.stringify(before[k]) !== JSON.stringify(after![k]))
     await recordAudit(tx, {
       tenantId: ctx.tenantId,
       actorId: ctx.actorId,
       action: 'people.update',
       entity: 'user',
       entityId: id,
-      before: { fullName: before.fullName, phone: before.phone, status: before.status },
-      after: { fullName: after!.fullName, phone: after!.phone, status: after!.status },
+      before: Object.fromEntries(changed.map(k => [k, before[k]])),
+      after: Object.fromEntries(changed.map(k => [k, after![k]])),
     })
+    // Журнал безопасности (docs/16 §15): смена контактов, блокировка/разблокировка, архив
+    const contactKeys = changed.filter(k => k === 'phone' || k === 'email' || k === 'workContacts' || k === 'telegramChatId')
+    if (contactKeys.length) await logSecurity({ tenantId: ctx.tenantId, userId: id, event: 'contacts.changed', meta: { by: ctx.actorId, fields: contactKeys } })
+    if (before.isBlocked !== after!.isBlocked) await logSecurity({ tenantId: ctx.tenantId, userId: id, event: after!.isBlocked ? 'user.blocked' : 'user.unblocked', meta: { by: ctx.actorId } })
+    if (before.status !== 'archived' && after!.status === 'archived') await logSecurity({ tenantId: ctx.tenantId, userId: id, event: 'user.archived', meta: { by: ctx.actorId } })
     return after!
   })
 }
@@ -425,6 +438,7 @@ export async function assignRole(ctx: Ctx, userId: string, input: {
       before: prev ? { roleCode: input.roleCode, scopeType: input.scopeType, scopeId, validUntil: prev.validUntil, reason: prev.reason, isOrgDerived: prev.isOrgDerived } : null,
       after: { roleCode: input.roleCode, scopeType: input.scopeType, scopeId, validUntil, reason },
     })
+    await logSecurity({ tenantId: ctx.tenantId, userId, event: 'roles.changed', meta: { by: ctx.actorId, action: prev ? 'update' : 'assign', roleCode: input.roleCode, scopeType: input.scopeType, scopeId } })
     // docs/16 §8: человеку — о новой роли (кроме базовой employee при создании)
     if (assigned && !prev && input.roleCode !== 'employee' && userId !== ctx.actorId) {
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId, code: 'user_role_granted', payload: { role: role.name }, dedupKey: `role_granted:${userId}:${role.id}:${Date.now()}` })
@@ -446,6 +460,8 @@ export async function setBlocked(ctx: Ctx, userId: string, blocked: boolean): Pr
     await tx.update(users).set({ isBlocked: blocked, status: blocked ? 'suspended' : 'active', updatedAt: new Date() }).where(eq(users.id, userId))
     if (blocked) await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: blocked ? 'people.block' : 'people.unblock', entity: 'user', entityId: userId })
+    // docs/16 §15, Г-16.2: «Адміністратор заблокував користувача»
+    await logSecurity({ tenantId: ctx.tenantId, userId, event: blocked ? 'user.blocked' : 'user.unblocked', meta: { by: ctx.actorId } })
     if (blocked) {
       const [mgr] = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
       if (mgr?.manager_id && mgr.manager_id !== ctx.actorId) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr.manager_id, code: 'user_blocked', payload: { name: u.fullName }, dedupKey: `user_blocked:${userId}:${Date.now()}` })
@@ -473,6 +489,8 @@ export async function archivePerson(ctx: Ctx, userId: string, input: { reason: '
     const { reassignOwner } = await import('./knowledge')
     await reassignOwner(tx, ctx.tenantId, userId, ctx.actorId)
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.archive', entity: 'user', entityId: userId, after: { reason: input.reason, comment: input.comment ?? null, cancelled } })
+    await logSecurity({ tenantId: ctx.tenantId, userId, event: 'user.archived', meta: { by: ctx.actorId, reason: input.reason } })
+    if (input.closeSessions !== false) await logSecurity({ tenantId: ctx.tenantId, userId, event: 'session.revoked', meta: { by: ctx.actorId, reason: 'archived' } })
     return { ok: true as const, cancelled }
   })
 }
@@ -488,6 +506,7 @@ export async function closeSessions(ctx: Ctx, userId: string, sessionId?: string
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt), ...(sessionId ? [eq(sessions.id, sessionId)] : []))).returning({ id: sessions.id })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.close_sessions', entity: 'user', entityId: userId, after: { closed: rows.length, sessionId: sessionId ?? null } })
+    if (rows.length) await logSecurity({ tenantId: ctx.tenantId, userId, event: 'session.revoked', meta: { by: ctx.actorId, reason: 'admin', closed: rows.length } })
     return rows.length
   })
 }
@@ -596,6 +615,7 @@ export async function removeRole(ctx: Ctx, userId: string, roleCode: string, rea
       .returning({ scopeType: userRoles.scopeType, scopeId: userRoles.scopeId, validUntil: userRoles.validUntil, reason: userRoles.reason, isOrgDerived: userRoles.isOrgDerived })
     if (!rows.length) return { ok: false as const, code: 'not_found' as const }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'role.revoke', entity: 'user', entityId: userId, before: { roleCode, grants: rows }, after: { reason: reason?.trim() || null } })
+    await logSecurity({ tenantId: ctx.tenantId, userId, event: 'roles.changed', meta: { by: ctx.actorId, action: 'revoke', roleCode, reason: reason?.trim() || null } })
     return { ok: true as const }
   })
 }
@@ -697,7 +717,8 @@ export async function bulkPeople(ctx: Ctx, input: { ids: string[], action: 'add_
       switch (input.action) {
         case 'add_tag': {
           await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-            await tx.execute(sql`update users set tags = array(select distinct unnest(array_append(tags, ${input.tag!}::text))), updated_at = now() where id = ${id}::uuid`)
+            const [tag] = await ensureTags(tx, ctx.tenantId, 'user', [input.tag!])
+            await tx.execute(sql`update users set tags = array(select distinct unnest(array_append(tags, ${tag ?? input.tag!}::text))), updated_at = now() where id = ${id}::uuid`)
             await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.tag', entity: 'user', entityId: id, after: { tag: input.tag } })
           })
           done++

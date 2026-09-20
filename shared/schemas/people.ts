@@ -1,5 +1,19 @@
 import { z } from 'zod'
+import { ORG_CONFLICT_KINDS, TAG_SCOPES } from '../enums'
 import { phoneSchema } from './auth'
+
+/** Метка (docs/16 §14.2): ≤ 40 знаков, без угловых скобок. */
+export const tagNameSchema = z.string().trim().min(1, 'Вкажіть мітку').max(40, 'Не більше 40 знаків').regex(/^[^<>]+$/, 'Без кутових дужок')
+
+/** CRUD /tags (docs/04 §4.11): область действия обязательна. */
+export const tagCreateSchema = z.object({
+  name: tagNameSchema,
+  scope: z.enum(TAG_SCOPES),
+  description: z.string().trim().max(200).nullable().optional(),
+  color: z.enum(['sun', 'teal', 'coral', 'muted']).nullable().optional(),
+})
+export const tagUpdateSchema = tagCreateSchema.omit({ scope: true }).partial()
+export const tagListQuerySchema = z.object({ scope: z.enum(TAG_SCOPES).optional() })
 
 /** Профиль (docs/16 §3.1, §6.1): вход по телефону, ФИО по частям, transliteration для сертификатов. */
 export const personCreateSchema = z.object({
@@ -14,7 +28,7 @@ export const personCreateSchema = z.object({
   birthDate: z.string().date().nullable().optional(),
   gender: z.enum(['male', 'female', 'unspecified']).nullable().optional(),
   cityId: z.string().uuid().nullable().optional(),
-  tags: z.array(z.string().min(1).max(50)).max(20).default([]),
+  tags: z.array(tagNameSchema).max(20).default([]),
   hiredAt: z.string().date().nullable().optional(),
   positionSince: z.string().date().nullable().optional(),
   externalId: z.string().max(100).nullable().optional(),
@@ -146,7 +160,7 @@ export type PersonUpdateInput = z.infer<typeof personUpdateSchema>
 export const bulkSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
   action: z.enum(['add_tag', 'set_location', 'assign_role', 'invite', 'archive']),
-  tag: z.string().min(1).max(50).optional(),
+  tag: tagNameSchema.optional(),
   locationId: z.string().uuid().optional(),
   positionId: z.string().uuid().optional(),
   roleCode: z.string().max(50).optional(),
@@ -154,3 +168,20 @@ export const bulkSchema = z.object({
 }).refine(b => b.action !== 'add_tag' || b.tag, { message: 'Вкажіть мітку', path: ['tag'] })
   .refine(b => b.action !== 'set_location' || b.locationId, { message: 'Оберіть точку', path: ['locationId'] })
   .refine(b => b.action !== 'assign_role' || b.roleCode, { message: 'Оберіть роль', path: ['roleCode'] })
+
+/** POST /org-conflicts/:id/resolve — разрешение конфликта оргструктуры (мокап OrgConflicts). */
+export const conflictResolveSchema = z.object({
+  action: z.enum(['acknowledge', 'close_placement']),
+  placementId: z.string().uuid().nullable().optional(),
+  comment: z.string().trim().max(500).nullable().optional(),
+}).refine(c => c.action !== 'close_placement' || c.placementId, { message: 'Оберіть розміщення, яке закрити', path: ['placementId'] })
+
+/** GET /org-conflicts — протокол с фильтром по состоянию. */
+export const conflictListQuerySchema = z.object({
+  state: z.enum(['open', 'resolved', 'all']).default('open'),
+  kind: z.enum(ORG_CONFLICT_KINDS).optional(),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  userId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+})

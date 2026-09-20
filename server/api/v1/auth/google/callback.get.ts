@@ -12,6 +12,6 @@ export default defineEventHandler(async (event) => {
   if (rows.length !== 1) return sendRedirect(event, '/login?error=google_no_user')
   const { token } = await createSession({ tenantId: r.tenantId, userId: rows[0]!.id, userAgent: getHeader(event, 'user-agent'), ip: clientIp(event) })
   setSessionCookies(event, token)
-  await logSecurity({ tenantId: r.tenantId, userId: rows[0]!.id, event: 'login.google', ip: clientIp(event), userAgent: getHeader(event, 'user-agent') })
+  await logSecurity({ tenantId: r.tenantId, userId: rows[0]!.id, event: 'login.success', meta: { method: 'google' }, ip: clientIp(event), userAgent: getHeader(event, 'user-agent') })
   return sendRedirect(event, '/')
 })

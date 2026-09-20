@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TAG_SCOPES } from '../../../../shared/enums'
 import { cities, locations, orgUnits, positionLevels, positions, tags } from '../../../db/schema'
 import { requireScope } from '../../../services/access'
 import { recordAudit } from '../../../services/audit'
@@ -12,6 +13,7 @@ const bodySchema = z.object({
   orgUnitId: z.string().uuid().optional(),
   address: z.string().max(300).optional(),
   parentId: z.string().uuid().optional(),
+  scope: z.enum(TAG_SCOPES).optional(), // метки: область обязательна (docs/16 §14.2)
 })
 
 export default defineEventHandler(async (event) => {
@@ -34,7 +36,9 @@ export default defineEventHandler(async (event) => {
           [created] = await tx.insert(positionLevels).values({ tenantId: access.tenantId, name: input.name }).returning()
           break
         case 'tags':
-          [created] = await tx.insert(tags).values({ tenantId: access.tenantId, name: input.name }).returning()
+          if (!input.scope) throw createError({ statusCode: 400, data: { code: 'validation_failed', message: 'Вкажіть область дії мітки' } })
+          if (input.name.length > 40 || /[<>]/.test(input.name)) throw createError({ statusCode: 400, data: { code: 'validation_failed', message: 'Мітка — до 40 знаків без кутових дужок' } })
+          ;[created] = await tx.insert(tags).values({ tenantId: access.tenantId, name: input.name, scope: input.scope }).returning()
           break
         case 'positions':
           [created] = await tx.insert(positions).values({

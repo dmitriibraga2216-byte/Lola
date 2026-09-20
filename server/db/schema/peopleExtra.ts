@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import { boolean, index, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
+import { locations, orgUnits } from './org'
 
 /** Группы и сегменты, функциональные руководители, заметки о человеке (docs/16 §3.4–3.5, §5.2). */
 
@@ -14,6 +15,10 @@ export const userGroups = pgTable('user_groups', {
   filter: jsonb('filter'), // как audience.segment (docs/15 §3.2)
   isActive: boolean('is_active').notNull().default(true),
   recalcAt: timestamp('recalc_at', { withTimezone: true }),
+  // docs/16 §14.1: группы, порождённые оргструктурой, руками не правятся и пересобираются при импорте и смене размещения
+  isOrgDerived: boolean('is_org_derived').notNull().default(false),
+  orgUnitId: uuid('org_unit_id').references(() => orgUnits.id, { onDelete: 'cascade' }), // узел-источник производной группы
+  locationId: uuid('location_id').references(() => locations.id, { onDelete: 'cascade' }),
 }, t => [
   unique().on(t.tenantId, t.name),
 ])

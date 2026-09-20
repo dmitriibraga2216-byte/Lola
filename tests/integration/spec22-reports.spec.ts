@@ -76,7 +76,7 @@ afterAll(async () => {
   await admin`delete from enrollments where subject_id = ${courseId}`
   await admin`delete from courses where id = ${courseId}`
   await admin`delete from notifications where tenant_id = ${tenantId} and code = 'security_alert'`
-  await admin`delete from security_log where tenant_id = ${tenantId} and event in ('s22.test_warning', 's22.test_info', 'settings.security_changed') and created_at > now() - interval '10 minutes'`
+  await admin`delete from security_log where tenant_id = ${tenantId} and (event = 'settings.security_changed' or meta->>'s22' = '1') and created_at > now() - interval '10 minutes'`
   await admin`update tenants set settings = settings - 'security' where id = ${tenantId}`
   await admin`update users set email = null where id = ${adminId} and email = 'admin-s22@example.test'`
   if (userIds.length) { await admin`delete from functional_chiefs where user_id in ${admin(userIds)} or chief_id in ${admin(userIds)}`; await admin`delete from users where id in ${admin(userIds)}` }
@@ -239,7 +239,7 @@ describe('журналы task-access · org-conflicts · severity → почта
   })
 
   it('severity: при включённом «Повідомляти на E-mail» warning и critical кладут письмо администраторам в очередь, info — нет', async () => {
-    await logSecurity({ tenantId, userId: learnerId, event: 's22.test_warning', severity: 'warning' })
+    await logSecurity({ tenantId, userId: learnerId, event: 'login.failed', severity: 'warning', meta: { s22: 1 } })
     const n = await admin`select count(*)::int as n from notifications where code = 'security_alert' and tenant_id = ${tenantId}`
     expect(n[0]!.n).toBe(0) // выключено по умолчанию
 
@@ -247,13 +247,13 @@ describe('журналы task-access · org-conflicts · severity → почта
     const s = await updateSecuritySettings(ctx(), { emailAlerts: true })
     expect(s.emailAlerts).toBe(true)
     // Сама смена настройки безопасности — critical → уже письмо
-    await logSecurity({ tenantId, userId: learnerId, event: 's22.test_warning', severity: 'warning' })
-    await logSecurity({ tenantId, userId: learnerId, event: 's22.test_info' })
+    await logSecurity({ tenantId, userId: learnerId, event: 'login.failed', severity: 'warning', meta: { s22: 1 } })
+    await logSecurity({ tenantId, userId: learnerId, event: 'otp.sent', meta: { s22: 1 } })
     const mails = await admin`select payload, channel, user_id from notifications where code = 'security_alert' and tenant_id = ${tenantId} order by created_at`
     expect(mails.length).toBeGreaterThanOrEqual(2)
     expect(mails.every(m => m.channel === 'email')).toBe(true)
-    expect(mails.some(m => (m.payload as { event: string }).event === 's22.test_warning')).toBe(true)
-    expect(mails.some(m => (m.payload as { event: string }).event === 's22.test_info')).toBe(false)
+    expect(mails.some(m => (m.payload as { event: string }).event === 'login.failed')).toBe(true)
+    expect(mails.some(m => (m.payload as { event: string }).event === 'otp.sent')).toBe(false)
     expect(mails.some(m => m.user_id === adminId)).toBe(true)
     const [audit] = await admin`select 1 from audit_log where tenant_id = ${tenantId} and action = 'settings.security' and actor_id = ${adminId} limit 1`
     expect(audit).toBeDefined()

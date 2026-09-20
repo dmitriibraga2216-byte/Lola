@@ -114,14 +114,14 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
       expect(rc!.user_agent).toBeTruthy()
       // Формат docs/02: ip, geo, user_agent, browser, os, device — одинаково во всех журналах
       expect(Object.keys(rc!).sort()).toEqual(['browser', 'device', 'geo', 'ip', 'os', 'user_agent'])
-      const [sec] = await admin`select request_context, severity from security_log where event = 'login.otp' order by created_at desc limit 1`
+      const [sec] = await admin`select request_context, severity from security_log where event = 'login.success' order by created_at desc limit 1`
       expect((sec!.request_context as { ip?: string } | null)?.ip).toBeTruthy()
       expect(sec!.severity).toBe('info')
       // Журнал по API отдаёт тот же контекст колонками мокапа: ip, geo, client, severity
-      const res = await fetch(`${BASE}/api/v1/logs/security?type=login`, { headers: { cookie } })
+      const res = await fetch(`${BASE}/api/v1/logs/security?type=login.success`, { headers: { cookie } })
       expect(res.status).toBe(200)
       const row = ((await res.json()) as { data: { rows: Record<string, unknown>[] } }).data.rows[0]!
-      expect(row).toMatchObject({ severity: 'info', event: 'login.otp' })
+      expect(row).toMatchObject({ severity: 'info', event: 'login.success' })
       expect(row).toHaveProperty('ip')
       expect(row).toHaveProperty('client')
     }
@@ -143,8 +143,9 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
         if (last === 429) break
       }
       expect(last).toBe(429)
-      const rows = await admin`select event, severity from security_log where event in ('login.failed', 'login.blocked') and created_at > now() - interval '1 minute' order by created_at desc limit 10`
-      expect(rows.some(r => r.event === 'login.failed' && r.severity === 'warning')).toBe(true)
+      // docs/16 §15 (Spec 16): неверный код — otp.failed, блокировка по попыткам — login.blocked
+      const rows = await admin`select event, severity from security_log where event in ('otp.failed', 'login.blocked') and created_at > now() - interval '1 minute' order by created_at desc limit 10`
+      expect(rows.some(r => r.event === 'otp.failed' && r.severity === 'warning')).toBe(true)
       expect(rows.some(r => r.event === 'login.blocked' && r.severity === 'warning')).toBe(true)
       await admin`delete from rate_limits where key like ${'otp:%'}`
     }

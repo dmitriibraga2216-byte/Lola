@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
     // Выход из сессии «от имени» — это `impersonation.ended` (docs/16 §15), а не обычный logout
     if (!(auth.impersonatorAdminId && await stopImpersonation(auth))) {
       await revokeSession(auth)
-      await logSecurity({ tenantId: auth.tenantId, userId: auth.userId, event: 'logout' })
+      await logSecurity({ tenantId: auth.tenantId, userId: auth.userId, event: 'session.revoked', meta: { reason: 'logout' } })
     }
   }
   clearSessionCookies(event)

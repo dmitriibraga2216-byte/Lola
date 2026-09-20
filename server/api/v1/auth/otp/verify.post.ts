@@ -17,10 +17,10 @@ export default defineEventHandler(async (event) => {
 
   const result = await verifyOtp(phone, code)
   if (!result.ok) {
-    // Журнал безопасности (docs/16 §15): неудачный вход — warning, блокировка по попыткам — warning; пишется в каждый тенант номера
+    // Журнал безопасности (docs/16 §15): неверный код — otp.failed (warning), блокировка по попыткам — login.blocked (warning); пишется в каждый тенант номера
     const blocked = result.code === 'rate_limited'
     for (const u of await usersByPhone(phone)) {
-      await logSecurity({ tenantId: u.tenant_id, userId: u.user_id, event: blocked ? 'login.blocked' : 'login.failed', meta: blocked ? { reason: 'attempts' } : { attemptsLeft: result.attemptsLeft ?? null } })
+      await logSecurity({ tenantId: u.tenant_id, userId: u.user_id, event: blocked ? 'login.blocked' : 'otp.failed', meta: blocked ? { reason: 'attempts', method: 'otp' } : { attemptsLeft: result.attemptsLeft ?? null } })
     }
     if (blocked) {
       return apiError(event, 429, 'rate_limited', 'Забагато невірних спроб. Номер заблоковано на 30 хвилин')
@@ -60,7 +60,8 @@ export default defineEventHandler(async (event) => {
   await logSecurity({
     tenantId: user.tenant_id,
     userId: user.user_id,
-    event: 'login.otp',
+    event: 'login.success',
+    meta: { method: 'otp' },
     ip: clientIp(event),
     userAgent: getHeader(event, 'user-agent'),
   })

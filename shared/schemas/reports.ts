@@ -67,6 +67,8 @@ export const logFilterSchema = z.object({
   userId: z.string().uuid().optional(),
   type: z.string().max(80).optional(),
   severity: z.enum(SECURITY_SEVERITIES).optional(),
+  orgUnitId: z.string().uuid().optional(), // мокап SecurityLog: фильтр «Підрозділ» (с потомками)
+  state: z.enum(['open', 'resolved', 'all']).optional(), // протокол конфликтов: «Не вирішено» / «Вирішено»
   contentType: z.enum(CONTENT_TYPES).optional(),
   contentId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),

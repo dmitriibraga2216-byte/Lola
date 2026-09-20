@@ -23,6 +23,7 @@ export const IMPORT_COLUMNS = [
   'ПІБ', 'Телефон', 'Email', 'Посада', 'Рівень посади', 'Місто',
   'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Зовнішній ID',
   'Прізвище', 'Імʼя', 'По батькові', 'Дата народження',
+  'Дата призначення посади', 'Гендер', // Г-16.1: position_since, gender
 ] as const
 export type ImportColumn = typeof IMPORT_COLUMNS[number]
 
@@ -43,7 +44,9 @@ const COLUMN_ALIASES: Record<ImportColumn, string[]> = {
   'Прізвище': ['прізвище', 'фамилия', 'last name', 'lastname', 'surname'],
   'Імʼя': ['імя', 'ім\'я', 'имя', 'first name', 'firstname', 'given name'],
   'По батькові': ['по батькові', 'отчество', 'middle name', 'patronymic'],
-  'Дата народження': ['дата народження', 'дата рождения', 'birth date', 'birthday', 'dob', 'д.н.'],
+  'Дата народження': ['дата народження', 'дата рождения', 'birth date', 'birthday', 'dob', 'д.н.', 'birth_date'],
+  'Дата призначення посади': ['дата призначення посади', 'дата призначення', 'position since', 'position_since', 'на посаді з'],
+  'Гендер': ['гендер', 'стать', 'gender', 'пол', 'sex'],
 }
 const norm = (s: string) => s.toLowerCase().replace(/[ʼ'’`]/g, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim()
 
@@ -81,6 +84,9 @@ export interface ImportRow {
   firstName?: string
   middleName?: string
   birthDate?: string
+  positionSince?: string
+  gender?: 'male' | 'female' | 'unspecified'
+  unknownUnit?: string // подразделение не из справочника при createRefs=false — строка протокола конфликтов (unit_missing)
   action: 'create' | 'update' | 'skip'
   errors: string[]
   warnings?: string[]
@@ -239,6 +245,11 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
       if (hiredAt && !/^\d{4}-\d{2}-\d{2}$/.test(hiredAt)) errors.push('Дата найму: у форматі РРРР-ММ-ДД')
       const birthDate = rec['Дата народження'] ?? ''
       if (birthDate && !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) errors.push('Дата народження: у форматі РРРР-ММ-ДД')
+      const positionSince = rec['Дата призначення посади'] ?? ''
+      if (positionSince && !/^\d{4}-\d{2}-\d{2}$/.test(positionSince)) errors.push('Дата призначення посади: у форматі РРРР-ММ-ДД')
+      else if (positionSince && hiredAt && /^\d{4}-\d{2}-\d{2}$/.test(hiredAt) && positionSince < hiredAt) errors.push('Дата призначення посади: не може бути раніше дати найму')
+      const genderRaw = (rec['Гендер'] ?? '').trim().toLowerCase()
+      const gender = !genderRaw ? undefined : ['ч', 'чол', 'чоловік', 'м', 'муж', 'male', 'm'].includes(genderRaw) ? 'male' as const : ['ж', 'жін', 'жінка', 'жен', 'female', 'f'].includes(genderRaw) ? 'female' as const : 'unspecified' as const
 
       const email = rec['Email'] ?? ''
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email: невірний')
@@ -266,7 +277,8 @@ export async function validateImport(ctx: Ctx, fileName: string, raw: Record<str
         tags: (rec['Мітки'] ?? '').split(/[,;]/).map(s => s.trim()).filter(Boolean),
         hiredAt,
         externalId,
-        lastName, firstName, middleName, birthDate,
+        lastName, firstName, middleName, birthDate, positionSince, gender,
+        ...(!options.createRefs && orgUnit && !known.orgUnits.has(orgUnit.toLowerCase()) ? { unknownUnit: orgUnit } : {}),
         action: errors.length > 0 ? 'skip' : existingId ? 'update' : 'create',
         errors,
         warnings,
@@ -443,7 +455,14 @@ export async function applyImport(ctx: Ctx, jobId: string) {
       const locationByName = new Map(locationRows.map(r => [r.name.toLowerCase(), r.id]))
       const roleByKey = new Map(roleRows.flatMap(r => [[r.code.toLowerCase(), r], [r.name.toLowerCase(), r]] as [string, typeof r][]))
       // Политика «Роль за замовчуванням» (docs/24 §3.4.1 «Ролі»): роль для новых людей без колонки role
-      const defaultRoleCode = (await readSettings(tx, ctx.tenantId)).policies.roles.defaultRoleCode
+      const policies = (await readSettings(tx, ctx.tenantId)).policies
+      const defaultRoleCode = policies.roles.defaultRoleCode
+      // «Не перезаписувати під час імпорту» (docs/16 Г-16.1, docs/24 §3.4.1 «Користувачі»): поля из списка импорт не трогает у существующих людей
+      const keep = new Set(policies.users.importKeepFields)
+      const keepPlacement = keep.has('position') || keep.has('location') || keep.has('orgUnit')
+      // «Дозволити призначення користувача в кілька підрозділів» (docs/24 §3.4.1 «Оргструктура»): второе подразделение — конфликт double_unit, а не замена
+      const allowMultipleUnits = policies.orgStructure.allowMultipleUnits && policies.orgStructure.mode !== 'user_groups'
+      const { ensureTags } = await import('./tags')
 
       // Проставить уровни позициям, где заданы
       for (const r of batch) {
@@ -480,15 +499,22 @@ export async function applyImport(ctx: Ctx, jobId: string) {
           middleName: name.middleName,
           email: row.email || null,
           cityId: row.city ? cityByName.get(row.city.toLowerCase()) ?? null : null,
-          tags: row.tags,
+          tags: await ensureTags(tx, ctx.tenantId, 'user', row.tags),
           hiredAt: row.hiredAt || null,
           birthDate: row.birthDate || null,
           externalId: row.externalId || null,
+          ...(row.positionSince ? { positionSince: row.positionSince } : {}),
+          ...(row.gender ? { gender: row.gender } : {}),
         }
 
         let id: string
         if (userId) {
-          await tx.update(users).set({ ...base, updatedAt: new Date() }).where(eq(users.id, userId))
+          // «Не перезаписувати»: у существующего человека поля из списка политики остаются как есть
+          const patch: Partial<typeof base> = { ...base }
+          if (keep.has('tags')) delete patch.tags
+          if (keep.has('email')) delete patch.email
+          if (keep.has('fullName')) { delete patch.fullName; delete patch.lastName; delete patch.firstName; delete patch.middleName }
+          await tx.update(users).set({ ...patch, ...(keep.has('phone') || !row.phone ? {} : { phone: row.phone }), updatedAt: new Date() }).where(eq(users.id, userId))
           id = userId
           updated++
         }
@@ -508,7 +534,7 @@ export async function applyImport(ctx: Ctx, jobId: string) {
 
         const locationId = locationByName.get(row.location.toLowerCase())
         const positionId = positionByName.get(row.position.toLowerCase())
-        if (locationId && positionId) {
+        if (locationId && positionId && !(userId && keepPlacement)) {
           const current = await tx.select({ id: userPlacements.id })
             .from(userPlacements)
             .where(and(
@@ -518,18 +544,30 @@ export async function applyImport(ctx: Ctx, jobId: string) {
               isNull(userPlacements.endedAt),
             ))
           if (current.length === 0) {
-            // docs/16 §14: ручная правка и импорт спорят — старое основное размещение уходит в протокол конфликтов, импорт продолжается
-            const replaced = await tx.select({ locationId: userPlacements.locationId, positionId: userPlacements.positionId }).from(userPlacements)
-              .where(and(eq(userPlacements.userId, id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-            for (const r of replaced) await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: id, kind: 'placement_replaced', source: 'import', importJobId: jobId, actorId: ctx.actorId, details: { from: r, to: { locationId, positionId } } })
-            await tx.update(userPlacements)
-              .set({ endedAt: sql`current_date` })
-              .where(and(eq(userPlacements.userId, id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+            const unitId = orgUnitByName.get(row.orgUnit.toLowerCase()) ?? locationRows.find(l => l.id === locationId)?.orgUnitId ?? null
+            const open = await tx.select({ id: userPlacements.id, locationId: userPlacements.locationId, positionId: userPlacements.positionId, orgUnitId: userPlacements.orgUnitId, isPrimary: userPlacements.isPrimary }).from(userPlacements)
+              .where(and(eq(userPlacements.userId, id), isNull(userPlacements.endedAt)))
+            const primary = open.filter(o => o.isPrimary)
+            // docs/16 §14, Spec 22 долг (3): человек в двух подразделениях. При разрешённых нескольких подразделениях старое размещение
+            // остаётся открытым (уже не основное) и пишется double_unit; иначе импорт закрывает его — placement_replaced.
+            const otherUnit = primary.find(o => (o.orgUnitId ?? null) !== unitId && unitId !== null)
+            if (allowMultipleUnits && otherUnit) {
+              await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: id, kind: 'double_unit', source: 'import', importJobId: jobId, actorId: ctx.actorId, details: { orgUnitId: unitId, otherOrgUnitId: otherUnit.orgUnitId, otherLocationId: otherUnit.locationId, otherPlacementId: otherUnit.id, locationId, positionId } })
+              await tx.update(userPlacements).set({ isPrimary: false, updatedAt: new Date() }).where(and(eq(userPlacements.userId, id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+            }
+            else {
+              // ручная правка и импорт спорят — старое основное размещение уходит в протокол конфликтов, импорт продолжается
+              for (const r of primary) await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: id, kind: 'placement_replaced', source: 'import', importJobId: jobId, actorId: ctx.actorId, details: { from: { locationId: r.locationId, positionId: r.positionId }, to: { locationId, positionId } } })
+              await tx.update(userPlacements)
+                .set({ endedAt: sql`current_date` })
+                .where(and(eq(userPlacements.userId, id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+            }
             await tx.insert(userPlacements).values({
               tenantId: ctx.tenantId,
               userId: id,
               locationId,
               positionId,
+              orgUnitId: unitId,
               isPrimary: true,
             })
             // docs/01 §1.9.3: правило «должность → роль» применяется при импорте
@@ -553,6 +591,20 @@ export async function applyImport(ctx: Ctx, jobId: string) {
     })
   }
   }
+
+  // Строки с подразделением не из справочника (createRefs выключен): протокол конфликтов — unit_missing, импорт продолжается (мокап OrgConflicts)
+  const missingUnits = rows.filter(r => r.unknownUnit)
+  if (missingUnits.length) {
+    await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+      for (const r of missingUnits) {
+        const [u] = r.externalId ? await tx.select({ id: users.id }).from(users).where(eq(users.externalId, r.externalId)) : []
+        await logOrgConflict(tx, { tenantId: ctx.tenantId, userId: u?.id ?? null, kind: 'unit_missing', source: 'import', importJobId: jobId, actorId: ctx.actorId, details: { line: r.line, orgUnit: r.unknownUnit, fullName: r.fullName } })
+      }
+    })
+  }
+  // docs/16 §14.1: группы «з оргструктури» пересобираются при импорте
+  const { rebuildOrgGroups } = await import('./groups')
+  await rebuildOrgGroups(ctx.tenantId).catch(err => console.error('rebuildOrgGroups after import', err))
 
   // Приглашения созданным (options.sendInvites) — только тем, у кого есть телефон
   if (options.sendInvites) {

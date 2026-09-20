@@ -17,7 +17,7 @@ const body = z.object({
   timezone: z.string().max(60).optional(),
   sort: z.number().int().optional(),
   color: z.string().max(20).nullable().optional(),
-  kind: z.string().max(20).nullable().optional(),
+  description: z.string().max(200).nullable().optional(),
 })
 
 /** Редагування довідника (docs/16 §3.3): перейменування зберігає звʼязки, деактивація замість видалення. */

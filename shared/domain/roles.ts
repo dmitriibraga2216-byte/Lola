@@ -10,7 +10,7 @@ export const SCOPES = [
   'course.view', 'course.create', 'course.edit', 'course.publish', 'course.archive',
   'question.manage', 'media.upload', 'media.delete', 'knowledge.manage', 'survey.manage',
   // Люди и назначения
-  'people.view', 'people.invite', 'people.edit', 'people.deactivate', 'people.import',
+  'people.view', 'people.invite', 'people.edit', 'people.deactivate', 'people.import', 'people.password',
   'assignment.create', 'assignment.cancel', 'role.assign',
   // Проверка
   'review.queue', 'review.grade', 'certification.confirm',

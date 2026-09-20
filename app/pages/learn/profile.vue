@@ -3,7 +3,7 @@
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
-const { me, initials, logout, hasScope, switchRole } = useAuth()
+const { me, initials, logout, hasScope, switchRole, fetchMe } = useAuth()
 const { api } = useApi()
 
 // Переключение активной роли (docs/01 §1.9.2, мокап Profile: список ролей, активная помечена)
@@ -51,6 +51,21 @@ const birthdayConsent = ref((me.value?.user as { birthdayConsent?: boolean } | u
 async function setBirthdayConsent(v: boolean) {
   try { birthdayConsent.value = (await api<{ birthdayConsent: boolean }>('/me/birthday-consent', { method: 'PATCH', body: { birthdayConsent: v } })).birthdayConsent }
   catch (err) { error.value = apiErrorOf(err).message }
+}
+// Пароль (docs/16 §14.5 «Безпека → Зміна пароля»): два поля; форма раскрыта сразу, если политика требует смены после первого входа
+const route = useRoute()
+const meUser = computed(() => me.value?.user as { hasPassword?: boolean, mustChangePassword?: boolean } | undefined)
+const pwd = reactive({ open: route.query.password === '1' || !!meUser.value?.mustChangePassword, current: '', next: '', repeat: '', done: false, busy: false })
+async function changePassword() {
+  error.value = ''
+  pwd.busy = true
+  try {
+    await api('/me/password', { method: 'POST', body: { ...(meUser.value?.hasPassword ? { currentPassword: pwd.current } : {}), password: pwd.next } })
+    Object.assign(pwd, { open: false, current: '', next: '', repeat: '', done: true })
+    await fetchMe()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { pwd.busy = false }
 }
 const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk') : ''
 </script>
@@ -107,6 +122,16 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
       <label class="toggle row-link"><input type="checkbox" :checked="birthdayConsent" @change="setBirthdayConsent(($event.target as HTMLInputElement).checked)"><span>{{ t('profile.birthdayConsent') }}<span class="hint">{{ t('profile.birthdayConsentHint') }}</span></span></label>
       <NuxtLink to="/learn/development" class="row-link">{{ t('dev.short') }}</NuxtLink>
       <NuxtLink to="/learn/surveys" class="row-link">{{ t('survey.title') }}</NuxtLink>
+      <button class="row-link" :aria-expanded="pwd.open" @click="pwd.open = !pwd.open">{{ meUser?.hasPassword ? t('profile.changePassword') : t('profile.setPassword') }}</button>
+      <form v-if="pwd.open" class="pwd" @submit.prevent="changePassword">
+        <p v-if="meUser?.mustChangePassword" class="muted">{{ t('profile.mustChangePassword') }}</p>
+        <label v-if="meUser?.hasPassword"><span>{{ t('profile.currentPassword') }}</span><input v-model="pwd.current" type="password" autocomplete="current-password" required></label>
+        <label><span>{{ t('person.newPassword') }}</span><input v-model="pwd.next" type="password" minlength="8" autocomplete="new-password" required></label>
+        <label><span>{{ t('person.repeatPassword') }}</span><input v-model="pwd.repeat" type="password" minlength="8" autocomplete="new-password" required></label>
+        <p v-if="pwd.repeat && pwd.repeat !== pwd.next" class="error">{{ t('person.passwordsDiffer') }}</p>
+        <button type="submit" class="row-link primary" :disabled="pwd.busy || pwd.next.length < 8 || pwd.next !== pwd.repeat">{{ t('common.save') }}</button>
+      </form>
+      <p v-if="pwd.done" class="muted" role="status">{{ t('profile.passwordChanged') }}</p>
       <button class="row-link" @click="linkTelegram">{{ t('home.linkTelegram') }}</button>
       <p v-if="tgLink" class="muted tg">
         <a v-if="tgLink.url" :href="tgLink.url" target="_blank" rel="noopener" class="link">{{ t('home.openTelegram') }}</a>
@@ -140,5 +165,10 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
 .chip[disabled] { opacity: .6; cursor: progress; }
 .row-link { font: inherit; font-weight: 700; text-align: left; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line-soft); color: var(--color-ink); text-decoration: none; border-radius: var(--radius-s); padding: var(--space-3) var(--space-4); cursor: pointer; }
 .row-link.danger { color: var(--color-coral-ink); }
+.row-link.primary { background: var(--color-sun); border-color: var(--color-sun); text-align: center; }
+.pwd { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); background: var(--color-bg-soft); border-radius: var(--radius-s); }
+.pwd label { display: grid; gap: 2px; font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
+.pwd input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
+.pwd .error { margin: 0; color: var(--color-coral-ink); font-size: var(--font-size-body-s); }
 .tg { margin: 0 var(--space-2); }
 </style>

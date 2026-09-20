@@ -9,7 +9,7 @@ interface ImportStats { total: number, create: number, update: number, skip: num
 interface Options { createRefs: boolean, archiveMissing: boolean, sendInvites: boolean }
 interface HistoryRow { id: string, file_name: string, status: string, stats: ImportStats, created_at: string, created_by_name: string | null }
 
-const COLUMNS = ['ПІБ', 'Прізвище', 'Імʼя', 'По батькові', 'Телефон', 'Email', 'Посада', 'Рівень посади', 'Місто', 'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Дата народження', 'Зовнішній ID']
+const COLUMNS = ['ПІБ', 'Прізвище', 'Імʼя', 'По батькові', 'Телефон', 'Email', 'Посада', 'Рівень посади', 'Місто', 'Підрозділ', 'Точка', 'Роль', 'Мітки', 'Дата найму', 'Дата призначення посади', 'Дата народження', 'Гендер', 'Зовнішній ID']
 
 const file = ref<File | null>(null)
 const jobId = ref('')
@@ -19,6 +19,12 @@ const headers = ref<string[]>([])
 const mapping = ref<Record<string, string>>({})
 const presetUsed = ref(false)
 const options = reactive<Options>({ createRefs: true, archiveMissing: false, sendInvites: false })
+// «Не перезаписувати під час імпорту» (docs/16 Г-16.1, docs/24 §3.4.1): список полей из политик тенанта — только показать, правится в настройках
+const keepFields = ref<string[]>([])
+onMounted(async () => {
+  try { keepFields.value = (await api<{ users: { importKeepFields: string[] } }>('/settings/policies')).users.importKeepFields }
+  catch { keepFields.value = [] }
+})
 const applied = ref<ImportStats | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -148,6 +154,11 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk')
         <label class="check"><input v-model="options.createRefs" type="checkbox"> {{ t('import.createRefs') }}</label>
         <label class="check"><input v-model="options.archiveMissing" type="checkbox"> {{ t('import.archiveMissing') }}</label>
         <label class="check"><input v-model="options.sendInvites" type="checkbox"> {{ t('import.sendInvites') }}</label>
+        <p class="keep">
+          <template v-if="keepFields.length">{{ t('import.keepFields') }}: <b>{{ keepFields.map(f => t(`settings.users.fields.${f}`)).join(', ') }}</b></template>
+          <template v-else>{{ t('import.keepFieldsNone') }}</template>
+          <NuxtLink to="/admin/settings/policies" class="link">{{ t('import.keepFieldsSettings') }}</NuxtLink>
+        </p>
         <button v-if="!applied" class="primary" :disabled="busy" @click="remap">{{ t('import.remap') }}</button>
       </section>
 
@@ -204,6 +215,8 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk')
 </template>
 
 <style scoped>
+.keep { font-size: var(--font-size-body-s); color: var(--color-ink-muted); margin: var(--space-2) 0; }
+.keep .link { margin-left: var(--space-2); color: var(--color-teal-ink); }
 h1 {
   margin: 0 0 var(--space-2);
   font-weight: 900;

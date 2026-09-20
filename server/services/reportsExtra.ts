@@ -208,6 +208,72 @@ export async function myCompetencies(ctx: Ctx, userId: string) {
   })
 }
 
+// ── Історія навчання і рейтинг у кабінеті (docs/22 §13.5, docs/04 `/me/study-history`) ─
+
+/**
+ * Рейтинг — мінімальна формула `[решение]` (docs/28 «Spec 19»): повноцінних балів
+ * (`points_ledger`, R3) ще немає, тому рахуємо кількість успішно виконаних призначень
+ * (курс/програма/тест) наростаючим підсумком; «зовнішній» ряд — завершені заявки на
+ * зовнішнє навчання (`19` §5, «зовнішні бали»). Історія охоплює ті самі типи, що й
+ * `TASK_REPORT_TYPES` (`reportTasks.ts`) — інші типи не входять, це задокументований долг.
+ */
+export async function studyHistory(ctx: Ctx, userId: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [profile] = await tx.execute(sql`
+      select u.full_name, l.name as location, ou.name as org_unit, p.name as position
+      from users u
+      left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+      left join locations l on l.id = up.location_id
+      left join org_units ou on ou.id = up.org_unit_id
+      left join positions p on p.id = up.position_id
+      where u.id = ${userId}::uuid
+    `) as unknown as Row[]
+
+    const mine = await tx.execute(sql`
+      select 'course'::text as content_type, c.title, e.status, round(coalesce(e.score, e.progress_pct))::int as result_pct,
+             coalesce(e.completed_at, e.updated_at) as at
+      from enrollments e join courses c on c.id = e.subject_id
+      where e.user_id = ${userId}::uuid and e.cancelled_at is null and e.status in ('done', 'failed')
+      union all
+      select 'training_program'::text, pr.title, e.status, e.progress_pct::int, coalesce(e.completed_at, e.updated_at)
+      from program_enrollments e join programs pr on pr.id = e.program_id
+      where e.user_id = ${userId}::uuid and e.cancelled_at is null and e.status in ('done', 'failed')
+      union all
+      select 'test'::text, q.title, case when a.passed then 'done' else 'failed' end, round(a.score)::int, coalesce(a.submitted_at, a.created_at)
+      from attempts a join quizzes q on q.id = a.quiz_id
+      where a.user_id = ${userId}::uuid and a.status <> 'in_progress'
+        and a.id = (select id from attempts a2 where a2.user_id = a.user_id and a2.quiz_id = a.quiz_id and a2.status <> 'in_progress' order by a2.created_at desc limit 1)
+      order by at desc limit 200
+    `) as unknown as { content_type: string, title: string, status: string, result_pct: number | null, at: Date }[]
+
+    const external = await tx.execute(sql`
+      select title, decided_at as at from external_training_requests where user_id = ${userId}::uuid and status = 'completed' order by decided_at desc limit 200
+    `) as unknown as { title: string, at: Date }[]
+
+    const items = [
+      ...mine.map(m => ({ title: m.title, contentType: m.content_type, status: m.status, resultPct: m.result_pct, date: m.at, external: false })),
+      ...external.map(e => ({ title: e.title, contentType: 'external_learning', status: 'done', resultPct: null, date: e.at, external: true })),
+    ].sort((a, b) => +new Date(b.date) - +new Date(a.date))
+
+    const currentRating = mine.filter(m => m.status === 'done').length
+
+    // Динаміка рейтингу — останні 8 місяців, наростаючим підсумком «мій» і «зовнішній» ряд.
+    const months: string[] = []
+    const now = new Date()
+    for (let i = 7; i >= 0; i--) months.push(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7))
+    const monthOf = (d: Date | string) => new Date(d).toISOString().slice(0, 7)
+    let mineAcc = 0
+    let extAcc = 0
+    const series = months.map((period) => {
+      mineAcc += mine.filter(m => m.status === 'done' && monthOf(m.at) === period).length
+      extAcc += external.filter(e => monthOf(e.at) === period).length
+      return { period, mine: mineAcc, external: extAcc }
+    })
+
+    return { profile: profile ?? null, currentRating, series, items }
+  })
+}
+
 // ── Недельный дайджест руководителю (docs/22 §8, §10 digest.weekly) ──
 
 /** Понедельник: каждому руководителю точки — три числа и три ссылки. */

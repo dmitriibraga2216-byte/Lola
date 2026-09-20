@@ -82,6 +82,14 @@ export type PollMode = typeof POLL_MODES[number]
 export const POLL_QUESTION_KINDS = ['single', 'multi', 'free', 'scale'] as const
 export type PollQuestionKind = typeof POLL_QUESTION_KINDS[number]
 
+/** Источник уровня компетенции человека (docs/19 Г-19.2, docs/02 `user_competencies.source`): приоритет assessment > task > manual. */
+export const COMPETENCY_SOURCES = ['assessment', 'task', 'manual'] as const
+export type CompetencySource = typeof COMPETENCY_SOURCES[number]
+
+/** Спосіб відображення рівня компетенції (docs/19 §14.1 «Шкала компетенцій»): назва рівня чи число. */
+export const DISPLAY_AS = ['label', 'value'] as const
+export type DisplayAs = typeof DISPLAY_AS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -99,4 +107,6 @@ export const ENUMS: Record<string, readonly string[]> = {
   assessment_kind: ASSESSMENT_KINDS,
   poll_mode: POLL_MODES,
   poll_question_kind: POLL_QUESTION_KINDS,
+  competency_source: COMPETENCY_SOURCES,
+  display_as: DISPLAY_AS,
 }

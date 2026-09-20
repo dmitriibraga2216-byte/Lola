@@ -1784,6 +1784,7 @@
     "noPlan": "No development plan yet. Create one and add goals — your manager will approve",
     "createPlan": "Create plan",
     "plan": "Plan",
+    "planGoal": "Plan goal",
     "planSent": "Done",
     "planStatus": {
       "draft": "draft",
@@ -1896,12 +1897,9 @@
     "levelRequired": "Required",
     "history": "Assessment history",
     "source": {
-      "self": "self",
-      "manager": "manager",
-      "test": "test",
-      "workshop": "workshop",
-      "assessment": "360° review",
-      "certification": "certification"
+      "assessment": "assessment form",
+      "task": "completed assignment",
+      "manual": "manual by manager"
     },
     "reports": "Development reports",
     "report": {
@@ -1949,7 +1947,23 @@
     "coverage": "Fit the profile: {fit} of {people}",
     "applyToPeople": "Apply to people in this position",
     "applied": "Assignments created: {a}, people enrolled: {e}",
-    "awaitingApproval": "Awaiting approval"
+    "awaitingApproval": "Awaiting approval",
+    "positionGoals": "Position goals",
+    "responsibilities": "Position responsibilities",
+    "usePositionLevels": "Use position levels for this profile",
+    "usePositionLevelsHint": "One profile can set different requirements for, e.g., \"Barista\" and \"Barista level 2\"",
+    "anyLevel": "Any position level",
+    "sourceHint": "Where the level comes from:",
+    "sourceHintExpiry": "An assessment older than 12 months is shown grey and does not count as confirmed",
+    "sourceHintAssessment": "the most significant",
+    "sourceHintTask": "no more than one step up",
+    "sourceHintManual": "with a reason, logged to the audit trail",
+    "displayAs": "Show competency level as",
+    "displayAsLabel": "Level name",
+    "displayAsValue": "Number",
+    "displayAsHint": "Affects \"My development\", the competency matrix and position profile",
+    "sourceLabel": "Source",
+    "expiringSoon": "expiring soon"
   },
   "assess": {
     "title": "My assessments",
@@ -4000,5 +4014,19 @@
     "nameRule": "Tag: up to 40 characters, no angle brackets",
     "deleteConfirm": "Delete tag \"{name}\"?",
     "inUse": "In use ({n}) — remove it from objects first"
+  },
+  "studyHistory": {
+    "title": "My study history",
+    "currentRating": "Current rating",
+    "legendMine": "My rating",
+    "legendExternal": "External",
+    "external": "External",
+    "empty": "Study history is empty yet",
+    "status": {
+      "done": "completed",
+      "failed": "failed",
+      "in_progress": "in progress",
+      "not_started": "not started"
+    }
   }
 }

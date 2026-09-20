@@ -64,6 +64,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   plan_period_ending: 'Період плану розвитку завершується {{until}} — час підбити підсумки',
   plan_period_ended: 'Період плану розвитку завершено: цілі без результату закрито як «Не досягнуто». Напишіть підсумок',
   competency_gap_detected: '{{name}}: критичний розрив за компетенціями — {{competencies}}',
+  competency_expiring: 'Оцінка компетенції «{{name}}» діє ще 14 днів — потрібне підтвердження',
+  competency_expired: 'Оцінка компетенції «{{name}}» протерміновано і більше не враховується',
   assessment_task_assigned: 'Оцінка «{{title}}»: заповніть анкету до {{due}}',
   assessment_due_soon: 'Оцінка «{{title}}»: анкета ще не заповнена, термін {{due}}',
   assessment_not_submitted: 'Оцінка «{{title}}»: {{name}} не заповнив анкету',

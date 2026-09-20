@@ -44,7 +44,13 @@ export const positionProfiles = pgTable('position_profiles', {
   positionId: uuid('position_id').notNull().references(() => positions.id),
   positionLevelId: uuid('position_level_id').references(() => positionLevels.id),
   description: text('description'),
-  competencyRequirements: jsonb('competency_requirements').notNull().default('[]'), // [{competencyId, requiredLevel, isCritical}]
+  // docs/19 §14.2: «Цілі посади» и «Обов'язки посади» — вікісвіг-блоки, отдельно от description.
+  goals: jsonb('goals'),
+  responsibilities: jsonb('responsibilities'),
+  // «Використовувати рівні посади для профілю»: один профіль задаёт разные требования для
+  // «Бариста» и «Бариста 2 рівня» через competencyRequirements[].positionLevelId (docs/02 Spec 19).
+  usePositionLevels: boolean('use_position_levels').notNull().default(false),
+  competencyRequirements: jsonb('competency_requirements').notNull().default('[]'), // [{competencyId, requiredLevel, isCritical, positionLevelId?}]
   mandatoryContent: jsonb('mandatory_content').notNull().default('[]'), // [{subjectType, subjectId, dueDays}]
   probationDays: integer('probation_days'),
   isActive: boolean('is_active').notNull().default(true),
@@ -53,20 +59,22 @@ export const positionProfiles = pgTable('position_profiles', {
   unique().on(t.tenantId, t.positionId, t.positionLevelId),
 ])
 
+/** Лог оценок уровня (docs/02 `user_competencies`): source_ref_id = evidenceId, reason = comment. */
 export const competencyAssessments = pgTable('competency_assessments', {
   ...baseColumns,
   tenantId: tenantId(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   competencyId: uuid('competency_id').notNull().references(() => competencies.id, { onDelete: 'cascade' }),
   level: integer('level').notNull(),
-  source: text('source').notNull(), // self | manager | test | workshop | assessment | certification
+  source: text('source').notNull(), // assessment | task | manual (docs/02 Spec 19, Г-19.2)
   evidenceId: uuid('evidence_id'),
   assessedBy: uuid('assessed_by').references(() => users.id),
   assessedAt: timestamp('assessed_at', { withTimezone: true }).notNull().defaultNow(),
-  validUntil: timestamp('valid_until', { withTimezone: true }),
+  validUntil: timestamp('valid_until', { withTimezone: true }), // по умолчанию +12 месяцев (docs/19 Г-19.2)
   comment: text('comment'),
 }, t => [
   index().on(t.tenantId, t.userId, t.competencyId, t.assessedAt.desc()),
+  index().on(t.tenantId, t.validUntil),
 ])
 
 export const developmentPlans = pgTable('development_plans', {

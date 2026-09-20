@@ -91,7 +91,7 @@ export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmen
  * назначение той же транзакцией, что и состояние узла; раскрытие — после фиксации.
  * `source.kind` — task_type (docs/02): manual | trajectory; `source.trajectoryId/nodeId` кладутся в audience.
  */
-export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory', trajectoryId?: string, nodeId?: string, enrollmentId?: string } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' }> {
+export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory' | 'catalog', trajectoryId?: string, nodeId?: string, enrollmentId?: string } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' }> {
   const title = await subjectTitle(tx, input.subjectType, input.subjectId)
   if (!title) return { ok: false as const, code: 'subject_not_found' as const }
 

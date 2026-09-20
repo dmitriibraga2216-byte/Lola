@@ -224,6 +224,9 @@ create table courses (
                                               -- pct (% успішності) | avg_score (середній бал)
                                               -- | final_test (за підсумковим тестуванням)
   is_catalog_visible boolean not null default false,
+  -- Режим доступу каталогу (`10` §14.1, Spec 10): діє тільки коли is_catalog_visible.
+  -- Значення узгоджені з `assign_mode` траєкторій (без manual/automation — тут керує тумблер вище).
+  assign_mode text not null default 'catalog_free', -- catalog_free | catalog_request
   tags text[] not null default '{}',
   created_by uuid references users(id),
   unique (tenant_id, slug)
@@ -517,8 +520,9 @@ create table enrollments (                    -- «конкретный чело
   user_id uuid not null references users(id) on delete cascade,
   course_id uuid not null references courses(id),
   course_version_id uuid not null references course_versions(id),
-  source text not null default 'assigned',    -- assigned | self | repeat
+  source text not null default 'assigned',    -- assigned | self | repeat | catalog (Spec 10 — заявка через каталог)
   status text not null default 'not_started', -- not_started | in_progress | completed | failed | expired
+  requested_at timestamptz,                   -- `10` §14.1, Spec 10: заявка через каталог (catalog_request) до рішення — status = not_assigned
   progress_pct numeric(5,2) not null default 0,
   due_at timestamptz,
   started_at timestamptz,

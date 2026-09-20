@@ -74,6 +74,7 @@ export const programEnrollments = pgTable('program_enrollments', {
   programVersion: integer('program_version').notNull().default(1),
   status: text('status').notNull().default('not_started'), // enrollment_status (docs/02): not_started | in_progress | done | failed; снятие — cancelled_at
   cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelReason: text('cancel_reason'), // причина зняття / відмови у заявці (spec-10)
   requestedAt: timestamp('requested_at', { withTimezone: true }), // заявка через каталог: status = not_assigned до решения
   currentNodeId: uuid('current_node_id'),
   nodesState: jsonb('nodes_state').notNull().default('{}'), // {nodeId: {status, at, score, enrollmentId, via}}

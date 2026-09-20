@@ -4,9 +4,12 @@ import { apiData } from '../../../utils/apiResponse'
 
 export default defineEventHandler(async (event) => {
   const access = await requireScope(event, 'learn.catalog')
-  const q = getQuery(event).q
+  const query = getQuery(event)
   return apiData(await catalog(
     { tenantId: access.tenantId, actorId: access.userId },
-    typeof q === 'string' ? q : undefined,
+    {
+      q: typeof query.q === 'string' ? query.q : undefined,
+      categoryId: typeof query.category === 'string' ? query.category : undefined,
+    },
   ))
 })

@@ -118,6 +118,28 @@ export const contentAccessGroups = pgTable('content_access_groups', {
   unique().on(t.tenantId, t.contentType, t.contentId, t.groupId),
 ])
 
+/**
+ * Единая лента комментариев (docs/02, docs/10 §14.2): комментарий к контенту или прохождению
+ * с маршрутизацией автору матеріалу [решение Lola] — иначе жалоба на розбіжність матеріалу
+ * не доходить до того, хто може її виправити.
+ */
+export const comments = pgTable('comments', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  authorId: uuid('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  sourceType: text('source_type').notNull(), // task | course | program | knowledge | notice
+  sourceId: uuid('source_id').notNull(),
+  isRead: boolean('is_read').notNull().default(false),
+  readBy: uuid('read_by').references(() => users.id),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  routedTo: uuid('routed_to').references(() => users.id), // автор матеріалу / керівник / адміністратор
+  replyToId: uuid('reply_to_id').references((): AnyPgColumn => comments.id, { onDelete: 'cascade' }),
+}, t => [
+  index().on(t.tenantId, t.sourceType, t.sourceId),
+  index().on(t.tenantId, t.isRead),
+])
+
 export const courses = pgTable('courses', {
   ...baseColumns,
   tenantId: tenantId(),
@@ -132,6 +154,9 @@ export const courses = pgTable('courses', {
   estimatedMinutes: integer('estimated_minutes'),
   strictOrder: boolean('strict_order').notNull().default(true),
   isCatalogVisible: boolean('is_catalog_visible').notNull().default(false),
+  // Режим доступу каталогу (docs/10 §14.1, узгоджено з assign_mode траєкторій, docs/17 §14.1):
+  // діє тільки коли isCatalogVisible; ручне призначення це поле не використовує.
+  assignMode: text('assign_mode').notNull().default('catalog_free'), // catalog_free | catalog_request
   validityMonths: integer('validity_months'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   // Карточка курса по эталону (docs/11 §14.1, docs/02 §2.4)

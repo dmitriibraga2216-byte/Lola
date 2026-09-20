@@ -468,15 +468,22 @@ export async function selfEnrollProgram(ctx: Ctx, programId: string): Promise<En
   })
 }
 
-export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean) {
+/** Рішення по заявці (docs/10 §14.1): відмова — з причиною, яку бачить людина. */
+export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean, reason?: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     // Заявка через каталог: status = not_assigned + requested_at; отказ — cancelled_at
     const [enr] = await tx.select().from(programEnrollments).where(and(eq(programEnrollments.id, enrollmentId), eq(programEnrollments.status, 'not_assigned'), sql`${programEnrollments.requestedAt} is not null`, isNull(programEnrollments.cancelledAt)))
     if (!enr) return null
-    if (!approve) { await tx.update(programEnrollments).set({ cancelledAt: new Date(), updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId)); return { status: 'cancelled' } }
+    if (!approve) {
+      await tx.update(programEnrollments).set({ cancelledAt: new Date(), cancelReason: reason ?? null, updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'program_enrollment.request.reject', entity: 'program_enrollment', entityId: enrollmentId, after: { userId: enr.userId, reason } })
+      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: enr.userId, code: 'catalog_request_rejected', payload: { reason: reason ?? null }, dedupKey: `catalog_request_rejected:${enrollmentId}` })
+      return { status: 'cancelled' }
+    }
     await tx.update(programEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
     await openEnrollment(tx, ctx.tenantId, enrollmentId)
     const [p] = await tx.select({ title: programs.title }).from(programs).where(eq(programs.id, enr.programId))
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'program_enrollment.request.approve', entity: 'program_enrollment', entityId: enrollmentId, after: { userId: enr.userId } })
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: enr.userId, code: 'program_assigned', payload: { title: p?.title, due: '' }, dedupKey: `prog_assigned:${enr.id}` })
     return { status: 'not_started' }
   })

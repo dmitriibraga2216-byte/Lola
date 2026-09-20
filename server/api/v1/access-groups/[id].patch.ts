@@ -1,10 +1,10 @@
 import { accessGroupSchema } from '../../../../shared/schemas/resources'
-import { requireScope } from '../../../services/access'
+import { requireAnyScope } from '../../../services/access'
 import { updateAccessGroup } from '../../../services/resources'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
 export default defineEventHandler(async (event) => {
-  const a = await requireScope(event, 'knowledge.manage')
+  const a = await requireAnyScope(event, ['knowledge.manage', 'assignment.create'])
   const p = accessGroupSchema.partial().safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Перевірте поля групи доступу', { issues: p.error.issues })
   const r = await updateAccessGroup({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data)

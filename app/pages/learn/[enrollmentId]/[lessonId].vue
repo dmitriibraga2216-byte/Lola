@@ -152,6 +152,11 @@ onMounted(async () => {
       await navigateTo(`/learn/workshop/${opened.lesson.itemId}?enrollmentId=${enrollmentId}&lessonId=${lessonId}`, { replace: true })
       return
     }
+    // Урок-заняття (docs/29 Б.3): картка заняття своя, запис на сесію засчитує урок при відвідуванні
+    if (opened.lesson.itemType === 'meetup') {
+      await navigateTo(`/learn/meetups/${opened.lesson.itemId}?enrollmentId=${enrollmentId}&lessonId=${lessonId}`, { replace: true })
+      return
+    }
     data.value = opened
     tree.value = treeRes
     secondsSpent.value = opened.progress.secondsSpent

@@ -4,16 +4,31 @@ const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 const route = useRoute()
+// Урок-заняття (docs/29 Б.3): якщо відкрито з курсу, реєстрація на сесію тягне enrollmentId/lessonId —
+// відмітка присутності на сесії тоді автоматично зараховує урок.
+const fromCourse = computed(() => ({ enrollmentId: route.query.enrollmentId as string | undefined, lessonId: route.query.lessonId as string | undefined }))
 interface P { id: string, userId: string, fullName: string, status: string, waitlistPosition: number | null, checkInMethod: string | null, checkedInAt: string | null }
-interface M { id: string, kind: string, title: string, description: unknown[], startsAt: string, endsAt: string, status: string, room: string | null, address: string | null, location: { name: string, address: string | null } | null, trainers: { id: string, fullName: string }[], capacity: number | null, registered: number, waitlist: number, seatsLeft: number | null, mine: { status: string, waitlistPosition: number | null } | null, enrollOpen: boolean, canCancel: boolean, materials: string[], materialsOpenAt: string, isTrainer: boolean, attendanceMode: string, webinar: { joinUrl: string | null, recordUrl: string | null } | null, participants?: P[] }
+interface M { id: string, kind: string, title: string, description: unknown[], announcement: unknown[], startsAt: string, endsAt: string, status: string, room: string | null, address: string | null, location: { name: string, address: string | null } | null, trainers: { id: string, fullName: string }[], capacity: number | null, registered: number, waitlist: number, seatsLeft: number | null, mine: { status: string, waitlistPosition: number | null } | null, enrollOpen: boolean, canCancel: boolean, materials: string[], materialsOpenAt: string, isTrainer: boolean, attendanceMode: string, webinar: { joinUrl: string | null, recordUrl: string | null } | null, participants?: P[] }
+interface Session { id: string, starts_at: string, ends_at: string, status: string, location: string | null, room: string | null, trainers: string[], capacity: number | null, registered: number, waitlist: number, seatsLeft: number | null, my_status: string | null, my_waitlist_position: number | null, enrollOpen: boolean }
 const m = ref<M | null>(null)
+const sessions = ref<Session[]>([])
 const error = ref('')
 const notice = ref('')
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
-async function load() { try { m.value = await api<M>(`/meetups/${route.params.id}`) } catch (err) { error.value = apiErrorOf(err).message } }
+async function load() {
+  try {
+    m.value = await api<M>(`/meetups/${route.params.id}`)
+    sessions.value = await api<Session[]>(`/meetups/${route.params.id}/sessions`)
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 onMounted(() => { load(); timer = setInterval(() => { now.value = Date.now() }, 1000) })
 onUnmounted(() => { if (timer) clearInterval(timer) })
+async function sessionAct(fn: () => Promise<unknown>, ok?: string) { error.value = ''; notice.value = ''; try { await fn(); if (ok) notice.value = ok; await load() } catch (err) { error.value = apiErrorOf(err).message } }
+const registerSession = (s: Session) => sessionAct(() => api(`/meetup-sessions/${s.id}/register`, { method: 'POST', body: fromCourse.value }), t('mt.registeredOk'))
+const unregisterSession = (s: Session) => sessionAct(() => api(`/meetup-sessions/${s.id}/register`, { method: 'DELETE' }), t('mt.unregisteredOk'))
+const fmtSession = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' })
 const countdown = computed(() => { if (!m.value) return ''; const left = new Date(m.value.startsAt).getTime() - now.value; if (left <= 0) return ''; const h = Math.floor(left / 3_600_000), mi = Math.floor((left % 3_600_000) / 60_000), s = Math.floor((left % 60_000) / 1000); return h > 48 ? t('mt.inDays', { n: Math.floor(h / 24) }) : `${h}:${String(mi).padStart(2, '0')}:${String(s).padStart(2, '0')}` })
 async function act(fn: () => Promise<unknown>, ok?: string) { error.value = ''; notice.value = ''; try { const r = await fn() as { conflict?: string }; if (r?.conflict) notice.value = t('mt.conflict', { title: r.conflict }); else if (ok) notice.value = ok; await load() } catch (err) { error.value = apiErrorOf(err).message } }
 const register = () => act(() => api(`/meetups/${route.params.id}/register`, { method: 'POST' }), t('mt.registeredOk'))
@@ -51,9 +66,27 @@ const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendan
         </div>
       </section>
 
+      <section v-if="m.announcement?.length" class="card">
+        <h2>{{ t('mt.announcement') }}</h2>
+        <LessonBlocks :blocks="m.announcement as never" :blocks-state="{}" readonly />
+      </section>
       <section v-if="m.description?.length" class="card">
         <h2>{{ t('mt.program') }}</h2>
         <LessonBlocks :blocks="m.description as never" :blocks-state="{}" readonly />
+      </section>
+      <section v-if="sessions.length" class="card">
+        <h2>{{ t('mt.sessions') }}</h2>
+        <div v-for="s in sessions" :key="s.id" class="session-row" :data-testid="`session-${s.id}`">
+          <div>
+            <div class="session-when">{{ fmtSession(s.starts_at) }}</div>
+            <div class="sub"><template v-if="s.location">{{ s.location }}</template><template v-if="s.room">, {{ s.room }}</template> · {{ s.trainers.join(', ') }}</div>
+            <div v-if="s.my_status === 'waitlist'" class="sub">{{ t('mt.inQueue', { n: s.my_waitlist_position }) }}</div>
+            <div v-else-if="s.seatsLeft != null" class="sub">{{ s.seatsLeft > 0 ? t('mt.seatsLeft', { n: s.seatsLeft }) : t('mt.full') }}</div>
+          </div>
+          <button v-if="!s.my_status || s.my_status === 'cancelled'" class="chip" :disabled="!s.enrollOpen" @click="registerSession(s)">{{ s.enrollOpen ? t('mt.register') : t('mt.closed') }}</button>
+          <button v-else-if="['registered', 'waitlist'].includes(s.my_status)" class="chip" @click="unregisterSession(s)">{{ t('mt.unregister') }}</button>
+          <span v-else class="badge teal">{{ t(`mt.status.${s.my_status}`) }}</span>
+        </div>
       </section>
       <section class="card">
         <h2>{{ t('mt.materials') }}</h2>
@@ -85,6 +118,9 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .badge.sun, .badge.waitlist { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.coral, .badge.missed { background: var(--color-coral); color: var(--color-coral-deep); }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.session-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--color-bg-line); }
+.session-row:first-child { border-top: none; }
+.session-when { font-weight: 800; }
 .link { color: var(--color-ink); font-weight: 700; }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 .notice { background: var(--color-teal); color: var(--color-teal-deep); padding: var(--space-3); border-radius: var(--radius-m); }

@@ -56,19 +56,20 @@ export const moduleCreateSchema = z.object({
 export const lessonCreateSchema = z.object({
   moduleId: z.string().uuid(),
   title: z.string().min(1).max(200),
-  itemType: z.enum(['resource', 'quiz', 'workshop']).default('resource'),
+  itemType: z.enum(['resource', 'quiz', 'workshop', 'meetup']).default('resource'),
   resource: z.object({
     body: bodySchema,
   }).optional(), // «Створити і підключити ресурс»: новый ресурс из тела
   resourceId: z.string().uuid().optional(), // подключить существующий опубликованный ресурс из библиотеки (CoursePlan)
   quizId: z.string().uuid().optional(),
   workshopId: z.string().uuid().optional(),
+  meetupId: z.string().uuid().optional(), // урок-заняття (docs/29 Б.3): itemId = meetups.id, зачёт по відвідуванню сесії
   isRequired: z.boolean().default(true),
   minSeconds: z.number().int().min(10).max(3600).nullable().optional(),
   videoThresholdPct: z.number().int().min(50).max(100).default(90),
   passScorePct: z.number().min(1).max(100).nullable().optional(), // порог теста в плане курса (docs/11 §14.1); назначение перекрывает
-}).refine(l => l.itemType === 'quiz' ? !!l.quizId : l.itemType === 'workshop' ? !!l.workshopId : !!l.resource || !!l.resourceId, {
-  message: 'Для уроку-тесту вкажіть quizId, для практикуму — workshopId, для матеріалу — resource або resourceId',
+}).refine(l => l.itemType === 'quiz' ? !!l.quizId : l.itemType === 'workshop' ? !!l.workshopId : l.itemType === 'meetup' ? !!l.meetupId : !!l.resource || !!l.resourceId, {
+  message: 'Для уроку-тесту вкажіть quizId, для практикуму — workshopId, для заняття — meetupId, для матеріалу — resource або resourceId',
 })
 
 export const lessonUpdateSchema = z.object({

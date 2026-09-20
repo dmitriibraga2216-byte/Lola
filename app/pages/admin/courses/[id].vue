@@ -39,7 +39,7 @@ interface Editor {
   modules: { id: string, title: string, lessons: Lesson[] }[]
 }
 interface Check { code: string, label: string, ok: boolean }
-interface LibItem { id: string, title: string, kind: 'resource' | 'quiz' | 'workshop', sub: string, tags: string[], questions?: number }
+interface LibItem { id: string, title: string, kind: 'resource' | 'quiz' | 'workshop' | 'meetup', sub: string, tags: string[], questions?: number }
 
 const editor = ref<Editor | null>(null)
 const selected = ref<Lesson | null>(null)
@@ -56,7 +56,7 @@ const busy = ref(false)
 const newModuleTitle = ref('')
 const newItemTitle = ref('')
 const targetModuleId = ref('')
-const libKind = ref<'all' | 'resource' | 'quiz' | 'workshop'>('all')
+const libKind = ref<'all' | 'resource' | 'quiz' | 'workshop' | 'meetup'>('all')
 const libTag = ref('')
 const libQ = ref('')
 const library = ref<LibItem[]>([])
@@ -65,15 +65,20 @@ const card = reactive({ title: '', code: '', durationDays: null as number | null
 const canEdit = computed(() => hasScope('course.edit'))
 
 async function loadLibrary() {
-  const [res, quizzes, workshops] = await Promise.all([
+  const [res, quizzes, workshops, meetups, webinars] = await Promise.all([
     api<{ items: { id: string, title: string, kind: string, tags: string[], estimatedMinutes?: number | null }[] }>('/resources', { query: { status: 'published', perPage: 100 } }).catch(() => ({ items: [] })),
     api<{ id: string, title: string, status: string, questionCount?: number, tags?: string[] }[]>('/quizzes').catch(() => []),
     api<{ id: string, title: string, status: string, tags?: string[] }[]>('/workshops').catch(() => []),
+    api<{ id: string, title: string, summary: string | null }[]>('/tasks/content', { query: { type: 'meetup' } }).catch(() => []),
+    api<{ id: string, title: string, summary: string | null }[]>('/tasks/content', { query: { type: 'webinar' } }).catch(() => []),
   ])
   library.value = [
     ...res.items.map(r => ({ id: r.id, title: r.title, kind: 'resource' as const, sub: t(`resource.kind.${r.kind}`), tags: r.tags })),
     ...quizzes.filter(q => q.status === 'published').map(q => ({ id: q.id, title: q.title, kind: 'quiz' as const, sub: t('course.itemQuiz'), tags: q.tags ?? [], questions: q.questionCount })),
     ...workshops.filter(w => w.status === 'published').map(w => ({ id: w.id, title: w.title, kind: 'workshop' as const, sub: t('course.itemWorkshop'), tags: w.tags ?? [] })),
+    // Урок-заняття (docs/29 Б.3): дата і місце — в сесіях на призначенні, тут лише вибір картки
+    ...meetups.map(m => ({ id: m.id, title: m.title, kind: 'meetup' as const, sub: t('course.itemMeetup'), tags: [] as string[] })),
+    ...webinars.map(w => ({ id: w.id, title: w.title, kind: 'meetup' as const, sub: t('course.itemWebinar'), tags: [] as string[] })),
   ]
 }
 
@@ -190,6 +195,7 @@ async function addLesson(body: Record<string, unknown>) {
 function attach(item: LibItem) {
   if (item.kind === 'resource') return addLesson({ title: item.title, itemType: 'resource', resourceId: item.id })
   if (item.kind === 'quiz') return addLesson({ title: item.title, itemType: 'quiz', quizId: item.id })
+  if (item.kind === 'meetup') return addLesson({ title: item.title, itemType: 'meetup', meetupId: item.id })
   return addLesson({ title: item.title, itemType: 'workshop', workshopId: item.id })
 }
 
@@ -276,6 +282,7 @@ async function publish() {
 function itemSub(l: Lesson): string {
   if (l.itemType === 'quiz') return t('course.itemQuiz')
   if (l.itemType === 'workshop') return t('course.itemWorkshop')
+  if (l.itemType === 'meetup') return t('course.itemMeetup')
   return l.resource?.estimatedMinutes ? `${t('course.itemResource')} · ${t('course.minutesN', { n: l.resource.estimatedMinutes })}` : t('course.itemResource')
 }
 </script>
@@ -324,7 +331,7 @@ function itemSub(l: Lesson): string {
         <h2 class="panel-title">{{ t('course.library') }}</h2>
         <div class="lib-filters">
           <select v-model="libKind" class="field" :aria-label="t('resource.filter.kind')">
-            <option v-for="k in (['all', 'resource', 'quiz', 'workshop'] as const)" :key="k" :value="k">{{ t(`course.libKind.${k}`) }}</option>
+            <option v-for="k in (['all', 'resource', 'quiz', 'workshop', 'meetup'] as const)" :key="k" :value="k">{{ t(`course.libKind.${k}`) }}</option>
           </select>
           <select v-model="libTag" class="field" :aria-label="t('resource.filter.tag')">
             <option value="">{{ t('resource.filter.tag') }}</option>
@@ -394,6 +401,10 @@ function itemSub(l: Lesson): string {
         <div v-else-if="selected.itemType === 'workshop'" class="quiz-note">
           {{ t('course.workshopLesson') }}
           <NuxtLink to="/admin/workshops">{{ t('admin.nav.workshops') }} →</NuxtLink>
+        </div>
+        <div v-else-if="selected.itemType === 'meetup'" class="quiz-note">
+          {{ t('course.meetupLesson') }}
+          <NuxtLink :to="`/admin/meetups/${selected.itemId}`">{{ t('admin.nav.meetups') }} →</NuxtLink>
         </div>
         <template v-else>
           <p class="help">

@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import { locations, meetupRegistrations, meetups, userPlacements, users, webinarParticipations, webinars } from '../db/schema'
+import { lessonProgress, locations, meetupRegistrations, meetups, userPlacements, users, webinarParticipations, webinars } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import type { TenantTx } from '../utils/withTenant'
@@ -14,6 +14,8 @@ export interface MeetupInput {
   kind?: 'meetup' | 'webinar' | 'event'
   title: string
   description?: unknown[]
+  announcement?: unknown[] // «Анонс» (docs/18 §14): обов'язковий для meetup|webinar, читає людина до запису
+  tags?: string[]
   courseId?: string | null
   startsAt: string
   endsAt: string
@@ -48,7 +50,7 @@ export async function createMeetup(ctx: Ctx, input: MeetupInput) {
       timezone = l?.tz
     }
     const [m] = await tx.insert(meetups).values({
-      tenantId: ctx.tenantId, kind: input.kind ?? 'meetup', title: input.title, description: input.description ?? [], courseId: input.courseId ?? null,
+      tenantId: ctx.tenantId, kind: input.kind ?? 'meetup', title: input.title, description: input.description ?? [], announcement: input.announcement ?? [], tags: input.tags ?? [], courseId: input.courseId ?? null,
       startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), timezone: timezone ?? 'Europe/Kyiv', locationId: input.locationId ?? null, room: input.room ?? null, address: input.address ?? null,
       trainerIds: input.trainerIds, capacity: input.capacity ?? null, waitlistEnabled: input.waitlistEnabled ?? true, enrollDeadlineHours: input.enrollDeadlineHours ?? 2, cancelDeadlineHours: input.cancelDeadlineHours ?? 24,
       attendanceMode: input.attendanceMode ?? 'manual', qrSecret: randomBytes(24).toString('base64url'), requiresFeedback: input.requiresFeedback ?? true, feedbackSurveyId: input.feedbackSurveyId ?? null,
@@ -80,7 +82,7 @@ export async function updateMeetup(ctx: Ctx, id: string, input: Partial<MeetupIn
     const [before] = await tx.select().from(meetups).where(eq(meetups.id, id))
     if (!before || before.status === 'finished' || before.status === 'cancelled') return null
     const patch: Record<string, unknown> = { updatedAt: new Date() }
-    for (const k of ['title', 'description', 'courseId', 'timezone', 'locationId', 'room', 'address', 'trainerIds', 'capacity', 'waitlistEnabled', 'enrollDeadlineHours', 'cancelDeadlineHours', 'attendanceMode', 'requiresFeedback', 'feedbackSurveyId', 'materials', 'status', 'coverKey', 'registrationRequired'] as const) {
+    for (const k of ['title', 'description', 'announcement', 'tags', 'courseId', 'timezone', 'locationId', 'room', 'address', 'trainerIds', 'capacity', 'waitlistEnabled', 'enrollDeadlineHours', 'cancelDeadlineHours', 'attendanceMode', 'requiresFeedback', 'feedbackSurveyId', 'materials', 'status', 'coverKey', 'registrationRequired'] as const) {
       if (input[k] !== undefined) patch[k] = input[k]
     }
     if (input.startsAt) patch.startsAt = new Date(input.startsAt)
@@ -309,9 +311,13 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, m: typeof meetups.$inferSe
   const now = new Date()
   await tx.update(meetupRegistrations).set({ status, checkedInAt: status === 'attended' ? now : r.checkedInAt, checkInMethod: status === 'attended' ? method : r.checkInMethod, checkedInBy: method === 'manual' ? ctx.actorId : null, cancelReason: reason ?? r.cancelReason, waitlistPosition: null, updatedAt: now }).where(eq(meetupRegistrations.id, r.id))
   await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.attendance', entity: 'meetup_registration', entityId: r.id, before: { status: r.status }, after: { status, method, by: ctx.actorId } })
-  // Зачёт в курсе (docs/18 §7.7): занятие как урок засчитывается при attended
+  // Зачёт в курсе (docs/18 §7.7, docs/29 Б.3): занятие как урок засчитывается при attended —
+  // прогресс урока ставим напрямую (как тест/практикум, attempts.ts onAttemptPassed), а
+  // completeLesson дальше только пересчитывает прогресс курса.
   if (status === 'attended' && r.enrollmentId && r.lessonId) {
     const enrollmentId = r.enrollmentId, lessonId = r.lessonId
+    await tx.insert(lessonProgress).values({ tenantId: ctx.tenantId, enrollmentId, lessonId, status: 'completed', completedAt: now })
+      .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: now } })
     setImmediate(() => completeLesson({ tenantId: ctx.tenantId, actorId: r.userId }, enrollmentId, lessonId).catch(() => {}))
   }
   // Занятие как узел программы (docs/17 §7.4)

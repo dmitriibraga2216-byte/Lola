@@ -10,7 +10,7 @@ const people = ref<{ id: string, fullName: string }[]>([])
 const surveys = ref<{ id: string, title: string }[]>([])
 const error = ref('')
 const notice = ref('')
-const form = reactive({ kind: 'meetup', title: '', startsAt: '', endsAt: '', locationId: '', room: '', address: '', trainerIds: [] as string[], capacity: null as number | null, waitlistEnabled: true, enrollDeadlineHours: 2, cancelDeadlineHours: 24, attendanceMode: 'both', requiresFeedback: true, feedbackSurveyId: '', program: '', provider: 'meet', joinUrl: '', minMinutes: null as number | null })
+const form = reactive({ kind: 'meetup', title: '', announcement: '', tags: '', startsAt: '', endsAt: '', locationId: '', room: '', address: '', trainerIds: [] as string[], capacity: null as number | null, waitlistEnabled: true, enrollDeadlineHours: 2, cancelDeadlineHours: 24, attendanceMode: 'both', requiresFeedback: true, feedbackSurveyId: '', program: '', provider: 'meet', joinUrl: '', minMinutes: null as number | null })
 async function load() {
   try {
     items.value = await api<M[]>(`/meetups?from=${new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10)}&to=${new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10)}`)
@@ -21,7 +21,7 @@ onMounted(load)
 async function create() {
   error.value = ''; notice.value = ''
   try {
-    const body: Record<string, unknown> = { kind: form.kind, title: form.title, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), locationId: form.locationId || null, room: form.room || null, address: form.address || null, trainerIds: form.trainerIds, capacity: form.capacity || null, waitlistEnabled: form.waitlistEnabled, enrollDeadlineHours: form.enrollDeadlineHours, cancelDeadlineHours: form.cancelDeadlineHours, attendanceMode: form.attendanceMode, requiresFeedback: form.requiresFeedback, feedbackSurveyId: form.feedbackSurveyId || null, description: form.program ? [{ id: 'p', type: 'text', html: `<p>${form.program.replace(/\n/g, '<br>')}</p>` }] : [] }
+    const body: Record<string, unknown> = { kind: form.kind, title: form.title, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), locationId: form.locationId || null, room: form.room || null, address: form.address || null, trainerIds: form.trainerIds, capacity: form.capacity || null, waitlistEnabled: form.waitlistEnabled, enrollDeadlineHours: form.enrollDeadlineHours, cancelDeadlineHours: form.cancelDeadlineHours, attendanceMode: form.attendanceMode, requiresFeedback: form.requiresFeedback, feedbackSurveyId: form.feedbackSurveyId || null, description: form.program ? [{ id: 'p', type: 'text', html: `<p>${form.program.replace(/\n/g, '<br>')}</p>` }] : [], announcement: form.announcement ? [{ id: 'a', type: 'text', html: `<p>${form.announcement.replace(/\n/g, '<br>')}</p>` }] : [], tags: form.tags ? form.tags.split(',').map(x => x.trim()).filter(Boolean) : [] }
     if (form.kind === 'webinar') body.webinar = { provider: form.provider, joinUrl: form.joinUrl || null, minMinutesForAttendance: form.minMinutes }
     const m = await api<{ id: string }>('/meetups', { method: 'POST', body })
     notice.value = t('common.saved'); form.title = ''
@@ -52,6 +52,12 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'sho
         <select v-model="form.kind" class="field"><option value="meetup">{{ t('mt.kind.meetup') }}</option><option v-if="hasScope('webinar.manage')" value="webinar">{{ t('mt.kind.webinar') }}</option><option value="event">{{ t('mt.kind.event') }}</option></select>
         <input v-model="form.title" class="field grow" :placeholder="t('mt.titlePh')" data-testid="mt-title">
       </div>
+      <div v-if="form.kind !== 'event'" class="row">
+        <textarea v-model="form.announcement" class="field grow" rows="2" :placeholder="t('mt.announcementPh')" data-testid="mt-announcement" />
+      </div>
+      <div class="row">
+        <input v-model="form.tags" class="field grow" :placeholder="t('mt.tagsPh')">
+      </div>
       <div class="row">
         <label class="sub">{{ t('mt.start') }} <input v-model="form.startsAt" class="field" type="datetime-local" data-testid="mt-start"></label>
         <label class="sub">{{ t('mt.end') }} <input v-model="form.endsAt" class="field" type="datetime-local" data-testid="mt-end"></label>
@@ -81,7 +87,7 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'sho
         <select v-if="form.requiresFeedback" v-model="form.feedbackSurveyId" class="field"><option value="">{{ t('mt.defaultSurvey') }}</option><option v-for="s in surveys" :key="s.id" :value="s.id">{{ s.title }}</option></select>
       </div>
       <textarea v-model="form.program" class="field" rows="3" :placeholder="t('mt.programPh')" />
-      <button class="primary" :disabled="form.title.length < 3 || !form.startsAt || !form.endsAt || !form.trainerIds.length" data-testid="mt-create" @click="create">{{ t('common.save') }}</button>
+      <button class="primary" :disabled="form.title.length < 3 || !form.startsAt || !form.endsAt || !form.trainerIds.length || (form.kind !== 'event' && !form.announcement.trim())" data-testid="mt-create" @click="create">{{ t('common.save') }}</button>
     </section>
   </div>
 </template>

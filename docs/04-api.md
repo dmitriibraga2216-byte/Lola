@@ -340,3 +340,26 @@
   (одноразовый токен, 10 минут, привязан к `chat_id` и коду уведомления).
 - Ошибки: 403 — бот заблокирован, канал переключается на SMS; 429 — `retry_after`;
   400 «chat not found» — сброс привязки.
+
+## 4.20 Заняття, вебінари — сесії на призначенні (Spec 18)
+
+Базовий `CRUD /meetups`, `/meetups/schedule`, `/meetups/checkin` (`18` §10) лишається без змін —
+обслуговує стару однораундову картку та `kind=event` (Spec 21). Нове — сесії, прив'язані до
+призначення (`18` §14.1), окремою моделлю поверх картки:
+
+| Метод | Путь | Комментарий |
+| --- | --- | --- |
+| GET/POST | `/meetups/:id/sessions` | список / нова сесія заняття-вебінару (`?taskId=` — тільки одного призначення) |
+| GET/PATCH | `/meetup-sessions/:id` | картка сесії з учасниками (`manage`), «Мій статус» |
+| POST | `/meetup-sessions/:id/cancel` | `{reason, notify}` — знімає реєстрації, сповіщає |
+| POST/DELETE | `/meetup-sessions/:id/register` | запис / відписка на сесію; `{enrollmentId, lessonId}` — з уроку курсу (Б.3) |
+| POST | `/meetup-sessions/:id/register-others` | `{userIds[]}` |
+| GET | `/meetup-sessions/:id/qr` | поточний токен тренера, 30 с |
+| POST | `/meetup-sessions/checkin` | `{token}` → 410 `qr.expired`, 403 `not_registered` |
+| POST | `/meetup-sessions/:id/attendance` | `{userId, status, reason?}` — заднім числом (сесія завершена) причина обов'язкова, вікно 7 днів, лише керівник точки/`meetup.manage` → 422 `reason_required`, 409 `window_passed`, 403 `forbidden` |
+| POST | `/meetup-sessions/:id/tick` | `{seconds}` — тік перегляду вебінару, зачёт по `webinarMinWatchPct` з `assignments.params` |
+| POST | `/meetup-sessions/:id/participations` | дані участі від провайдера/вручну |
+| GET | `/meetup-sessions/:id/ics` | файл календаря сесії |
+
+`GET /reports/attendance` тепер віддає й розділ `sessions` (звіт по сесіях) поряд зі старим
+`meetups` (події, docs/28 «Spec 18»).

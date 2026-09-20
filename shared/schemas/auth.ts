@@ -6,8 +6,10 @@ export const phoneSchema = z.string()
   .transform(v => (v.startsWith('0') ? `+38${v}` : v.startsWith('380') ? `+${v}` : v))
   .pipe(z.string().regex(/^\+380\d{9}$/, 'Невірний формат номера'))
 
+/** `channel` — явний вибір людини («Надіслати код на пошту»), docs/01 §1.5. Без нього канал обирається автоматично. */
 export const otpRequestSchema = z.object({
   phone: phoneSchema,
+  channel: z.enum(['sms', 'email']).optional(),
 })
 
 export const otpVerifySchema = z.object({

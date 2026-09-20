@@ -10,7 +10,8 @@ const step = ref<Step>('phone')
 const devCode = ref('')
 const phone = ref('')
 const code = ref('')
-const channel = ref<'telegram' | 'sms'>('sms')
+const channel = ref<'telegram' | 'sms' | 'email'>('sms')
+const maskedEmail = ref('')
 const error = ref('')
 const busy = ref(false)
 // Вход через Google (docs/09 §9.1): ссылку даёт сервер; тенант — из ?tenant= или единственный на этом хосте
@@ -62,15 +63,16 @@ function normalizedPhone(): string {
   return `+380${phone.value.replace(/\D/g, '')}`
 }
 
-async function requestCode() {
+async function requestCode(explicitChannel?: 'email') {
   error.value = ''
   busy.value = true
   try {
-    const data = await rawFetch<{ data: { channel: 'telegram' | 'sms', devCode?: string } }>(
+    const data = await rawFetch<{ data: { channel: 'telegram' | 'sms' | 'email', maskedEmail?: string, devCode?: string } }>(
       '/api/v1/auth/otp/request',
-      { method: 'POST', body: { phone: normalizedPhone() } },
+      { method: 'POST', body: { phone: normalizedPhone(), ...(explicitChannel ? { channel: explicitChannel } : {}) } },
     )
     channel.value = data.data.channel
+    maskedEmail.value = data.data.maskedEmail ?? ''
     devCode.value = data.data.devCode ?? '' // только демо-стенд/dev (OTP_DEBUG=1), в проде поля нет
     step.value = 'code'
     code.value = ''
@@ -177,13 +179,14 @@ async function selectTenant(tenantId: string) {
             maxlength="9"
             placeholder="__ ___ __ __"
             autocomplete="tel-national"
-            @keyup.enter="requestCode"
+            @keyup.enter="requestCode()"
           >
         </div>
-        <button class="primary" :disabled="busy || phone.replace(/\D/g, '').length !== 9" @click="requestCode">
+        <button class="primary" :disabled="busy || phone.replace(/\D/g, '').length !== 9" @click="requestCode()">
           {{ t('login.getCode') }}
         </button>
         <button v-if="googleAvailable" class="ghost" data-testid="login-google" @click="loginGoogle">{{ t('login.google') }}</button>
+        <button class="linkish" type="button" :disabled="busy || phone.replace(/\D/g, '').length !== 9" data-testid="login-email-otp-link" @click="requestCode('email')">{{ t('login.byEmailOtp') }}</button>
         <button v-if="guest?.passwordLogin" class="linkish" type="button" data-testid="login-password-link" @click="step = 'password'; error = ''">{{ t('login.byPassword') }}</button>
       </template>
 
@@ -201,8 +204,8 @@ async function selectTenant(tenantId: string) {
       <template v-else-if="step === 'code'">
         <h2 class="title">{{ t('login.enterCode') }}</h2>
         <p class="hint">
-          {{ channel === 'telegram' ? t('login.sentTelegramTo') : t('login.sentSmsTo') }}
-          <b class="phone-b">{{ maskedPhone }}</b>
+          {{ channel === 'telegram' ? t('login.sentTelegramTo') : channel === 'email' ? t('login.sentEmailTo') : t('login.sentSmsTo') }}
+          <b class="phone-b">{{ channel === 'email' ? maskedEmail : maskedPhone }}</b>
         </p>
         <p v-if="devCode" class="hint demo-code">{{ t('login.demoCode') }}: <b>{{ devCode }}</b></p>
         <!-- Шесть ячеек мокапа Login: настоящий ввод — один скрытый input, ячейки только показывают цифры -->
@@ -226,10 +229,10 @@ async function selectTenant(tenantId: string) {
           {{ t('login.signIn') }}
         </button>
         <p v-if="resendIn > 0" class="hint muted">{{ t('login.resendInShort') }} <b>{{ resendIn }} с</b></p>
-        <button v-else class="ghost" :disabled="busy" @click="requestCode">{{ t('login.resend') }}</button>
+        <button v-else class="ghost" :disabled="busy" @click="requestCode(channel === 'email' ? 'email' : undefined)">{{ t('login.resend') }}</button>
         <button class="linkish" type="button" @click="codeHelp = !codeHelp">{{ t('login.noCode') }}</button>
         <div v-if="codeHelp" class="help-box">
-          <p>{{ channel === 'telegram' ? t('login.noCodeTelegram') : t('login.noCodeSms') }}</p>
+          <p>{{ channel === 'telegram' ? t('login.noCodeTelegram') : channel === 'email' ? t('login.noCodeEmail') : t('login.noCodeSms') }}</p>
           <button class="ghost" @click="step = 'phone'; codeHelp = false">{{ t('login.changePhone') }}</button>
         </div>
       </template>

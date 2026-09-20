@@ -41,10 +41,13 @@
     "enterCode": "Enter the code",
     "sentTelegramTo": "Code sent to Telegram for",
     "sentSmsTo": "Code sent by SMS to",
+    "sentEmailTo": "Code sent by e-mail to",
+    "byEmailOtp": "Send code by e-mail",
     "resendInShort": "Resend in",
     "noCode": "Not receiving the code",
     "noCodeTelegram": "Check that the bot is started in Telegram. If there is no code for over a minute, resend — it will go by SMS.",
     "noCodeSms": "SMS can take up to a minute. If there is no code, resend or check the number.",
+    "noCodeEmail": "The e-mail can take a few minutes — check your Spam folder. If there is no code, resend.",
     "changePhone": "Change number",
     "support": "Can't sign in — contact your location manager",
     "supportOr": "or",
@@ -3946,6 +3949,9 @@
       "otpTtlMinutes": "Code lifetime, min",
       "otpAttempts": "Code entry attempts",
       "otpSendsPer15Min": "Code sends per 15 min",
+      "otpEmailEnabled": "Allow code by e-mail",
+      "otpEmailEnabledHint": "Person can pick \"Send code by e-mail\" on the login screen",
+      "otpFallbackToEmail": "Auto-send by e-mail when no SMS provider is configured",
       "blockMinutes": "Block after exceeding, min"
     },
     "scopeTypes": {

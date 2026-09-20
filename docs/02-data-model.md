@@ -183,7 +183,7 @@ create table otp_codes (
   tenant_id uuid,                             -- null до выбора пространства
   phone text not null,
   code_hash text not null,
-  channel text not null,                      -- telegram | sms
+  channel text not null,                      -- telegram | sms | email (docs/28 «Вхід: код на e-mail»)
   attempts int not null default 0,
   expires_at timestamptz not null,
   consumed_at timestamptz

@@ -18,8 +18,12 @@ export default defineEventHandler(async (event) => {
   if (all.length > 0 && all.every(u => u.tenant_status !== 'active')) {
     return apiError(event, 403, 'tenant_suspended', 'Простір призупинено оператором платформи. Зверніться до підтримки Lola')
   }
-  const result = await requestOtp(parsed.data.phone, clientIp(event))
+  const result = await requestOtp(parsed.data.phone, clientIp(event), { channel: parsed.data.channel })
   if (!result.ok) {
+    if (result.code === 'no_channel') {
+      // docs/28 «Вхід: код на e-mail»: ні Telegram, ні SMS (не дозволено політикою тенанта), ні пошти в картці
+      return apiError(event, 422, 'no_channel', 'Немає каналу для коду. Зверніться до менеджера точки')
+    }
     setHeader(event, 'Retry-After', 900)
     return apiError(event, 429, 'rate_limited', 'Забагато спроб. Спробуйте пізніше')
   }
@@ -32,6 +36,7 @@ export default defineEventHandler(async (event) => {
   // Наличие номера не раскрываем: всегда 200
   return apiData({
     channel: result.channel,
+    ...(result.maskedEmail ? { maskedEmail: result.maskedEmail } : {}),
     ...(result.devCode ? { devCode: result.devCode } : {}),
   })
 })

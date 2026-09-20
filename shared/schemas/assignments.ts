@@ -313,4 +313,8 @@ export const templateSchema = z.object({
   throttle: z.object({ maxPerDay: z.number().int().min(1).max(50).optional(), perSubject: z.boolean().optional() }).nullable().optional(),
   escalateAfterHours: z.number().int().min(1).max(720).nullable().optional(),
   ignoreQuietHours: z.boolean().optional(),
-})
+  // Spec 23 (docs/23 §13.1, §13.4): вёрстка листа — тільки на каналі email; картинки шаблону
+  bodyMjml: z.string().max(20_000).optional(),
+  imageKey: z.string().max(300).nullable().optional(),
+  telegramImageKey: z.string().max(300).nullable().optional(),
+}).refine(d => d.channel === 'email' || !d.bodyMjml, { message: 'MJML-шаблон можна вказати лише для каналу email', path: ['bodyMjml'] })

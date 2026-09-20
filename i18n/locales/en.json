@@ -1620,6 +1620,10 @@
     },
     "lastOk": "updated {at}",
     "notConfiguredHint": "Connect an account — fill in the keys below",
+    "smtpTestTo": "Address for the test email",
+    "smtpTestSend": "Send test message",
+    "smtpTestOk": "Email sent",
+    "smtpTestFail": "Failed to send",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "disconnectConfirm": "Disconnect? Keys will be revoked.",
@@ -2718,8 +2722,20 @@
     "tab": {
       "templates": "Templates",
       "broadcast": "Broadcast",
-      "report": "Report"
+      "report": "Report",
+      "schedule": "Send time"
     },
+    "scopeHint": "Editing a tenant template doesn't touch the default text — it creates a custom version",
+    "scopeCol": "Source",
+    "scope": {
+      "global": "Global",
+      "custom": "Custom"
+    },
+    "bodyHint": "Text template · Telegram and SMS",
+    "mjml": "MJML template (email)",
+    "imageKey": "Template image",
+    "telegramImageKey": "Telegram image",
+    "previewHtml": "Email preview",
     "search": "Search by event",
     "onlyChanged": "Changed only",
     "code": "Event",
@@ -2761,7 +2777,26 @@
     "smsCosts": "SMS costs by location",
     "messages": "Messages",
     "segments": "Segments",
-    "blockedBots": "Blocked the bot"
+    "blockedBots": "Blocked the bot",
+    "schedule": {
+      "title": "Notification send time",
+      "warn": "Changing these settings affects the send time for all users.",
+      "limitPeriod": "Limit the notification sending period",
+      "from": "from",
+      "to": "to",
+      "class": {
+        "birthdays": "Birthday notifications",
+        "anniversaries": "Anniversary notifications",
+        "autoClosedTasks": "Tasks auto-closed after the due date",
+        "managerDigest": "Manager digest of completed tasks",
+        "dueTasks": "Tasks whose due date is approaching",
+        "programReminder": "Reminder a day before a program item starts"
+      },
+      "emailLayout": "Email layout",
+      "header": "Header",
+      "footer": "Footer",
+      "logoKey": "Image (logo)"
+    }
   },
   "questionEditor": {
     "newTitle": "New question",

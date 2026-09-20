@@ -103,9 +103,49 @@ const policiesSchema = z.object({
   }).default({}),
 })
 
-/** Тихие часы (docs/24 §6): начало < конца, окно ≥ 4 часов. */
-const quietHoursSchema = z.object({ from: z.number().int().min(0).max(23).default(9), to: z.number().int().min(1).max(24).default(20) })
+/**
+ * Тихие часы (docs/24 §6; docs/23 §13.2.1 «Обмежити період відправлення повідомлень»):
+ * начало < конца, окно ≥ 4 часов; `enabled` — сам переключатель обмеження (по умолчанию увімкнено,
+ * як в еталоні), вимкнений — уведомления не переносятся на утро.
+ */
+const quietHoursSchema = z.object({
+  enabled: z.boolean().default(true),
+  from: z.number().int().min(0).max(23).default(9),
+  to: z.number().int().min(1).max(24).default(20),
+})
   .refine(q => q.to - q.from >= 4, { message: 'Вікно має бути не меншим за 4 години' })
+
+/** Час доби HH:MM (docs/23 §13.2.1: свій час на кожен клас подій). */
+const clockSchema = z.object({ hour: z.number().int().min(0).max(23), minute: z.number().int().min(0).max(59) })
+
+/**
+ * Час відправлення повідомлень по класах подій (docs/23 §13.2.1, знято з еталона `/notifications/settings`):
+ * не одне вікно тиші на все, а свій час на клас + «Надіслати додаткове нагадування за N днів» — для днів
+ * народження вже є `birthdays.reminderDays`. Значення за замовчуванням — як у знятій установці.
+ */
+const notificationScheduleShape = z.object({
+  birthdays: clockSchema.default({ hour: 9, minute: 0 }),
+  anniversaries: clockSchema.default({ hour: 9, minute: 0 }), // «Річниці» — довг: подія ще не реалізована (docs/28 «Spec 23»)
+  autoClosedTasks: clockSchema.default({ hour: 0, minute: 0 }), // «Автоматично завершені завдання» — службова розсилка вночі
+  managerDigest: clockSchema.default({ hour: 9, minute: 0 }), // дайджест керівнику
+  dueTasks: clockSchema.default({ hour: 9, minute: 0 }), // термін виконання закінчується
+  programReminder: clockSchema.default({ hour: 9, minute: 0 }), // нагадування за день до старту елемента програми — довг
+})
+export const notificationScheduleSchema = notificationScheduleShape.default({})
+export type NotificationSchedule = z.infer<typeof notificationScheduleSchema>
+export const notificationSchedulePatchSchema = z.object(
+  Object.fromEntries(Object.keys(notificationScheduleShape.shape).map(k => [k, clockSchema.partial().optional()])),
+).strict()
+
+/** Обвʼязка листа тенанта (docs/23 §13.5 `/notifications/email-template-settings`): шапка/підвал/лого. */
+const emailLayoutShape = z.object({
+  headerMjml: z.string().max(20_000).default(''),
+  footerMjml: z.string().max(20_000).default(''),
+  logoKey: z.string().max(300).nullable().default(null),
+})
+export const emailLayoutSchema = emailLayoutShape.default({})
+export type EmailLayout = z.infer<typeof emailLayoutSchema>
+export const emailLayoutPatchSchema = emailLayoutShape.partial().strict()
 
 export const tenantSettingsSchema = z.object({
   /** Простір (docs/24 §3.1; name/slug/locale/timezone — колонки tenants, акцент — branding) */
@@ -129,6 +169,9 @@ export const tenantSettingsSchema = z.object({
   }).default({}),
   policies: policiesSchema.default({}),
   quietHours: quietHoursSchema.default({}),
+  // Spec 23 (docs/23 §13.2.1, §13.5)
+  notificationSchedule: notificationScheduleSchema,
+  emailLayout: emailLayoutSchema,
   /** Ниже — ключи, заведённые раньше отдельными спеками; сведены сюда без смены формы */
   security: z.object({ emailAlerts: z.boolean().default(false) }).default({}), // Spec 22
   knowledge: z.object({ restrictAccess: z.boolean().default(true) }).default({}), // Spec 21
@@ -230,9 +273,14 @@ export const scaleSchema = z.object({
 export type ScaleInput = z.infer<typeof scaleSchema>
 
 // ── Переводы (docs/24 §3.6) ──
+/**
+ * Ключ перекладу: або шлях інтерфейсу (`a.b.c`), або фраза шаблону сповіщення —
+ * вміст `{{#_tr}}…{{/_tr}}` (docs/23 §13.4): один шаблон, переклад по локалі отримувача
+ * через цю саму таблицю (docs/28 «Spec 23» — рішення без нової таблиці).
+ */
 export const translationSchema = z.object({
   locale: z.enum(['uk', 'en']),
-  key: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_.]{0,200}$/),
+  key: z.string().trim().min(1).max(300),
   value: z.string().min(1).max(2000),
 })
 export const translationsImportSchema = z.object({

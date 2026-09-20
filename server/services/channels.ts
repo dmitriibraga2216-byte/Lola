@@ -11,14 +11,14 @@ import { getSecret, markSecretResult, SECRET_KEYS } from './secrets'
 
 export type ChannelResult = { ok: true } | { ok: false, skipped: boolean, error: string }
 
-export async function sendViaChannel(tenantId: string, channel: 'sms' | 'email', msg: { userId: string, text: string, subject?: string }): Promise<ChannelResult> {
+export async function sendViaChannel(tenantId: string, channel: 'sms' | 'email', msg: { userId: string, text: string, subject?: string, html?: string }): Promise<ChannelResult> {
   const [u] = await withTenant(tenantId, null, tx => tx.select({ phone: users.phone, email: users.email }).from(users).where(eq(users.id, msg.userId)))
   if (channel === 'sms') {
     if (!u?.phone) return { ok: false, skipped: true, error: 'no phone' }
     return sendSms(tenantId, u.phone, msg.text)
   }
   if (!u?.email) return { ok: false, skipped: true, error: 'no email' }
-  return sendEmail(tenantId, u.email, msg.subject ?? 'Lola', msg.text)
+  return sendEmail(tenantId, u.email, msg.subject ?? 'Lola', msg.text, msg.html)
 }
 
 export async function sendSms(tenantId: string, phone: string, text: string): Promise<ChannelResult> {
@@ -61,14 +61,37 @@ export async function sendSms(tenantId: string, phone: string, text: string): Pr
   }
 }
 
-export async function sendEmail(tenantId: string, to: string, subject: string, text: string): Promise<ChannelResult> {
-  const url = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.URL) ?? process.env.SMTP_URL
-  const from = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM) ?? process.env.SMTP_FROM ?? 'lola@localhost'
-  if (!url) return { ok: false, skipped: true, error: 'smtp not configured' }
+/**
+ * Транспорт SMTP тенанта (docs/09 §9.7.1): свій host/port/login/password, иначе — старый
+ * единый `url` (совместимость) или платформенный `SMTP_URL` (fallback, docs/28 «Spec 23»).
+ */
+export async function smtpTransportConfig(tenantId: string): Promise<{ transport: string | Record<string, unknown>, from: string } | null> {
+  const host = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.HOST)
+  const from = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM_EMAIL)) ?? (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM)) ?? process.env.SMTP_FROM ?? 'lola@localhost'
+  const fromName = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM_NAME)
+  const fromHeader = fromName ? `"${fromName.replace(/"/g, '')}" <${from}>` : from
+  if (host) {
+    const port = Number(await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.PORT)) || 587
+    const login = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.LOGIN)
+    const password = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.PASSWORD)
+    return {
+      transport: { host, port, secure: port === 465, auth: login ? { user: login, pass: password ?? '' } : undefined },
+      from: fromHeader,
+    }
+  }
+  const url = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.URL)) ?? process.env.SMTP_URL
+  if (!url) return null
+  return { transport: url, from: fromHeader }
+}
+
+export async function sendEmail(tenantId: string, to: string, subject: string, text: string, html?: string): Promise<ChannelResult> {
+  const cfg = await smtpTransportConfig(tenantId)
+  if (!cfg) return { ok: false, skipped: true, error: 'smtp not configured' }
+  const replyTo = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.REPLY_TO)
   try {
     const nodemailer = await import('nodemailer')
-    const transport = nodemailer.createTransport(url)
-    await transport.sendMail({ from, to, subject, text })
+    const transport = nodemailer.createTransport(cfg.transport as never)
+    await transport.sendMail({ from: cfg.from, to, subject, text, ...(html ? { html } : {}), ...(replyTo ? { replyTo } : {}) })
     await markSecretResult(tenantId, 'smtp', true)
     return { ok: true }
   }
@@ -76,4 +99,9 @@ export async function sendEmail(tenantId: string, to: string, subject: string, t
     await markSecretResult(tenantId, 'smtp', false, String(err))
     return { ok: false, skipped: false, error: String(err).slice(0, 200) }
   }
+}
+
+/** «Надіслати тестове повідомлення» (docs/09 §9.7.1): перевірка з'єднання без постановки в чергу. */
+export async function testSmtpConnection(tenantId: string, to: string): Promise<ChannelResult> {
+  return sendEmail(tenantId, to, 'Lola — перевірка SMTP', 'Це тестовий лист. Якщо ви його бачите — SMTP налаштовано правильно.')
 }

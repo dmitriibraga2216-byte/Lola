@@ -11,9 +11,11 @@ interface Ctx { tenantId: string, actorId: string }
  * проверяются тестом»). Round-trip: записали → прочитали → совпало.
  */
 export const SECRET_KEYS = {
-  telegram: { BOT_TOKEN: 'bot_token', BOT_USERNAME: 'bot_username' },
+  // docs/09 §9.7.2: свій бот тенанта і зовнішній (fallback), коли тенант свого не завів
+  telegram: { BOT_TOKEN: 'bot_token', BOT_USERNAME: 'bot_username', EXTERNAL_BOT_TOKEN: 'external_bot_token' },
   sms: { API_KEY: 'api_key', SENDER: 'sender', PROVIDER: 'provider' },
-  smtp: { URL: 'url', FROM: 'from' },
+  // docs/09 §9.7.1: повний склад полів SMTP тенанта; URL/FROM лишились для сумісності зі старими записами
+  smtp: { HOST: 'host', PORT: 'port', LOGIN: 'login', PASSWORD: 'password', FROM_NAME: 'from_name', FROM_EMAIL: 'from_email', REPLY_TO: 'reply_to', URL: 'url', FROM: 'from' },
   s3: { ACCESS_KEY: 'access_key', SECRET_KEY: 'secret_key', ENDPOINT: 'endpoint', BUCKET: 'bucket' },
   // OAuth-провайдеры (docs/09 §9.2): храним только refresh_token, access_token запрашиваем каждый раз
   google: { REFRESH_TOKEN: 'refresh_token', ACCOUNT_EMAIL: 'account_email', CALENDAR_ID: 'calendar_id' },
@@ -59,10 +61,16 @@ export async function integrationStatus(ctx: Ctx, provider: Provider) {
     const present = new Set(rows.map(r => r.key))
     const configured = keys.filter(k => present.has(k))
     const failing = rows.find(r => r.status === 'failing')
+    // «Повний склад» різний за провайдером (docs/09 §9.3): необовʼязкові поля (зовнішній бот, reply-to…)
+    // не мають блокувати «Підключено».
+    const complete = provider === 'sms' ? present.has('api_key')
+      : provider === 'smtp' ? present.has('host') || present.has('url')
+        : provider === 'telegram' ? present.has('bot_token') || present.has('external_bot_token')
+          : keys.every(k => present.has(k))
     return {
       provider,
       configured: configured.length > 0,
-      complete: keys.every(k => present.has(k)) || provider === 'sms' && present.has('api_key'),
+      complete,
       state: failing ? 'failing' : configured.length ? 'connected' : 'not_configured',
       accountLabel: rows.find(r => r.accountLabel)?.accountLabel ?? null,
       lastOkAt: rows.map(r => r.lastOkAt).filter(Boolean).sort().pop() ?? null,

@@ -47,6 +47,14 @@ async function importWorkspace(apply: boolean) {
   catch (err) { oauthError.value.google = apiErrorOf(err).message } finally { wsImport.busy = false }
 }
 const forms = reactive<Record<string, Record<string, string>>>({ telegram: {}, sms: {}, smtp: {} })
+// «Надіслати тестове повідомлення» — перевірка SMTP-зʼєднання без постановки в чергу (docs/09 §9.7.1)
+const smtpTestTo = ref('')
+const smtpTestResult = ref<'ok' | 'fail' | null>(null)
+async function testSmtp() {
+  smtpTestResult.value = null
+  try { await api('/settings/integrations/smtp/test', { method: 'POST', body: { to: smtpTestTo.value } }); smtpTestResult.value = 'ok' }
+  catch { smtpTestResult.value = 'fail' }
+}
 const webhooks = ref<{ endpoints: Endpoint[], events: string[] }>({ endpoints: [], events: [] })
 const whForm = reactive({ url: '', events: [] as string[], description: '' })
 const whSecret = ref('')
@@ -136,6 +144,12 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
           <div class="actions">
             <button class="primary" @click="saveProvider(p)">{{ t('integrations.connect') }}</button>
             <button v-if="statuses[p]!.state !== 'not_configured'" class="chip danger" @click="disconnectProvider(p)">{{ t('integrations.disconnect') }}</button>
+          </div>
+          <div v-if="p === 'smtp' && statuses[p]!.state !== 'not_configured'" class="row">
+            <input v-model="smtpTestTo" type="email" :placeholder="t('integrations.smtpTestTo')" class="grow">
+            <button class="chip" :disabled="!smtpTestTo" @click="testSmtp">{{ t('integrations.smtpTestSend') }}</button>
+            <span v-if="smtpTestResult === 'ok'" class="teal">{{ t('integrations.smtpTestOk') }}</span>
+            <span v-if="smtpTestResult === 'fail'" class="fail">{{ t('integrations.smtpTestFail') }}</span>
           </div>
         </template>
       </section>

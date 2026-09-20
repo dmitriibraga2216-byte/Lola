@@ -32,7 +32,9 @@ export const users = pgTable('users', {
   archivedAt: timestamp('archived_at', { withTimezone: true }),
   telegramChatId: bigint('telegram_chat_id', { mode: 'bigint' }),
   telegramBlocked: boolean('telegram_blocked').notNull().default(false), // бот заблокирован (403) — канал переключается на SMS (docs/23 §6.5)
-  passwordHash: text('password_hash'), // только для e-mail входа
+  passwordHash: text('password_hash'), // вход по e-mail + паролю (docs/01 §1.5, docs/16 §14.4): argon2id; в API никогда не отдаётся
+  mustChangePassword: boolean('must_change_password').notNull().default(false), // «Змінити пароль після першого входу» (docs/16 §14.4, docs/24 §3.4.1 «Паролі»)
+  passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }), // для политики «Обмежити максимальний термін дії пароля»
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   externalId: text('external_id'), // ID в учётной системе тенанта (для импорта)
   cityId: uuid('city_id').references(() => cities.id),

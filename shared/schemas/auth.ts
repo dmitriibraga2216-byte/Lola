@@ -26,3 +26,21 @@ export const inviteAcceptSchema = z.object({
 
 export type OtpRequestInput = z.infer<typeof otpRequestSchema>
 export type OtpVerifyInput = z.infer<typeof otpVerifySchema>
+
+/** Вход по e-mail + паролю (docs/01 §1.5, docs/04 §4.2) — если включено политикой тенанта. */
+export const passwordLoginSchema = z.object({
+  email: z.string().trim().email('Некоректна пошта').max(200),
+  password: z.string().min(1, 'Введіть пароль').max(200),
+})
+
+/** POST /people/:id/password — пароль ставит администратор (docs/04 §4.11, скоуп people.password). */
+export const passwordSetSchema = z.object({
+  password: z.string().min(8).max(200),
+  mustChange: z.boolean().optional(), // по умолчанию — политика «Змінити пароль після першого входу»
+})
+
+/** POST /me/password — собственный пароль; текущий обязателен, если пароль уже был. */
+export const passwordChangeSchema = z.object({
+  currentPassword: z.string().max(200).optional(),
+  password: z.string().min(8).max(200),
+})

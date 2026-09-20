@@ -34,6 +34,8 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
   const person = frameSelect()
   const joins = frameJoins()
   const byUser = (col: SQL) => f.userId ? sql`and ${col} = ${f.userId}::uuid` : sql``
+  // «Підрозділ» (мокап SecurityLog): подразделение основного размещения с потомками по ltree
+  const byUnit = f.orgUnitId ? sql`and coalesce(pl.org_unit_id, l.org_unit_id) in (select id from org_units where path <@ (select path from org_units where id = ${f.orgUnitId}::uuid))` : sql``
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     switch (kind) {
       case 'task-status':
@@ -69,7 +71,8 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
         return tx.execute(sql`
           select o.id, o.created_at, ${person}, o.kind, o.source, o.details, o.import_job_id, o.resolved_at, act.full_name as actor, ${context(sql`o.request_context`, null)}
           from org_conflicts o left join users u on u.id = o.user_id ${joins} left join users act on act.id = o.actor_id
-          where true ${period(sql`o.created_at`)} ${cursor(sql`o.created_at`)} ${byUser(sql`o.user_id`)} ${f.type ? sql`and o.kind = ${f.type}` : sql``}
+          where true ${period(sql`o.created_at`)} ${cursor(sql`o.created_at`)} ${byUser(sql`o.user_id`)} ${byUnit} ${f.type ? sql`and o.kind = ${f.type}` : sql``}
+            ${f.state === 'open' ? sql`and o.resolved_at is null` : f.state === 'resolved' ? sql`and o.resolved_at is not null` : sql``}
           order by o.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'notifications':
         return tx.execute(sql`
@@ -87,7 +90,7 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
         return tx.execute(sql`
           select s.id, s.created_at, s.severity, s.event, s.meta, ${person}, ${context(sql`s.request_context`, sql`s.ip`)}
           from security_log s left join users u on u.id = s.user_id ${joins}
-          where true ${period(sql`s.created_at`)} ${cursor(sql`s.created_at`)} ${byUser(sql`s.user_id`)} ${f.type ? sql`and s.event like ${`${f.type}%`}` : sql``} ${f.severity ? sql`and s.severity = ${f.severity}` : sql``}
+          where true ${period(sql`s.created_at`)} ${cursor(sql`s.created_at`)} ${byUser(sql`s.user_id`)} ${byUnit} ${f.type ? sql`and s.event like ${`${f.type}%`}` : sql``} ${f.severity ? sql`and s.severity = ${f.severity}` : sql``}
           order by s.created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'import':
         return tx.execute(sql`

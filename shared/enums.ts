@@ -52,6 +52,24 @@ export const SECURITY_SEVERITIES = ['info', 'warning', 'critical'] as const
 export type SecuritySeverity = typeof SECURITY_SEVERITIES[number]
 
 /** Имя перечисления в docs/02 → значения. Используется тестом паритета. */
+/** Область действия метки (docs/16 §14.2, docs/30): обязательна, без неё на форме курса всплывают метки должностей. */
+export const TAG_SCOPES = ['user', 'course', 'resource', 'question', 'task'] as const
+export type TagScope = typeof TAG_SCOPES[number]
+
+/** Вид конфликта оргструктуры (docs/16 §7, §14; Spec 22 + `unit_missing` по мокапу OrgConflicts). */
+export const ORG_CONFLICT_KINDS = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing'] as const
+export type OrgConflictKind = typeof ORG_CONFLICT_KINDS[number]
+
+/** Коды событий журнала безопасности (docs/16 §15 Г-16.2) — единственный список, писатель `logSecurity` принимает только их. */
+export const SECURITY_EVENTS = [
+  'login.success', 'login.failed', 'login.blocked', 'otp.sent', 'otp.failed', 'session.revoked',
+  'user.created', 'user.blocked', 'user.unblocked', 'user.archived',
+  'password.changed', 'password.reset_by_admin',
+  'roles.changed', 'contacts.changed', 'impersonation.started', 'impersonation.ended',
+  'export.personal_data', 'settings.security_changed', 'api_token.created', 'api_token.revoked',
+] as const
+export type SecurityEvent = typeof SECURITY_EVENTS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -63,4 +81,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   question_kind: QUESTION_KINDS,
   scoring_method: SCORING_METHODS,
   attempt_request_status: ATTEMPT_REQUEST_STATUSES,
+  tag_scope: TAG_SCOPES,
+  org_conflict_kind: ORG_CONFLICT_KINDS,
+  security_event: SECURITY_EVENTS,
 }

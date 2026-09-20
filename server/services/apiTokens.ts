@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { apiTokens } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { logSecurity } from './securityLog'
 import { hitRateLimit } from './rateLimit'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -30,6 +31,7 @@ export async function createToken(ctx: Ctx, input: { name: string, scopes: strin
       expiresAt: input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null, createdBy: ctx.actorId,
     }).returning({ id: apiTokens.id })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'api_token.create', entity: 'api_token', entityId: t!.id, after: { name: input.name, scopes: input.scopes } })
+    await logSecurity({ tenantId: ctx.tenantId, userId: ctx.actorId, event: 'api_token.created', meta: { tokenId: t!.id, name: input.name, scopes: input.scopes } })
     return { id: t!.id, token: raw }
   })
 }
@@ -37,7 +39,10 @@ export async function createToken(ctx: Ctx, input: { name: string, scopes: strin
 export async function revokeToken(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [t] = await tx.update(apiTokens).set({ revokedAt: new Date(), updatedAt: new Date() }).where(eq(apiTokens.id, id)).returning({ id: apiTokens.id })
-    if (t) await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'api_token.revoke', entity: 'api_token', entityId: id })
+    if (t) {
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'api_token.revoke', entity: 'api_token', entityId: id })
+      await logSecurity({ tenantId: ctx.tenantId, userId: ctx.actorId, event: 'api_token.revoked', meta: { tokenId: id } })
+    }
     return t ?? null
   })
 }

@@ -66,7 +66,7 @@ async function loadRefs() {
   try {
     const [positions, levels, cities, locations, roles, tags, tree] = await Promise.all([
       api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/position-levels'), api<Ref[]>('/refs/cities'), api<Ref[]>('/refs/locations'),
-      api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags'), api<{ units: Unit[] }>('/org/tree'),
+      api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags?scope=user'), api<{ units: Unit[] }>('/org/tree'),
     ])
     Object.assign(refs, { positions, levels, cities, locations, roles, tags, units: tree.units })
   }

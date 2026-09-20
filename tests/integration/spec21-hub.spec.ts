@@ -255,7 +255,7 @@ describe('дни рождения (29 Б.16), контакты (docs/21 §14.8),
     expect(blocks.supportContact.name).toBe('HR')
     const page = await hx.guestPage('kappi')
     expect(page).toMatchObject({ slug: 'kappi', blocks: { policyUrl: 'https://example.com/policy' } })
-    expect(Object.keys(page!)).toEqual(['name', 'slug', 'blocks']) // ничего лишнего наружу
+    expect(Object.keys(page!)).toEqual(['name', 'slug', 'blocks', 'passwordLogin']) // ничего лишнего наружу; passwordLogin — Spec 16
     expect(await hx.guestPage('no-such-tenant-xyz')).toBeNull()
     expect(await hx.guestPage('../etc')).toBeNull()
     expect(hx.slugFromHost('kappi.lola.app')).toBe('kappi')

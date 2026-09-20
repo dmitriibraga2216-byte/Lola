@@ -50,7 +50,8 @@
 | POST | `/auth/otp/request` | `{phone}` → отправка кода; ответ всегда 200 (не раскрываем наличие номера) |
 | POST | `/auth/otp/verify` | `{phone, code}` → сессия или список тенантов для выбора |
 | POST | `/auth/tenant/select` | `{tenantId}` → сессия в выбранном тенанте |
-| POST | `/auth/password/login` | `{email, password}` (если включено тенантом) |
+| POST | `/auth/password/login` | `{email, password}` (если включено политикой `passwords.loginEnabled`, иначе 403 `password_login_disabled`); ответ `{requiresTenantSelect, mustChangePassword}` либо `selectToken` + `tenants`; N неудач → 429 |
+| POST | `/me/password` | `{currentPassword?, password}` — свой пароль; текущий обязателен, если он был (403 `wrong_current`); остальные сессии закрываются |
 | POST | `/auth/invite/accept` | `{token}` → активация и сессия |
 | POST | `/auth/logout` | текущая сессия |
 | POST | `/auth/logout-all` | все сессии пользователя |
@@ -211,13 +212,14 @@
 | GET/PATCH | `/people/:id` | карточка (`16` §14.4) |
 | POST | `/people/:id/roles` | роль в области: `{roleCode, scopeType, scopeId?, validUntil?, reason?}`; повтор той же роли в той же области — редактирование срока и причины |
 | DELETE | `/people/:id/roles/:code` | снять роль; `?reason=` — в аудит; последний администратор — 409 `last_admin` |
-| POST | `/people/:id/password` | смена пароля администратором (отдельный эндпоинт, отдельный скоуп) |
+| POST | `/people/:id/password` | `{password, mustChange?}` — смена пароля администратором, скоуп `people.password`; 400 `too_short` \| `weak` по политикам «Паролі» |
 | POST | `/people/import` | CSV → `importJobId`, файл проверяется целиком |
 | GET | `/people/import/:id` | протокол: создать N, обновить M, ошибок K с номерами строк |
 | POST | `/people/import/:id/apply` | применить (всё или ничего) |
 | CRUD | `/org-units`, `/locations`, `/positions`, `/position-levels`, `/cities`, `/user-groups` | справочники |
-| CRUD | `/tags` | метка с обязательной областью действия (`16` §14.2) |
-| GET | `/org-conflicts` | протокол конфликтов оргструктуры |
+| CRUD | `/tags` | `GET ?scope=` (people.view, со счётчиком использований), `POST {name, scope, description?, color?}` / `PATCH /:id` / `DELETE /:id` (settings.tenant); 409 `duplicate` \| `in_use`; `/refs/tags?scope=user` — для форм людей |
+| GET | `/org-conflicts` | `?state=open\|resolved\|all&kind=&from&to&userId` — протокол конфликтов оргструктуры (people.edit) |
+| POST | `/org-conflicts/:id/resolve` | `{action: acknowledge\|close_placement, placementId?, comment?}`; 409 `already_resolved`; `GET /org-conflicts/:id/placements` — открытые размещения человека |
 
 ## 4.12 Развитие и оценка
 

@@ -5,7 +5,7 @@ const rawFetch = $fetch as unknown as <T>(url: string, opts?: { method?: string,
 const { t } = useI18n()
 const { fetchMe } = useAuth()
 
-type Step = 'phone' | 'code' | 'tenant'
+type Step = 'phone' | 'code' | 'tenant' | 'password'
 const step = ref<Step>('phone')
 const devCode = ref('')
 const phone = ref('')
@@ -31,7 +31,7 @@ const codeHelp = ref(false)
 const codeInput = ref<HTMLInputElement | null>(null)
 const supportContact = String(useRuntimeConfig().public.supportContact || '')
 // Гостевая страница (docs/21 Г-21.3, docs/25 §4): три блока тенанта до входа; тенант — по поддомену Host, в dev — ?tenant=
-interface Guest { name: string, slug: string, blocks: { welcome: unknown[], supportContact: { name?: string, phone?: string, email?: string, telegram?: string }, policyUrl: string | null } }
+interface Guest { name: string, slug: string, passwordLogin?: boolean, blocks: { welcome: unknown[], supportContact: { name?: string, phone?: string, email?: string, telegram?: string }, policyUrl: string | null } }
 const guest = ref<Guest | null>(null)
 onMounted(async () => {
   try { guest.value = (await rawFetch<{ data: Guest }>(`/api/v1/public/guest-page?slug=${encodeURIComponent(tenantSlug.value)}`)).data }
@@ -119,6 +119,27 @@ async function verifyCode() {
   }
 }
 
+// Вход по e-mail + паролю (docs/01 §1.5, docs/04 §4.2) — резервный способ, если включён политикой тенанта
+const email = ref('')
+const password = ref('')
+async function loginPassword() {
+  error.value = ''
+  busy.value = true
+  try {
+    const res = await rawFetch<{ data: { requiresTenantSelect: boolean, mustChangePassword?: boolean, selectToken?: string, tenants?: { tenantId: string, name: string, slug: string }[] } }>('/api/v1/auth/password/login', { method: 'POST', body: { email: email.value.trim(), password: password.value } })
+    if (res.data.requiresTenantSelect) {
+      selectToken.value = res.data.selectToken!
+      tenantOptions.value = res.data.tenants!
+      step.value = 'tenant'
+      return
+    }
+    await fetchMe()
+    await navigateTo(res.data.mustChangePassword ? '/learn/profile?password=1' : '/')
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+
 async function selectTenant(tenantId: string) {
   error.value = ''
   busy.value = true
@@ -163,6 +184,18 @@ async function selectTenant(tenantId: string) {
           {{ t('login.getCode') }}
         </button>
         <button v-if="googleAvailable" class="ghost" data-testid="login-google" @click="loginGoogle">{{ t('login.google') }}</button>
+        <button v-if="guest?.passwordLogin" class="linkish" type="button" data-testid="login-password-link" @click="step = 'password'; error = ''">{{ t('login.byPassword') }}</button>
+      </template>
+
+      <template v-else-if="step === 'password'">
+        <h2 class="title">{{ t('login.byPassword') }}</h2>
+        <p class="hint">{{ t('login.byPasswordHint') }}</p>
+        <label class="label" for="email">{{ t('login.email') }}</label>
+        <input id="email" v-model="email" type="email" autocomplete="username" inputmode="email" @keyup.enter="loginPassword">
+        <label class="label" for="password">{{ t('login.password') }}</label>
+        <input id="password" v-model="password" type="password" autocomplete="current-password" @keyup.enter="loginPassword">
+        <button class="primary" :disabled="busy || !email.includes('@') || !password" @click="loginPassword">{{ t('login.signIn') }}</button>
+        <button class="linkish" type="button" @click="step = 'phone'; error = ''">{{ t('login.byCode') }}</button>
       </template>
 
       <template v-else-if="step === 'code'">

@@ -25,7 +25,7 @@ export type RoleError = 'not_found' | 'code_taken' | 'system_role' | 'admin_role
 export const SCOPE_GROUPS: { key: string, scopes: string[] }[] = [
   { key: 'learn', scopes: ['learn.view', 'learn.catalog', 'learn.attempt'] },
   { key: 'content', scopes: ['course.view', 'course.create', 'course.edit', 'course.publish', 'course.archive', 'question.manage', 'media.upload', 'media.delete', 'knowledge.manage', 'survey.manage', 'wiki.edit'] },
-  { key: 'people', scopes: ['people.view', 'people.invite', 'people.edit', 'people.deactivate', 'people.import', 'assignment.create', 'assignment.cancel', 'role.assign'] },
+  { key: 'people', scopes: ['people.view', 'people.invite', 'people.edit', 'people.deactivate', 'people.import', 'people.password', 'assignment.create', 'assignment.cancel', 'role.assign'] },
   { key: 'review', scopes: ['review.queue', 'review.grade', 'certification.confirm'] },
   { key: 'reports', scopes: ['report.own', 'report.team', 'report.tenant', 'report.export', 'report.builder'] },
   { key: 'development', scopes: ['development.own', 'development.team', 'development.manage', 'competency.manage', 'position_profile.manage', 'request.decide'] },

@@ -35,7 +35,8 @@ export default defineEventHandler(async (event) => {
   await logSecurity({
     tenantId: invite.tenant_id,
     userId: invite.user_id,
-    event: 'login.invite',
+    event: 'login.success',
+    meta: { method: 'invite' },
     ip: clientIp(event),
   })
 

@@ -18,7 +18,7 @@ export const securityLog = pgTable('security_log', {
   id: bigserial('id', { mode: 'bigint' }).primaryKey(),
   tenantId: tenantId(),
   userId: uuid('user_id'),
-  event: text('event').notNull(), // login.otp | login.failed | logout | session.revoked | role.assigned | …
+  event: text('event').notNull(), // security_event (docs/02, docs/16 §15): login.success | login.failed | session.revoked | roles.changed | …
   severity: text('severity').notNull().default('info'), // security_severity (docs/02): info | warning | critical — «Рівень» в журнале, по нему настраивается рассылка на почту (docs/22 §13.4)
   meta: jsonb('meta').notNull().default('{}'),
   ip: inet('ip'),

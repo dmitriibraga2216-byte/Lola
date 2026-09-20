@@ -37,7 +37,7 @@ const modal = ref<{ title: string, rows: { fullName: string, status?: string }[]
 
 async function load() {
   try {
-    const [c, p, o, tg] = await Promise.all([api<RefItem[]>('/refs/cities'), api<RefItem[]>('/refs/positions'), api<RefItem[]>('/refs/org-units'), api<RefItem[]>('/refs/tags')])
+    const [c, p, o, tg] = await Promise.all([api<RefItem[]>('/refs/cities'), api<RefItem[]>('/refs/positions'), api<RefItem[]>('/refs/org-units'), api<RefItem[]>('/refs/tags?scope=user')])
     refs.city = c; refs.position = p; refs.org_unit = o; refs.tag = tg
     courses.value = (await api<{ id: string, title: string, status: string }[]>('/courses')).filter(x => x.status === 'published')
     if (!isNew.value) {

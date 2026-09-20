@@ -24,12 +24,17 @@ export const positionLevels = pgTable('position_levels', {
   unique().on(t.tenantId, t.name),
 ])
 
+/**
+ * Метки (docs/16 §14.2, docs/02 «Метки»): область действия обязательна — без неё на форме курса
+ * всплывают метки должностей. name ≤ 40 знаков без угловых скобок, уникальна в паре (scope, name).
+ */
 export const tags = pgTable('tags', {
   ...baseColumns,
   tenantId: tenantId(),
   name: text('name').notNull(),
+  description: text('description'),
   color: text('color'), // sun | teal | coral | muted
-  kind: text('kind').notNull().default('any'), // any | people | content | assignment
+  scope: text('scope').notNull(), // tag_scope (docs/02): user | course | resource | question | task
 }, t => [
-  unique().on(t.tenantId, t.name),
+  unique().on(t.tenantId, t.scope, t.name),
 ])

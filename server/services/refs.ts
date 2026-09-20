@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm'
+import type { TagScope } from '../../shared/enums'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 
@@ -29,7 +30,7 @@ const EDITABLE: Record<RefKind, string[]> = {
   'position-levels': ['name', 'sort'],
   'org-units': ['name', 'parent_id'],
   'locations': ['name', 'address', 'city_id', 'org_unit_id', 'timezone', 'manager_id', 'is_active'],
-  'tags': ['name', 'color', 'kind'],
+  'tags': ['name', 'color', 'description'], // область действия не меняется — иначе метка «переедет» с людей на курсы
 }
 const CAMEL: Record<string, string> = { isActive: 'is_active', levelId: 'level_id', parentId: 'parent_id', cityId: 'city_id', orgUnitId: 'org_unit_id', managerId: 'manager_id' }
 
@@ -87,10 +88,10 @@ export async function deleteRef(ctx: Ctx, kind: RefKind, id: string): Promise<{ 
 
 async function tagUsage(ctx: Ctx, id: string): Promise<number> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [t] = await tx.execute(sql`select name from tags where id = ${id}::uuid`) as unknown as { name: string }[]
+    const [t] = await tx.execute(sql`select name, scope from tags where id = ${id}::uuid`) as unknown as { name: string, scope: TagScope }[]
     if (!t) return 0
-    const [r] = await tx.execute(sql`select (select count(*) from users where ${t.name} = any(tags)) + (select count(*) from courses where ${t.name} = any(tags)) as n`) as unknown as { n: number }[]
-    return Number(r?.n ?? 0)
+    const { usageOf } = await import('./tags')
+    return usageOf(tx, t.scope, t.name)
   })
 }
 
@@ -104,7 +105,12 @@ export async function mergeRefs(ctx: Ctx, kind: RefKind, fromId: string, intoId:
     if (!a || !b) return { ok: false as const, code: 'not_found' as const }
     let moved = 0
     if (kind === 'tags') {
-      for (const table of ['users', 'courses']) {
+      // Сливать можно только метки одной области — по таблицам этой области
+      const [sa] = await tx.execute(sql`select scope from tags where id = ${fromId}::uuid`) as unknown as { scope: TagScope }[]
+      const [sb] = await tx.execute(sql`select scope from tags where id = ${intoId}::uuid`) as unknown as { scope: TagScope }[]
+      if (sa!.scope !== sb!.scope) return { ok: false as const, code: 'unsupported' as const }
+      const { TAG_TABLES } = await import('./tags')
+      for (const table of TAG_TABLES[sa!.scope]) {
         const rows = await tx.execute(sql`update ${sql.identifier(table)} set tags = array(select distinct unnest(array_replace(tags, ${a.name}::text, ${b.name}::text))) where ${a.name} = any(tags) returning id`) as unknown as unknown[]
         moved += rows.length
       }

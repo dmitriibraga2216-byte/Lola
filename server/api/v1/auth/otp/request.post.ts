@@ -1,5 +1,7 @@
 import { otpRequestSchema } from '../../../../../shared/schemas/auth'
 import { requestOtp } from '../../../../services/otp'
+import { usersByPhone } from '../../../../services/authLookup'
+import { logSecurity } from '../../../../services/securityLog'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 import { clientIp } from '../../../../utils/authCookies'
 
@@ -15,6 +17,11 @@ export default defineEventHandler(async (event) => {
   if (!result.ok) {
     setHeader(event, 'Retry-After', 900)
     return apiError(event, 429, 'rate_limited', 'Забагато спроб. Спробуйте пізніше')
+  }
+
+  // docs/16 §15: отправка кода — событие журнала безопасности в каждом тенанте номера (наружу наличие номера не раскрывается)
+  for (const u of await usersByPhone(parsed.data.phone)) {
+    await logSecurity({ tenantId: u.tenant_id, userId: u.user_id, event: 'otp.sent', meta: { channel: result.channel } })
   }
 
   // Наличие номера не раскрываем: всегда 200

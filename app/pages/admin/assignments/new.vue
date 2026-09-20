@@ -52,7 +52,7 @@ onMounted(async () => {
   try {
     const [p, l, o, r, tg, ppl] = await Promise.all([
       api<Ref[]>('/refs/positions'), api<Ref[]>('/refs/locations'), api<Ref[]>('/refs/org-units'),
-      api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags'),
+      api<{ code: string, name: string }[]>('/settings/roles'), api<Ref[]>('/refs/tags?scope=user'),
       api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).then(r => r.map(x => ({ id: x.id, name: x.fullName }))),
     ])
     Object.assign(refs, { positions: p, locations: l, orgUnits: o, roles: r, tags: tg, people: ppl })

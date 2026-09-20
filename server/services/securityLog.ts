@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import { securityLog, tenants } from '../db/schema'
-import type { SecuritySeverity } from '../../shared/enums'
+import type { SecurityEvent, SecuritySeverity } from '../../shared/enums'
 import type { SecuritySettings } from '../../shared/schemas/reports'
 import { currentRequestContext } from '../utils/requestContext'
 import { withTenant } from '../utils/withTenant'
@@ -11,7 +11,7 @@ import type { TenantTx } from '../utils/withTenant'
  * critical — вход от имени, выгрузка персональных данных, смена настроек безопасности;
  * warning — неудачный вход, блокировка по попыткам; остальное — info. Вызывающий может передать severity явно.
  */
-export function severityOf(event: string): SecuritySeverity {
+export function severityOf(event: SecurityEvent): SecuritySeverity {
   if (event.startsWith('impersonation.') || event === 'export.personal_data' || event === 'settings.security_changed') return 'critical'
   if (event === 'login.failed' || event === 'login.blocked' || event === 'otp.failed') return 'warning'
   return 'info'
@@ -41,11 +41,14 @@ export async function updateSecuritySettings(ctx: { tenantId: string, actorId: s
   return next
 }
 
-/** Запись в журнал безопасности (docs/06-infra.md §6.6). Не должна ронять основной поток. */
+/**
+ * Единственный писатель журнала безопасности (docs/06 §6.6; коды — docs/16 §15 Г-16.2, `security_event` в docs/02).
+ * Не должен ронять основной поток; `request_context` — из хелпера запроса (CLAUDE.md п. 14).
+ */
 export async function logSecurity(input: {
   tenantId: string
   userId?: string | null
-  event: string
+  event: SecurityEvent
   severity?: SecuritySeverity
   meta?: Record<string, unknown>
   ip?: string | null

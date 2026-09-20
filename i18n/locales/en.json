@@ -49,7 +49,12 @@
     "support": "Can't sign in — contact your location manager",
     "supportOr": "or",
     "guestSupport": "Cannot sign in? Contact:",
-    "policy": "Data policy"
+    "policy": "Data policy",
+    "byPassword": "Sign in with password",
+    "byCode": "Sign in with phone code",
+    "byPasswordHint": "For methodologists and administrators, if the space allows password sign-in",
+    "email": "E-mail",
+    "password": "Password"
   },
   "home": {
     "logout": "Sign out",
@@ -118,7 +123,9 @@
       "scales": "Rating scales",
       "translations": "Translations",
       "usage": "Usage",
-      "certificates": "Certificates"
+      "certificates": "Certificates",
+      "tags": "Tags",
+      "orgConflicts": "Org structure conflicts"
     },
     "section": {
       "learning": "Learning",
@@ -232,7 +239,8 @@
       "learning": "Learning",
       "assessment": "Assessments",
       "activity": "Activity",
-      "notes": "Notes"
+      "notes": "Notes",
+      "security": "Security"
     },
     "lastName": "Last name",
     "firstName": "First name",
@@ -333,7 +341,26 @@
     "tagsHint": "comma-separated",
     "locale": "Language",
     "isBlockedHint": "Sign-in will be denied",
-    "isHiddenHint": "Will not appear in lists and ratings"
+    "isHiddenHint": "Will not appear in lists and ratings",
+    "activeSessions": "Active sessions",
+    "lastLogin": "Last sign-in",
+    "telegramLinked": "linked",
+    "assigned": "Assigned",
+    "doneCount": "Completed",
+    "overdueCount": "Overdue",
+    "daysInCompany": "{n} days with the company",
+    "password": "Password",
+    "passwordNone": "not set",
+    "passwordSetShort": "set",
+    "passwordMustChange": "change after sign-in",
+    "setPassword": "Set password",
+    "resetPassword": "Reset password",
+    "passwordSet": "Password saved",
+    "passwordHint": "Password is a backup e-mail sign-in. Minimum length and weak-password rules come from space policies",
+    "newPassword": "New password",
+    "repeatPassword": "Repeat password",
+    "passwordsDiffer": "Passwords do not match",
+    "mustChangeAfterLogin": "Change password after first sign-in"
   },
   "import": {
     "hint": "An xlsx or csv file following the template.",
@@ -380,7 +407,10 @@
       "validating": "validating",
       "archived": "archived"
     },
-    "archiveMissingWarn": "Careful: every active person missing from the file will be archived."
+    "archiveMissingWarn": "Careful: every active person missing from the file will be archived.",
+    "keepFields": "Do not overwrite on import",
+    "keepFieldsNone": "Import overwrites all file fields — \"Do not overwrite\" is not configured",
+    "keepFieldsSettings": "Configure"
   },
   "refs": {
     "cities": "Cities",
@@ -395,7 +425,9 @@
     "mergeInto": "Merge “{from}” into:",
     "inactive": "inactive",
     "deleteConfirm": "Delete “{name}”?",
-    "color": "Color"
+    "color": "Color",
+    "count": "{n} records",
+    "people": "{n} people"
   },
   "journals": {
     "audit": "Audit log",
@@ -463,7 +495,9 @@
       "task": "Task",
       "kind": "Conflict kind",
       "task_title": "Task",
-      "resolved_at": "Resolved"
+      "resolved_at": "Resolved",
+      "startedBy": "Started by",
+      "state": "State"
     },
     "crumb": "Reports · Journals",
     "title": {
@@ -490,16 +524,26 @@
     "minutes": "{n} min",
     "activeNow": "now",
     "eventText": {
-      "login_otp": "Signed in with code",
-      "login_google": "Signed in with Google",
-      "login_telegram": "Signed in with Telegram",
-      "login_invite": "Signed in by invitation",
-      "login_failed": "Wrong sign-in code",
-      "login_blocked": "Five failed sign-in attempts in a row",
-      "logout": "Signed out",
-      "logout_all": "Signed out on all devices",
-      "impersonation_start": "Signed in as user",
-      "telegram_linked": "Telegram linked"
+      "login_failed": "Failed sign-in",
+      "login_blocked": "Five failed sign-in attempts in a row — sign-in blocked",
+      "login_success": "Sign-in",
+      "otp_sent": "Sign-in code sent",
+      "otp_failed": "Wrong sign-in code",
+      "session_revoked": "Session closed",
+      "user_created": "User created",
+      "user_blocked": "Administrator blocked the user",
+      "user_unblocked": "User unblocked",
+      "user_archived": "User archived",
+      "password_changed": "Password changed",
+      "password_reset_by_admin": "Administrator reset the password",
+      "roles_changed": "User roles changed",
+      "contacts_changed": "Contacts changed",
+      "impersonation_started": "Signed in as user",
+      "impersonation_ended": "Impersonation ended",
+      "export_personal_data": "Personal data export",
+      "settings_security_changed": "Security settings changed",
+      "api_token_created": "API token created",
+      "api_token_revoked": "API token revoked"
     },
     "retentionForever": "Kept indefinitely",
     "anyType": "Any",
@@ -513,7 +557,8 @@
       "double_unit": "Person in two units",
       "placement_replaced": "Import replaced a manual placement",
       "manager_self": "Manager reports to themselves",
-      "manager_cycle": "Manager cycle"
+      "manager_cycle": "Manager cycle",
+      "unit_missing": "Imported unit is missing from the dictionary"
     },
     "conflictSource": {
       "manual": "Manual",
@@ -538,7 +583,9 @@
       "attempt_recalculate_ok": "Recalculated: attempt {n} of {of} passed",
       "attempt_recalculate_fail": "Recalculated: attempt {n} of {of} failed",
       "attempt_recalculate_review": "Recalculated: attempt {n} of {of} under review"
-    }
+    },
+    "month": "Month",
+    "system": "System"
   },
   "learner": {
     "nav": {
@@ -2498,7 +2545,12 @@
     "empty": "No groups yet",
     "active": "Active",
     "delete": "Delete",
-    "confirmDelete": "Delete group “{name}”?"
+    "confirmDelete": "Delete group “{name}”?",
+    "orgHint": "Groups derived from the org structure are rebuilt on import and cannot be edited by hand",
+    "sourceAll": "All",
+    "sourceOrg": "From org structure",
+    "sourceManual": "Created manually",
+    "changedAt": "changed {at}"
   },
   "orgAdmin": {
     "title": "Org structure",
@@ -2606,7 +2658,12 @@
     "more": "More",
     "weekActivity": "Activity this week",
     "birthdayConsent": "Show my birthday",
-    "birthdayConsentHint": "Colleagues will see the date in “Birthdays”; turn off and you will not be listed"
+    "birthdayConsentHint": "Colleagues will see the date in “Birthdays”; turn off and you will not be listed",
+    "changePassword": "Change password",
+    "setPassword": "Set password",
+    "currentPassword": "Current password",
+    "passwordChanged": "Password changed. Other sessions closed",
+    "mustChangePassword": "You must change your password before continuing"
   },
   "notif": {
     "title": "Notifications",
@@ -3643,7 +3700,8 @@
       "settings.tenant": "Workspace settings",
       "settings.notifications": "Notification settings",
       "settings.integrations": "Integrations",
-      "audit.view": "Logs"
+      "audit.view": "Logs",
+      "people.password": "Set passwords"
     },
     "roles": {
       "title": "Roles and permissions",
@@ -3746,5 +3804,58 @@
       "assignments": "Active assignments",
       "attemptsMonth": "Attempts this month"
     }
+  },
+  "conflicts": {
+    "title": "Org structure conflicts log",
+    "hint": "Import does not fail on a conflict: it logs a row and continues. Resolve it: accept as is or close the extra placement",
+    "col": {
+      "date": "Date",
+      "person": "Person",
+      "kind": "Conflict",
+      "details": "Details",
+      "source": "Source",
+      "state": "State"
+    },
+    "state": {
+      "open": "Unresolved",
+      "resolved": "Resolved",
+      "all": "All"
+    },
+    "resolve": "Resolve",
+    "resolveTitle": "Resolve conflict",
+    "resolved": "Conflict resolved",
+    "acknowledge": "Accept as is",
+    "closePlacement": "Close one of the placements",
+    "whichPlacement": "Which placement to close",
+    "primary": "primary",
+    "empty": "No conflicts",
+    "missing": "not in dictionary",
+    "line": "row {n}",
+    "otherUnit": "another unit",
+    "replacedFrom": "previous placement"
+  },
+  "tags": {
+    "title": "Manage tags",
+    "hint": "Scope is required: without it position tags show up on the course form",
+    "add": "Add tag",
+    "col": {
+      "name": "Tag",
+      "scope": "Scope",
+      "description": "Description",
+      "usage": "Usages"
+    },
+    "scope": {
+      "user": "People",
+      "course": "Courses",
+      "resource": "Resources",
+      "question": "Questions",
+      "task": "Tasks"
+    },
+    "allScopes": "All scopes",
+    "empty": "No tags yet",
+    "namePlaceholder": "up to 40 characters",
+    "nameRule": "Tag: up to 40 characters, no angle brackets",
+    "deleteConfirm": "Delete tag \"{name}\"?",
+    "inUse": "In use ({n}) — remove it from objects first"
   }
 }

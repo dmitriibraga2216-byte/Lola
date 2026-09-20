@@ -26,7 +26,7 @@ const errors = ref<Record<string, string>>({})
 onMounted(async () => {
   try {
     const [cities, levels, positions, locations, tags, tree] = await Promise.all([
-      api<Ref[]>('/refs/cities'), api<Ref[]>('/refs/position-levels'), api<Ref[]>('/refs/positions'), api<Loc[]>('/refs/locations'), api<Ref[]>('/refs/tags'), api<{ units: Unit[] }>('/org/tree'),
+      api<Ref[]>('/refs/cities'), api<Ref[]>('/refs/position-levels'), api<Ref[]>('/refs/positions'), api<Loc[]>('/refs/locations'), api<Ref[]>('/refs/tags?scope=user'), api<{ units: Unit[] }>('/org/tree'),
     ])
     Object.assign(refs, { cities, levels, positions, locations, tags, units: tree.units })
   }

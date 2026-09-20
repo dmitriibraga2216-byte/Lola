@@ -171,7 +171,7 @@ describe('люди (docs/16 §13)', () => {
   it('§3.4–3.5: динамическая группа пересчитывается; функциональный руководитель; заметки', async () => {
     const a = await makePerson('Група Один')
     const b = await makePerson('Група Два')
-    const g = await G.upsertGroup(ctx(), { name: `Тест-група ${Date.now()}`, kind: 'dynamic', filter: { positionIds: [posId] } })
+    const g = await G.upsertGroup(ctx(), { name: `Тест-група ${Date.now()}`, kind: 'dynamic', filter: { positionIds: [posId] } }) as { id: string, members: string[] }
     groupIds.push(g!.id)
     expect(g!.members).toEqual(expect.arrayContaining([a, b]))
     const c = await makePerson('Група Три')

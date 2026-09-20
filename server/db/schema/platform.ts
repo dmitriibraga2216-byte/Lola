@@ -1,9 +1,10 @@
 import { sql } from 'drizzle-orm'
 import {
-  boolean, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
+  bigserial, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
+import { tenants } from './tenants'
 
 const bytea = customType<{ data: Buffer }>({ dataType() { return 'bytea' } })
 
@@ -39,6 +40,46 @@ export const plans = pgTable('plans', {
   priceUah: integer('price_uah'),
   sort: integer('sort').notNull().default(0),
 })
+
+/**
+ * Переопределение лимитов конкретному тенанту (docs/24 §4.4, docs/25 §10): null — лимит из тарифа `plans`.
+ * `active_jobs` — сколько задач одного тенанта воркер берёт за один круг round-robin и держит одновременно (docs/25 §5).
+ */
+export const tenantLimits = pgTable('tenant_limits', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  users: integer('users'), // активных людей (docs/25 §10 п. 1 — считается по status = 'active')
+  storageGb: integer('storage_gb'),
+  smsPerMonth: integer('sms_per_month'),
+  apiPerMinute: integer('api_per_minute'),
+  webhooks: integer('webhooks'),
+  activeJobs: integer('active_jobs'),
+  updatedBy: uuid('updated_by').references(() => platformAdmins.id, { onDelete: 'set null' }),
+}, t => [
+  index().on(t.tenantId),
+  unique().on(t.tenantId),
+])
+
+/**
+ * Журнал действий оператора платформы (docs/25 §7 п. 5, §3.1): кто, что, по какому тенанту.
+ * Платформенная таблица без tenant_id и без RLS; тенант — `subject_tenant_id` (set null после purge, slug остаётся в `after`).
+ */
+export const platformAudit = pgTable('platform_audit', {
+  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+  adminId: uuid('admin_id').references(() => platformAdmins.id, { onDelete: 'set null' }),
+  adminEmail: text('admin_email').notNull(),
+  action: text('action').notNull(), // tenant.suspend | tenant.resume | tenant.purge_schedule | tenant.purge_cancel | tenant.purged | tenant.limits | tenant.update | tenant.create | platform.request
+  subjectTenantId: uuid('subject_tenant_id').references(() => tenants.id, { onDelete: 'set null' }),
+  entity: text('entity').notNull(),
+  entityId: text('entity_id'),
+  before: jsonb('before'),
+  after: jsonb('after'),
+  requestContext: jsonb('request_context'), // CLAUDE.md п. 14: {ip, geo, user_agent, browser, os, device}
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  index().on(t.subjectTenantId, t.createdAt.desc()),
+  index().on(t.createdAt.desc()),
+])
 
 /** Секреты тенанта (docs/09 §9.4): AES-GCM, ключ из окружения, наружу — только account_label и статус. */
 export const tenantSecrets = pgTable('tenant_secrets', {

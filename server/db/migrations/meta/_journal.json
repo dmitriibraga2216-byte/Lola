@@ -288,6 +288,13 @@
       "when": 1789957993802,
       "tag": "0040_spec19_competencies",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789958053802,
+      "tag": "0041_spec25_tenancy",
+      "breakpoints": true
     }
   ]
 }

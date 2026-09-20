@@ -1,10 +1,10 @@
 import { otpVerifySchema } from '../../../../../shared/schemas/auth'
 import { verifyOtp } from '../../../../services/otp'
-import { usersByPhone } from '../../../../services/authLookup'
+import { usersByPhone, usersByPhoneAll } from '../../../../services/authLookup'
 import { createSession, issueSelectToken } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
 import { apiData, apiError } from '../../../../utils/apiResponse'
-import { clientIp, setSessionCookies } from '../../../../utils/authCookies'
+import { clientIp, onHostTenant, setSessionCookies } from '../../../../utils/authCookies'
 
 export default defineEventHandler(async (event) => {
   const parsed = otpVerifySchema.safeParse(await readBody(event))
@@ -30,8 +30,11 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const users = await usersByPhone(phone)
+  const all = onHostTenant(event, await usersByPhoneAll(phone))
+  const users = all.filter(u => u.tenant_status === 'active')
   if (users.length === 0) {
+    // docs/25 §8: простір призупинено — пояснюємо, а не ховаємо за «код невірний»
+    if (all.length > 0) return apiError(event, 403, 'tenant_suspended', 'Простір призупинено оператором платформи. Зверніться до підтримки Lola')
     // Код верный, но номера в системе нет — не раскрываем
     return apiError(event, 401, 'otp_invalid', 'Код невірний')
   }

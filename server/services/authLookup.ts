@@ -15,11 +15,18 @@ export interface PhoneUser {
   status: string
   locale: string
   has_telegram: boolean
+  tenant_status: 'active' | 'suspended' | 'archived'
 }
 
-export async function usersByPhone(phone: string): Promise<PhoneUser[]> {
+/** Люди по номеру во всех тенантах, включая приостановленные (миграция 0041) — чтобы вход мог ответить 403, а не «код невірний». */
+export async function usersByPhoneAll(phone: string): Promise<PhoneUser[]> {
   const rows = await db.execute(sql`select * from auth_users_by_phone(${phone})`)
   return rows as unknown as PhoneUser[]
+}
+
+/** Только работающие тенанты (docs/25 §8): в приостановленный не входят. */
+export async function usersByPhone(phone: string): Promise<PhoneUser[]> {
+  return (await usersByPhoneAll(phone)).filter(u => u.tenant_status === 'active')
 }
 
 export interface SessionRow {

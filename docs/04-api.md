@@ -323,10 +323,16 @@
 | Метод | Путь | Описание |
 | --- | --- | --- |
 | GET/POST | `/platform/tenants` | список и создание |
-| GET/PATCH | `/platform/tenants/:id` | карточка, тариф, лимиты |
+| GET/PATCH | `/platform/tenants/:id` | карточка, тариф (`plan`), триал, название, settings; статус — только suspend/resume/purge |
 | POST | `/platform/tenants/:id/impersonate` | вход «от имени»: обязательна причина, 60 минут, запись в журнал безопасности тенанта |
 | GET | `/platform/metrics` | метрики платформы |
 | POST | `/platform/tenants/:id/anonymized-dump` | обезличенный слепок (`25` §16.3) |
+| POST | `/platform/tenants/:id/suspend` | `{reason?}` — приостановка (`25` §8): вход и API тенанта отвечают 403 `tenant_suspended`, задачи стоят, данные целы; 409 `tenant.wrong_status`. Spec 25 |
+| POST | `/platform/tenants/:id/resume` | возобновление из suspended. Spec 25 |
+| POST | `/platform/tenants/:id/purge` | `{confirmSlug}` — команда на удаление: только из suspended, slug должен совпасть (409 `tenant.confirm_mismatch`); `status = archived`, задача `tenant.purge` через 30 дней. Spec 25 |
+| DELETE | `/platform/tenants/:id/purge` | отмена удаления до срока: archived → suspended. Spec 25 |
+| GET/PUT | `/platform/tenants/:id/limits` | тариф и переопределения `tenant_limits` (`users`, `storageGb`, `smsPerMonth`, `apiPerMinute`, `webhooks`, `activeJobs`); null — вернуться к тарифу. Spec 25 |
+| GET | `/platform/audit` | `?tenantId=&limit=` — журнал `platform_audit` (`25` §7 п. 5). Spec 25 |
 
 ## 4.18 Вебхуки наружу
 

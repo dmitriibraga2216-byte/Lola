@@ -15,7 +15,8 @@ import { ensureTenantDefaults } from '../db/tenantDefaults'
  */
 
 let pdb: ReturnType<typeof drizzle<typeof schema>> | undefined
-function platformDb() {
+/** Подключение ролью platform_admin (BYPASSRLS) — только для платформенных сервисов (docs/25 §7 п. 1). */
+export function platformDb() {
   if (!pdb) {
     const url = process.env.PLATFORM_DATABASE_URL
     if (!url) throw new Error('PLATFORM_DATABASE_URL не задан — панель оператора недоступна')
@@ -64,13 +65,21 @@ export async function validatePlatformSession(token: string): Promise<PlatformAu
 export async function listTenants() {
   const db = platformDb()
   return db.execute(sql`
-    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at,
-           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active') as active_users,
+    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at,
+           coalesce(tl.users, p.max_users) as users_limit,
+           coalesce(tl.storage_gb, p.max_storage_gb) as storage_gb_limit,
+           coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
+           tl.active_jobs as active_jobs_limit,
+           (tl.id is not null) as has_overrides,
+           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked) as active_users,
            (select count(*)::int from users u where u.tenant_id = t.id) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
            (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
-    from tenants t order by t.created_at desc
+    from tenants t
+    left join plans p on p.code = t.plan
+    left join tenant_limits tl on tl.tenant_id = t.id
+    order by t.created_at desc
   `) as unknown as Promise<Record<string, unknown>[]>
 }
 
@@ -132,12 +141,12 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
   })
 }
 
-export async function updateTenant(id: string, input: { status?: string, plan?: string, trialEndsAt?: string | null, name?: string, settings?: Record<string, unknown> }, actor: PlatformAuth) {
+/** Тариф, триал, название, settings. Статус меняется только suspend/resume/purge в `platformTenants` (docs/25 §8). */
+export async function updateTenant(id: string, input: { plan?: string, trialEndsAt?: string | null, name?: string, settings?: Record<string, unknown> }, actor: PlatformAuth) {
   const db = platformDb()
   const [before] = await db.select().from(tenants).where(eq(tenants.id, id))
   if (!before) return null
   const [after] = await db.update(tenants).set({
-    ...(input.status !== undefined ? { status: input.status } : {}),
     ...(input.plan !== undefined ? { plan: input.plan } : {}),
     ...(input.trialEndsAt !== undefined ? { trialEndsAt: input.trialEndsAt ? new Date(input.trialEndsAt) : null } : {}),
     ...(input.name !== undefined ? { name: input.name } : {}),
@@ -145,6 +154,10 @@ export async function updateTenant(id: string, input: { status?: string, plan?: 
     updatedAt: new Date(),
   }).where(eq(tenants.id, id)).returning()
   await db.insert(schema.auditLog).values({ tenantId: id, actorId: null, action: 'tenant.update', entity: 'tenant', entityId: id, before: { status: before.status, plan: before.plan }, after: { ...input, by: actor.email } })
+  const { recordPlatformAudit } = await import('./platformTenants')
+  await recordPlatformAudit(actor, { action: 'tenant.update', tenantId: id, entity: 'tenant', entityId: id, before: { plan: before.plan, name: before.name, trialEndsAt: before.trialEndsAt }, after: input })
+  const { invalidateLimits } = await import('./tenantLimits')
+  invalidateLimits(id)
   return after!
 }
 
@@ -187,15 +200,17 @@ export async function tenantUsers(tenantId: string) {
     .from(schema.users).where(eq(schema.users.tenantId, tenantId)).orderBy(desc(schema.users.createdAt)).limit(200)
 }
 
-/** Лимиты тарифа (docs/03 §3.12): проверка перед созданием пользователя. */
+/**
+ * Лимит людей (docs/25 §10 п. 1, docs/24 §4.4.1): считается по активным (`status = 'active'`, не заблокированным),
+ * переопределение — `tenant_limits.users`, иначе тариф. Блокировка человека сразу освобождает место.
+ */
 export async function checkPlanLimit(tenantId: string, what: 'users'): Promise<{ ok: boolean, limit: number | null, current: number }> {
-  const db = platformDb()
-  const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId))
-  const [p] = t ? await db.select().from(plans).where(eq(plans.code, t.plan)) : []
+  const { effectiveLimits } = await import('./tenantLimits')
+  const limits = await effectiveLimits(tenantId)
   if (what === 'users') {
-    const rows = await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status in ('invited','active')`) as unknown as { n: number }[]
+    const rows = await platformDb().execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked`) as unknown as { n: number }[]
     const n = rows[0]?.n ?? 0
-    const limit = p?.maxUsers ?? null
+    const limit = limits.users
     return { ok: limit === null || n < limit, limit, current: n }
   }
   return { ok: true, limit: null, current: 0 }

@@ -98,7 +98,11 @@ export async function contacts(ctx: Ctx, access: Access, q: { q?: string, orgUni
 
 /**
  * Ежедневно (due.scan): `birthday_upcoming` руководителю точки за N дней (тенант: settings.birthdays.reminderDays, по умолчанию 3 —
- * «щоб встиг купити торт», docs/21 §14.7), `birthday_today` — коллегам точки именинника. Дедуп на год.
+ * «щоб встиг купити торт», docs/21 §14.7). `birthday_today` — докс/33 D-044 (вопрос §А, відповіді
+ * не було до дедлайну → застосовано рекомендацію-фолбек): одна щоденна розсилка на точку замість
+ * окремого сповіщення на кожного колегу — щоб велика точка з кількома іменинниками не засипала
+ * стрічку. Дедуп на день і точку (`bday_digest:<locationId>:<yyyy-mm-dd>:<recipientId>` — унікальний
+ * `dedup_key` per-тенант per-отримувача, як і решта кодів).
  */
 export async function birthdayScan(tenantId: string): Promise<{ upcoming: number, today: number }> {
   const out = { upcoming: 0, today: 0 }
@@ -107,8 +111,10 @@ export async function birthdayScan(tenantId: string): Promise<{ upcoming: number
     const days = t?.days ?? 3
     const today = new Date(iso(new Date()))
     const year = today.getUTCFullYear()
+    const dateKey = today.toISOString().slice(0, 10)
     const rows = await tx.execute(sql`${PEOPLE_SQL} and u.birth_date is not null and u.birthday_consent = true`) as unknown as PersonRow[]
     const mgrOf = new Map<string, string | null>()
+    const todayByLocation = new Map<string, { id: string, fullName: string }[]>()
     for (const r of rows) {
       const d = birthdayIn(year, r.birth_date!)
       const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000)
@@ -122,10 +128,17 @@ export async function birthdayScan(tenantId: string): Promise<{ upcoming: number
         if (mgr && mgr !== r.id && await enqueueNotification(tx, { tenantId, userId: mgr, code: 'birthday_upcoming', payload: { name: r.full_name, date: label, days }, dedupKey: `bday_up:${r.id}:${year}` })) out.upcoming++
       }
       if (diff === 0 && r.location_id) {
-        const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${r.location_id}::uuid and u.status = 'active' and u.id <> ${r.id}::uuid`) as unknown as { id: string }[]
-        for (const m of mates) {
-          if (await enqueueNotification(tx, { tenantId, userId: m.id, code: 'birthday_today', payload: { name: r.full_name }, dedupKey: `bday:${r.id}:${m.id}:${year}` })) out.today++
-        }
+        if (!todayByLocation.has(r.location_id)) todayByLocation.set(r.location_id, [])
+        todayByLocation.get(r.location_id)!.push({ id: r.id, fullName: r.full_name })
+      }
+    }
+    for (const [locationId, celebrants] of todayByLocation) {
+      const celebrantIds = new Set(celebrants.map(c => c.id))
+      const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${locationId}::uuid and u.status = 'active'`) as unknown as { id: string }[]
+      const names = celebrants.map(c => c.fullName).join(', ')
+      for (const m of mates) {
+        if (celebrantIds.has(m.id)) continue // іменинник не отримує дайджест про самого себе
+        if (await enqueueNotification(tx, { tenantId, userId: m.id, code: 'birthday_today', payload: { names, count: celebrants.length }, dedupKey: `bday_digest:${locationId}:${dateKey}:${m.id}` })) out.today++
       }
     }
   })

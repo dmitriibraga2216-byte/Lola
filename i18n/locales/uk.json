@@ -1501,7 +1501,8 @@
     "bookmarks": "Мої закладки",
     "noBookmarks": "Закладок поки немає — позначте зірочкою те, до чого повертаєтесь",
     "bookmark": "У закладки",
-    "bookmarked": "У закладках"
+    "bookmarked": "У закладках",
+    "categories": "Категорії"
   },
   "news": {
     "title": "Новини",
@@ -1655,7 +1656,8 @@
     "continue": "продовжити",
     "questionOf": "Питання {n} з {total}",
     "or": "або",
-    "freeHint": "Ваша відповідь"
+    "freeHint": "Ваша відповідь",
+    "attachFile": "Прикріпити файл"
   },
   "workshop": {
     "reviewTitle": "Перевірка практикумів",
@@ -3863,7 +3865,21 @@
     "revoked": "відкликано {n}",
     "months": "{n} міс.",
     "unlimited": "безстроково",
-    "empty": "Сертифікатів ще не видавали"
+    "empty": "Сертифікатів ще не видавали",
+    "browseIssued": "Переглянути видані",
+    "issuedTitle": "Видані сертифікати",
+    "searchHint": "Пошук за ПІБ або номером",
+    "allCourses": "Усі курси",
+    "stateLabel": "Стан",
+    "allStates": "Усі стани",
+    "stateActive": "Дійсний",
+    "stateRevoked": "Відкликано",
+    "person": "Людина",
+    "number": "Номер",
+    "revoke": "Відкликати",
+    "revokeReasonHint": "Причина відкликання (мінімум 10 символів)",
+    "revokeConfirm": "Підтвердити відкликання",
+    "revokedReasonLine": "Причина відкликання: {reason}"
   },
   "settings": {
     "discard": "Відхилити зміни",

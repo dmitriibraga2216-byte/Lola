@@ -6,6 +6,7 @@
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
+const { upload, compressImage } = useMediaUpload()
 
 interface Opt { id: string, text: string }
 interface Q { id: string, type: 'single' | 'multi' | 'free' | 'scale', text: string, options?: Opt[], allowOwnOption?: boolean, allowFiles?: boolean, required?: boolean, scale: { name: string, options: { value: number, label: string }[] } | null }
@@ -24,6 +25,10 @@ const value = ref<number | null>(null)
 const error = ref('')
 const notice = ref('')
 const busy = ref(false)
+// Файли до вільної відповіді (docs/33 D-040, docs/28 Spec 20 відк. (7)): сервер приймає fileIds,
+// завантаження — той самий шлях /media, що й у вільній відповіді тесту (quiz/[quizId].vue).
+const fileIds = ref<string[]>([])
+const fileNames = ref<string[]>([])
 
 async function load() {
   try { items.value = await api<S[]>('/learning/surveys') }
@@ -31,7 +36,27 @@ async function load() {
 }
 onMounted(load)
 
-function resetAnswer() { pick.value = null; picks.value = []; own.value = ''; text.value = ''; value.value = null }
+function resetAnswer() { pick.value = null; picks.value = []; own.value = ''; text.value = ''; value.value = null; fileIds.value = []; fileNames.value = [] }
+
+async function attachFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  busy.value = true
+  error.value = ''
+  try {
+    const blob = await compressImage(file)
+    const mediaId = await upload(blob, file.name)
+    fileIds.value.push(mediaId)
+    fileNames.value.push(file.name)
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
+  finally {
+    busy.value = false
+    ;(e.target as HTMLInputElement).value = ''
+  }
+}
 async function start(s: S) {
   error.value = ''; notice.value = ''; results.value = null
   try { step.value = await api<Step>(`/learning/surveys/${s.id}/start`, { method: 'POST', body: {} }); active.value = s; resetAnswer() }
@@ -43,7 +68,7 @@ function answerBody() {
   switch (q.value.type) {
     case 'single': return own.value.trim() && !pick.value ? { own: own.value.trim() } : pick.value ? { optionId: pick.value } : null
     case 'multi': return picks.value.length || own.value.trim() ? { optionIds: picks.value, ...(own.value.trim() ? { own: own.value.trim() } : {}) } : null
-    case 'free': return text.value.trim() ? { text: text.value.trim() } : null
+    case 'free': return text.value.trim() || fileIds.value.length ? { text: text.value.trim(), ...(fileIds.value.length ? { fileIds: fileIds.value } : {}) } : null
     case 'scale': return value.value != null ? { value: value.value } : null
   }
 }
@@ -108,7 +133,16 @@ function togglePick(id: string) { const i = picks.value.indexOf(id); if (i >= 0)
         <div v-else-if="q.type === 'scale'" class="scale" role="radiogroup">
           <button v-for="o in (q.scale?.options ?? [1, 2, 3, 4, 5].map(n => ({ value: n, label: String(n) })))" :key="o.value" type="button" role="radio" :aria-checked="value === o.value" :class="['opt', { on: value === o.value }]" :title="o.label" @click="value = o.value">{{ o.label }}</button>
         </div>
-        <textarea v-else v-model="text" rows="4" class="field" :placeholder="t('survey.freeHint')" />
+        <template v-else>
+          <textarea v-model="text" rows="4" class="field" :placeholder="t('survey.freeHint')" />
+          <div v-if="q.allowFiles" class="attach">
+            <label class="ghost attach-btn">
+              {{ t('survey.attachFile') }}
+              <input type="file" accept="image/*,video/*,application/pdf" capture="environment" hidden :disabled="busy" @change="attachFile">
+            </label>
+            <span v-for="(n, i) in fileNames" :key="`${n}-${i}`" class="file-chip">{{ n }}</span>
+          </div>
+        </template>
       </template>
       <div class="foot">
         <button class="primary" :disabled="busy || !canNext" data-testid="poll-next" @click="next">{{ t('common.next') }}</button>
@@ -142,6 +176,9 @@ h2 { margin: 0; font-weight: 800; }
 .own { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); }
 .own-field { border: 2px dashed var(--color-bg-line); border-radius: var(--radius-l); }
 .scale { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.attach { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; margin-top: var(--space-2); }
+.attach-btn { cursor: pointer; }
+.file-chip { font-size: var(--font-size-body-s); background: var(--color-bg-soft); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); }
 .opt { font: inherit; font-weight: 800; min-width: 48px; height: 48px; padding: 0 var(--space-3); border: 2px solid var(--color-bg-line); background: var(--color-bg-soft); border-radius: var(--radius-pill); cursor: pointer; color: var(--color-ink); }
 .opt.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .foot { margin-top: auto; padding-top: var(--space-4); }

@@ -92,7 +92,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   notice_not_acknowledged: 'Оголошення «{{title}}» чекає на підтвердження{{#due}} до {{due}}{{/due}}',
   announcement_overdue_manager: 'Не підтвердили оголошення «{{title}}»: {{names}}',
   birthday_upcoming: 'За {{days}} дн. день народження у {{name}} ({{date}}) — час подбати про привітання',
-  birthday_today: 'Сьогодні день народження у {{name}} — привітайте!',
+  // Докс/33 D-044: щоденний дайджест на точку замість окремого сповіщення на кожного іменинника
+  birthday_today: 'Сьогодні день народження: {{names}} — привітайте!',
   scheduled_report: 'Звіт «{{name}}» готовий: {{rows}} рядків. {{url}}',
   program_assigned: 'Вам призначено програму «{{title}}»{{#due}}. Термін: {{due}}{{/due}}',
   program_node_unlocked: '«{{title}}»: відкрився наступний крок{{#step}} — {{step}}{{/step}}',

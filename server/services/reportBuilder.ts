@@ -1,7 +1,9 @@
 import { desc, eq, sql } from 'drizzle-orm'
 import { savedReports, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { scopeSql } from './access'
 import { enqueueNotification } from './notifications'
+import { frameJoins } from './reportFrame'
 import { toXlsx } from './reports'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -10,29 +12,36 @@ interface Ctx { tenantId: string, actorId: string }
  * Конструктор сводных отчётов (docs/03 §3.26): сущность → поля → фильтры → группировка,
  * сохранение под именем, расписание с отправкой в Telegram/на почту.
  * Поля — только из белого списка: SQL собирается из известных колонок, не из ввода.
+ *
+ * Докс/33 D-046: людина у всіх трьох сутностей резолвиться тим самим фрагментом, що й у решти
+ * звітів/журналів (`reportFrame.ts#frameJoins` — відкрите основне розміщення через `LATERAL`,
+ * а не прямий `JOIN`, тому кілька відкритих `is_primary`-рядків не розмножують результат);
+ * `l`/`p`/`ou`/`ci` — аліаси каркаса, `pl` — саме розміщення. Область видимості — той самий
+ * `scopeSql`, що й у `reportFrame.ts#frameWhere`, по `pl.location_id`. Поля лишились свої —
+ * конструктор довільний, каркас дає лише «хто ця людина», не набір колонок.
  */
 export const ENTITIES = {
   people: {
-    from: sql`users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id`,
+    from: sql`users u ${frameJoins()}`,
     fields: {
       full_name: sql`u.full_name`, phone: sql`u.phone`, status: sql`u.status`, hired_at: sql`u.hired_at`, location: sql`l.name`, position: sql`p.name`,
       courses_done: sql`(select count(*) from enrollments e where e.user_id = u.id and e.status = 'done' and e.cancelled_at is null)`,
       courses_overdue: sql`(select count(*) from enrollments e where e.user_id = u.id and e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now())`,
     },
-    filters: { location_id: sql`up.location_id`, position_id: sql`up.position_id`, status: sql`u.status`, hired_from: sql`u.hired_at`, hired_to: sql`u.hired_at` },
+    filters: { location_id: sql`pl.location_id`, position_id: sql`pl.position_id`, status: sql`u.status`, hired_from: sql`u.hired_at`, hired_to: sql`u.hired_at` },
     tenantCol: sql`u.tenant_id`,
   },
   enrollments: {
-    from: sql`enrollments e join users u on u.id = e.user_id join courses c on c.id = e.subject_id left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id`,
+    from: sql`enrollments e join users u on u.id = e.user_id join courses c on c.id = e.subject_id ${frameJoins()}`,
     // Пять статусов + признаки: overdue (due_at < now при незавершённом), cancelled_at (снято)
     fields: { full_name: sql`u.full_name`, course: sql`c.title`, status: sql`e.status`, overdue: sql`(e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now())`, cancelled_at: sql`e.cancelled_at`, progress_pct: sql`e.progress_pct`, due_at: sql`e.due_at`, completed_at: sql`e.completed_at`, location: sql`l.name`, source: sql`e.source` },
-    filters: { location_id: sql`up.location_id`, course_id: sql`e.subject_id`, status: sql`e.status`, due_from: sql`e.due_at`, due_to: sql`e.due_at` },
+    filters: { location_id: sql`pl.location_id`, course_id: sql`e.subject_id`, status: sql`e.status`, due_from: sql`e.due_at`, due_to: sql`e.due_at` },
     tenantCol: sql`e.tenant_id`,
   },
   attempts: {
-    from: sql`attempts a join users u on u.id = a.user_id join quizzes q on q.id = a.quiz_id left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id`,
+    from: sql`attempts a join users u on u.id = a.user_id join quizzes q on q.id = a.quiz_id ${frameJoins()}`,
     fields: { full_name: sql`u.full_name`, quiz: sql`q.title`, attempt_no: sql`a.attempt_no`, status: sql`a.status`, score: sql`a.score`, passed: sql`a.passed`, started_at: sql`a.started_at`, finished_at: sql`a.finished_at`, location: sql`l.name` },
-    filters: { location_id: sql`up.location_id`, quiz_id: sql`a.quiz_id`, status: sql`a.status`, from: sql`a.started_at`, to: sql`a.started_at` },
+    filters: { location_id: sql`pl.location_id`, quiz_id: sql`a.quiz_id`, status: sql`a.status`, from: sql`a.started_at`, to: sql`a.started_at` },
     tenantCol: sql`a.tenant_id`,
   },
 } as const
@@ -60,8 +69,9 @@ export async function runReport(ctx: Ctx, spec: ReportSpec, limit = 2000, scope:
     else if (Array.isArray(v)) where.push(sql`${col}::text in (${sql.join(v.map(x => sql`${String(x)}`), sql`, `)})`)
     else where.push(sql`${col}::text = ${String(v)}`)
   }
-  // Область видимости (docs/22 §7.1): применяется до фильтров, расширить параметром нельзя
-  if (scope !== null) where.push(scope.length ? sql`up.location_id in (${sql.join(scope.map(id => sql`${id}::uuid`), sql`, `)})` : sql`false`)
+  // Область видимости (docs/22 §7.1): применяется до фильтров, расширить параметром нельзя;
+  // тот же `scopeSql`, что и в reportFrame.ts#frameWhere, по розміщенню каркаса (`pl`).
+  if (scope !== null) where.push(sql`true ${scopeSql(scope, sql`pl.location_id`)}`)
   const whereSql = where.length ? sql`where ${sql.join(where, sql` and `)}` : sql``
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const F = ent.fields as Record<string, ReturnType<typeof sql>>

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { certificateCounters, certificates, courses, enrollments } from '../db/schema'
+import { certificateCounters, certificates, courses, enrollments, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
@@ -105,20 +105,34 @@ export async function myCertificates(ctx: Ctx) {
   })
 }
 
-export async function listCertificates(ctx: Ctx) {
+/**
+ * Список виданих сертифікатів (мокап Certificates, докс/33 D-065): пошук за ПІБ/номером,
+ * фільтр за курсом і станом — під клікабельний рядок таблиці шаблонів і саму витрину відкликання.
+ */
+export async function listCertificates(ctx: Ctx, filters: { courseId?: string, status?: 'active' | 'revoked', q?: string } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.select({
       id: certificates.id,
       number: certificates.number,
       userId: certificates.userId,
+      fullName: users.fullName,
       score: certificates.score,
       issuedAt: certificates.issuedAt,
       validUntil: certificates.validUntil,
       revokedAt: certificates.revokedAt,
+      revokeReason: certificates.revokeReason,
+      courseId: certificates.courseId,
       courseTitle: courses.title,
     })
       .from(certificates)
       .leftJoin(courses, eq(courses.id, certificates.courseId))
+      .innerJoin(users, eq(users.id, certificates.userId))
+      .where(and(
+        filters.courseId ? eq(certificates.courseId, filters.courseId) : undefined,
+        filters.status === 'active' ? sql`${certificates.revokedAt} is null` : undefined,
+        filters.status === 'revoked' ? sql`${certificates.revokedAt} is not null` : undefined,
+        filters.q ? sql`(${users.fullName} ilike ${`%${filters.q}%`} or ${certificates.number} ilike ${`%${filters.q}%`})` : undefined,
+      ))
       .orderBy(desc(certificates.issuedAt))
       .limit(200)
   })

@@ -1,15 +1,20 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import { checklistRuns, checklists, locations, ratingScales, users } from '../db/schema'
+import { checklistRuns, checklists, locations, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
+import { frameJoins, frameSelect, frameTail } from './reportFrame'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import type { ScaleOption } from './assessment'
+import { loadScale } from './assessment'
+import type { ScaleInfo } from './assessment'
+import type { ChecklistInput } from '../../shared/schemas/assessment'
+import { CHECKLIST_MUTABLE_WHEN_LOCKED } from '../../shared/schemas/assessment'
 
 interface Ctx { tenantId: string, actorId: string }
 
-export interface ChecklistItem { id: string, group?: string, text: string, scaleId: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
+/** Пункт чек-листа: вес, критичность, фото, подсказка; `criterionId` — ссылка на словарь (docs/20 §14.3). Шкала одна на чек-лист. */
+export interface ChecklistItem { id: string, group?: string, text: string, criterionId?: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
 export interface RunAnswer { itemId: string, value: number | null, comment?: string | null, photoMediaIds?: string[], isNa?: boolean }
 export interface ActionItem { id: string, text: string, responsibleId: string, dueAt: string, status: 'open' | 'done' | 'overdue', doneAt?: string | null }
 
@@ -18,38 +23,68 @@ export interface ActionItem { id: string, text: string, responsibleId: string, d
 export async function listChecklists(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.execute(sql`
-      select c.*, (select count(*)::int from checklist_runs r where r.checklist_id = c.id and r.status = 'finished') as runs,
+      select c.*, s.name as scale_name,
+             (select count(*)::int from checklist_runs r where r.checklist_id = c.id and r.status = 'finished') as runs,
              (select count(*)::int from checklist_runs r where r.checklist_id = c.id and r.status = 'finished' and r.started_at >= now() - interval '7 days') as runs_week
-      from checklists c order by c.is_active desc, c.title
+      from checklists c join scales s on s.id = c.scale_id order by c.is_active desc, c.updated_at desc
     `) as unknown as Promise<Record<string, unknown>[]>
   })
 }
 
-export async function upsertChecklist(ctx: Ctx, input: { id?: string, title: string, kind: string, items: ChecklistItem[], scoring: string, passScore: number, criticalFailRule: string, whoCanRun: unknown, subjectKind: string, frequency?: { timesPerWeek: number } | null, requireSignature?: boolean, isActive?: boolean }) {
+export type ChecklistSaveResult = { ok: true, checklist: typeof checklists.$inferSelect } | { ok: false, code: 'not_found' | 'locked' | 'bad_scale', fields?: string[] }
+
+/** Замороженные поля (docs/20 §14.4): шкала, состав и веса пунктов, подсчёт, порог, критическое правило, тип, пропуск/комментарии. */
+function frozenDiff(before: typeof checklists.$inferSelect, input: ChecklistInput): string[] {
+  const changed: string[] = []
+  const cmp: Record<string, [unknown, unknown]> = {
+    kind: [before.kind, input.kind], scaleId: [before.scaleId, input.scaleId], scoring: [before.scoring, input.scoring], passScore: [Number(before.passScore), input.passScore],
+    criticalFailRule: [before.criticalFailRule, input.criticalFailRule], subjectKind: [before.subjectKind, input.subjectKind], requireSignature: [before.requireSignature, input.requireSignature ?? false],
+    allowSkip: [before.allowSkip, input.allowSkip], allowItemComment: [before.allowItemComment, input.allowItemComment], itemCommentRequired: [before.itemCommentRequired, input.itemCommentRequired],
+  }
+  for (const [k, [a, b]] of Object.entries(cmp)) if (a !== b && !(CHECKLIST_MUTABLE_WHEN_LOCKED as readonly string[]).includes(k)) changed.push(k)
+  const was = before.items as ChecklistItem[]
+  const norm = (i: ChecklistItem) => JSON.stringify([i.id, i.text, i.criterionId ?? null, i.weight, !!i.isCritical, !!i.requiresPhoto, i.group ?? ''])
+  if (was.length !== input.items.length || was.some((i, idx) => norm(i) !== norm(input.items[idx]!))) changed.push('items')
+  return changed
+}
+
+export async function upsertChecklist(ctx: Ctx, input: ChecklistInput): Promise<ChecklistSaveResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const values = {
-      title: input.title, kind: input.kind, items: input.items, scoring: input.scoring, passScore: String(input.passScore), criticalFailRule: input.criticalFailRule,
-      whoCanRun: input.whoCanRun ?? { roles: ['mentor', 'manager', 'admin'] }, subjectKind: input.subjectKind, frequency: input.frequency ?? null, requireSignature: input.requireSignature ?? false, isActive: input.isActive ?? true,
+    const scale = await loadScale(tx, input.scaleId)
+    if (!scale || !scale.options.length) return { ok: false as const, code: 'bad_scale' as const }
+    const card = { title: input.title, description: input.description ?? null, instruction: input.instruction ?? [], tags: input.tags, whoCanRun: input.whoCanRun, frequency: input.frequency ?? null, isActive: input.isActive ?? true }
+    const params = {
+      kind: input.kind, scaleId: input.scaleId, items: input.items, scoring: input.scoring, passScore: String(input.passScore), criticalFailRule: input.criticalFailRule,
+      subjectKind: input.subjectKind, requireSignature: input.requireSignature ?? false, allowSkip: input.allowSkip, allowItemComment: input.allowItemComment, itemCommentRequired: input.itemCommentRequired,
     }
     if (input.id) {
-      const [r] = await tx.update(checklists).set({ ...values, updatedAt: new Date() }).where(eq(checklists.id, input.id)).returning()
-      return r ?? null
+      const [before] = await tx.select().from(checklists).where(eq(checklists.id, input.id))
+      if (!before) return { ok: false as const, code: 'not_found' as const }
+      if (before.isLocked) {
+        const changed = frozenDiff(before, input)
+        if (changed.length) return { ok: false as const, code: 'locked' as const, fields: changed }
+        const [r] = await tx.update(checklists).set({ ...card, updatedAt: new Date() }).where(eq(checklists.id, input.id)).returning()
+        await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.update', entity: 'checklist', entityId: input.id, before: { title: before.title }, after: { title: input.title, locked: true } })
+        return { ok: true as const, checklist: r! }
+      }
+      const [r] = await tx.update(checklists).set({ ...card, ...params, updatedAt: new Date() }).where(eq(checklists.id, input.id)).returning()
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.update', entity: 'checklist', entityId: input.id, before: { title: before.title, scaleId: before.scaleId, items: (before.items as unknown[]).length }, after: { title: input.title, scaleId: input.scaleId, items: input.items.length } })
+      return { ok: true as const, checklist: r! }
     }
-    const [r] = await tx.insert(checklists).values({ tenantId: ctx.tenantId, createdBy: ctx.actorId, ...values }).returning()
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.create', entity: 'checklist', entityId: r!.id })
-    return r!
+    const [r] = await tx.insert(checklists).values({ tenantId: ctx.tenantId, createdBy: ctx.actorId, ...card, ...params }).returning()
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.create', entity: 'checklist', entityId: r!.id, after: { title: input.title, items: input.items.length } })
+    return { ok: true as const, checklist: r! }
   })
 }
 
+/** Заморозка при первом прогоне (docs/20 §14.4). */
+async function lockChecklist(tx: TenantTx, tenantId: string, id: string, actorId: string | null) {
+  const [r] = await tx.update(checklists).set({ isLocked: true, updatedAt: new Date() }).where(and(eq(checklists.id, id), eq(checklists.isLocked, false))).returning({ id: checklists.id })
+  if (r) await recordAudit(tx, { tenantId, actorId, action: 'checklist.lock', entity: 'checklist', entityId: id, after: { isLocked: true } })
+}
+
 export async function getChecklist(ctx: Ctx, id: string) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [c] = await tx.select().from(checklists).where(eq(checklists.id, id))
-    if (!c) return null
-    const items = c.items as ChecklistItem[]
-    const scaleIds = [...new Set(items.map(i => i.scaleId))]
-    const scales = scaleIds.length ? await tx.select().from(ratingScales).where(inArray(ratingScales.id, scaleIds)) : []
-    return { ...c, scales }
-  })
+  return withTenant(ctx.tenantId, ctx.actorId, tx => getChecklistTx(tx, id))
 }
 
 // ── Прогоны (docs/20 §3.6, §5.4, §7.3–7.5) ─────────────────────────────
@@ -62,6 +97,7 @@ export async function startRun(ctx: Ctx, checklistId: string, input: { locationI
       tenantId: ctx.tenantId, checklistId, subjectKind: c.subjectKind, locationId: input.locationId ?? null, subjectUserId: input.subjectUserId ?? null, observerId: ctx.actorId,
       startedAt: input.startedAt ? new Date(input.startedAt) : new Date(), device: input.device ?? null, geo: input.geo ?? null,
     }).returning()
+    await lockChecklist(tx, ctx.tenantId, checklistId, ctx.actorId)
     return r!
   })
 }
@@ -76,39 +112,49 @@ export async function saveRun(ctx: Ctx, runId: string, input: { answers: RunAnsw
   })
 }
 
-export interface RunScore { score: number, passed: boolean, criticalFailed: string[], failedItems: string[], answered: number, total: number, missingPhoto: string[] }
+export interface RunScore { score: number, points: number, maxPoints: number, percent: number, passed: boolean, criticalFailed: string[], failedItems: string[], answered: number, total: number, missingPhoto: string[], missingComment: string[] }
 
-/** Подсчёт (docs/20 §7.3–7.4): percent/points по весам, n/a вне знаменателя; критический провал обнуляет. */
-export function scoreRun(c: { items: ChecklistItem[], scoring: string, passScore: number, criticalFailRule: string }, answers: RunAnswer[], scales: Map<string, { options: ScaleOption[], passThreshold: number | null }>): RunScore {
+export interface ScoringRules { items: ChecklistItem[], scoring: string, passScore: number, criticalFailRule: string, allowSkip?: boolean, itemCommentRequired?: boolean }
+
+/**
+ * Подсчёт (docs/20 §7.3–7.4, §14.3): «набрана частка від суми ваг» — пункт даёт (значення − min)/(max − min) × вага,
+ * максимум — сумма весов отвеченных пунктов; пропущенные (n/a) вне знаменателя. Пункт «провалено», если его доля
+ * ниже прохідного бала чек-листа (Spec 20 — docs/28); критический провал обнуляет результат.
+ */
+export function scoreRun(c: ScoringRules, answers: RunAnswer[], scale: ScaleInfo): RunScore {
   const byItem = new Map(answers.map(a => [a.itemId, a]))
-  let num = 0, den = 0, maxPts = 0
+  const range = Math.max(scale.max - scale.min, 1e-9)
+  let points = 0, maxPoints = 0
   const criticalFailed: string[] = []
   const failedItems: string[] = []
   const missingPhoto: string[] = []
+  const missingComment: string[] = []
   let answered = 0
   for (const it of c.items) {
     const a = byItem.get(it.id)
-    const scale = scales.get(it.scaleId)
-    const max = Math.max(...(scale?.options ?? [{ value: 1 }]).map(o => o.value), 1)
-    const pass = scale?.passThreshold ?? max
-    maxPts += it.weight * max
     if (!a || (a.value == null && !a.isNa)) continue
     answered++
     if (a.isNa) continue
     if (it.requiresPhoto && !(a.photoMediaIds?.length)) missingPhoto.push(it.id)
-    const ok = Number(a.value) >= pass
-    if (!ok) { failedItems.push(it.id); if (it.isCritical) criticalFailed.push(it.id) }
-    num += Number(a.value) * it.weight
-    den += max * it.weight
+    const share = Math.min(1, Math.max(0, (Number(a.value) - scale.min) / range))
+    const ok = share * 100 >= c.passScore
+    if (!ok) {
+      failedItems.push(it.id)
+      if (it.isCritical) criticalFailed.push(it.id)
+      if (c.itemCommentRequired && !(a.comment ?? '').trim()) missingComment.push(it.id)
+    }
+    points += share * it.weight
+    maxPoints += it.weight
   }
-  let score = c.scoring === 'points' ? Math.round(num * 100) / 100 : den ? Math.round((num / den) * 10000) / 100 : 0
-  let passed = c.scoring === 'points' ? score >= c.passScore : c.scoring === 'pass_fail' ? failedItems.length === 0 : score >= c.passScore
+  points = Math.round(points * 100) / 100
+  const percent = maxPoints ? Math.round((points / maxPoints) * 10000) / 100 : 0
+  let score = c.scoring === 'points' ? points : percent
+  let passed = c.scoring === 'points' ? points >= c.passScore : c.scoring === 'pass_fail' ? failedItems.length === 0 : percent >= c.passScore
   if (c.criticalFailRule === 'any_critical_fails_all' && criticalFailed.length) { passed = false; score = 0 }
-  void maxPts
-  return { score, passed, criticalFailed, failedItems, answered, total: c.items.length, missingPhoto }
+  return { score, points, maxPoints, percent, passed, criticalFailed, failedItems, answered, total: c.items.length, missingPhoto, missingComment }
 }
 
-export type FinishResult = { ok: true, score: RunScore } | { ok: false, code: 'not_found' | 'incomplete' | 'photo_required' | 'action_plan_required' | 'signature_required', itemIds?: string[] }
+export type FinishResult = { ok: true, score: RunScore } | { ok: false, code: 'not_found' | 'incomplete' | 'photo_required' | 'comment_required' | 'action_plan_required' | 'signature_required', itemIds?: string[] }
 
 /** Завершение: все пункты отвечены, фото где требуется, при провале — план действий с ответственным и сроком (docs/20 §7.5). */
 export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunAnswer[], actionPlan?: ActionItem[], finishedAt?: string, startedAt?: string, signatureMediaId?: string }): Promise<FinishResult> {
@@ -117,12 +163,15 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
     if (!r) return { ok: false as const, code: 'not_found' as const }
     const [c] = await tx.select().from(checklists).where(eq(checklists.id, r.checklistId))
     const items = c!.items as ChecklistItem[]
-    const answers = input.answers ?? (r.answers as RunAnswer[])
-    const scaleRows = await tx.select().from(ratingScales).where(inArray(ratingScales.id, [...new Set(items.map(i => i.scaleId))]))
-    const scales = new Map(scaleRows.map(s => [s.id, { options: s.options as ScaleOption[], passThreshold: s.passThreshold != null ? Number(s.passThreshold) : null }]))
-    const score = scoreRun({ items, scoring: c!.scoring, passScore: Number(c!.passScore), criticalFailRule: c!.criticalFailRule }, answers, scales)
-    if (score.answered < score.total) return { ok: false as const, code: 'incomplete' as const, itemIds: items.filter(i => !answers.some(a => a.itemId === i.id && (a.value != null || a.isNa))).map(i => i.id) }
+    const answers = (input.answers ?? (r.answers as RunAnswer[])).map(a => c!.allowItemComment ? a : { ...a, comment: null })
+    const scale = await loadScale(tx, c!.scaleId)
+    if (!scale) return { ok: false as const, code: 'not_found' as const }
+    const score = scoreRun({ items, scoring: c!.scoring, passScore: Number(c!.passScore), criticalFailRule: c!.criticalFailRule, allowSkip: c!.allowSkip, itemCommentRequired: c!.itemCommentRequired }, answers, scale)
+    // Без «Дозволити пропускати питання» n/a не принимается — пункт считается неотвеченным
+    const unanswered = items.filter(i => !answers.some(a => a.itemId === i.id && (a.value != null || (a.isNa && c!.allowSkip)))).map(i => i.id)
+    if (unanswered.length) return { ok: false as const, code: 'incomplete' as const, itemIds: unanswered }
     if (score.missingPhoto.length) return { ok: false as const, code: 'photo_required' as const, itemIds: score.missingPhoto }
+    if (score.missingComment.length) return { ok: false as const, code: 'comment_required' as const, itemIds: score.missingComment }
     const plan = (input.actionPlan ?? (r.actionPlan as ActionItem[])).filter(p => p.text?.trim() && p.responsibleId && p.dueAt)
     if (!score.passed && !plan.length) return { ok: false as const, code: 'action_plan_required' as const }
     // Б.1: подпись проверяемого пальцем на экране — PNG в медиа
@@ -175,10 +224,8 @@ export async function getRun(ctx: Ctx, runId: string, opts: { canSeeUnpublished?
 async function getChecklistTx(tx: TenantTx, id: string) {
   const [c] = await tx.select().from(checklists).where(eq(checklists.id, id))
   if (!c) return null
-  const items = c.items as ChecklistItem[]
-  const scaleIds = [...new Set(items.map(i => i.scaleId))]
-  const scales = scaleIds.length ? await tx.select().from(ratingScales).where(inArray(ratingScales.id, scaleIds)) : []
-  return { ...c, scales }
+  const scale = await loadScale(tx, c.scaleId)
+  return { ...c, scale, maxPoints: (c.items as ChecklistItem[]).reduce((acc, i) => acc + i.weight, 0) }
 }
 
 export async function myRuns(ctx: Ctx) {
@@ -240,14 +287,17 @@ export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: st
         select r.checklist_id, (x->>'itemId') as item_id, (x->>'value')::numeric as value, (x->>'isNa')::boolean as is_na
         from checklist_runs r cross join jsonb_array_elements(r.answers) x where ${where}
       ), it as (
-        select c.id as checklist_id, c.title, (i->>'id') as item_id, (i->>'text') as text, (i->>'scaleId')::uuid as scale_id
+        -- Провал пункта: доля (значення − min)/(max − min) ниже прохідного бала чек-листа (та же формула, что в scoreRun)
+        select c.id as checklist_id, c.title, (i->>'id') as item_id, (i->>'text') as text, c.pass_score,
+               (select min(value) from scale_levels sl where sl.scale_id = c.scale_id) as smin,
+               (select max(value) from scale_levels sl where sl.scale_id = c.scale_id) as smax
         from checklists c cross join jsonb_array_elements(c.items) i
       )
       select it.title as checklist, it.text, count(*)::int as total,
-             sum(case when a.value < coalesce(s.pass_threshold, 1) then 1 else 0 end)::int as failed
-      from a join it on it.checklist_id = a.checklist_id and it.item_id = a.item_id left join rating_scales s on s.id = it.scale_id
+             sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 < it.pass_score then 1 else 0 end)::int as failed
+      from a join it on it.checklist_id = a.checklist_id and it.item_id = a.item_id
       where a.is_na is not true and a.value is not null
-      group by 1, 2 having sum(case when a.value < coalesce(s.pass_threshold, 1) then 1 else 0 end) > 0 order by failed desc limit 20
+      group by 1, 2 having sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 < it.pass_score then 1 else 0 end) > 0 order by failed desc limit 20
     `) as unknown as Record<string, unknown>[]
     const actions = runs.flatMap(r => (r.action_plan as ActionItem[]).map(p => ({ ...p, runId: r.id, location: r.location, checklist: r.title })))
     return { runs, byLocationWeek, topFailed, actions: { total: actions.length, done: actions.filter(a => a.status === 'done').length, overdue: actions.filter(a => a.status === 'overdue').length } }
@@ -309,25 +359,37 @@ export async function actionDueScan(tenantId: string): Promise<number> {
 
 export async function assessmentReport(ctx: Ctx, filter: { cycleId?: string, locationId?: string, scope?: string[] | null } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    // По человеку: средние self/manager/peer и расхождение self−manager по анкете в целом
+    // Каркас docs/22 §13.3 + колонки Г-20.3: Кого оцінюють · Роль оцінювача · Заповнено · Дата заповнення ·
+    // Середній бал · Бал по групах критеріїв · Розрив із нормою (факт − норма по каждому критерию)
     return tx.execute(sql`
-      with sub as (
-        select t.cycle_id, t.subject_user_id, t.rater_kind, avg(a.value) as avg_value
-        from assessment_tasks t join assessment_answers a on a.task_id = t.id
-        join assessment_cycles c on c.id = t.cycle_id
-        where t.status = 'submitted' and a.is_na = false and a.value is not null
-          ${filter.cycleId ? sql`and t.cycle_id = ${filter.cycleId}::uuid` : sql``}
-        group by 1, 2, 3
-      )
-      select c.title as cycle, u.full_name, l.name as location,
-             round(max(case when s.rater_kind = 'self' then s.avg_value end), 2) as self,
-             round(max(case when s.rater_kind = 'manager' then s.avg_value end), 2) as manager,
-             round(max(case when s.rater_kind = 'peer' then s.avg_value end), 2) as peer,
-             round(max(case when s.rater_kind = 'self' then s.avg_value end) - max(case when s.rater_kind = 'manager' then s.avg_value end), 2) as gap
-      from sub s join users u on u.id = s.subject_user_id join assessment_cycles c on c.id = s.cycle_id
-      left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
-      where true ${scopeSql(filter.scope ?? null, sql`up.location_id`)}
-      group by 1, 2, 3 order by 1, 2 limit 500
+      select ${frameSelect()}, c.id as cycle_id, c.title as cycle, t.id as task_id, t.rater_kind,
+             ${frameTail({ assignedAt: sql`t.created_at`, completedAt: sql`t.submitted_at`, status: sql`case when t.status = 'submitted' then 'done' when t.status = 'in_progress' then 'in_progress' when t.status in ('declined', 'expired') then 'failed' else 'not_started' end`, result: sql`av.avg_score` })},
+             (t.status = 'submitted') as filled, av.avg_score, gr.by_group, gp.gaps
+      from assessment_tasks t
+      join assessment_cycles c on c.id = t.cycle_id
+      join assessment_forms f on f.id = c.form_id
+      join users u on u.id = t.subject_user_id
+      ${frameJoins()}
+      left join lateral (
+        select round(avg(a.value), 2) as avg_score from assessment_answers a
+        where a.task_id = t.id and a.is_na = false and a.value is not null and not (f.zero_means_no_grade and a.value = 0)
+      ) av on true
+      left join lateral (
+        select jsonb_object_agg(x.name, x.v) as by_group from (
+          select cg.name, round(avg(a.value), 2) as v from assessment_answers a
+          join criteria cr on cr.id = a.criterion_id join criteria_groups cg on cg.id = cr.group_id
+          where a.task_id = t.id and a.is_na = false and a.value is not null and not (f.zero_means_no_grade and a.value = 0) group by cg.name) x
+      ) gr on true
+      left join lateral (
+        select jsonb_agg(jsonb_build_object('criterion', cr.text, 'value', a.value, 'norm', ai.norm, 'gap', round(a.value - ai.norm, 2)) order by ai.sort_order) as gaps
+        from assessment_answers a join criteria cr on cr.id = a.criterion_id
+        join assessment_items ai on ai.criterion_id = a.criterion_id and ai.form_id = c.form_id
+        where a.task_id = t.id and a.is_na = false and a.value is not null and not (f.zero_means_no_grade and a.value = 0)
+      ) gp on true
+      where true ${scopeSql(filter.scope ?? null, sql`pl.location_id`)}
+        ${filter.cycleId ? sql`and t.cycle_id = ${filter.cycleId}::uuid` : sql``}
+        ${filter.locationId ? sql`and pl.location_id = ${filter.locationId}::uuid` : sql``}
+      order by c.created_at desc, u.full_name, t.rater_kind limit 1000
     `) as unknown as Promise<Record<string, unknown>[]>
   })
 }

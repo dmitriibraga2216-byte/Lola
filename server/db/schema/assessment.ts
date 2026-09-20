@@ -6,23 +6,14 @@ import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 import { locations } from './org'
 import { competencies } from './development'
+import { scales } from './settings'
 
 /**
- * Оценка персонала и чек-листы (docs/20-assessment.md): шкалы, группы критериев,
- * анкеты, циклы 360°, задачи оценщиков с ответами, чек-листы наблюдения и их прогоны.
+ * Оценка персонала и чек-листы (docs/20-assessment.md): группы критериев (словарь, docs/20 §14.6),
+ * анкеты с нормами (docs/02 «Оценка и чек-листы»), циклы 360°, задачи оценщиков с ответами,
+ * чек-листы наблюдения и их прогоны. Шкалы — общие `scales(kind=levels)` (docs/24 Г-24.4, Spec 20:
+ * прежняя `rating_scales` перенесена миграцией 0039).
  */
-
-export const ratingScales = pgTable('rating_scales', {
-  ...baseColumns,
-  tenantId: tenantId(),
-  name: text('name').notNull(),
-  kind: text('kind').notNull().default('ordinal'), // binary | ordinal | percent | letters
-  options: jsonb('options').notNull(), // [{value, label, color}]
-  passThreshold: numeric('pass_threshold', { precision: 6, scale: 2 }),
-  allowNa: boolean('allow_na').notNull().default(true),
-}, t => [
-  unique().on(t.tenantId, t.name),
-])
 
 export const criteriaGroups = pgTable('criteria_groups', {
   ...baseColumns,
@@ -31,6 +22,7 @@ export const criteriaGroups = pgTable('criteria_groups', {
   description: text('description'),
   sort: integer('sort').notNull().default(0),
   weight: numeric('weight', { precision: 6, scale: 2 }).notNull().default('1'),
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`), // «Мітки» группы (docs/20 §14.6)
 }, t => [
   index().on(t.tenantId),
 ])
@@ -41,10 +33,8 @@ export const criteria = pgTable('criteria', {
   groupId: uuid('group_id').notNull().references(() => criteriaGroups.id, { onDelete: 'cascade' }),
   text: text('text').notNull(),
   description: text('description'),
-  scaleId: uuid('scale_id').notNull().references(() => ratingScales.id),
   weight: numeric('weight', { precision: 6, scale: 2 }).notNull().default('1'),
   isCritical: boolean('is_critical').notNull().default(false),
-  requiresCommentBelow: numeric('requires_comment_below', { precision: 6, scale: 2 }),
   competencyId: uuid('competency_id').references(() => competencies.id),
   requiresPhoto: boolean('requires_photo').notNull().default(false),
   sort: integer('sort').notNull().default(0),
@@ -52,16 +42,44 @@ export const criteria = pgTable('criteria', {
   index().on(t.tenantId, t.groupId),
 ])
 
-/** Анкета — набор групп критериев (docs/20 §3.3 form_id). */
+/**
+ * Анкета оценки (docs/20 §14.2, docs/02 `assessments`): тип, шкала, правила комментирования,
+ * состав — `assessment_items` с нормой на критерий. После первого заполнения `is_locked`:
+ * шкала, состав и нормы не меняются (docs/20 §14.4), только название, описание, инструкция и метки.
+ */
 export const assessmentForms = pgTable('assessment_forms', {
   ...baseColumns,
   tenantId: tenantId(),
   title: text('title').notNull(),
   description: text('description'),
-  groupIds: uuid('group_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  instruction: jsonb('instruction').notNull().default('[]'), // «Інструкція для тих, хто відповідає на анкету» — блоки
+  kind: text('kind').notNull().default('by_criteria'), // assessment_kind: by_criteria | by_competencies
+  scaleId: uuid('scale_id').notNull().references(() => scales.id),
+  allowCommentGroups: boolean('allow_comment_groups').notNull().default(false),
+  commentGroupsRequired: boolean('comment_groups_required').notNull().default(false),
+  commentWhenAboveNorm: boolean('comment_when_above_norm').notNull().default(false),
+  commentWhenBelowNorm: boolean('comment_when_below_norm').notNull().default(true),
+  commentWhenEqual: boolean('comment_when_equal').notNull().default(false),
+  zeroMeansNoGrade: boolean('zero_means_no_grade').notNull().default(false),
+  isLocked: boolean('is_locked').notNull().default(false),
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   isActive: boolean('is_active').notNull().default(true),
 }, t => [
   index().on(t.tenantId),
+])
+
+/** Состав анкеты: «критерій — індикатор · Норма» (docs/20 §14.2). Кластер — «Додати новий кластер». */
+export const assessmentItems = pgTable('assessment_items', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  formId: uuid('form_id').notNull().references(() => assessmentForms.id, { onDelete: 'cascade' }),
+  criterionId: uuid('criterion_id').notNull().references(() => criteria.id, { onDelete: 'cascade' }),
+  norm: numeric('norm', { precision: 6, scale: 2 }).notNull(),
+  cluster: text('cluster'),
+  sortOrder: integer('sort_order').notNull().default(0),
+}, t => [
+  index().on(t.tenantId, t.formId),
+  unique().on(t.formId, t.criterionId),
 ])
 
 export const assessmentCycles = pgTable('assessment_cycles', {
@@ -99,6 +117,7 @@ export const assessmentTasks = pgTable('assessment_tasks', {
   dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
   declineReason: text('decline_reason'),
+  groupComments: jsonb('group_comments').notNull().default('{}'), // {groupId: text} — «Дозволити коментувати групи критеріїв»
 }, t => [
   unique().on(t.cycleId, t.subjectUserId, t.raterUserId),
   index().on(t.tenantId, t.raterUserId, t.status),
@@ -118,12 +137,24 @@ export const assessmentAnswers = pgTable('assessment_answers', {
   unique().on(t.taskId, t.criterionId),
 ])
 
+/**
+ * Чек-лист (docs/20 §3.5, §14.3; docs/02 `checklists`): одна шкала на чек-лист, у пункта — вес
+ * («у чек-листа вага, в анкеті оцінки — норма»). `is_locked` — после первого прогона (docs/20 §14.4).
+ */
 export const checklists = pgTable('checklists', {
   ...baseColumns,
   tenantId: tenantId(),
   title: text('title').notNull(),
+  description: text('description'),
+  instruction: jsonb('instruction').notNull().default('[]'),
   kind: text('kind').notNull().default('observation'), // observation | audit | mystery
-  items: jsonb('items').notNull(), // [{id, group, text, scaleId, weight, isCritical, requiresPhoto, hint}]
+  scaleId: uuid('scale_id').notNull().references(() => scales.id),
+  items: jsonb('items').notNull(), // [{id, group, text, criterionId?, weight, isCritical, requiresPhoto, hint}]
+  allowSkip: boolean('allow_skip').notNull().default(false), // «Дозволити пропускати питання»
+  allowItemComment: boolean('allow_item_comment').notNull().default(true), // «Дозволити коментування кожного критерію»
+  itemCommentRequired: boolean('item_comment_required').notNull().default(false), // «Зробити поле обов'язковим» — для провалених пунктів (мокап Checklist)
+  isLocked: boolean('is_locked').notNull().default(false),
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   scoring: text('scoring').notNull().default('percent'), // percent | points | pass_fail
   passScore: numeric('pass_score', { precision: 6, scale: 2 }).notNull().default('80'),
   criticalFailRule: text('critical_fail_rule').notNull().default('any_critical_fails_all'), // | none

@@ -28,7 +28,7 @@ function start(c: C) {
 }
 function go(checklistId: string) {
   const key = crypto.randomUUID()
-  navigateTo({ path: `/learn/checklists/run/${key}`, query: { checklistId, locationId: locationId.value || undefined } })
+  navigateTo({ path: `/learn/checklists/run/${key}`, query: { checklistId, locationId: locationId.value || undefined, locationName: locations.value.find(l => l.id === locationId.value)?.name } })
 }
 const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })
 </script>

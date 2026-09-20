@@ -70,6 +70,18 @@ export const SECURITY_EVENTS = [
 ] as const
 export type SecurityEvent = typeof SECURITY_EVENTS[number]
 
+/** Тип анкеты оценки (docs/20 §14.2): «За критеріями» | «За компетенціями». */
+export const ASSESSMENT_KINDS = ['by_criteria', 'by_competencies'] as const
+export type AssessmentKind = typeof ASSESSMENT_KINDS[number]
+
+/** Режим опроса (docs/20 §14.5): «Лінійне опитування» | «Опитування з умовами». */
+export const POLL_MODES = ['linear', 'conditional'] as const
+export type PollMode = typeof POLL_MODES[number]
+
+/** Типы вопросов опроса (docs/20 §14.7): «Одиночне» · «Множинне» · «Вільна відповідь» · «По шкалі». */
+export const POLL_QUESTION_KINDS = ['single', 'multi', 'free', 'scale'] as const
+export type PollQuestionKind = typeof POLL_QUESTION_KINDS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -84,4 +96,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   tag_scope: TAG_SCOPES,
   org_conflict_kind: ORG_CONFLICT_KINDS,
   security_event: SECURITY_EVENTS,
+  assessment_kind: ASSESSMENT_KINDS,
+  poll_mode: POLL_MODES,
+  poll_question_kind: POLL_QUESTION_KINDS,
 }

@@ -45,7 +45,7 @@ async function load() {
   try {
     const [d, r, card, rl, sc] = await Promise.all([
       api<ParamsData>(`/tasks/${id}/params`), api<Reminders>(`/tasks/${id}/reminders`), api<{ title: string }>(`/tasks/${id}`),
-      api<{ id: string, name: string }[]>('/automation-rules').catch(() => []), api<{ id: string, name: string }[]>('/rating-scales').catch(() => []),
+      api<{ id: string, name: string }[]>('/automation-rules').catch(() => []), api<{ id: string, name: string }[]>('/scales').catch(() => []),
     ])
     contentType.value = d.contentType
     title.value = card.title

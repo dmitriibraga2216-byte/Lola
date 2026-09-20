@@ -9,9 +9,10 @@ const { compressImage } = useMediaUpload()
 const offline = useOfflineRuns()
 const route = useRoute()
 const router = useRouter()
-interface Opt { value: number, label: string, color?: string }
-interface Item { id: string, group?: string, text: string, scaleId: string, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
-interface CL { id: string, title: string, items: Item[], scales: { id: string, options: Opt[], allowNa: boolean, passThreshold: string | null }[], subjectKind: string, requireSignature?: boolean }
+interface Opt { value: number, label: string }
+interface Item { id: string, group?: string, text: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
+/** Чек-лист за мокапом Checklist: одна шкала, у пункту вага; «N з M балів · %» рахує сервер, тут — попередній підрахунок тією ж формулою. */
+interface CL { id: string, title: string, items: Item[], scale: { options: Opt[], min: number, max: number } | null, maxPoints: number, subjectKind: string, requireSignature?: boolean, allowSkip: boolean, allowItemComment: boolean, itemCommentRequired: boolean, passScore: string, scoring: string, criticalFailRule: string }
 const cl = ref<CL | null>(null)
 const run = ref<OfflineRun | null>(null)
 const people = ref<{ id: string, fullName: string }[]>([])
@@ -38,7 +39,7 @@ onMounted(async () => {
   try { people.value = (await api<{ id: string, fullName: string }[]>('/people?limit=100')).map(p => ({ id: p.id, fullName: p.fullName })) } catch { people.value = me.value ? [{ id: me.value.user.id, fullName: me.value.user.fullName }] : [] }
 })
 const groups = computed(() => { const m = new Map<string, Item[]>(); for (const it of cl.value?.items ?? []) { const g = it.group || ''; m.set(g, [...(m.get(g) ?? []), it]) } return [...m] })
-const scaleOf = (it: Item) => cl.value?.scales.find(s => s.id === it.scaleId)
+const location = computed(() => (route.query.locationName ? String(route.query.locationName) : ''))
 const done = computed(() => cl.value ? cl.value.items.filter(i => run.value?.answers[i.id]?.value != null || run.value?.answers[i.id]?.isNa).length : 0)
 function set(id: string, patch: Partial<{ value: number | null, comment: string, isNa: boolean }>) {
   const a = run.value!.answers[id]!
@@ -74,45 +75,63 @@ async function finish() {
     router.push('/learn/checklists')
   } catch (err) { error.value = apiErrorOf(err).message; run.value!.finishedAt = undefined } finally { busy.value = false }
 }
-// Локальный предрасчёт результата для экрана «после завершения» (сервер — источник истины)
+// Локальный предрасчёт (та же формула, что scoreRun на сервере: доля (значення − min)/(max − min) × вага; сервер — источник истины)
 const localScore = computed(() => {
   if (!cl.value || !run.value) return null
-  let num = 0, den = 0
+  const sc = cl.value.scale ?? { min: 0, max: 1, options: [] }
+  const range = Math.max(sc.max - sc.min, 1e-9)
+  const pass = Number(cl.value.passScore)
+  let points = 0, maxPoints = 0
   const failed: string[] = []; const crit: string[] = []
   for (const it of cl.value.items) {
-    const a = run.value.answers[it.id]; const s = scaleOf(it)
+    const a = run.value.answers[it.id]
     if (!a || a.isNa || a.value == null) continue
-    const max = Math.max(...(s?.options ?? [{ value: 1 }]).map(o => o.value), 1); const pass = s?.passThreshold != null ? Number(s.passThreshold) : max
-    if (a.value < pass) { failed.push(it.id); if (it.isCritical) crit.push(it.id) }
-    num += a.value; den += max
+    const share = Math.min(1, Math.max(0, (a.value - sc.min) / range))
+    if (share * 100 < pass) { failed.push(it.id); if (it.isCritical) crit.push(it.id) }
+    points += share * it.weight; maxPoints += it.weight
   }
-  const pct = den ? Math.round((num / den) * 100) : 0
-  return { score: crit.length ? 0 : pct, passed: !crit.length && pct >= 80, failedItems: failed, criticalFailed: crit }
+  points = Math.round(points * 100) / 100
+  const pct = maxPoints ? Math.round((points / maxPoints) * 100) : 0
+  const critFail = cl.value.criticalFailRule === 'any_critical_fails_all' && crit.length > 0
+  const passed = !critFail && (cl.value.scoring === 'points' ? points >= pass : cl.value.scoring === 'pass_fail' ? !failed.length : pct >= pass)
+  return { score: critFail ? 0 : pct, points, maxPoints, passed, failedItems: failed, criticalFailed: crit }
 })
+const itemState = (it: Item) => { const a = run.value?.answers[it.id]; if (!a || (a.value == null && !a.isNa)) return 'open'; if (a.isNa) return 'na'; return localScore.value?.failedItems.includes(it.id) ? 'fail' : 'ok' }
+const commentRequired = (it: Item) => cl.value?.itemCommentRequired && itemState(it) === 'fail' && !(run.value?.answers[it.id]?.comment ?? '').trim()
 const itemText = (id: string) => cl.value?.items.find(i => i.id === id)?.text ?? ''
 </script>
 <template>
   <div v-if="cl && run">
-    <NuxtLink to="/learn/checklists" class="back">← {{ t('cl.title') }}</NuxtLink>
-    <h1>{{ cl.title }}</h1>
+    <div class="head">
+      <NuxtLink to="/learn/checklists" class="back" :aria-label="t('common.back')">←</NuxtLink>
+      <h1>{{ cl.title }}<template v-if="location"> · {{ location }}</template></h1>
+    </div>
+    <div class="bar" role="progressbar" :aria-valuenow="done" :aria-valuemax="cl.items.length"><i :style="{ width: `${cl.items.length ? (done / cl.items.length) * 100 : 0}%` }" /></div>
+    <p class="points"><b>{{ localScore?.points ?? 0 }}</b><span>{{ t('cl.pointsOf', { max: cl.maxPoints }) }} · {{ localScore?.score ?? 0 }}%</span></p>
     <p v-if="!offline.online.value" class="offline">{{ t('cl.offlineFill') }}</p>
     <p v-if="error" class="error">{{ error }}</p>
 
     <template v-if="stage === 'fill'">
       <section v-for="[g, items] in groups" :key="g" class="group">
         <h2 v-if="g">{{ g }}</h2>
-        <div v-for="it in items" :key="it.id" :class="['item', { flag: flagged.includes(it.id) }]" :data-testid="`item-${it.id}`">
-          <div class="item-text">{{ it.text }}<span v-if="it.isCritical" class="crit"> · {{ t('cl.critical') }}</span></div>
+        <div v-for="it in items" :key="it.id" :class="['item', itemState(it), { flag: flagged.includes(it.id) }]" :data-testid="`item-${it.id}`">
+          <div class="row">
+            <span :class="['mark', itemState(it)]" aria-hidden="true">{{ itemState(it) === 'ok' ? '✓' : itemState(it) === 'fail' ? '✕' : '?' }}</span>
+            <div class="item-text">{{ it.text }}<span v-if="it.isCritical" class="crit"> · {{ t('cl.critical') }}</span><div class="weight">{{ t('assess.weight') }} {{ it.weight }}</div></div>
+          </div>
           <div v-if="it.hint" class="hint">{{ it.hint }}</div>
-          <div class="scale">
-            <button v-for="o in scaleOf(it)?.options ?? []" :key="o.value" :class="['opt', { on: run.answers[it.id]?.value === o.value }]" @click="set(it.id, { value: o.value })">{{ o.label }}</button>
-            <button v-if="scaleOf(it)?.allowNa" :class="['opt', 'na', { on: run.answers[it.id]?.isNa }]" @click="set(it.id, { isNa: true })">{{ t('assess.na') }}</button>
+          <div class="scale" role="radiogroup" :aria-label="it.text">
+            <button v-for="o in cl.scale?.options ?? []" :key="o.value" type="button" role="radio" :aria-checked="run.answers[it.id]?.value === o.value" :class="['opt', { on: run.answers[it.id]?.value === o.value }]" @click="set(it.id, { value: o.value })">{{ o.label }}</button>
+            <button v-if="cl.allowSkip" type="button" :class="['opt', 'na', { on: run.answers[it.id]?.isNa }]" @click="set(it.id, { isNa: true })">{{ t('cl.skip') }}</button>
           </div>
           <div class="photos">
             <img v-for="(p, i) in run.answers[it.id]?.photos ?? []" :key="i" :src="p.dataUrl" alt="">
             <label :class="['chip', { req: it.requiresPhoto && !(run.answers[it.id]?.photos.length) }]">📷 {{ t('cl.photo') }}{{ it.requiresPhoto ? ' *' : '' }}<input type="file" accept="image/*" capture="environment" hidden @change="photo(it.id, $event)"></label>
           </div>
-          <input :value="run.answers[it.id]?.comment" class="field" :placeholder="t('assess.comment')" @input="set(it.id, { comment: ($event.target as HTMLInputElement).value })">
+          <div v-if="cl.allowItemComment" :class="['comment', { req: commentRequired(it) }]">
+            <div v-if="commentRequired(it)" class="req-label">{{ t('cl.commentRequired') }}</div>
+            <input :value="run.answers[it.id]?.comment" class="field" :placeholder="t('assess.comment')" :aria-label="`${t('assess.comment')}: ${it.text}`" @input="set(it.id, { comment: ($event.target as HTMLInputElement).value })">
+          </div>
         </div>
       </section>
       <section v-if="cl.requireSignature" class="sign">
@@ -121,13 +140,13 @@ const itemText = (id: string) => cl.value?.items.find(i => i.id === id)?.text ??
       </section>
       <div class="sticky">
         <span>{{ t('cl.doneN', { n: done, total: cl.items.length }) }}</span>
-        <button class="primary" :disabled="busy || done < cl.items.length || (cl.requireSignature && !run.signature)" data-testid="run-finish" @click="finish">{{ t('cl.finish') }}</button>
+        <button class="primary" :disabled="busy || done < cl.items.length || (cl.requireSignature && !run.signature)" data-testid="run-finish" @click="finish">{{ t('cl.finishRun') }}</button>
       </div>
     </template>
 
     <section v-else class="group">
       <h2>{{ t('cl.result') }}</h2>
-      <div :class="['score', (result ?? localScore)?.passed ? 'ok' : 'bad']">{{ (result ?? localScore)?.score }}%<small>{{ (result ?? localScore)?.passed ? t('cl.passed') : t('cl.failed') }}</small></div>
+      <div :class="['score', (result ?? localScore)?.passed ? 'ok' : 'bad']">{{ (result ?? localScore)?.score }}%<small>{{ (result ?? localScore)?.passed ? t('cl.passed') : t('cl.failed') }} · {{ localScore?.points }} {{ t('cl.pointsOf', { max: cl.maxPoints }) }}</small></div>
       <ul v-if="(result ?? localScore)?.failedItems.length" class="fails">
         <li v-for="id in (result ?? localScore)!.failedItems" :key="id">✕ {{ itemText(id) }}<b v-if="(result ?? localScore)!.criticalFailed.includes(id)"> — {{ t('cl.critical') }}</b></li>
       </ul>
@@ -151,11 +170,26 @@ const itemText = (id: string) => cl.value?.items.find(i => i.id === id)?.text ??
   <p v-else-if="error" class="error">{{ error }}</p>
 </template>
 <style scoped>
-.back { color: var(--color-ink-muted); text-decoration: none; font-weight: 700; }
-h1 { margin: var(--space-2) 0; font-weight: 900; }
+.head { display: flex; align-items: center; gap: var(--space-3); }
+.back { color: var(--color-ink); text-decoration: none; font-weight: 900; font-size: 22px; }
+h1 { margin: var(--space-2) 0; font-weight: 900; font-size: 20px; letter-spacing: -0.01em; }
+.bar { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); transition: width 0.2s; }
+.points { display: flex; align-items: baseline; gap: var(--space-2); margin: var(--space-2) 0; }
+.points b { font-family: ui-monospace, monospace; font-size: 30px; font-weight: 900; }
+.points span { color: var(--color-ink-muted); font-weight: 700; }
+.row { display: flex; gap: var(--space-3); align-items: flex-start; }
+.mark { width: 26px; height: 26px; border-radius: var(--radius-s); background: var(--color-bg); display: grid; place-items: center; font-weight: 900; flex: none; color: var(--color-ink-muted); }
+.mark.ok, .mark.fail { color: var(--color-ink); }
+.item.ok { background: var(--color-teal-soft); border: 2px solid var(--color-teal); border-radius: var(--radius-l); padding: var(--space-3); }
+.item.fail { background: var(--color-coral-soft); border: 2px solid var(--color-coral); border-radius: var(--radius-l); padding: var(--space-3); }
+.item.open, .item.na { background: var(--color-bg); border: 2px solid var(--color-bg-line); border-radius: var(--radius-l); padding: var(--space-3); }
+.weight { font-size: 12px; font-weight: 700; color: var(--color-ink-muted); margin-top: 2px; }
+.comment.req { background: var(--color-coral-soft); border: 2px solid var(--color-coral); border-radius: var(--radius-l); padding: var(--space-2) var(--space-3); }
+.req-label { font-size: 12px; font-weight: 900; letter-spacing: 0.06em; color: var(--color-coral-deep); margin-bottom: var(--space-1); }
 h2, h3 { margin: 0; font-weight: 800; }
 .group { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-3); margin-bottom: var(--space-3); }
-.item { display: grid; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--color-bg-line-soft); }
+.item { display: grid; gap: var(--space-2); }
 .item.flag { outline: 2px solid var(--color-coral); border-radius: var(--radius-m); padding: var(--space-2); }
 .item-text { font-weight: 700; }
 .crit { color: var(--color-coral-deep); font-size: var(--font-size-body-s); }

@@ -4,9 +4,9 @@ definePageMeta({ layout: false })
 const { t } = useI18n()
 const { api } = useApi()
 const route = useRoute()
-interface Opt { value: number, label: string, color?: string }
-interface Item { id: string, group?: string, text: string, scaleId: string, hint?: string }
-interface Form { wave: string, checklist: { id: string, title: string, items: Item[] }, scales: { id: string, options: Opt[], allowNa: boolean }[], location: { name: string, address: string | null } | null, expiresAt: string }
+interface Opt { value: number, label: string }
+interface Item { id: string, group?: string, text: string, hint?: string }
+interface Form { wave: string, checklist: { id: string, title: string, items: Item[], allowSkip: boolean, allowItemComment: boolean }, scale: { options: Opt[] } | null, location: { name: string, address: string | null } | null, expiresAt: string }
 const form = ref<Form | null>(null)
 const error = ref('')
 const answers = reactive<Record<string, { value: number | null, comment: string, isNa: boolean }>>({})
@@ -19,7 +19,6 @@ onMounted(async () => {
   catch (err) { error.value = apiErrorOf(err).message }
 })
 const groups = computed(() => { const m = new Map<string, Item[]>(); for (const it of form.value?.checklist.items ?? []) { const g = it.group || ''; m.set(g, [...(m.get(g) ?? []), it]) } return [...m] })
-const scaleOf = (it: Item) => form.value?.scales.find(s => s.id === it.scaleId)
 const answered = computed(() => Object.values(answers).filter(a => a.value != null || a.isNa).length)
 async function submit() {
   busy.value = true; error.value = ''; flagged.value = []
@@ -49,8 +48,8 @@ async function submit() {
           <p class="text">{{ it.text }}</p>
           <p v-if="it.hint" class="sub">{{ it.hint }}</p>
           <div class="opts">
-            <button v-for="o in scaleOf(it)?.options ?? []" :key="o.value" type="button" :class="['opt', { on: answers[it.id]?.value === o.value }]" @click="answers[it.id]!.value = o.value; answers[it.id]!.isNa = false">{{ o.label }}</button>
-            <button v-if="scaleOf(it)?.allowNa" type="button" :class="['opt', { on: answers[it.id]?.isNa }]" @click="answers[it.id]!.isNa = !answers[it.id]!.isNa; if (answers[it.id]!.isNa) answers[it.id]!.value = null">{{ t('cl.na') }}</button>
+            <button v-for="o in form.scale?.options ?? []" :key="o.value" type="button" :class="['opt', { on: answers[it.id]?.value === o.value }]" @click="answers[it.id]!.value = o.value; answers[it.id]!.isNa = false">{{ o.label }}</button>
+            <button v-if="form.checklist.allowSkip" type="button" :class="['opt', { on: answers[it.id]?.isNa }]" @click="answers[it.id]!.isNa = !answers[it.id]!.isNa; if (answers[it.id]!.isNa) answers[it.id]!.value = null">{{ t('cl.na') }}</button>
           </div>
           <input v-model="answers[it.id]!.comment" class="field" :placeholder="t('assess.comment')" maxlength="2000">
         </div>

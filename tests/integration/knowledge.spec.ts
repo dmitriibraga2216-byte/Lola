@@ -2,7 +2,7 @@ import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const { createArticle, updateArticle, search, revisions, blocksToText, linkArticle, feedback, confirmActual, reviewScan, knowledgeReport } = await import('../../server/services/knowledge')
-const { createSurvey, updateSurvey, mySurveys, respond, surveyReport, triggerCourseFeedback } = await import('../../server/services/surveys')
+const { createSurvey, updateSurvey, mySurveys, startSurvey, answerQuestion, surveyReport, triggerCourseFeedback } = await import('../../server/services/surveys')
 const { createNews, listNews, getNews, ackNews, newsReaders, trackView, publishScan } = await import('../../server/services/news')
 const { createWorkshop, submitWorkshop, reviewQueue, claim, grade, workshopForLearner, workshopSlaScan, addComment } = await import('../../server/services/workshops')
 const { createCourse, addModule, addLesson, publishCourse } = await import('../../server/services/courses')
@@ -165,24 +165,29 @@ describe('база знаний: поиск находит и статью, и �
 })
 
 describe('опросы', () => {
-  it('анонимный опрос: дедуп ответов, порог 5 скрывает отчёт, потом распределение и среднее', async () => {
+  it('анонимный опрос: дедуп по участию, порог 5 скрывает отчёт, потом распределение и среднее', async () => {
     const s = await createSurvey(ctx(), {
-      title: `Анонімне ${Date.now()}`, kind: 'survey', isAnonymous: true,
-      questions: [{ id: 'q1', type: 'scale', text: 'Оцініть 1–5', required: true }, { id: 'q2', type: 'yesno', text: 'Рекомендуєте?' }, { id: 'q3', type: 'text', text: 'Коментар', required: false }],
+      title: `Анонімне ${Date.now()}`, kind: 'survey', mode: 'linear', isAnonymous: true, isConfidential: false, showResults: false, tags: [],
+      questions: [
+        { id: 'q1', type: 'scale', text: 'Оцініть 1–5', required: true },
+        { id: 'q2', type: 'single', text: 'Рекомендуєте?', options: [{ id: 'yes', text: 'Так' }, { id: 'no', text: 'Ні' }] },
+        { id: 'q3', type: 'free', text: 'Коментар', required: false },
+      ],
     })
     surveyIds.push(s.id)
     await updateSurvey(ctx(), s.id, { status: 'active' })
 
     expect((await mySurveys(learner())).some(x => x.id === s.id)).toBe(true)
 
-    const bad = await respond(learner(), s.id, { q2: 'yes' })
-    expect(bad.ok).toBe(false)
-    if (!bad.ok) expect(bad.code).toBe('incomplete')
-
-    expect((await respond(learner(), s.id, { q1: 4, q2: 'yes' })).ok).toBe(true)
-    const again = await respond(learner(), s.id, { q1: 5, q2: 'no' })
-    expect(again.ok).toBe(false)
-    if (!again.ok) expect(again.code).toBe('already')
+    // Сервер отдаёт вопросы по одному; обязательный без ответа не пропускает
+    const st = await startSurvey(learner(), s.id)
+    expect(st.ok && st.question?.id).toBe('q1')
+    const bad = await answerQuestion(learner(), s.id, 'q1', null)
+    expect(bad).toMatchObject({ ok: false, code: 'required' })
+    expect(await answerQuestion(learner(), s.id, 'q1', { value: 4 })).toMatchObject({ ok: true, done: false, question: { id: 'q2' } })
+    expect(await answerQuestion(learner(), s.id, 'q2', { optionId: 'yes' })).toMatchObject({ ok: true, done: false, question: { id: 'q3' } })
+    expect(await answerQuestion(learner(), s.id, 'q3', null)).toMatchObject({ ok: true, done: true })
+    expect(await startSurvey(learner(), s.id)).toMatchObject({ ok: false, code: 'already' })
     expect((await mySurveys(learner())).some(x => x.id === s.id)).toBe(false)
 
     // Ответ анонимен: user_id null
@@ -194,7 +199,7 @@ describe('опросы', () => {
 
     // Досыпаем 4 ответа напрямую — порог достигнут
     for (let i = 0; i < 4; i++) {
-      await admin`insert into survey_responses (tenant_id, survey_id, respondent_hash, answers) values (${tenantId}, ${s.id}, ${`h${i}`}, ${JSON.stringify({ q1: 5, q2: i % 2 ? 'yes' : 'no' })}::jsonb)`
+      await admin`insert into survey_responses (tenant_id, survey_id, answers) values (${tenantId}, ${s.id}, ${JSON.stringify({ q1: { value: 5 }, q2: { optionId: i % 2 ? 'yes' : 'no' } })}::jsonb)`
     }
     const rep = await surveyReport(ctx(), s.id)
     expect(rep!.hidden).toBe(false)
@@ -211,7 +216,7 @@ describe('опросы', () => {
     await addLesson(ctx(), { moduleId: m!.id, title: 'У', itemType: 'resource', resource: { body: text('<p>x</p>') }, isRequired: true, videoThresholdPct: 90 })
     await publishCourse(ctx(), c.id, 'v1')
 
-    const s = await createSurvey(ctx(), { title: `Оцінка курсу ${Date.now()}`, kind: 'course_feedback', isAnonymous: false, questions: [{ id: 'q1', type: 'scale', text: 'Як вам курс?' }], triggerCourseId: c.id })
+    const s = await createSurvey(ctx(), { title: `Оцінка курсу ${Date.now()}`, kind: 'course_feedback', mode: 'linear', isAnonymous: false, isConfidential: false, showResults: false, tags: [], questions: [{ id: 'q1', type: 'scale', text: 'Як вам курс?' }], triggerCourseId: c.id })
     surveyIds.push(s.id)
     await updateSurvey(ctx(), s.id, { status: 'active' })
 

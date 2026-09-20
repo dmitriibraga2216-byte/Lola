@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Перевірте дані прогону')
   const r = await finishRun({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data)
   if (!r.ok) {
-    const msg: Record<string, string> = { not_found: 'Прогін не знайдено', incomplete: 'Відмітьте всі пункти', photo_required: 'Для цих пунктів потрібне фото', action_plan_required: 'Чек-лист не пройдено — додайте план дій: що виправити, хто відповідальний, до коли', signature_required: 'Потрібен підпис того, кого перевіряли' }
+    const msg: Record<string, string> = { not_found: 'Прогін не знайдено', incomplete: 'Відмітьте всі пункти', photo_required: 'Для цих пунктів потрібне фото', comment_required: 'Для провалених пунктів коментар обовʼязковий', action_plan_required: 'Чек-лист не пройдено — додайте план дій: що виправити, хто відповідальний, до коли', signature_required: 'Потрібен підпис того, кого перевіряли' }
     return apiError(event, r.code === 'not_found' ? 404 : 422, `checklist.${r.code}`, msg[r.code]!, { itemIds: r.itemIds })
   }
   return apiData(r)

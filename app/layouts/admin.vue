@@ -39,6 +39,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/birthdays', label: t('admin.nav.birthdays'), show: hasScope('people.view') },
     { to: '/admin/contacts', label: t('admin.nav.contacts'), show: hasScope('people.view') },
     { to: '/admin/knowledge/access', label: t('admin.nav.kbAccess'), show: hasScope('knowledge.manage') },
+    { to: '/admin/assessment/forms', label: t('admin.nav.assessForms'), show: hasScope('assessment.manage') },
     { to: '/admin/assessment/cycles', label: t('admin.nav.assessCycles'), show: hasScope('assessment.run') },
     { to: '/admin/checklists', label: t('admin.nav.checklists'), show: hasScope('checklist.manage') },
   ] },

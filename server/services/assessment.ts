@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import {
-  assessmentAnswers, assessmentCycles, assessmentForms, assessmentTasks, competencies, competencyAssessments, criteria, criteriaGroups,
-  locations, ratingScales, userPlacements, users,
+  assessmentAnswers, assessmentCycles, assessmentForms, assessmentItems, assessmentTasks, competencies, competencyAssessments, criteria, criteriaGroups,
+  locations, scaleLevels, scales, userPlacements, users,
 } from '../db/schema'
 import type { Audience } from '../../shared/schemas/assignments'
+import type { AssessmentFormInput, CriteriaGroupInput, CriterionInput } from '../../shared/schemas/assessment'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -12,37 +13,49 @@ import { enqueueNotification } from './notifications'
 
 interface Ctx { tenantId: string, actorId: string }
 
-export interface ScaleOption { value: number, label: string, color?: string }
+/** Шкала уровней (scales.kind=levels) в виде, удобном для подсчёта: значения и подписи. */
+export interface ScaleOption { value: number, label: string }
+export interface ScaleInfo { id: string, name: string, options: ScaleOption[], min: number, max: number }
 
-// ── Шкалы, группы, критерии, анкеты (docs/20 §3.1–3.2) ──────────────────
-
-export async function listScales(ctx: Ctx) {
-  return withTenant(ctx.tenantId, ctx.actorId, tx => tx.select().from(ratingScales).orderBy(asc(ratingScales.createdAt)))
+export async function loadScale(tx: TenantTx, scaleId: string): Promise<ScaleInfo | null> {
+  const [s] = await tx.select({ id: scales.id, name: scales.name }).from(scales).where(eq(scales.id, scaleId))
+  if (!s) return null
+  const levels = await tx.select({ label: scaleLevels.label, value: scaleLevels.value }).from(scaleLevels).where(eq(scaleLevels.scaleId, scaleId)).orderBy(asc(scaleLevels.sortOrder))
+  const options = levels.filter(l => l.value != null).map(l => ({ value: Number(l.value), label: l.label }))
+  const values = options.map(o => o.value)
+  return { id: s.id, name: s.name, options, min: values.length ? Math.min(...values) : 0, max: values.length ? Math.max(...values) : 1 }
 }
 
-export async function upsertScale(ctx: Ctx, input: { id?: string, name: string, kind: string, options: ScaleOption[], passThreshold?: number | null, allowNa?: boolean }) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const values = { name: input.name, kind: input.kind, options: input.options, passThreshold: input.passThreshold != null ? String(input.passThreshold) : null, allowNa: input.allowNa ?? true }
-    if (input.id) {
-      const [r] = await tx.update(ratingScales).set({ ...values, updatedAt: new Date() }).where(eq(ratingScales.id, input.id)).returning()
-      return r ?? null
-    }
-    const [r] = await tx.insert(ratingScales).values({ tenantId: ctx.tenantId, ...values }).returning()
-    return r!
-  })
-}
+// ── Словарь: группы и критерии (docs/20 §3.2, §14.6) ─────────────────────
 
 export async function listGroups(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const groups = await tx.select().from(criteriaGroups).orderBy(asc(criteriaGroups.sort), asc(criteriaGroups.name))
     const items = await tx.select().from(criteria).orderBy(asc(criteria.sort), asc(criteria.createdAt))
-    return groups.map(g => ({ ...g, criteria: items.filter(c => c.groupId === g.id) }))
+    // «Де використовуються» (мокап CriteriaGroups): в анкетах, в чек-листах
+    const inForms = new Map((await tx.select({ id: assessmentItems.criterionId, n: sql<number>`count(distinct ${assessmentItems.formId})::int` }).from(assessmentItems).groupBy(assessmentItems.criterionId)).map(r => [r.id, r.n]))
+    const inChecklists = new Map((await tx.execute(sql`select (i->>'criterionId')::uuid as id, count(distinct c.id)::int as n from checklists c, jsonb_array_elements(c.items) i where i->>'criterionId' is not null group by 1`) as unknown as { id: string, n: number }[]).map(r => [r.id, r.n]))
+    return groups.map(g => ({
+      ...g,
+      criteria: items.filter(c => c.groupId === g.id).map(c => ({ ...c, usedInForms: inForms.get(c.id) ?? 0, usedInChecklists: inChecklists.get(c.id) ?? 0 })),
+    }))
   })
 }
 
-export async function upsertGroup(ctx: Ctx, input: { id?: string, name: string, description?: string, sort?: number, weight?: number }) {
+/** Сводка библиотеки: «В анкетах оцінки N · В чек-листах N · Прив'язано до компетенцій N». */
+export async function libraryUsage(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const values = { name: input.name, description: input.description ?? null, sort: input.sort ?? 0, weight: String(input.weight ?? 1) }
+    const [r] = await tx.execute(sql`
+      select (select count(distinct form_id)::int from assessment_items) as forms,
+             (select count(distinct c.id)::int from checklists c, jsonb_array_elements(c.items) i where i->>'criterionId' is not null) as checklists,
+             (select count(*)::int from criteria where competency_id is not null) as competencies`) as unknown as { forms: number, checklists: number, competencies: number }[]
+    return r!
+  })
+}
+
+export async function upsertGroup(ctx: Ctx, input: CriteriaGroupInput) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const values = { name: input.name, description: input.description ?? null, sort: input.sort ?? 0, weight: String(input.weight ?? 1), tags: input.tags ?? [] }
     if (input.id) {
       const [r] = await tx.update(criteriaGroups).set({ ...values, updatedAt: new Date() }).where(eq(criteriaGroups.id, input.id)).returning()
       return r ?? null
@@ -52,12 +65,11 @@ export async function upsertGroup(ctx: Ctx, input: { id?: string, name: string, 
   })
 }
 
-export async function upsertCriterion(ctx: Ctx, input: { id?: string, groupId: string, text: string, description?: string, scaleId: string, weight?: number, isCritical?: boolean, requiresCommentBelow?: number | null, competencyId?: string | null, requiresPhoto?: boolean, sort?: number }) {
+export async function upsertCriterion(ctx: Ctx, input: CriterionInput) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const values = {
-      groupId: input.groupId, text: input.text, description: input.description ?? null, scaleId: input.scaleId, weight: String(input.weight ?? 1),
-      isCritical: input.isCritical ?? false, requiresCommentBelow: input.requiresCommentBelow != null ? String(input.requiresCommentBelow) : null,
-      competencyId: input.competencyId ?? null, requiresPhoto: input.requiresPhoto ?? false, sort: input.sort ?? 0,
+      groupId: input.groupId, text: input.text, description: input.description ?? null, weight: String(input.weight ?? 1),
+      isCritical: input.isCritical ?? false, competencyId: input.competencyId ?? null, requiresPhoto: input.requiresPhoto ?? false, sort: input.sort ?? 0,
     }
     if (input.id) {
       const [r] = await tx.update(criteria).set({ ...values, updatedAt: new Date() }).where(eq(criteria.id, input.id)).returning()
@@ -68,49 +80,128 @@ export async function upsertCriterion(ctx: Ctx, input: { id?: string, groupId: s
   })
 }
 
-export async function deleteCriterion(ctx: Ctx, id: string) {
+export type DeleteCriterionResult = { ok: true } | { ok: false, code: 'not_found' | 'in_use', forms?: number }
+
+/** Критерий, который уже стоит в замороженной анкете, удалить нельзя — состав заморожен (docs/20 §14.4). */
+export async function deleteCriterion(ctx: Ctx, id: string): Promise<DeleteCriterionResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const locked = await tx.select({ id: assessmentItems.formId }).from(assessmentItems).innerJoin(assessmentForms, eq(assessmentForms.id, assessmentItems.formId))
+      .where(and(eq(assessmentItems.criterionId, id), eq(assessmentForms.isLocked, true)))
+    if (locked.length) return { ok: false as const, code: 'in_use' as const, forms: locked.length }
     const [r] = await tx.delete(criteria).where(eq(criteria.id, id)).returning({ id: criteria.id })
-    return !!r
+    return r ? { ok: true as const } : { ok: false as const, code: 'not_found' as const }
   })
 }
+
+// ── Анкеты (docs/20 §14.2, §14.4) ─────────────────────────────────────────
+
+/** Роли оценщиков по умолчанию (docs/20 Г-20.1): вес и анонимность — свойство роли (Г-20.2). */
+export const RATER_ROLE_DEFAULTS = [
+  { kind: 'manager', weight: 2, anonymous: false },
+  { kind: 'self', weight: 0, anonymous: false },
+  { kind: 'peer', weight: 1, anonymous: true },
+  { kind: 'subordinate', weight: 1, anonymous: true },
+  { kind: 'mentor', weight: 1, anonymous: false },
+] as const
 
 export async function listForms(ctx: Ctx) {
-  return withTenant(ctx.tenantId, ctx.actorId, tx => tx.select().from(assessmentForms).orderBy(desc(assessmentForms.createdAt)))
-}
-
-export async function upsertForm(ctx: Ctx, input: { id?: string, title: string, description?: string, groupIds: string[], isActive?: boolean }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const values = { title: input.title, description: input.description ?? null, groupIds: input.groupIds, isActive: input.isActive ?? true }
-    if (input.id) {
-      const [r] = await tx.update(assessmentForms).set({ ...values, updatedAt: new Date() }).where(eq(assessmentForms.id, input.id)).returning()
-      return r ?? null
-    }
-    const [r] = await tx.insert(assessmentForms).values({ tenantId: ctx.tenantId, ...values }).returning()
-    return r!
+    return tx.execute(sql`
+      select f.id, f.title, f.kind, f.is_active, f.is_locked, f.tags, f.updated_at, f.created_at, s.name as scale_name,
+             (select count(*)::int from assessment_items i where i.form_id = f.id) as criteria_count,
+             (select count(*)::int from assessment_cycles c where c.form_id = f.id) as cycles_count
+      from assessment_forms f join scales s on s.id = f.scale_id
+      order by f.updated_at desc limit 500`) as unknown as Promise<Record<string, unknown>[]>
   })
 }
 
-/** Анкета в развёрнутом виде: группы с критериями и шкалами — для заполнения и подсчёта. */
-export async function formStructure(tx: TenantTx, formId: string) {
+export async function getForm(ctx: Ctx, id: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [f] = await tx.select().from(assessmentForms).where(eq(assessmentForms.id, id))
+    if (!f) return null
+    const items = await tx.select({ criterionId: assessmentItems.criterionId, norm: assessmentItems.norm, cluster: assessmentItems.cluster, sortOrder: assessmentItems.sortOrder, text: criteria.text, groupId: criteria.groupId, groupName: criteriaGroups.name })
+      .from(assessmentItems).innerJoin(criteria, eq(criteria.id, assessmentItems.criterionId)).innerJoin(criteriaGroups, eq(criteriaGroups.id, criteria.groupId))
+      .where(eq(assessmentItems.formId, id)).orderBy(asc(assessmentItems.sortOrder))
+    const scale = await loadScale(tx, f.scaleId)
+    return { ...f, scale, items: items.map(i => ({ ...i, norm: Number(i.norm) })), raterRoles: RATER_ROLE_DEFAULTS }
+  })
+}
+
+export type FormSaveResult = { ok: true, form: typeof assessmentForms.$inferSelect } | { ok: false, code: 'not_found' | 'locked' | 'bad_scale' | 'bad_norm', fields?: string[], max?: number }
+
+/** Что из замороженной анкеты пытались изменить (docs/20 §14.4): шкала, состав критериев, нормы, тип, правила комментирования. */
+function frozenDiff(before: typeof assessmentForms.$inferSelect, beforeItems: { criterionId: string, norm: string, cluster: string | null }[], input: AssessmentFormInput): string[] {
+  const changed: string[] = []
+  if (before.kind !== input.kind) changed.push('kind')
+  if (before.scaleId !== input.scaleId) changed.push('scaleId')
+  for (const k of ['allowCommentGroups', 'commentGroupsRequired', 'commentWhenAboveNorm', 'commentWhenBelowNorm', 'commentWhenEqual', 'zeroMeansNoGrade'] as const) if (before[k] !== input[k]) changed.push(k)
+  const was = new Map(beforeItems.map(i => [i.criterionId, i]))
+  if (was.size !== input.items.length || input.items.some(i => !was.has(i.criterionId))) changed.push('items')
+  else if (input.items.some(i => Number(was.get(i.criterionId)!.norm) !== i.norm)) changed.push('norms')
+  return changed
+}
+
+export async function saveForm(ctx: Ctx, input: AssessmentFormInput): Promise<FormSaveResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const scale = await loadScale(tx, input.scaleId)
+    if (!scale || !scale.options.length) return { ok: false as const, code: 'bad_scale' as const }
+    const badNorm = input.items.filter(i => i.norm < scale.min || i.norm > scale.max)
+    if (badNorm.length) return { ok: false as const, code: 'bad_norm' as const, fields: badNorm.map(i => i.criterionId), max: scale.max }
+    const params = {
+      kind: input.kind, scaleId: input.scaleId, allowCommentGroups: input.allowCommentGroups, commentGroupsRequired: input.commentGroupsRequired,
+      commentWhenAboveNorm: input.commentWhenAboveNorm, commentWhenBelowNorm: input.commentWhenBelowNorm, commentWhenEqual: input.commentWhenEqual, zeroMeansNoGrade: input.zeroMeansNoGrade,
+    }
+    const card = { title: input.title, description: input.description ?? null, instruction: input.instruction ?? [], tags: input.tags, isActive: input.isActive }
+    if (input.id) {
+      const [before] = await tx.select().from(assessmentForms).where(eq(assessmentForms.id, input.id))
+      if (!before) return { ok: false as const, code: 'not_found' as const }
+      const beforeItems = await tx.select({ criterionId: assessmentItems.criterionId, norm: assessmentItems.norm, cluster: assessmentItems.cluster }).from(assessmentItems).where(eq(assessmentItems.formId, input.id))
+      if (before.isLocked) {
+        const changed = frozenDiff(before, beforeItems, input)
+        if (changed.length) return { ok: false as const, code: 'locked' as const, fields: changed }
+        const [f] = await tx.update(assessmentForms).set({ ...card, updatedAt: new Date() }).where(eq(assessmentForms.id, input.id)).returning()
+        await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.form.update', entity: 'assessment_form', entityId: input.id, before: { title: before.title }, after: { title: input.title, locked: true } })
+        return { ok: true as const, form: f! }
+      }
+      const [f] = await tx.update(assessmentForms).set({ ...card, ...params, updatedAt: new Date() }).where(eq(assessmentForms.id, input.id)).returning()
+      await tx.delete(assessmentItems).where(eq(assessmentItems.formId, input.id))
+      await tx.insert(assessmentItems).values(input.items.map((i, idx) => ({ tenantId: ctx.tenantId, formId: input.id!, criterionId: i.criterionId, norm: String(i.norm), cluster: i.cluster ?? null, sortOrder: idx })))
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.form.update', entity: 'assessment_form', entityId: input.id, before: { title: before.title, kind: before.kind, scaleId: before.scaleId, items: beforeItems.length }, after: { title: input.title, kind: input.kind, scaleId: input.scaleId, items: input.items.length } })
+      return { ok: true as const, form: f! }
+    }
+    const [f] = await tx.insert(assessmentForms).values({ tenantId: ctx.tenantId, ...card, ...params }).returning()
+    await tx.insert(assessmentItems).values(input.items.map((i, idx) => ({ tenantId: ctx.tenantId, formId: f!.id, criterionId: i.criterionId, norm: String(i.norm), cluster: i.cluster ?? null, sortOrder: idx })))
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.form.create', entity: 'assessment_form', entityId: f!.id, after: { title: input.title, kind: input.kind, items: input.items.length } })
+    return { ok: true as const, form: f! }
+  })
+}
+
+/** Заморозка при первом заполнении (docs/20 §14.4): дальше шкала, состав и нормы не меняются. */
+export async function lockForm(tx: TenantTx, tenantId: string, formId: string, actorId: string | null) {
+  const [r] = await tx.update(assessmentForms).set({ isLocked: true, updatedAt: new Date() }).where(and(eq(assessmentForms.id, formId), eq(assessmentForms.isLocked, false))).returning({ id: assessmentForms.id })
+  if (r) await recordAudit(tx, { tenantId, actorId, action: 'assessment.form.lock', entity: 'assessment_form', entityId: formId, after: { isLocked: true } })
+}
+
+export interface FormCriterion { id: string, text: string, description: string | null, weight: number, isCritical: boolean, competencyId: string | null, norm: number, cluster: string | null }
+export interface FormGroup { id: string, name: string, description: string | null, weight: number, criteria: FormCriterion[] }
+export interface FormStructure { form: typeof assessmentForms.$inferSelect, scale: ScaleInfo, groups: FormGroup[] }
+
+/** Анкета в развёрнутом виде: группы (из словаря) с критериями и нормами, одна шкала — для заполнения и подсчёта. */
+export async function formStructure(tx: TenantTx, formId: string): Promise<FormStructure | null> {
   const [form] = await tx.select().from(assessmentForms).where(eq(assessmentForms.id, formId))
   if (!form) return null
-  const groups = form.groupIds.length ? await tx.select().from(criteriaGroups).where(inArray(criteriaGroups.id, form.groupIds)).orderBy(asc(criteriaGroups.sort)) : []
-  const items = groups.length ? await tx.select().from(criteria).where(inArray(criteria.groupId, groups.map(g => g.id))).orderBy(asc(criteria.sort)) : []
-  const scaleIds = [...new Set(items.map(c => c.scaleId))]
-  const scales = scaleIds.length ? await tx.select().from(ratingScales).where(inArray(ratingScales.id, scaleIds)) : []
-  const scaleById = new Map(scales.map(s => [s.id, s]))
-  return {
-    form,
-    groups: groups.map(g => ({
-      id: g.id, name: g.name, description: g.description, weight: Number(g.weight),
-      criteria: items.filter(c => c.groupId === g.id).map(c => ({
-        id: c.id, text: c.text, description: c.description, weight: Number(c.weight), isCritical: c.isCritical,
-        requiresCommentBelow: c.requiresCommentBelow != null ? Number(c.requiresCommentBelow) : null, competencyId: c.competencyId,
-        scale: scaleById.get(c.scaleId) ?? null,
-      })),
-    })),
+  const scale = await loadScale(tx, form.scaleId)
+  if (!scale) return null
+  const rows = await tx.select({ item: assessmentItems, crit: criteria, group: criteriaGroups })
+    .from(assessmentItems).innerJoin(criteria, eq(criteria.id, assessmentItems.criterionId)).innerJoin(criteriaGroups, eq(criteriaGroups.id, criteria.groupId))
+    .where(eq(assessmentItems.formId, formId)).orderBy(asc(criteriaGroups.sort), asc(assessmentItems.sortOrder))
+  const groups: FormGroup[] = []
+  for (const r of rows) {
+    let g = groups.find(x => x.id === r.group.id)
+    if (!g) { g = { id: r.group.id, name: r.group.name, description: r.group.description, weight: Number(r.group.weight), criteria: [] }; groups.push(g) }
+    g.criteria.push({ id: r.crit.id, text: r.crit.text, description: r.crit.description, weight: Number(r.crit.weight), isCritical: r.crit.isCritical, competencyId: r.crit.competencyId, norm: Number(r.item.norm), cluster: r.item.cluster })
   }
+  return { form, scale, groups }
 }
 
 // ── Циклы (docs/20 §3.3, §7.1) ─────────────────────────────────────────
@@ -278,27 +369,54 @@ export async function getTask(ctx: Ctx, taskId: string) {
     const answers = await tx.select().from(assessmentAnswers).where(eq(assessmentAnswers.taskId, taskId))
     // Кто увидит комментарии (docs/20 §5.2): при анонимности — руководитель; иначе и сам человек
     const commentsVisibleTo = c!.anonymousForSubject ? 'manager' : 'subject_and_manager'
-    return { task: t, cycle: c!, subject, structure, answers: answers.map(a => ({ criterionId: a.criterionId, value: a.value != null ? Number(a.value) : null, comment: a.comment, isNa: a.isNa })), commentsVisibleTo }
+    const role = RATER_ROLE_DEFAULTS.find(r => r.kind === t.raterKind)
+    return {
+      task: t, cycle: c!, subject, structure,
+      answers: answers.map(a => ({ criterionId: a.criterionId, value: a.value != null ? Number(a.value) : null, comment: a.comment, isNa: a.isNa })),
+      groupComments: t.groupComments as Record<string, string>,
+      commentsVisibleTo,
+      // Г-20.2: анонимность — свойство роли; порог показа — из цикла
+      isAnonymous: role?.anonymous ?? false, minRatersToShow: c!.minRatersToShow,
+    }
   })
 }
 
-/** Автосохранение ответов; проверка «комментарий ниже порога» — при отправке. */
-export async function saveAnswers(ctx: Ctx, taskId: string, answers: { criterionId: string, value: number | null, comment?: string | null, isNa?: boolean }[]) {
+/** Автосохранение ответов; первое сохранение замораживает анкету (docs/20 §14.4). Правила комментирования — при отправке. */
+export async function saveAnswers(ctx: Ctx, taskId: string, answers: { criterionId: string, value: number | null, comment?: string | null, isNa?: boolean }[], groupComments?: Record<string, string>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [t] = await tx.select().from(assessmentTasks).where(and(eq(assessmentTasks.id, taskId), eq(assessmentTasks.raterUserId, ctx.actorId)))
     if (!t || !['pending', 'in_progress'].includes(t.status)) return null
+    const [c] = await tx.select({ formId: assessmentCycles.formId }).from(assessmentCycles).where(eq(assessmentCycles.id, t.cycleId))
+    const structure = await formStructure(tx, c!.formId)
+    if (!structure) return null
+    const known = new Set(structure.groups.flatMap(g => g.criteria.map(cr => cr.id)))
+    const scaleValues = new Set(structure.scale.options.map(o => o.value))
     for (const a of answers) {
+      if (!known.has(a.criterionId)) continue
+      if (a.value != null && !scaleValues.has(a.value)) return { saved: 0, badValue: a.criterionId }
       await tx.insert(assessmentAnswers).values({ tenantId: ctx.tenantId, taskId, criterionId: a.criterionId, value: a.value != null ? String(a.value) : null, comment: a.comment ?? null, isNa: a.isNa ?? false })
         .onConflictDoUpdate({ target: [assessmentAnswers.taskId, assessmentAnswers.criterionId], set: { value: a.value != null ? String(a.value) : null, comment: a.comment ?? null, isNa: a.isNa ?? false, updatedAt: new Date() } })
     }
-    if (t.status === 'pending') await tx.update(assessmentTasks).set({ status: 'in_progress', updatedAt: new Date() }).where(eq(assessmentTasks.id, taskId))
+    const patch: Partial<typeof assessmentTasks.$inferInsert> = { updatedAt: new Date() }
+    if (t.status === 'pending') patch.status = 'in_progress'
+    if (groupComments && structure.form.allowCommentGroups) patch.groupComments = groupComments
+    await tx.update(assessmentTasks).set(patch).where(eq(assessmentTasks.id, taskId))
+    await lockForm(tx, ctx.tenantId, c!.formId, ctx.actorId)
     return { saved: answers.length }
   })
 }
 
-export type SubmitResult = { ok: true } | { ok: false, code: 'not_found' | 'bad_status' | 'incomplete' | 'comment_required', criterionIds?: string[] }
+export type SubmitResult = { ok: true } | { ok: false, code: 'not_found' | 'bad_status' | 'incomplete' | 'comment_required' | 'group_comment_required', criterionIds?: string[], groupIds?: string[] }
 
-/** Отправка: все критерии отвечены (или n/a), комментарий обязателен ниже порога (docs/20 §13.2). */
+/** Правило комментирования для оценки против нормы (docs/20 §14.2): комментарий обязателен ниже нормы, разрешён выше/при совпадении. */
+export function commentRule(form: { commentWhenBelowNorm: boolean, commentWhenAboveNorm: boolean, commentWhenEqual: boolean, zeroMeansNoGrade: boolean }, value: number | null, norm: number): 'required' | 'allowed' | 'none' {
+  if (value == null || (form.zeroMeansNoGrade && value === 0)) return 'none'
+  if (value < norm) return form.commentWhenBelowNorm ? 'required' : 'none'
+  if (value > norm) return form.commentWhenAboveNorm ? 'allowed' : 'none'
+  return form.commentWhenEqual ? 'allowed' : 'none'
+}
+
+/** Отправка: все критерии отвечены (или n/a), комментарий обязателен ниже нормы (docs/20 §13.2, §14.2), комментарий к группе — по правилу. */
 export async function submitTask(ctx: Ctx, taskId: string): Promise<SubmitResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [t] = await tx.select().from(assessmentTasks).where(and(eq(assessmentTasks.id, taskId), eq(assessmentTasks.raterUserId, ctx.actorId)))
@@ -306,19 +424,26 @@ export async function submitTask(ctx: Ctx, taskId: string): Promise<SubmitResult
     if (!['pending', 'in_progress'].includes(t.status)) return { ok: false as const, code: 'bad_status' as const }
     const [c] = await tx.select().from(assessmentCycles).where(eq(assessmentCycles.id, t.cycleId))
     const structure = await formStructure(tx, c!.formId)
+    if (!structure) return { ok: false as const, code: 'not_found' as const }
     const answers = new Map((await tx.select().from(assessmentAnswers).where(eq(assessmentAnswers.taskId, taskId))).map(a => [a.criterionId, a]))
     const missing: string[] = []
     const needComment: string[] = []
-    for (const g of structure?.groups ?? []) {
+    const needGroupComment: string[] = []
+    const groupComments = t.groupComments as Record<string, string>
+    for (const g of structure.groups) {
       for (const cr of g.criteria) {
         const a = answers.get(cr.id)
         if (!a || (a.value == null && !a.isNa)) { missing.push(cr.id); continue }
-        if (!a.isNa && cr.requiresCommentBelow != null && Number(a.value) < cr.requiresCommentBelow && !(a.comment ?? '').trim()) needComment.push(cr.id)
+        if (a.isNa) continue
+        if (commentRule(structure.form, Number(a.value), cr.norm) === 'required' && !(a.comment ?? '').trim()) needComment.push(cr.id)
       }
+      if (structure.form.allowCommentGroups && structure.form.commentGroupsRequired && !(groupComments[g.id] ?? '').trim()) needGroupComment.push(g.id)
     }
     if (missing.length) return { ok: false as const, code: 'incomplete' as const, criterionIds: missing }
     if (needComment.length) return { ok: false as const, code: 'comment_required' as const, criterionIds: needComment }
+    if (needGroupComment.length) return { ok: false as const, code: 'group_comment_required' as const, groupIds: needGroupComment }
     await tx.update(assessmentTasks).set({ status: 'submitted', submittedAt: new Date(), updatedAt: new Date() }).where(eq(assessmentTasks.id, taskId))
+    await lockForm(tx, ctx.tenantId, c!.formId, ctx.actorId)
     return { ok: true as const }
   })
 }
@@ -365,13 +490,15 @@ export async function computeResults(tx: TenantTx, cycleId: string, subjectUserI
   const kindOfTask = new Map(tasks.map(t => [t.id, t.raterKind]))
   const ratersByKind: Record<string, number> = {}
   for (const t of tasks) ratersByKind[t.raterKind] = (ratersByKind[t.raterKind] ?? 0) + 1
+  // «Значення 0 означає відсутність оцінки» — ноль вне знаменателя, как n/a
+  const counted = (a: typeof assessmentAnswers.$inferSelect) => !a.isNa && a.value != null && !(structure.form.zeroMeansNoGrade && Number(a.value) === 0)
 
   const groups: GroupScore[] = structure.groups.map((g) => {
     const byKind: Record<string, { avg: number | null, n: number }> = {}
     for (const kind of new Set(tasks.map(t => t.raterKind))) {
       let num = 0, den = 0
       for (const cr of g.criteria) {
-        for (const a of answers.filter(a => a.criterionId === cr.id && kindOfTask.get(a.taskId) === kind && !a.isNa && a.value != null)) {
+        for (const a of answers.filter(a => a.criterionId === cr.id && kindOfTask.get(a.taskId) === kind && counted(a))) {
           num += Number(a.value) * cr.weight; den += cr.weight
         }
       }
@@ -385,9 +512,15 @@ export async function computeResults(tx: TenantTx, cycleId: string, subjectUserI
     for (const g of groups) { const v = g.byKind[kind]?.avg; if (v != null) { num += v * g.weight; den += g.weight } }
     overall[kind] = den ? Math.round((num / den) * 100) / 100 : null
   }
+  // «Розрив із нормою» (Г-20.3): факт (среднее по всем оценщикам, кроме самооценки) минус норма критерия
+  const criteriaGaps = structure.groups.flatMap(g => g.criteria.map((cr) => {
+    const vals = answers.filter(a => a.criterionId === cr.id && kindOfTask.get(a.taskId) !== 'self' && counted(a)).map(a => Number(a.value))
+    const avg = vals.length ? Math.round((vals.reduce((x, y) => x + y, 0) / vals.length) * 100) / 100 : null
+    return { criterionId: cr.id, groupId: g.id, text: cr.text, norm: cr.norm, avg, gap: avg == null ? null : Math.round((avg - cr.norm) * 100) / 100 }
+  }))
   // Комментарии по критериям (для отображения с учётом анонимности)
   const comments = answers.filter(a => (a.comment ?? '').trim()).map(a => ({ criterionId: a.criterionId, kind: kindOfTask.get(a.taskId)!, comment: a.comment!, taskId: a.taskId }))
-  return { cycle: c, structure, groups, overall, ratersByKind, comments }
+  return { cycle: c, structure, groups, overall, ratersByKind, comments, criteriaGaps }
 }
 
 /** Результат для человека (docs/20 §7.2): при анонимности — без авторов; блок коллег скрыт, если их меньше порога. */
@@ -405,7 +538,7 @@ export async function resultsFor(ctx: Ctx, subjectUserId: string, cycleId: strin
     const overall = Object.fromEntries(Object.entries(r.overall).filter(([k]) => !hiddenKinds.has(k)))
     const gaps = groups.map(g => ({ groupId: g.groupId, selfVsManager: g.byKind.self?.avg != null && g.byKind.manager?.avg != null ? Math.round((g.byKind.self.avg - g.byKind.manager.avg) * 100) / 100 : null }))
     const comments = r.comments.filter(c => !hiddenKinds.has(c.kind)).map(c => anon ? { criterionId: c.criterionId, kind: c.kind, comment: c.comment } : c)
-    return { cycle: { id: r.cycle.id, title: r.cycle.title, status: r.cycle.status, minRatersToShow: r.cycle.minRatersToShow, anonymousForSubject: r.cycle.anonymousForSubject }, groups, overall, gaps, ratersByKind: r.ratersByKind, hiddenKinds: [...hiddenKinds], comments, structure: r.structure.groups.map(g => ({ id: g.id, name: g.name, criteria: g.criteria.map(c => ({ id: c.id, text: c.text })) })) }
+    return { cycle: { id: r.cycle.id, title: r.cycle.title, status: r.cycle.status, minRatersToShow: r.cycle.minRatersToShow, anonymousForSubject: r.cycle.anonymousForSubject }, groups, overall, gaps, ratersByKind: r.ratersByKind, hiddenKinds: [...hiddenKinds], comments, criteriaGaps: r.criteriaGaps, scale: r.structure.scale, structure: r.structure.groups.map(g => ({ id: g.id, name: g.name, criteria: g.criteria.map(c => ({ id: c.id, text: c.text, norm: c.norm })) })) }
   })
 }
 
@@ -450,10 +583,10 @@ export async function finishCycle(ctx: Ctx | { tenantId: string, actorId: null }
           const use = mgr.length ? mgr : vals
           if (!use.length) continue
           const avg = use.reduce((acc, a) => acc + Number(a.value), 0) / use.length
-          const max = Math.max(...((cr.scale?.options as ScaleOption[] | undefined) ?? [{ value: 5 }]).map(o => o.value))
-          // Маппинг шкалы на уровни компетенции (docs/19 §3.3): доля от максимума шкалы × число уровней
+          const { min, max } = r.structure.scale
+          // Маппинг шкалы на уровни компетенции (docs/19 §3.3): доля от диапазона шкалы × число уровней
           const levelsMax = compMax.get(cr.competencyId) ?? 5
-          const level = Math.max(1, Math.min(levelsMax, Math.round((avg / max) * levelsMax)))
+          const level = Math.max(1, Math.min(levelsMax, Math.round(((avg - min) / Math.max(max - min, 1)) * levelsMax)))
           await tx.insert(competencyAssessments).values({ tenantId: ctx.tenantId, userId: s, competencyId: cr.competencyId, level, source: 'assessment', evidenceId: cycleId, assessedBy: ctx.actorId, comment: `Цикл «${c.title}»` })
           n++
         }

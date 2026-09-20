@@ -34,7 +34,7 @@ beforeAll(async () => {
   lazarevaId = (await admin`select id from locations where tenant_id = ${tenantId} and name = 'Лазарева'`)[0]!.id as string
   posId = (await admin`insert into positions (tenant_id, name, code) values (${tenantId}, ${`Бариста-оц-${Date.now()}`}, 'barista-as') returning id`)[0]!.id as string
   await admin`update locations set manager_id = ${adminId} where id = ${lazarevaId}`
-  scaleId = (await admin`select id from rating_scales where tenant_id = ${tenantId} and name = '1–5'`)[0]!.id as string
+  scaleId = (await admin`select id from scales where tenant_id = ${tenantId} and name = '1–5'`)[0]!.id as string
   const c = await dev.createCompetency({ tenantId, actorId: adminId }, { name: `Гостинність ${Date.now()}`, kind: 'soft', levels: [1, 2, 3].map(n => ({ level: n, title: `L${n}`, behavior: `Поведінка ${n}` })) })
   compId = c.id
 })
@@ -62,11 +62,13 @@ const ctx = (actorId = adminId) => ({ tenantId, actorId })
 async function makeForm() {
   const g = await as.upsertGroup(ctx(), { name: `Сервіс ${Date.now()}`, weight: 1 })
   groupIds.push(g!.id)
-  const c1 = await as.upsertCriterion(ctx(), { groupId: g!.id, text: 'Вітається з гостем', scaleId, requiresCommentBelow: 3, competencyId: compId })
-  const c2 = await as.upsertCriterion(ctx(), { groupId: g!.id, text: 'Пропонує доповнення', scaleId, weight: 2 })
-  const f = await as.upsertForm(ctx(), { title: `Анкета ${Date.now()}`, groupIds: [g!.id] })
-  formIds.push(f!.id)
-  return { form: f!, c1: c1!, c2: c2! }
+  const c1 = await as.upsertCriterion(ctx(), { groupId: g!.id, text: 'Вітається з гостем', competencyId: compId })
+  const c2 = await as.upsertCriterion(ctx(), { groupId: g!.id, text: 'Пропонує доповнення', weight: 2 })
+  // Норма 3 у первого критерия: оценка ниже нормы требует комментария (docs/20 §13.2, §14.2)
+  const r = await as.saveForm(ctx(), { title: `Анкета ${Date.now()}`, kind: 'by_criteria', scaleId, allowCommentGroups: false, commentGroupsRequired: false, commentWhenAboveNorm: false, commentWhenBelowNorm: true, commentWhenEqual: false, zeroMeansNoGrade: false, tags: [], isActive: true, items: [{ criterionId: c1!.id, norm: 3 }, { criterionId: c2!.id, norm: 3 }] })
+  if (!r.ok) throw new Error(r.code)
+  formIds.push(r.form.id)
+  return { form: r.form, c1: c1!, c2: c2! }
 }
 
 describe('этап 8: процедура оценки (docs/20 §13)', () => {
@@ -169,11 +171,13 @@ describe('этап 8: процедура оценки (docs/20 §13)', () => {
 
 describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
   it('критический провал обнуляет результат; без плана действий завершить нельзя; офлайн-время сохраняется', async () => {
-    const items = Array.from({ length: 20 }, (_, i) => ({ id: `i${i}`, group: i < 10 ? 'Зал' : 'Кухня', text: `Пункт ${i}`, scaleId, weight: 1, isCritical: i === 0 }))
-    const c = await cl.upsertChecklist(ctx(), { title: `Відкриття зміни ${Date.now()}`, kind: 'observation', items, scoring: 'percent', passScore: 80, criticalFailRule: 'any_critical_fails_all', whoCanRun: { roles: ['manager'] }, subjectKind: 'location', frequency: { timesPerWeek: 2 } })
-    checklistIds.push(c!.id)
+    const items = Array.from({ length: 20 }, (_, i) => ({ id: `i${i}`, group: i < 10 ? 'Зал' : 'Кухня', text: `Пункт ${i}`, weight: 1, isCritical: i === 0 }))
+    const cr = await cl.upsertChecklist(ctx(), { title: `Відкриття зміни ${Date.now()}`, kind: 'observation', scaleId, items, scoring: 'percent', passScore: 80, criticalFailRule: 'any_critical_fails_all', whoCanRun: { roles: ['manager'] }, subjectKind: 'location', frequency: { timesPerWeek: 2 }, allowSkip: false, allowItemComment: true, itemCommentRequired: false, tags: [] })
+    if (!cr.ok) throw new Error(cr.code)
+    const c = cr.checklist
+    checklistIds.push(c.id)
     const startedAt = new Date(Date.now() - 3600_000).toISOString() // заполнялся час назад офлайн
-    const run = await cl.startRun(ctx(), c!.id, { locationId: lazarevaId, startedAt, device: 'Pixel 7' })
+    const run = await cl.startRun(ctx(), c.id, { locationId: lazarevaId, startedAt, device: 'Pixel 7' })
     expect(run).toBeTruthy()
     // Все 19 остальных — 5, критический — 1
     const answers = items.map(i => ({ itemId: i.id, value: i.id === 'i0' ? 1 : 5 }))
@@ -187,17 +191,17 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
     expect(new Date(row!.started_at as string).toISOString()).toBe(startedAt)
     expect(new Date(row!.finished_at as string).toISOString()).toBe(finishedAt)
 
-    // Без критического: 19×5 + 1×3 из 100 → 98% пройдено
-    const run2 = await cl.startRun(ctx(), c!.id, { locationId: lazarevaId })
+    // Без критического: доля пункта (v − 1)/4 — 19×1 + 1×0.5 из 20 → 97.5% пройдено (docs/20 §14.3: частка від суми ваг)
+    const run2 = await cl.startRun(ctx(), c.id, { locationId: lazarevaId })
     const ok = await cl.finishRun(ctx(), run2!.id, { answers: items.map(i => ({ itemId: i.id, value: i.id === 'i5' ? 3 : 5 })) })
-    expect(ok).toMatchObject({ ok: true, score: { score: 98, passed: true, criticalFailed: [] } })
+    expect(ok).toMatchObject({ ok: true, score: { score: 97.5, points: 19.5, maxPoints: 20, passed: true, criticalFailed: [] } })
 
     // Отчёт и дисциплина
-    const rep = await cl.checklistReport(ctx(), { checklistId: c!.id })
+    const rep = await cl.checklistReport(ctx(), { checklistId: c.id })
     expect(rep.runs.length).toBe(2)
     expect(rep.topFailed.some(t => String(t.text) === 'Пункт 0')).toBe(true)
     const disc = await cl.disciplineReport(ctx())
-    expect(disc.find(d => d.location_id === lazarevaId && d.checklist === c!.title)?.done).toBe(2)
+    expect(disc.find(d => d.location_id === lazarevaId && d.checklist === c.title)?.done).toBe(2)
 
     // План действий: просрочка сканером
     await admin`update checklist_runs set action_plan = '[{"id":"a1","text":"Замінити табличку","responsibleId":"${admin.unsafe(adminId)}","dueAt":"2026-01-01","status":"open"}]'::jsonb where id = ${run!.id}`
@@ -209,17 +213,21 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
   })
 
   it('фото обязательно там, где requires_photo', async () => {
-    const c = await cl.upsertChecklist(ctx(), { title: `Фото ${Date.now()}`, kind: 'audit', items: [{ id: 'p', text: 'Вітрина', scaleId, weight: 1, requiresPhoto: true }], scoring: 'pass_fail', passScore: 100, criticalFailRule: 'none', whoCanRun: { roles: ['manager'] }, subjectKind: 'location' })
-    checklistIds.push(c!.id)
-    const run = await cl.startRun(ctx(), c!.id, { locationId: lazarevaId })
+    const cr = await cl.upsertChecklist(ctx(), { title: `Фото ${Date.now()}`, kind: 'audit', scaleId, items: [{ id: 'p', text: 'Вітрина', weight: 1, requiresPhoto: true }], scoring: 'pass_fail', passScore: 100, criticalFailRule: 'none', whoCanRun: { roles: ['manager'] }, subjectKind: 'location', allowSkip: false, allowItemComment: true, itemCommentRequired: false, tags: [] })
+    if (!cr.ok) throw new Error(cr.code)
+    const c = cr.checklist
+    checklistIds.push(c.id)
+    const run = await cl.startRun(ctx(), c.id, { locationId: lazarevaId })
     expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 'p', value: 5 }] })).toMatchObject({ ok: false, code: 'photo_required', itemIds: ['p'] })
     expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 'p', value: 5, photoMediaIds: [crypto.randomUUID()] }] })).toMatchObject({ ok: true })
   })
 
   it('Б.1: подпись проверяемого обязательна при require_signature', async () => {
-    const c = await cl.upsertChecklist(ctx(), { title: `Підпис ${Date.now()}`, kind: 'observation', items: [{ id: 's', text: 'Форма', scaleId, weight: 1 }], scoring: 'percent', passScore: 50, criticalFailRule: 'none', whoCanRun: { roles: ['manager'] }, subjectKind: 'user', requireSignature: true })
-    checklistIds.push(c!.id)
-    const run = await cl.startRun(ctx(), c!.id, { locationId: lazarevaId })
+    const cr = await cl.upsertChecklist(ctx(), { title: `Підпис ${Date.now()}`, kind: 'observation', scaleId, items: [{ id: 's', text: 'Форма', weight: 1 }], scoring: 'percent', passScore: 50, criticalFailRule: 'none', whoCanRun: { roles: ['manager'] }, subjectKind: 'user', requireSignature: true, allowSkip: false, allowItemComment: true, itemCommentRequired: false, tags: [] })
+    if (!cr.ok) throw new Error(cr.code)
+    const c = cr.checklist
+    checklistIds.push(c.id)
+    const run = await cl.startRun(ctx(), c.id, { locationId: lazarevaId })
     expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 's', value: 5 }] })).toMatchObject({ ok: false, code: 'signature_required' })
     const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${tenantId}, ${`sig-${Date.now()}.png`}, 'signature.png', 'image', 'image/png', 100, 'ready', ${adminId}) returning id`
     try {
@@ -232,10 +240,12 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
 
   it('Б.2: тайный покупатель — волна, одноразовая ссылка без входа, результат скрыт до публикации, отчёт по волнам', async () => {
     const my = await import('../../server/services/mystery')
-    const c = await cl.upsertChecklist(ctx(), { title: `Таємний ${Date.now()}`, kind: 'mystery', items: [{ id: 'a', text: 'Привітання', scaleId, weight: 1 }, { id: 'b', text: 'Чистота', scaleId, weight: 1 }], scoring: 'percent', passScore: 80, criticalFailRule: 'none', whoCanRun: { roles: ['admin'] }, subjectKind: 'location' })
-    checklistIds.push(c!.id)
+    const cr = await cl.upsertChecklist(ctx(), { title: `Таємний ${Date.now()}`, kind: 'mystery', scaleId, items: [{ id: 'a', text: 'Привітання', weight: 1 }, { id: 'b', text: 'Чистота', weight: 1 }], scoring: 'percent', passScore: 80, criticalFailRule: 'none', whoCanRun: { roles: ['admin'] }, subjectKind: 'location', allowSkip: false, allowItemComment: true, itemCommentRequired: false, tags: [] })
+    if (!cr.ok) throw new Error(cr.code)
+    const c = cr.checklist
+    checklistIds.push(c.id)
     expect(await my.createWave(ctx(), { checklistId: checklistIds[0]!, title: 'Не той тип', startsAt: '2026-09-01', endsAt: '2026-09-30' })).toBeNull()
-    const w = await my.createWave(ctx(), { checklistId: c!.id, title: `Хвиля ${Date.now()}`, startsAt: '2026-09-01', endsAt: '2026-09-30' })
+    const w = await my.createWave(ctx(), { checklistId: c.id, title: `Хвиля ${Date.now()}`, startsAt: '2026-09-01', endsAt: '2026-09-30' })
     expect(w!.status).toBe('active')
     const link = await my.createLink(ctx(), { waveId: w!.id, locationId: lazarevaId })
     expect(link!.token.length).toBeGreaterThan(20)
@@ -245,7 +255,7 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
     if (form.ok) expect(form.form.checklist.items.length).toBe(2)
     expect(await my.publicSubmit(link!.token, { answers: [{ itemId: 'a', value: 5 }] })).toMatchObject({ ok: false, code: 'incomplete' })
     const sub = await my.publicSubmit(link!.token, { answers: [{ itemId: 'a', value: 5 }, { itemId: 'b', value: 4 }] })
-    expect(sub).toMatchObject({ ok: true, score: 90, passed: true })
+    expect(sub).toMatchObject({ ok: true, score: 87.5, passed: true })
     // Одноразовость
     expect(await my.publicForm(link!.token)).toMatchObject({ ok: false, code: 'used' })
     expect(await my.publicForm('nope')).toMatchObject({ ok: false, code: 'not_found' })
@@ -253,14 +263,16 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
     expect(run).toMatchObject({ is_external: true, observer_id: adminId })
     // До публикации — только report.tenant; руководитель точки не видит
     expect(await cl.getRun(ctx(), run!.id as string)).toBeNull()
-    expect((await cl.checklistReport(ctx(), { checklistId: c!.id })).runs.length).toBe(0)
-    expect((await cl.checklistReport(ctx(), { checklistId: c!.id, canSeeUnpublished: true })).runs.length).toBe(1)
+    expect((await cl.checklistReport(ctx(), { checklistId: c.id })).runs.length).toBe(0)
+    expect((await cl.checklistReport(ctx(), { checklistId: c.id, canSeeUnpublished: true })).runs.length).toBe(1)
     expect((await my.mysteryReport(ctx(), { canSeeUnpublished: false })).waves.some(x => x.id === w!.id)).toBe(false)
     await my.setWaveStatus(ctx(), w!.id, 'published')
     expect(await cl.getRun(ctx(), run!.id as string)).not.toBeNull()
     const rep = await my.mysteryReport(ctx(), { canSeeUnpublished: false })
     expect(rep.waves.some(x => x.id === w!.id)).toBe(true)
-    expect(rep.cells[`${w!.id}:${lazarevaId}`]).toMatchObject({ avg: 90, runs: 1, passed: 1 })
+    expect(rep.cells[`${w!.id}:${lazarevaId}`]).toMatchObject({ avg: 87.5, runs: 1, passed: 1 })
+    await admin`delete from mystery_links where wave_id = ${w!.id}`
+    await admin`delete from checklist_runs where wave_id = ${w!.id}`
     await admin`delete from mystery_waves where id = ${w!.id}`
   })
 })

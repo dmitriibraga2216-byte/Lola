@@ -157,10 +157,11 @@
 | GET | `/learning/resources/:id` | ресурс для ученика: текущая версия, только при доступе; иначе 404 |
 | CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3): `GET/POST /tests/:id/question-groups`, `PATCH/DELETE /question-groups/:id` |
 | POST | `/tests/:id/questions/import` | «Питання з іншого тесту» (копия) и «з банку» (ссылка) |
-| CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа) |
+| CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа). Spec 20: реализовано как `GET/POST /surveys`, `GET/PATCH /surveys/:id` (вопросы в теле; после первого ответа вопросы/режим/приватность — 409 `survey.locked`), `GET /surveys/:id/report` (конфіденційно — имена только владельцу) |
+| POST | `/learning/surveys/:id/start`, `/learning/surveys/:id/answer` | прохождение опроса по одному вопросу: сервер отдаёт следующий по правилам «з умовами», граф клиенту не уходит; `{questionId, answer}` → `{done:false, question}` \| `{done:true, results?}`; 422 `survey.required\|bad_option\|own_not_allowed\|bad_value` |
 | CRUD | `/complex-tests/:id/items` | состав: тесты, сгруппированные по темам |
-| CRUD | `/checklists`, `/assessments` | анкеты; параметры замораживаются после первого заполнения |
-| CRUD | `/criteria-groups`, `/criteria`, `/scales` | словарь критериев и шкал (`24` Г-24.4): `/scales?kind=range\|levels`, `PUT /scales/:id` пересобирает уровни целиком, диапазоны подряд 0–100 |
+| CRUD | `/checklists`, `/assessments` | анкеты; параметры замораживаются после первого заполнения. Spec 20: `PUT /checklists` (`scaleId`, `allowSkip`, `allowItemComment`, `itemCommentRequired`, пункты с весом) и `PUT /assessment/forms` (`kind`, `scaleId`, правила комментирования, `items[{criterionId, norm, cluster}]`), `GET /assessment/forms/:id`; замороженное поле → 409 `checklist.locked` \| `form.locked` с `details.fields`; норма вне шкалы — 422 `form.bad_norm` |
+| CRUD | `/criteria-groups`, `/criteria`, `/scales` | словарь критериев и шкал (`24` Г-24.4): `/scales?kind=range\|levels`, `PUT /scales/:id` пересобирает уровни целиком, диапазоны подряд 0–100. Spec 20: `/assessment/groups` (с `tags`, счётчики использования), `GET /assessment/groups/usage` («Де використовуються»), `DELETE /assessment/criteria/:id` из замороженной анкеты — 409 `criterion.in_use`; `/rating-scales` снят — шкалы анкет живут в `scales(kind=levels)` |
 
 ## 4.9 Назначения
 

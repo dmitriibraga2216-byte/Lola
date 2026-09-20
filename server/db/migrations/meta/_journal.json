@@ -309,6 +309,13 @@
       "when": 1789958173802,
       "tag": "0043_otp_email_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789961773802,
+      "tag": "0044_debts2_resource_assignment_version",
+      "breakpoints": true
     }
   ]
 }

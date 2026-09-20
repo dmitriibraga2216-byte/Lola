@@ -26,7 +26,7 @@ const ALLOWED: Record<string, { kind: MediaKind, ext: string }> = {
   'image/png': { kind: 'image', ext: 'png' },
   'image/gif': { kind: 'image', ext: 'gif' },
   'image/webp': { kind: 'image', ext: 'webp' },
-  'image/svg+xml': { kind: 'image', ext: 'svg' }, // принимается только после санитизации (media.process)
+  'image/svg+xml': { kind: 'image', ext: 'svg' }, // очищается при обработке (jobs/mediaProcess → svgSanitize), оригинал перезаписывается
   'video/mp4': { kind: 'video', ext: 'mp4' },
   'video/quicktime': { kind: 'video', ext: 'mov' },
   'video/webm': { kind: 'video', ext: 'webm' },
@@ -161,10 +161,16 @@ export async function getMedia(ctx: Ctx, mediaId: string) {
   })
 }
 
-/** Подписанная ссылка на чтение, 10 минут (docs/06 §6.2). */
+/**
+ * Подписанная ссылка на чтение, 10 минут (docs/06 §6.2). SVG (D-011) отдаётся как вложение
+ * с явным типом: файл уже очищен при обработке, а `attachment` не даёт открыть его как страницу
+ * по прямой ссылке; в `<img src>` вложение показывается как обычно.
+ */
 export async function signedReadUrl(key: string): Promise<string> {
+  const svg = /\.svg$/i.test(key)
   return getSignedUrl(s3(), new GetObjectCommand({
     Bucket: S3_BUCKET(),
     Key: key,
+    ...(svg ? { ResponseContentType: 'image/svg+xml', ResponseContentDisposition: 'attachment' } : {}),
   }), { expiresIn: 600 })
 }

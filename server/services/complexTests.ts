@@ -26,7 +26,13 @@ export async function upsertComplexTest(ctx: Ctx, input: { id?: string, title: s
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const values = { title: input.title, parts: input.parts, sequential: input.sequential ?? true, showPartsResult: input.showPartsResult ?? true, isActive: input.isActive ?? true }
     if (input.id) {
+      const [before] = await tx.select({ parts: complexTests.parts }).from(complexTests).where(eq(complexTests.id, input.id))
       const [r] = await tx.update(complexTests).set({ ...values, updatedAt: new Date() }).where(eq(complexTests.id, input.id)).returning()
+      // D-019: изменился состав частей → баннер «N завдань змінено» у назначений (docs/15 §14.6)
+      if (r && before && JSON.stringify(before.parts) !== JSON.stringify(r.parts)) {
+        const { markContentChanged } = await import('./tasks')
+        await markContentChanged(tx, 'complex_test', input.id)
+      }
       return r ?? null
     }
     const [r] = await tx.insert(complexTests).values({ tenantId: ctx.tenantId, createdBy: ctx.actorId, ...values }).returning()

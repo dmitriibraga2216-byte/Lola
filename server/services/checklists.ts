@@ -69,6 +69,11 @@ export async function upsertChecklist(ctx: Ctx, input: ChecklistInput): Promise<
       }
       const [r] = await tx.update(checklists).set({ ...card, ...params, updatedAt: new Date() }).where(eq(checklists.id, input.id)).returning()
       await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.update', entity: 'checklist', entityId: input.id, before: { title: before.title, scaleId: before.scaleId, items: (before.items as unknown[]).length }, after: { title: input.title, scaleId: input.scaleId, items: input.items.length } })
+      // D-019: до заморозки пункты/шкала/правила чек-листа могут меняться → баннер «N завдань змінено» у назначений
+      if (frozenDiff(before, input).length) {
+        const { markContentChanged } = await import('./tasks')
+        await markContentChanged(tx, 'check_list', input.id)
+      }
       return { ok: true as const, checklist: r! }
     }
     const [r] = await tx.insert(checklists).values({ tenantId: ctx.tenantId, createdBy: ctx.actorId, ...card, ...params }).returning()

@@ -166,6 +166,11 @@ export async function saveForm(ctx: Ctx, input: AssessmentFormInput): Promise<Fo
       const [f] = await tx.update(assessmentForms).set({ ...card, ...params, updatedAt: new Date() }).where(eq(assessmentForms.id, input.id)).returning()
       await tx.delete(assessmentItems).where(eq(assessmentItems.formId, input.id))
       await tx.insert(assessmentItems).values(input.items.map((i, idx) => ({ tenantId: ctx.tenantId, formId: input.id!, criterionId: i.criterionId, norm: String(i.norm), cluster: i.cluster ?? null, sortOrder: idx })))
+      // D-019: до заморозки состав/нормы/шкала анкеты могут меняться → баннер «N завдань змінено» у назначений
+      if (frozenDiff(before, beforeItems, input).length) {
+        const { markContentChanged } = await import('./tasks')
+        await markContentChanged(tx, 'assessment', input.id)
+      }
       await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.form.update', entity: 'assessment_form', entityId: input.id, before: { title: before.title, kind: before.kind, scaleId: before.scaleId, items: beforeItems.length }, after: { title: input.title, kind: input.kind, scaleId: input.scaleId, items: input.items.length } })
       return { ok: true as const, form: f! }
     }

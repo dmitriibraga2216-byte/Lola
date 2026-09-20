@@ -73,8 +73,13 @@ export async function createWorkshop(ctx: Ctx, input: WorkshopInput) {
   })
 }
 
+/** Что считается «изменением содержания» практикума для баннера «N завдань змінено» (docs/15 §14.6, D-019). */
+const WORKSHOP_CONTENT_KEYS = ['criteria', 'passRule', 'submissionKinds', 'minTextLength', 'allowCameraOnly'] as const
+
 export async function updateWorkshop(ctx: Ctx, id: string, input: Partial<WorkshopInput>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [before] = await tx.select().from(workshops).where(and(eq(workshops.id, id), isNull(workshops.deletedAt)))
+    if (!before) return null
     const [w] = await tx.update(workshops).set({
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.description !== undefined ? { description: sanitizeBody(input.description) } : {}),
@@ -91,7 +96,13 @@ export async function updateWorkshop(ctx: Ctx, id: string, input: Partial<Worksh
       ...(input.status !== undefined ? { status: input.status } : {}),
       updatedAt: new Date(),
     }).where(and(eq(workshops.id, id), isNull(workshops.deletedAt))).returning()
-    return w ?? null
+    if (!w) return null
+    // D-019: правка критериев/правила зачёта/формата сдачи у опубликованного практикума → баннер у назначений
+    if (w.status === 'published' && WORKSHOP_CONTENT_KEYS.some(k => JSON.stringify(before[k]) !== JSON.stringify(w[k]))) {
+      const { markContentChanged } = await import('./tasks')
+      await markContentChanged(tx, 'workshop', id)
+    }
+    return w
   })
 }
 

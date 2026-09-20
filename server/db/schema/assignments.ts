@@ -19,7 +19,7 @@ export const assignments = pgTable('assignments', {
   kind: text('kind').notNull().default('manual'), // task_type (docs/02): manual | auto | catalog | trajectory | archive
   subjectType: text('subject_type').notNull().default('course'), // content_type (docs/02): course | training_program | resource | test | complex_test | workshop | poll | assessment | check_list | meetup | webinar
   subjectId: uuid('subject_id').notNull(),
-  subjectVersionId: uuid('subject_version_id'), // зафиксированная версия или null = текущая
+  subjectVersionId: uuid('subject_version_id'), // = content_version_id из docs/02: course — course_versions.id при «зафиксировать версию»; resource — resource_versions.id всегда, на момент выдачи (D-007); null = текущая
   audience: jsonb('audience').notNull(), // {rules: [...], match: 'any'|'all'} — docs/15 §3.2
   exclude: jsonb('exclude').notNull().default(sql`'{"rules":[]}'::jsonb`),
   startsAt: timestamp('starts_at', { withTimezone: true }),

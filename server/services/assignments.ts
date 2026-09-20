@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import type { z } from 'zod'
-import { assignmentCompetencies, assignments, courses, enrollmentEvents, enrollments, lessons, modules, users } from '../db/schema'
+import { assignmentCompetencies, assignments, courses, enrollmentEvents, enrollments, lessons, modules, resources, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -102,6 +102,12 @@ export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, 
   if (input.lockVersion && input.subjectType === 'course') {
     const [c] = await tx.select({ v: courses.publishedVersionId }).from(courses).where(eq(courses.id, input.subjectId))
     versionId = c?.v ?? null
+  }
+  else if (input.subjectType === 'resource') {
+    // D-007 (docs/28 Spec 11 «Версии»): назначение ресурса закрепляется за опубликованной версией на момент
+    // выдачи — как урок курса (`lessons.resource_version_id`); ученик читает этот снимок, а не текущую редакцию
+    const [r] = await tx.select({ v: resources.publishedVersionId }).from(resources).where(eq(resources.id, input.subjectId))
+    versionId = r?.v ?? null
   }
 
   const audience = source.trajectoryId ? { ...input.audience, trajectoryId: source.trajectoryId, nodeId: source.nodeId, trajectoryEnrollmentId: source.enrollmentId } : input.audience

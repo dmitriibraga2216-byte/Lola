@@ -155,7 +155,7 @@
 | POST | `/resources/:id/duplicate`, `/archive`, `/restore` | копия; архив ↔ чернетка |
 | CRUD | `/resource-categories`, `POST /resource-categories/reorder` | категории ресурсов с порядком (`{ids[]}`) |
 | CRUD | `/access-groups` | группы доступа (`?appliesTo=knowledge\|catalog`), члены `{subjectType, subjectId}` |
-| GET | `/learning/resources/:id` | ресурс для ученика: текущая версия, только при доступе; иначе 404 |
+| GET | `/learning/resources/:id` | ресурс для ученика: текущая версия, только при доступе; иначе 404. `?assignmentId=` — версия, закреплённая назначением (D-007) |
 | CRUD | `/tests/:id/questions`, `/question-groups` | вопросы и их группы (`12` §14.3): `GET/POST /tests/:id/question-groups`, `PATCH/DELETE /question-groups/:id`; правка и удаление вопроса — по-прежнему `PATCH /questions/:id` (старый путь для списка и создания — `/questions?quizId=`, до конца R1) |
 | POST | `/tests/:id/questions/import` | «Питання з іншого тесту» (копия) и «з банку» (ссылка) |
 | CRUD | `/polls/:id/questions` | вопросы опроса (четыре типа). Spec 20: реализовано как `GET/POST /surveys`, `GET/PATCH /surveys/:id` (вопросы в теле; после первого ответа вопросы/режим/приватность — 409 `survey.locked`), `GET /surveys/:id/report` (конфіденційно — имена только владельцу) |
@@ -289,7 +289,7 @@
 | --- | --- | --- |
 | POST | `/media/upload-url` | `{filename, mime, bytes, resourceId?}` → presigned PUT, `mediaId`; отказ 400 `media.too_big \| media.mime_not_allowed \| media.resource_too_big` до передачи |
 | POST | `/media/:id/complete` | подтверждение загрузки, запуск обработки |
-| GET | `/media/:id` | статус и подписанная ссылка на чтение (10 минут) |
+| GET | `/media/:id` | статус и подписанная ссылка на чтение (10 минут); оригинал SVG — только после санитизации (`ready`), до этого `?redirect=1` → 409 `not_ready` (D-011) |
 | DELETE | `/media/:id` | мягкое удаление |
 
 Ограничения (`11` Г-11.4): изображение ≤ 10 МБ, документ ≤ 50 МБ, аудио ≤ 100 МБ,

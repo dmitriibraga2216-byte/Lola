@@ -36,10 +36,12 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
     if (!enr) return { ok: false as const, code: 'not_found' as const }
     if (enr.status !== 'done') return { ok: false as const, code: 'not_completed' as const }
 
+    // Отозванный (D-013: откат зачёта при пересчёте) не считается — повторное завершение выдаёт новый номер (docs/14 §12)
     const existing = await tx.select({ id: certificates.id, number: certificates.number }).from(certificates)
       .where(and(
         eq(certificates.enrollmentId, enrollmentId),
         attemptId ? eq(certificates.attemptId, attemptId) : sql`${certificates.attemptId} is null`,
+        sql`${certificates.revokedAt} is null`,
       ))
     if (existing[0]) return { ok: true as const, certificateId: existing[0].id, number: existing[0].number, created: false }
 
@@ -66,7 +68,7 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
     if (!cert) {
       // Гонка: параллельная выдача уже создала — вернуть её
       const [again] = await tx.select({ id: certificates.id, number: certificates.number }).from(certificates)
-        .where(eq(certificates.enrollmentId, enrollmentId))
+        .where(and(eq(certificates.enrollmentId, enrollmentId), sql`${certificates.revokedAt} is null`)).orderBy(desc(certificates.issuedAt))
       return { ok: true as const, certificateId: again!.id, number: again!.number, created: false }
     }
 

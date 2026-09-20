@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import {
-  courseCategories, courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons,
+  certificates, courseCategories, courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons,
   locations, mediaAssets, modules, resources, userPlacements,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -39,6 +39,7 @@ export async function myLearning(ctx: Ctx, group: TaskGroup) {
       cancelledAt: enrollments.cancelledAt,
       source: enrollments.source,
       completedAt: enrollments.completedAt,
+      score: enrollments.score,
       courseId: courses.id,
       title: courses.title,
       coverKey: courses.coverKey,
@@ -345,7 +346,7 @@ export async function enrollmentTree(ctx: Ctx, enrollmentId: string) {
 
     return {
       enrollment,
-      course: { id: course!.id, title: course!.title, strictOrder: course!.strictOrder },
+      course: { id: course!.id, title: course!.title, strictOrder: course!.strictOrder, resultMode: course!.resultMode },
       version: { id: version!.id, version: version!.version },
       modules: moduleRows.map(m => ({
         id: m.id,
@@ -608,6 +609,102 @@ export type CompleteResult
     | { ok: false, code: 'not_found' | 'conditions_not_met', reasons?: string[] }
 
 /** Завершение урока: сервер проверяет условия (docs/11 §7.3), клиент только просит. */
+/**
+ * Результат курса по `courses.result_mode` (docs/11 §14.1, docs/28 Spec 11 «Карточка курса», D-009):
+ * `pct` — % успішності = доля зачтённых обязательных уроков (progress_pct);
+ * `avg_score` — среднее арифметическое результатов (%) уроков-тестов плана;
+ * `final_test` — результат (%) последнего урока-теста плана (підсумковий тест).
+ * Результат урока-теста — зачтённая попытка этой записи, иначе последняя оценённая.
+ * Курс без тестов в режимах `avg_score`/`final_test` считается как `pct`.
+ */
+export async function courseResultScore(tx: TenantTx, enrollmentId: string, versionId: string, resultMode: string, progressPct: number): Promise<number> {
+  if (resultMode !== 'avg_score' && resultMode !== 'final_test') return progressPct
+  // attempts.score — уже процент (shared/domain/grading computeTotals); урок без попытки — 0
+  const rows = await tx.execute(sql`
+    select a.score
+    from lessons l join modules m on m.id = l.module_id
+    left join lateral (
+      select a.score from attempts a
+      where a.enrollment_id = ${enrollmentId}::uuid and a.lesson_id = l.id and a.status in ('passed', 'failed')
+      order by a.passed desc nulls last, a.submitted_at desc nulls last limit 1
+    ) a on true
+    where m.course_version_id = ${versionId}::uuid and l.item_type = 'quiz'
+    order by m.sort, l.sort
+  `) as unknown as { score: string | null }[]
+  const pct = (r: { score: string | null }) => Number(r.score ?? 0)
+  if (!rows.length) return progressPct
+  if (resultMode === 'final_test') return pct(rows[rows.length - 1]!)
+  return Math.round(rows.reduce((s, r) => s + pct(r), 0) / rows.length * 100) / 100
+}
+
+/** Прогресс записи по обязательным урокам (docs/10 §7.2): сколько всего, сколько зачтено. */
+async function requiredProgress(tx: TenantTx, enrollmentId: string, versionId: string) {
+  const requiredLessonIds = (await tx.select({ id: lessons.id })
+    .from(lessons)
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .where(and(eq(modules.courseVersionId, versionId), eq(lessons.isRequired, true))))
+    .map(r => r.id)
+  const doneRows = requiredLessonIds.length
+    ? await tx.select({ lessonId: lessonProgress.lessonId }).from(lessonProgress)
+        .where(and(
+          eq(lessonProgress.enrollmentId, enrollmentId),
+          eq(lessonProgress.status, 'completed'),
+          inArray(lessonProgress.lessonId, requiredLessonIds),
+        ))
+    : []
+  const requiredTotal = requiredLessonIds.length
+  const requiredDone = doneRows.length
+  const progressPct = requiredTotal === 0 ? 100 : Math.floor(requiredDone / requiredTotal * 100)
+  return { requiredTotal, requiredDone, progressPct }
+}
+
+export type RollbackResult = { lessonReopened: boolean, courseReopened: boolean, certificateIds: string[] }
+
+/**
+ * Откат зачёта урока-теста (docs/28 Spec 12 «Перерахувати», D-013): попытка перестала быть
+ * зачтённой (passed → failed при пересчёте или аннулировании). Урок снова `opened`, если нет другой
+ * зачтённой попытки по нему; запись `done` → `in_progress` (completed_at и score снимаются), если урок
+ * обязательный; сертификаты записи отзываются с причиной «Помилка при видачі» (docs/14 §6.2).
+ * Вызывается внутри транзакции пересчёта; аудит пишет вызывающий.
+ */
+export async function rollbackLessonCompletion(tx: TenantTx, ctx: Ctx, enrollmentId: string, lessonId: string): Promise<RollbackResult> {
+  const none: RollbackResult = { lessonReopened: false, courseReopened: false, certificateIds: [] }
+  const [enrollment] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId))
+  const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId))
+  const [progress] = await tx.select().from(lessonProgress).where(and(eq(lessonProgress.enrollmentId, enrollmentId), eq(lessonProgress.lessonId, lessonId)))
+  if (!enrollment || !lesson || !progress || progress.status !== 'completed' || lesson.itemType !== 'quiz') return none
+
+  const [stillPassed] = await tx.execute(sql`select 1 from attempts where enrollment_id = ${enrollmentId}::uuid and lesson_id = ${lessonId}::uuid and status = 'passed' limit 1`) as unknown as unknown[]
+  if (stillPassed) return none
+
+  const now = new Date()
+  await tx.update(lessonProgress).set({ status: 'opened', completedAt: null, updatedAt: now }).where(eq(lessonProgress.id, progress.id))
+  const { requiredTotal, requiredDone, progressPct } = await requiredProgress(tx, enrollmentId, enrollment.versionId)
+  const courseReopened = enrollment.status === 'done' && lesson.isRequired
+  await tx.update(enrollments).set({
+    requiredTotal,
+    requiredDone,
+    progressPct: String(progressPct),
+    ...(courseReopened ? { status: 'in_progress', completedAt: null, score: null } : {}),
+    updatedAt: now,
+  }).where(eq(enrollments.id, enrollmentId))
+  await logEvent(tx, ctx.tenantId, enrollmentId, 'progress', {
+    lessonId, progressPct, reason: 'attempt_recalculated',
+    ...(courseReopened ? statusChange('done', 'in_progress', progressPct) : {}),
+  }, ctx.actorId)
+
+  const certificateIds: string[] = []
+  if (courseReopened) {
+    const revoked = await tx.update(certificates).set({ revokedAt: now, revokedBy: ctx.actorId, revokeReason: 'Помилка при видачі', updatedAt: now })
+      .where(and(eq(certificates.enrollmentId, enrollmentId), isNull(certificates.revokedAt))).returning({ id: certificates.id })
+    for (const c of revoked) {
+      certificateIds.push(c.id)
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'certificate.revoke', entity: 'certificate', entityId: c.id, after: { reason: 'Помилка при видачі', via: 'attempt.recalculate', enrollmentId } })
+    }
+  }
+  return { lessonReopened: true, courseReopened, certificateIds }
+}
+
 export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: string): Promise<CompleteResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [enrollment] = await tx.select().from(enrollments)
@@ -650,32 +747,22 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
     }
 
     // Пересчёт прогресса (docs/10 §7.2–7.3)
-    const requiredLessonIds = (await tx.select({ id: lessons.id })
-      .from(lessons)
-      .innerJoin(modules, eq(modules.id, lessons.moduleId))
-      .where(and(eq(modules.courseVersionId, enrollment.versionId), eq(lessons.isRequired, true))))
-      .map(r => r.id)
-
-    const doneRows = requiredLessonIds.length
-      ? await tx.select({ lessonId: lessonProgress.lessonId }).from(lessonProgress)
-          .where(and(
-            eq(lessonProgress.enrollmentId, enrollmentId),
-            eq(lessonProgress.status, 'completed'),
-            inArray(lessonProgress.lessonId, requiredLessonIds),
-          ))
-      : []
-
-    const requiredTotal = requiredLessonIds.length
-    const requiredDone = doneRows.length
-    const progressPct = requiredTotal === 0 ? 100 : Math.floor(requiredDone / requiredTotal * 100)
+    const { requiredTotal, requiredDone, progressPct } = await requiredProgress(tx, enrollmentId, enrollment.versionId)
     const courseCompleted = requiredTotal > 0 && requiredDone === requiredTotal
+
+    // D-009: результат курса по result_mode — при завершении, в enrollments.score
+    let score: number | null = null
+    if (courseCompleted && enrollment.status !== 'done') {
+      const [course] = await tx.select({ resultMode: courses.resultMode }).from(courses).where(eq(courses.id, enrollment.subjectId))
+      score = await courseResultScore(tx, enrollmentId, enrollment.versionId, course?.resultMode ?? 'pct', progressPct)
+    }
 
     await tx.update(enrollments).set({
       requiredTotal,
       requiredDone,
       progressPct: String(progressPct),
       ...(courseCompleted && enrollment.status !== 'done'
-        ? { status: 'done', completedAt: new Date() }
+        ? { status: 'done', completedAt: new Date(), score: score == null ? null : String(score) }
         : {}),
       lastActivityAt: new Date(),
       updatedAt: new Date(),
@@ -685,7 +772,7 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
     await logEvent(tx, ctx.tenantId, enrollmentId, courseCompleted ? 'completed' : 'progress', {
       lessonId,
       progressPct,
-      ...(courseCompleted && enrollment.status !== 'done' ? statusChange(enrollment.status, 'done', progressPct) : {}),
+      ...(courseCompleted && enrollment.status !== 'done' ? statusChange(enrollment.status, 'done', score ?? progressPct) : {}),
     }, ctx.actorId)
     if (courseCompleted) {
       const { emitWebhook } = await import('./webhooks')

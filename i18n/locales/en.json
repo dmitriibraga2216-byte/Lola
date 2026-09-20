@@ -659,6 +659,7 @@
       "failed": "Not passed"
     },
     "progressOf": "{done} of {total} required done",
+    "result": "Result: {score}% ({mode})",
     "optional": "optional",
     "lessonOf": "Lesson {n} of {total}",
     "exit": "Exit lesson",

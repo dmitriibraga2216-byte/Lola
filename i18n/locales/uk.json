@@ -659,6 +659,7 @@
       "failed": "Не зараховано"
     },
     "progressOf": "Пройдено {done} з {total} обовʼязкових",
+    "result": "Результат: {score}% ({mode})",
     "optional": "необовʼязковий",
     "lessonOf": "Урок {n} з {total}",
     "exit": "Вийти з уроку",

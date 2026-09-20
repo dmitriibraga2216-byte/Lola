@@ -830,13 +830,36 @@ trajectory_nodes(
   content_id uuid,
   days int,                -- для delay («пропустити через N днів»)
                            -- и stop_delay («закрити доступ через N днів»)
+  mentor_id uuid,          -- для mentor: явный наставник; null — керівник точки людини [решение spec-17]
+  params jsonb,            -- для task: правила назначения, которое создаст узел (ключи assignments.params
+                           -- по типу, `15` §14.3, + dueDays) — узел = шаблон назначения, не контент [решение spec-17]
   x int, y int             -- положение на полотне
 )
 
 trajectory_edges(
   id, tenant_id, trajectory_id, from_node_id, to_node_id,
   -- условие заполняется ТОЛЬКО когда from_node.kind = 'branch'; у остальных null
-  condition jsonb          -- {op:'passed'} | {op:'failed'} | {op:'score_gte', value:80} | {op:'else'}
+  condition jsonb,         -- {op:'passed'} | {op:'failed'} | {op:'score_gte', value:80} | {op:'else'}
+  sort int                 -- порядок гілок у branch: берётся первая подходящая (`17` §12)
+)
+
+-- Прохождение траектории человеком (spec-17): статус — enrollment_status (пять значений);
+-- заявка из каталога — not_assigned + requested_at; снятие — cancelled_at, не удаление
+trajectory_enrollments(
+  id, tenant_id, trajectory_id, user_id, status, source text,   -- manual | catalog | automation
+  rule_id uuid, mentor_id uuid, requested_at, available_from,    -- available_from — «Призначення через N днів» правила
+  started_at, completed_at, cancelled_at, cancel_reason, progress_pct, last_activity_at,
+  unique (trajectory_id, user_id)
+)
+-- Состояние узла у человека — путь воспроизводим (`17` §7.4)
+trajectory_node_states(
+  id, tenant_id, enrollment_id, node_id,
+  status text,             -- locked | available | in_progress | done | failed | skipped (`17` §4)
+  activated_at, finished_at, fires_at,   -- fires_at: когда сработает таймер delay/stop_delay
+  score numeric, passed boolean, assignment_id uuid,   -- task: назначение, созданное узлом (assignments.kind = trajectory)
+  reason text,             -- failed/skipped: access_closed | branch_not_taken | cancelled
+  chosen_edge_id uuid,     -- branch: выбранная гілка
+  unique (enrollment_id, node_id)
 )
 ```
 
@@ -1034,10 +1057,10 @@ automation_rules(
 )
 -- Четыре измерения; на каждое — свой режим и свой список значений
 automation_rule_dimensions(
-  rule_id,
+  id, tenant_id, rule_id,         -- tenant_id ради RLS (CLAUDE.md п. 1); unique (rule_id, dimension)
   dimension text not null,        -- city | position | org_unit | tag
   mode text not null,             -- any | include | exclude   («Будь-яке» / список / «Всі, окрім»)
-  value_ids uuid[]
+  value_ids uuid[]                -- для tag — id из tags; сопоставление с users.tags по имени
 )
 
 -- Правило «должность → роль» (`01` §1.9.1): роли в сети раздаются не руками.
@@ -1110,8 +1133,8 @@ content_type: course | training_program | resource | test | complex_test | works
 -- Режим назначения траектории и объявления
 assign_mode: manual | catalog_free | catalog_request | automation
 
--- Узлы траектории (`17` §14.3)
-trajectory_node_kind: start | finish | task | and | or | delay | stop_delay | branch
+-- Узлы траектории (`17` §14.3; branch — Г-17.1, mentor «Призначити наставника» — Г-17.2, наши)
+trajectory_node_kind: start | finish | task | and | or | delay | stop_delay | branch | mentor
 
 -- Тип объявления
 notice_kind: acknowledge | event | notification

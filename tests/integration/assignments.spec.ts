@@ -264,7 +264,7 @@ describe('профиль обучения и правила автоматиза
     const cA = await makeCourse('Правило А')
     const cB = await makeCourse('Правило Б')
     const rule = await createRule(ctx(), {
-      name: `Після А → Б ${Date.now()}`, trigger: 'course.completed', conditions: { courseIds: [cA] },
+      name: `Після А → Б ${Date.now()}`, trigger: 'course.completed', conditions: { courseIds: [cA] }, dimensions: [],
       actions: [{ type: 'assign_content', subjectType: 'course', subjectId: cB, dueDays: 5 }, { type: 'add_tag', tag: 'просунутий' }],
       isActive: true, runLimit: { oncePerUser: true }, assignDelayDays: 0,
     })
@@ -326,7 +326,7 @@ describe('правила по эталону (docs/15 §3.6): четыре гр�
     const course = await makeCourse('Правило-еталон')
     const rule = await createRule(ctx(), {
       name: `Бариста не з Одеси ${Date.now()}`, trigger: 'user.attributes_changed', assignDelayDays: 3,
-      conditions: { positionIds: [baristaPosId], cityIds: [odesa!.id as string], cityInvert: true },
+      conditions: {}, dimensions: [{ dimension: 'position', mode: 'include', valueIds: [baristaPosId] }, { dimension: 'city', mode: 'exclude', valueIds: [odesa!.id as string] }],
       actions: [{ type: 'assign_content', subjectType: 'course', subjectId: course, dueDays: 7 }], isActive: true, runLimit: { oncePerUser: true },
     })
     ruleIds.push(rule.id)

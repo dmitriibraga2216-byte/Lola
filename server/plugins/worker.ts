@@ -79,7 +79,9 @@ export default defineNitroPlugin(async () => {
         const cf = monday ? await frequencyScan(tenantId) : 0
         const an = await announcementScan(tenantId)
         const pr = await programScan(tenantId)
-        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired, rolesExpired })
+        const { trajectoryScan } = await import('../services/trajectories')
+        const tr = await trajectoryScan(tenantId) // docs/17: отложенные правилом прохождения, подстраховка таймеров
+        console.log(`[due.scan] ${tenantId}:`, { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, announcements: an, programs: pr, trajectories: tr, inactive, plans, reqReports, kbReview, digest, retention, expiredExports: expired, rolesExpired })
       }
     })
     // Сводные отчёты по расписанию (docs/03 §3.26) — проверка раз в час вместе с assignment.sync
@@ -124,6 +126,10 @@ export default defineNitroPlugin(async () => {
         const s = await deliverPending(tenantId)
         if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)
       }
+    })
+    await work<{ tenantId: string, stateId: string }>('trajectory.timer', async (jobs) => {
+      const { fireTimer } = await import('../services/trajectories')
+      for (const j of jobs) await fireTimer(j.data.tenantId, j.data.stateId)
     })
     await work<{ tenantId: string, assignmentId: string }>('assignment.expand', async (jobs) => {
       const job = jobs[0]

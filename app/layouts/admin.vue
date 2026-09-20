@@ -14,7 +14,7 @@ interface Section { key: string, label: string, icon: string, items: Item[] }
 const sections = computed<Section[]>(() => [
   { key: 'learning', label: t('admin.section.learning'), icon: 'book', items: [
     { to: '/admin/assignments', label: t('admin.nav.assignments'), show: hasScope('assignment.create') },
-    { to: '/admin/programs', label: t('admin.nav.programs'), show: hasScope('program.manage') },
+    { to: '/admin/trajectories', label: t('admin.nav.trajectories'), show: hasScope('program.manage') },
     { to: '/admin/review-workshops', label: t('admin.nav.reviewWorkshops'), show: hasScope('review.queue') },
     { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue') },
     { to: '/admin/attempt-requests', label: t('admin.nav.attemptRequests'), show: hasScope('review.grade') },
@@ -28,6 +28,7 @@ const sections = computed<Section[]>(() => [
   { key: 'content', label: t('admin.section.content'), icon: 'doc', items: [
     { to: '/admin/resources', label: t('admin.nav.resources'), show: hasScope('course.view') },
     { to: '/admin/courses', label: t('admin.nav.courses'), show: hasScope('course.view') },
+    { to: '/admin/programs', label: t('admin.nav.programs'), show: hasScope('program.manage') },
     { to: '/admin/quizzes', label: t('admin.nav.quizzes'), show: hasScope('course.view') },
     { to: '/admin/workshops', label: t('admin.nav.workshops'), show: hasScope('course.view') },
     { to: '/admin/meetups/complex', label: t('admin.nav.complexTests'), show: hasScope('complextest.manage') },

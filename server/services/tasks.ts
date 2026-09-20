@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
   assignmentCompetencies, assignments, automationRules, competencies, enrollmentEvents, enrollments, importJobs,
-  programEnrollments, taskParameterValues, taskParameters, users,
+  programEnrollments, taskParameterValues, taskParameters, trajectoryEnrollments, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -11,8 +11,7 @@ import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
 import { parseImportFile } from './importPeople'
-import { matchesConditions } from './automation'
-import type { Conditions } from './automation'
+import { matchesConditions, ruleConditions } from './automation'
 import {
   DEFAULT_REMINDERS, METHOD_KEYS, paramsFor, parseTaskParams, remindersSchema,
 } from '../../shared/schemas/assignments'
@@ -584,7 +583,8 @@ export async function applyOnLeave(tenantId: string, assignmentId: string): Prom
     if (a.automationRuleId) {
       const [rule] = await tx.select().from(automationRules).where(eq(automationRules.id, a.automationRuleId))
       if (!rule) return 0
-      stillMatches = userId => matchesConditions(tx, userId, rule.conditions as Conditions)
+      const cond = await ruleConditions(tx, rule)
+      stillMatches = userId => matchesConditions(tx, userId, cond)
     }
     else {
       const wanted = await resolveAudience(tx, a.audience as Audience, a.exclude as Audience)
@@ -603,4 +603,44 @@ export async function applyOnLeave(tenantId: string, assignmentId: string): Prom
     if (n) await recordAudit(tx, { tenantId, actorId: null, action: 'assignment.on_leave', entity: 'assignment', entityId: assignmentId, after: { cancelled: n, onLeaveCondition: a.onLeaveCondition } })
     return n
   })
+}
+
+/**
+ * Г-15.2 для программ и траекторий, выданных правилом (долг #35 закрыт в spec-17):
+ * человек больше не подпадает под правило → по `on_leave_condition` правила снимаются
+ * его открытые прохождения программ (`program_enrollments`) и траекторий
+ * (`trajectory_enrollments` + назначения узлов). Вызывается из sync.
+ */
+export async function applyOnLeaveForRules(tenantId: string): Promise<{ programs: number, trajectories: number }> {
+  const { cancelTrajectoryEnrollment } = await import('./trajectories')
+  const toCancel: { enrollmentId: string, onLeave: string }[] = []
+  const out = await withTenant(tenantId, null, async (tx) => {
+    const rules = await tx.select().from(automationRules).where(and(eq(automationRules.isActive, true), sql`${automationRules.onLeaveCondition} <> 'keep'`))
+    let programsN = 0
+    for (const rule of rules) {
+      const cond = await ruleConditions(tx, rule)
+      const unstartedOnly = rule.onLeaveCondition === 'cancel_unstarted'
+      // Программы: open — не снятые, не завершённые
+      const progs = await tx.select({ id: programEnrollments.id, userId: programEnrollments.userId, status: programEnrollments.status }).from(programEnrollments)
+        .where(and(eq(programEnrollments.ruleId, rule.id), isNull(programEnrollments.cancelledAt), inArray(programEnrollments.status, ['not_assigned', 'not_started', 'in_progress'])))
+      for (const e of progs) {
+        if (unstartedOnly && e.status === 'in_progress') continue
+        if (await matchesConditions(tx, e.userId, cond)) continue
+        await tx.update(programEnrollments).set({ cancelledAt: new Date(), updatedAt: new Date() }).where(eq(programEnrollments.id, e.id))
+        await recordAudit(tx, { tenantId, actorId: null, action: 'program.on_leave', entity: 'program_enrollment', entityId: e.id, after: { userId: e.userId, onLeaveCondition: rule.onLeaveCondition, ruleId: rule.id } })
+        programsN++
+      }
+      const trs = await tx.select({ id: trajectoryEnrollments.id, userId: trajectoryEnrollments.userId, status: trajectoryEnrollments.status }).from(trajectoryEnrollments)
+        .where(and(eq(trajectoryEnrollments.ruleId, rule.id), isNull(trajectoryEnrollments.cancelledAt), inArray(trajectoryEnrollments.status, ['not_assigned', 'not_started', 'in_progress'])))
+      for (const e of trs) {
+        if (unstartedOnly && e.status === 'in_progress') continue
+        if (await matchesConditions(tx, e.userId, cond)) continue
+        toCancel.push({ enrollmentId: e.id, onLeave: rule.onLeaveCondition })
+      }
+    }
+    return { programs: programsN }
+  })
+  let trajectoriesN = 0
+  for (const c of toCancel) if (await cancelTrajectoryEnrollment(tenantId, c.enrollmentId, { actorId: null, reason: 'left_condition', onLeaveCondition: c.onLeave })) trajectoriesN++
+  return { programs: out.programs, trajectories: trajectoriesN }
 }

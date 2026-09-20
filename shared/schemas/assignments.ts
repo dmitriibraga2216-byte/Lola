@@ -263,16 +263,26 @@ export const profileSchema = z.object({
   isActive: z.boolean().default(true),
 })
 
-/** Правило автоматизации (docs/15 §3.6, снято с эталона): четыре группы условий с инверсией «Всі, окрім». */
+/** Четыре измерения правила таблицей (docs/17 §14.2, docs/02 automation_rule_dimensions): «Будь-який» / «Тільки ці» / «Всі, окрім». */
+export const RULE_DIMENSIONS = ['city', 'position', 'org_unit', 'tag'] as const
+export type RuleDimension = typeof RULE_DIMENSIONS[number]
+export const ruleDimensionSchema = z.object({
+  dimension: z.enum(RULE_DIMENSIONS),
+  mode: z.enum(['any', 'include', 'exclude']).default('any'),
+  valueIds: z.array(z.string().uuid()).max(500).default([]),
+}).superRefine((d, ctx) => {
+  if (d.mode !== 'any' && d.valueIds.length === 0) ctx.addIssue({ code: 'custom', path: ['valueIds'], message: 'Оберіть значення або «Будь-який»' })
+})
+export const ruleDimensionsSchema = z.array(ruleDimensionSchema).max(4).default([])
+export type RuleDimensionInput = z.infer<typeof ruleDimensionSchema>
+
+/** Правило автоматизации (docs/15 §3.6, снято с эталона): четыре измерения с инверсией «Всі, окрім» + прочие условия. */
 export const ruleSchema = z.object({
   name: z.string().min(2).max(120),
   description: z.string().max(1000).optional(),
   trigger: z.enum(['user.activated', 'user.attributes_changed', 'user.created', 'user.placement_changed', 'course.completed', 'course.failed', 'certificate.expiring', 'assignment.overdue']),
+  dimensions: ruleDimensionsSchema, // аудитория — четыре измерения таблицей
   conditions: z.object({
-    cityIds: z.array(z.string().uuid()).optional(), cityInvert: z.boolean().optional(),
-    positionIds: z.array(z.string().uuid()).optional(), positionInvert: z.boolean().optional(),
-    orgUnitIds: z.array(z.string().uuid()).optional(), orgUnitInvert: z.boolean().optional(),
-    tags: z.array(z.string()).optional(), tagInvert: z.boolean().optional(),
     locationIds: z.array(z.string().uuid()).optional(),
     courseIds: z.array(z.string().uuid()).optional(), // для course.* — какой курс
     daysBefore: z.number().int().min(1).max(90).optional(), // для certificate.expiring

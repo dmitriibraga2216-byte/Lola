@@ -13,7 +13,8 @@
     "activate": "Activate",
     "deactivate": "Deactivate",
     "back": "Back",
-    "next": "Next"
+    "next": "Next",
+    "close": "Close"
   },
   "login": {
     "phoneLabel": "Phone number",
@@ -84,7 +85,7 @@
       "attendanceReport": "Attendance report",
       "reportBuilder": "Report builder",
       "rules": "Automation rules",
-      "programs": "Trajectories",
+      "programs": "Training programs",
       "groups": "Groups",
       "org": "Org structure",
       "peopleReport": "People report",
@@ -96,7 +97,8 @@
       "notifications": "Notification templates",
       "attemptRequests": "Attempt requests",
       "resources": "Resources",
-      "resourceCategories": "Categories"
+      "resourceCategories": "Categories",
+      "trajectories": "Trajectories"
     },
     "section": {
       "learning": "Learning",
@@ -2214,7 +2216,56 @@
     "action": "action",
     "delay": "Assign after, days",
     "oncePerUser": "once per user",
-    "publish": "Publish"
+    "publish": "Publish",
+    "create": "Create rule",
+    "empty": "No rules yet",
+    "col": {
+      "audience": "Audience",
+      "delay": "Delay",
+      "usage": "Used in",
+      "created": "Created",
+      "published": "Published"
+    },
+    "anyPosition": "Any position",
+    "daysN": "{n} d.",
+    "usedTrajectories": "{n} trajectories",
+    "usedPrograms": "{n} programs",
+    "usedTasks": "{n} tasks",
+    "published": "Published",
+    "unpublished": "Draft",
+    "whenTitle": "When it fires",
+    "whenHint": "A person is activated for the first time or receives the attributes below.",
+    "dim": {
+      "city": "City",
+      "position": "Position",
+      "org_unit": "Unit",
+      "tag": "Tags"
+    },
+    "mode": {
+      "any": "Any",
+      "include": "Only these",
+      "exclude": "All except"
+    },
+    "anyValue": "— any value —",
+    "noValues": "The directory is empty",
+    "peopleNow": "{n} people right now",
+    "showList": "Show list",
+    "hideList": "Hide list",
+    "delayTitle": "Delayed assignment",
+    "delayHint": "A newcomer gets the course not on day one but once settled.",
+    "assignAfter": "Assign after",
+    "onLeave": "When a person no longer matches",
+    "onLeaveOpt": {
+      "keep": "Keep assigned",
+      "cancel_unstarted": "Cancel unstarted",
+      "cancel_all": "Cancel all open"
+    },
+    "usage": {
+      "trajectory": "trajectory",
+      "program": "program",
+      "assignment": "task"
+    },
+    "notUsed": "The rule is not used anywhere yet"
   },
   "prog": {
     "title": "My programmes",
@@ -2301,7 +2352,14 @@
     "reportLine": "Enrolled: {total} · completed: {completed}",
     "funnel": "Funnel by step",
     "reachedDone": "reached {r} · done {d}",
-    "currentStep": "Current step"
+    "currentStep": "Current step",
+    "add": "Add",
+    "adminTitle": "Training programs",
+    "adminEmpty": "No programs yet",
+    "col": {
+      "duration": "Duration"
+    },
+    "itemsCount": "{n} items"
   },
   "groups": {
     "title": "Groups and segments",
@@ -2538,7 +2596,13 @@
       "test_message": "Test message",
       "telegram_blocked_manager": "Telegram blocked manager",
       "escalation": "Escalation",
-      "security_suspicious_login": "Security suspicious login"
+      "security_suspicious_login": "Security suspicious login",
+      "trajectory_assigned": "Trajectory assigned",
+      "trajectory_next_unlocked": "Next trajectory step unlocked",
+      "trajectory_finished": "Trajectory finished",
+      "trajectory_access_closed": "Step access closed",
+      "trajectory_mentor_confirm": "Mentee awaits your confirmation",
+      "trajectory_request": "Trajectory request"
     }
   },
   "ntpl": {
@@ -2786,5 +2850,155 @@
     "openLink": "Open link",
     "download": "Download file",
     "videoNotReady": "Video is still processing"
+  },
+  "traj": {
+    "title": "Learning trajectories",
+    "create": "Create trajectory",
+    "name": "Title*",
+    "namePh": "e.g. Barista onboarding trajectory",
+    "empty": "No trajectories yet — create the first one",
+    "draft": "Draft",
+    "blocksN": "{n} blocks",
+    "edgesN": "{n} links",
+    "tasksN": "{n} tasks",
+    "col": {
+      "title": "Title",
+      "blocks": "Blocks",
+      "assignMode": "Assignment mode",
+      "people": "People",
+      "updated": "Updated",
+      "published": "Published",
+      "person": "Person",
+      "state": "State",
+      "step": "Current step",
+      "progress": "Progress",
+      "started": "Started"
+    },
+    "assignMode": {
+      "manual": "Assigned manually",
+      "catalog_free": "Free access via catalog",
+      "catalog_request": "Request via catalog",
+      "automation": "Apply automation rule"
+    },
+    "assignModeTitle": "Assignment mode",
+    "ruleChip": "Rule “{name}”",
+    "rule": "Automation rule",
+    "ruleHint": "To everyone who gets the specified attributes.",
+    "ruleCreate": "Create a new automation rule",
+    "stopAfterFinish": "Do not assign tasks after the trajectory is finished",
+    "updatedBy": "Updated {date} · {name}",
+    "kind": {
+      "task": "Task",
+      "and": "AND block",
+      "or": "OR block",
+      "delay": "Time delay",
+      "stop_delay": "Stop delay",
+      "branch": "Branch by score",
+      "mentor": "Mentor",
+      "start": "Start",
+      "finish": "Finish"
+    },
+    "help": {
+      "start": "Start of learning. Connect Start to the first block.",
+      "finish": "Finish block. Every path must lead here.",
+      "and": "Accepts many inputs but lets the person through only when all of them are done.",
+      "or": "Lets the person through as soon as any input is done.",
+      "delay": "Counts the given number of days from its start, then lets through.",
+      "stop_delay": "Closes access to the next block after the given number of days if it is not done.",
+      "branch": "Branches by the previous task result: a condition on each link, an “else” link is required.",
+      "mentor": "Assigns a mentor for the trajectory; continues after the mentor confirms."
+    },
+    "startSub": "Beginning",
+    "finishSub": "Finish block",
+    "andSub": "all inputs",
+    "orSub": "any input",
+    "delaySub": "continue after {n} d.",
+    "stopDelaySub": "close after {n} d.",
+    "branchSub": "by result",
+    "mentorSub": "confirmation",
+    "pickContent": "pick content",
+    "palette": "Blocks",
+    "autoLayout": "Auto layout",
+    "check": "Check",
+    "noProblems": "no problems",
+    "problemsN": "problems: {n}",
+    "publish": "Publish",
+    "published": "Trajectory published",
+    "publishedHint": "The trajectory is published: blocks cannot be changed, only moved. To rebuild it, create a copy.",
+    "selectHint": "Select a block on the canvas to edit it or add a link.",
+    "nodeTitle": "Title (block label)*",
+    "delayDays": "Continue after (days)*",
+    "stopDelayDays": "Close access after (days)*",
+    "mentorHelp": "The mentor is the person's location manager. An explicit mentor can be set later.",
+    "contentType": "Content type",
+    "content": "Content",
+    "titleOverride": "Custom block title",
+    "dueDays": "Due in days",
+    "passScore": "Pass score, %",
+    "links": "Links",
+    "linkAdd": "Add link →",
+    "linkPick": "Pick the target block…",
+    "deleteBlock": "Delete block",
+    "condition": "Branch condition",
+    "scoreValue": "Score",
+    "cond": {
+      "passed": "passed",
+      "failed": "failed",
+      "score_gte": "score ≥",
+      "else": "else"
+    },
+    "nodesTitle": "Conditions live in nodes",
+    "nodesHint": "There are no conditions on arrows. Branching is AND/OR blocks, time is delay and stop delay. That is how you see why someone is stuck without clicking every line.",
+    "people": "People: {n}",
+    "peopleTitle": "People on the trajectory",
+    "noPeople": "Nobody assigned yet",
+    "assign": "Assign people",
+    "assignN": "Assign ({n})",
+    "assigned": "Assigned: {n}",
+    "duplicate": "Duplicate",
+    "ladder": "Path",
+    "approve": "Approve",
+    "reject": "Reject",
+    "cancel": "Remove",
+    "cancelReason": "Reason",
+    "opensAt": "opens {date}",
+    "source": {
+      "manual": "Manually",
+      "catalog": "Via catalog",
+      "automation": "Rule"
+    },
+    "state": {
+      "not_assigned": "Not assigned",
+      "not_started": "Not started",
+      "in_progress": "In progress",
+      "done": "Done",
+      "failed": "Failed",
+      "requested": "Requested",
+      "cancelled": "Removed"
+    },
+    "my": "My trajectories",
+    "myEmpty": "No trajectories yet",
+    "catalog": "Trajectory catalog",
+    "enroll": "Enroll",
+    "request": "Request",
+    "enrolled": "You are enrolled",
+    "requested": "Request sent to your manager",
+    "passedOf": "{done} of {total} done",
+    "confirmStep": "Confirm step",
+    "step": {
+      "done": "done",
+      "failed": "failed",
+      "closed": "access closed",
+      "open": "open",
+      "inProgress": "{n}% done",
+      "notAssigned": "not assigned yet",
+      "opensAt": "Opens {date}",
+      "locked": "ahead",
+      "stopDelay": "time limit",
+      "confirmed": "confirmed by mentor",
+      "waitingMentor": "waiting for mentor",
+      "waiting": "waiting"
+    },
+    "short": "Trajectories"
   }
 }

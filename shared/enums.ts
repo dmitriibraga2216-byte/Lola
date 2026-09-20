@@ -24,8 +24,8 @@ export type ContentType = typeof CONTENT_TYPES[number]
 export const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation'] as const
 export type AssignMode = typeof ASSIGN_MODES[number]
 
-/** Узлы траектории (docs/17 §14.3). */
-export const TRAJECTORY_NODE_KINDS = ['start', 'finish', 'task', 'and', 'or', 'delay', 'stop_delay', 'branch'] as const
+/** Узлы траектории (docs/17 §14.3; branch и mentor — наши, Г-17.1/Г-17.2). */
+export const TRAJECTORY_NODE_KINDS = ['start', 'finish', 'task', 'and', 'or', 'delay', 'stop_delay', 'branch', 'mentor'] as const
 export type TrajectoryNodeKind = typeof TRAJECTORY_NODE_KINDS[number]
 
 /** Тип объявления. */

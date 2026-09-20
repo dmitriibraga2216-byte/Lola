@@ -23,7 +23,7 @@ const admin = postgres(adminUrl, { max: 2, onnotice: () => {} })
 /** Таблицы контента (docs/08 §12.8): карточка содержит только материал. */
 const CONTENT_TABLES = [
   'courses', 'course_versions', 'modules', 'lessons', 'resources', 'resource_versions', 'quizzes', 'questions', 'question_banks',
-  'complex_tests', 'workshops', 'meetups', 'webinars', 'programs', 'program_nodes', 'knowledge_articles', 'news', 'surveys',
+  'complex_tests', 'workshops', 'meetups', 'webinars', 'programs', 'program_nodes', 'trajectories', 'trajectory_nodes', 'knowledge_articles', 'news', 'surveys',
 ]
 /**
  * Исключения, заданные самим ТЗ:
@@ -127,7 +127,7 @@ describe('3. Перечисления из docs/02', () => {
   it('ограничения в БД совпадают с перечислениями', async () => {
     const checks = await admin`
       select conname, pg_get_constraintdef(oid) as def from pg_constraint
-      where contype = 'c' and conname in ('assignments_subject_type_content_type', 'assignments_kind_task_type', 'enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status', 'security_log_severity_security_severity')`
+      where contype = 'c' and conname in ('assignments_subject_type_content_type', 'assignments_kind_task_type', 'enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status', 'security_log_severity_security_severity', 'trajectory_enrollments_status_enrollment_status', 'trajectory_nodes_kind_trajectory_node_kind', 'trajectories_assign_mode_assign_mode')`
     const defOf = (n: string) => checks.find(c => c.conname === n)?.def as string | undefined
     const valuesIn = (def: string) => [...def.matchAll(/'([a-z_]+)'::text/g)].map(m => m[1]!)
     expect(defOf('assignments_subject_type_content_type')).toBeDefined()
@@ -135,10 +135,13 @@ describe('3. Перечисления из docs/02', () => {
     expect(defOf('assignments_kind_task_type')).toBeDefined()
     expect(valuesIn(defOf('assignments_kind_task_type')!)).toEqual([...ENUMS.task_type!])
     // Пять статусов прохождения (CLAUDE.md п. 12) — и у записей на курс, и у записей на программу
-    for (const c of ['enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status']) {
+    for (const c of ['enrollments_status_enrollment_status', 'program_enrollments_status_enrollment_status', 'trajectory_enrollments_status_enrollment_status']) {
       expect(defOf(c), c).toBeDefined()
       expect(valuesIn(defOf(c)!)).toEqual([...ENUMS.enrollment_status!])
     }
+    // Узлы траектории и режим назначения (spec-17) — trajectory_node_kind, assign_mode
+    expect(valuesIn(defOf('trajectory_nodes_kind_trajectory_node_kind')!)).toEqual([...ENUMS.trajectory_node_kind!])
+    expect(valuesIn(defOf('trajectories_assign_mode_assign_mode')!)).toEqual([...ENUMS.assign_mode!])
     // Уровень события журнала безопасности — security_severity (docs/02), колонка security_log.severity
     expect(defOf('security_log_severity_security_severity')).toBeDefined()
     expect(valuesIn(defOf('security_log_severity_security_severity')!)).toEqual([...ENUMS.security_severity!])

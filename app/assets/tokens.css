@@ -21,6 +21,10 @@
   --color-coral: #ff6b4a;       /* коралл — ошибка */
   --color-coral-ink: #b23c22;
   --color-coral-deep: #3b0f03;
+  /* Мягкие подложки (заметки, блоки полотна траектории) */
+  --color-sun-soft: #fff4c7;
+  --color-teal-soft: #dcf3ef;
+  --color-coral-soft: #ffe1d9;
 
   /* Шрифт: заголовки 900 */
   --font-family: 'Nunito', 'Trebuchet MS', sans-serif;

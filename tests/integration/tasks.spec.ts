@@ -305,7 +305,7 @@ describe('Г-15.2 on_leave_condition, Г-15.3 компетенции, §14.5 п�
     const courseId = await makeCourse('Правило on leave')
     const rule = await createRule(ctx(), {
       name: `Бариста s15 ${Date.now()}`, trigger: 'user.placement_changed', assignDelayDays: 0, isActive: true, runLimit: { oncePerUser: true },
-      conditions: { positionIds: [baristaPosId] }, onLeaveCondition: 'cancel_unstarted',
+      conditions: {}, dimensions: [{ dimension: 'position', mode: 'include', valueIds: [baristaPosId] }], onLeaveCondition: 'cancel_unstarted',
       actions: [{ type: 'assign_content', subjectType: 'course', subjectId: courseId, dueDays: 7 }],
     })
     ruleIds.push(rule.id)

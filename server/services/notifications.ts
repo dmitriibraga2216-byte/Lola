@@ -90,6 +90,13 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   program_completed: 'Програму «{{title}}» завершено',
   program_stuck: 'Підопічний не рухається по програмі «{{title}}» 14 днів',
   program_request: 'Заявка на програму «{{title}}» чекає рішення',
+  // docs/17 §14.3, docs/30 (trajectory.next_unlocked, trajectory.finished)
+  trajectory_assigned: 'Вам призначено траєкторію «{{title}}»{{#availableFrom}}. Відкриється {{availableFrom}}{{/availableFrom}}',
+  trajectory_next_unlocked: 'Траєкторія «{{title}}»: відкрився наступний крок{{#step}} — {{step}}{{/step}}',
+  trajectory_finished: 'Траєкторію «{{title}}» завершено. Вітаємо!',
+  trajectory_access_closed: 'Траєкторія «{{title}}»: доступ до наступного кроку закрито{{#step}} ({{step}}){{/step}}',
+  trajectory_mentor_confirm: 'Траєкторія «{{title}}»: підопічний чекає на ваше підтвердження кроку{{#step}} «{{step}}»{{/step}}',
+  trajectory_request: 'Заявка на траєкторію «{{title}}» чекає рішення',
   // docs/16 §8
   user_invited: 'Вас запрошено до Lola. Посилання для входу: {{url}}',
   knowledge_review_due: 'Статтю «{{title}}» час перечитати й підтвердити актуальність',

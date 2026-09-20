@@ -315,7 +315,7 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, m: typeof meetups.$inferSe
     setImmediate(() => completeLesson({ tenantId: ctx.tenantId, actorId: r.userId }, enrollmentId, lessonId).catch(() => {}))
   }
   // Занятие как узел программы (docs/17 §7.4)
-  if (status === 'attended' || status === 'missed') setImmediate(() => import('./programs').then(p => p.onItemResult(ctx.tenantId, r.userId, m.kind === 'webinar' ? 'webinar' : 'meetup', m.id, { passed: status === 'attended' })).catch(() => {}))
+  if (status === 'attended' || status === 'missed') setImmediate(() => { import('./programs').then(p => p.onItemResult(ctx.tenantId, r.userId, m.kind === 'webinar' ? 'webinar' : 'meetup', m.id, { passed: status === 'attended' })).catch(() => {}); import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, r.userId, m.kind === 'webinar' ? 'webinar' : 'meetup', m.id, { passed: status === 'attended' })).catch(() => {}) })
 }
 
 export async function setAttendance(ctx: Ctx, meetupId: string, input: { userId: string, status: 'attended' | 'missed' | 'excused', reason?: string }) {

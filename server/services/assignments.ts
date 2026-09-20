@@ -206,7 +206,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
 
     if (inserted.length) {
       await tx.insert(enrollmentEvents).values(inserted.map(e => ({
-        tenantId, enrollmentId: e.id, event: 'created', payload: { source: 'assigned', assignmentId }, actorId: a.createdBy, requestContext: currentRequestContext(),
+        tenantId, enrollmentId: e.id, event: 'created', payload: { source: 'assigned', assignmentId, from: null, to: 'not_started' }, actorId: a.createdBy, requestContext: currentRequestContext(),
       })))
       const reminders = a.reminders as { notifyOnAssign?: boolean }
       if (reminders.notifyOnAssign !== false) {

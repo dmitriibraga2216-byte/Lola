@@ -54,6 +54,8 @@ const sections = computed<Section[]>(() => [
   ] },
   { key: 'reports', label: t('admin.section.reports'), icon: 'chart', items: [
     { to: '/admin/reports', label: t('admin.nav.reports'), show: hasScope('report.team') },
+    { to: '/admin/reports/summary', label: t('admin.nav.summaryReport'), show: hasScope('report.team') },
+    { to: '/admin/reports/tasks/test', label: t('admin.nav.taskReports'), show: hasScope('report.team') },
     { to: '/admin/reports/builder', label: t('admin.nav.reportBuilder'), show: hasScope('report.builder') },
     { to: '/admin/reports/people', label: t('admin.nav.peopleReport'), show: hasScope('report.team') },
     { to: '/admin/checklists/report', label: t('admin.nav.checklistReport'), show: hasScope('report.team') },

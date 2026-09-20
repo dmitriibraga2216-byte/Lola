@@ -19,9 +19,10 @@ type Row = Record<string, unknown>
 
 export const EXPORT_TTL_HOURS = 24
 
-export async function requestExport(ctx: Ctx, input: { report: string, filters?: Record<string, unknown>, format?: 'xlsx' | 'csv' }) {
+export async function requestExport(ctx: Ctx & { activeRoleId?: string | null }, input: { report: string, filters?: Record<string, unknown>, format?: 'xlsx' | 'csv' }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [e] = await tx.insert(reportExports).values({ tenantId: ctx.tenantId, userId: ctx.actorId, report: input.report, filters: input.filters ?? {}, format: input.format ?? 'xlsx' }).returning()
+    // Область выгрузки считается по роли, активной в момент запроса (docs/01 §1.9.2), а не по роли по умолчанию
+    const [e] = await tx.insert(reportExports).values({ tenantId: ctx.tenantId, userId: ctx.actorId, activeRoleId: ctx.activeRoleId ?? null, report: input.report, filters: input.filters ?? {}, format: input.format ?? 'xlsx' }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'report.export', entity: 'report_export', entityId: e!.id, after: { report: input.report, filters: input.filters ?? {} } })
     return e!
   })
@@ -42,12 +43,34 @@ export async function myExports(ctx: Ctx) {
 }
 
 /** Строки любого отчёта по имени и фильтрам — с областью видимости заказчика выгрузки. */
-export async function reportRows(tenantId: string, userId: string, report: string, filters: Record<string, unknown>): Promise<Row[]> {
-  const access = await loadAccess({ sessionId: 'export', tenantId, userId, impersonatedBy: null, activeRoleId: null } as never)
+export async function reportRows(tenantId: string, userId: string, report: string, filters: Record<string, unknown>, activeRoleId: string | null = null): Promise<Row[]> {
+  const access = await loadAccess({ sessionId: 'export', tenantId, userId, impersonatedBy: null, activeRoleId } as never)
   if (!access) return []
   const ctx = { tenantId, actorId: userId }
   const scope = narrowScope(await reportScope(access), filters.locationId as string | undefined)
   const f = { ...filters, scope } as never
+  // Spec 22: отчёт по типу контента, сводный мастер и журналы — тем же механизмом, каркас первыми колонками
+  if (report.startsWith('tasks-')) {
+    const { taskReportRows } = await import('./reportTasks')
+    const { taskReportQuerySchema, taskReportContentTypeSchema } = await import('../../shared/schemas/reports')
+    const ct = taskReportContentTypeSchema.safeParse(report.slice(6))
+    const q = taskReportQuerySchema.safeParse(filters)
+    return ct.success && q.success ? taskReportRows(ctx, ct.data, { ...q.data, scope }) : []
+  }
+  if (report === 'summary') {
+    const { summaryRows } = await import('./reportSummary')
+    const { summaryReportSchema } = await import('../../shared/schemas/reports')
+    const p = summaryReportSchema.safeParse(filters)
+    return p.success ? summaryRows(ctx, { ...p.data, scope }) : []
+  }
+  if (report.startsWith('log-')) {
+    if (!access.grants.some(g => g.scopes.includes('audit.view'))) return []
+    const { LOG_KINDS, logRows } = await import('./logs')
+    const { logFilterSchema } = await import('../../shared/schemas/reports')
+    const kind = report.slice(4) as typeof LOG_KINDS[number]
+    const q = logFilterSchema.safeParse(filters)
+    return LOG_KINDS.includes(kind) && q.success ? logRows(ctx, kind, q.data) : []
+  }
   if (report.startsWith('saved:')) {
     const { runReport } = await import('./reportBuilder')
     const [r] = await withTenant(tenantId, userId, tx => tx.select().from(savedReports).where(eq(savedReports.id, report.slice(6))))
@@ -81,7 +104,7 @@ export async function runExport(exportId: string, tenantId: string): Promise<voi
   const [e] = await withTenant(tenantId, null, tx => tx.update(reportExports).set({ status: 'running', updatedAt: new Date() }).where(and(eq(reportExports.id, exportId), eq(reportExports.status, 'queued'))).returning())
   if (!e) return
   try {
-    const rows = await reportRows(tenantId, e.userId, e.report, e.filters as Record<string, unknown>)
+    const rows = await reportRows(tenantId, e.userId, e.report, e.filters as Record<string, unknown>, e.activeRoleId ?? null)
     const buffer = e.format === 'csv' ? toCsv(rows) : await toXlsx(e.report, rows as never)
     const key = `exports/${tenantId}/${exportId}.${e.format}`
     await ensureBucket()

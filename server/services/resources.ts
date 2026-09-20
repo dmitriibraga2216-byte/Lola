@@ -11,6 +11,7 @@ import { recordAudit } from './audit'
 import { blocksToText } from './knowledge'
 import { enqueueNotification } from './notifications'
 import { sanitizeBody } from './sanitize'
+import { logTaskAccess } from './journals'
 import { slugify } from './courses'
 import type { ContentBlock } from '../../shared/schemas/content'
 import {
@@ -574,6 +575,7 @@ export async function viewResource(ctx: Ctx, id: string) {
     const v = await currentVersion(tx, id)
     if (!v) return null
     await tx.update(resources).set({ viewsCount: sql`${resources.viewsCount} + 1` }).where(eq(resources.id, id))
+    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'resource', contentId: id, title: v.title }) // docs/22 §13.4
     return {
       id: r.id, title: v.title, kind: v.kind, body: v.body as ContentBlock[], mediaId: v.mediaId, externalUrl: v.externalUrl,
       version: v.version, estimatedMinutes: r.estimatedMinutes, canPrint: await printAllowed(tx, ctx.tenantId, r.allowPrint),

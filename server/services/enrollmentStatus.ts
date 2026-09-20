@@ -56,3 +56,11 @@ export function deriveTaskState(row: { status: string, startsAt?: Date | string 
     group: (row.status === 'done' ? 'done' : row.status === 'failed' ? 'failed' : open && startsAt != null && startsAt > now ? 'planned' : open && dueAt != null && dueAt < now ? 'overdue' : 'new') as TaskGroup,
   }
 }
+
+/**
+ * Полезная нагрузка события смены статуса для `enrollment_events` (docs/22 §13.4 «Протокол змін статусу завдань»):
+ * журнал показывает «старое → новое» и результат на момент события, не пересчитывая их задним числом.
+ */
+export function statusChange(from: string | null, to: string, result?: number | null): { from: string | null, to: string, result?: number } {
+  return { from, to, ...(result == null ? {} : { result: Math.round(Number(result)) }) }
+}

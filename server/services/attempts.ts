@@ -16,6 +16,7 @@ import {
 } from '../../shared/domain/grading'
 import type { ScoringMethod } from '../../shared/enums'
 import { completeLesson } from './learning'
+import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -201,6 +202,8 @@ export async function startAttempt(ctx: Ctx, quizId: string, opts: { enrollmentI
       ip: opts.ip ?? null,
     }).returning({ id: attempts.id, attemptNo: attempts.attemptNo })
 
+    // docs/22 §13.4: старт попытки — обращение к заданию (каждое, не первое)
+    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'test', contentId: quizId, title: quiz.title, assignmentId: assignmentId ?? null, enrollmentId: opts.enrollmentId ?? null })
     business.inc({ event: 'attempt_started' })
     return { ok: true as const, attemptId: attempt!.id, attemptNo: attempt!.attemptNo, deadlineAt }
   })

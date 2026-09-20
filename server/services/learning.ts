@@ -10,7 +10,8 @@ import type { ContentBlock, TickInput } from '../../shared/schemas/content'
 import type { ResourceKind } from '../../shared/schemas/resources'
 import { evaluateLesson, type Evaluation } from './lessonRules'
 import { currentVersion, printAllowed } from './resources'
-import { TASK_GROUPS, deriveTaskState, notCancelled, taskGroupWhere } from './enrollmentStatus'
+import { TASK_GROUPS, deriveTaskState, notCancelled, statusChange, taskGroupWhere } from './enrollmentStatus'
+import { logTaskAccess } from './journals'
 import type { TaskGroup } from './enrollmentStatus'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -160,6 +161,8 @@ export async function enrollmentTree(ctx: Ctx, enrollmentId: string) {
 
     const [course] = await tx.select().from(courses).where(eq(courses.id, enrollment.subjectId))
     const [version] = await tx.select().from(courseVersions).where(eq(courseVersions.id, enrollment.versionId))
+    // docs/22 §13.4: обращение к заданию фиксируется на каждое открытие, не на первое
+    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'course', contentId: enrollment.subjectId, title: course?.title, assignmentId: enrollment.assignmentId, enrollmentId })
 
     const moduleRows = await tx.select().from(modules)
       .where(eq(modules.courseVersionId, enrollment.versionId))
@@ -275,7 +278,7 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
         startedAt: enrollment.startedAt ?? now,
         lastActivityAt: now,
       }).where(eq(enrollments.id, enrollmentId))
-      await logEvent(tx, ctx.tenantId, enrollmentId, 'started', {}, ctx.actorId)
+      await logEvent(tx, ctx.tenantId, enrollmentId, 'started', statusChange('not_started', 'in_progress'), ctx.actorId)
     }
     else {
       await tx.update(enrollments).set({ lastActivityAt: now }).where(eq(enrollments.id, enrollmentId))
@@ -451,6 +454,8 @@ export async function markDownloaded(ctx: Ctx, enrollmentId: string, lessonId: s
       .where(and(eq(lessonProgress.enrollmentId, enrollmentId), eq(lessonProgress.lessonId, lessonId))).returning()
     if (!progress) return null
     const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId))
+    const [enr] = await tx.select({ subjectId: enrollments.subjectId, assignmentId: enrollments.assignmentId }).from(enrollments).where(eq(enrollments.id, enrollmentId))
+    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'course', contentId: enr!.subjectId, title: lesson?.title, assignmentId: enr!.assignmentId, enrollmentId, action: 'download' })
     const material = lesson ? await lessonMaterial(tx, lesson) : null
     const evaluation: Evaluation = material ? evaluateLesson(material.facts, progressFacts(progress)) : { ready: false, reasons: [], requiredSeconds: null }
     return { secondsSpent: progress.secondsSpent, videoPct: progress.videoPct, scrollPct: progress.scrollPct, ...evaluation }
@@ -534,6 +539,7 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
     await logEvent(tx, ctx.tenantId, enrollmentId, courseCompleted ? 'completed' : 'progress', {
       lessonId,
       progressPct,
+      ...(courseCompleted && enrollment.status !== 'done' ? statusChange(enrollment.status, 'done', progressPct) : {}),
     }, ctx.actorId)
     if (courseCompleted) {
       const { emitWebhook } = await import('./webhooks')

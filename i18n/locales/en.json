@@ -98,7 +98,9 @@
       "attemptRequests": "Attempt requests",
       "resources": "Resources",
       "resourceCategories": "Categories",
-      "trajectories": "Trajectories"
+      "trajectories": "Trajectories",
+      "summaryReport": "Summary report",
+      "taskReports": "Task reports"
     },
     "section": {
       "learning": "Learning",
@@ -383,13 +385,15 @@
     "event": "Event",
     "details": "Details",
     "kind": {
-      "status": "Status log",
       "notifications": "Notifications",
       "sessions": "Sessions",
       "security": "Security",
       "import": "Import",
       "automation": "Automation",
-      "integrations": "Integrations"
+      "integrations": "Integrations",
+      "task-status": "Task statuses",
+      "task-access": "Task accesses",
+      "org-conflicts": "Org conflicts"
     },
     "retention": "Kept for {days} days",
     "immutable": "records are immutable",
@@ -435,17 +439,24 @@
       "unit": "Unit",
       "session_time": "Session time",
       "when": "Date",
-      "person": "Person"
+      "person": "Person",
+      "content_type": "Type",
+      "task": "Task",
+      "kind": "Conflict kind",
+      "task_title": "Task",
+      "resolved_at": "Resolved"
     },
     "crumb": "Reports · Journals",
     "title": {
-      "status": "Status change log",
       "notifications": "Notifications log",
       "sessions": "User sessions log",
       "security": "Security log",
       "import": "Import log",
       "automation": "Automation log",
-      "integrations": "Integrations log"
+      "integrations": "Integrations log",
+      "task-status": "Task status change log",
+      "task-access": "Task access log",
+      "org-conflicts": "Org structure conflicts log"
     },
     "severity": {
       "any": "Any level",
@@ -470,6 +481,44 @@
       "logout_all": "Signed out on all devices",
       "impersonation_start": "Signed in as user",
       "telegram_linked": "Telegram linked"
+    },
+    "retentionForever": "Kept indefinitely",
+    "anyType": "Any",
+    "emailAlerts": "Notify about changes by e-mail",
+    "emailAlertsHint": "Administrators — on “Warning” and “Critical” levels",
+    "access": {
+      "open": "Open",
+      "download": "Download"
+    },
+    "conflict": {
+      "double_unit": "Person in two units",
+      "placement_replaced": "Import replaced a manual placement",
+      "manager_self": "Manager reports to themselves",
+      "manager_cycle": "Manager cycle"
+    },
+    "conflictSource": {
+      "manual": "Manual",
+      "import": "Import"
+    },
+    "statusEvent": {
+      "created": "Task assigned",
+      "started": "User started the task",
+      "completed": "User completed the task",
+      "failed": "User failed the task",
+      "expired": "Task closed by deadline",
+      "cancelled": "Assignment cancelled",
+      "extended": "Deadline extended",
+      "reset": "Progress reset",
+      "overdue": "Deadline passed",
+      "attempt_submit_ok": "Attempt {n} of {of} passed",
+      "attempt_submit_fail": "Attempt {n} of {of} failed",
+      "attempt_submit_review": "Attempt {n} of {of} under review",
+      "attempt_review_ok": "Reviewed: attempt {n} of {of} passed",
+      "attempt_review_fail": "Reviewed: attempt {n} of {of} failed",
+      "attempt_review_review": "Reviewing attempt {n} of {of}",
+      "attempt_recalculate_ok": "Recalculated: attempt {n} of {of} passed",
+      "attempt_recalculate_fail": "Recalculated: attempt {n} of {of} failed",
+      "attempt_recalculate_review": "Recalculated: attempt {n} of {of} under review"
     }
   },
   "learner": {
@@ -2164,7 +2213,9 @@
       "avg_progress_pct": "Avg progress",
       "avg_score": "Avg score",
       "avg_attempt_no": "Avg attempt #"
-    }
+    },
+    "origin": "Builder",
+    "scheduled": "scheduled"
   },
   "rules": {
     "hint": "A rule defines the audience and trigger. What to assign is set by a programme referencing the rule, or by actions below",
@@ -3000,5 +3051,125 @@
       "waiting": "waiting"
     },
     "short": "Trajectories"
+  },
+  "frame": {
+    "col": {
+      "full_name": "Name",
+      "position": "Position",
+      "city": "City",
+      "unit": "Unit",
+      "tags": "Tags",
+      "assigned_at": "Assigned",
+      "completed_at": "Completed",
+      "status": "Status",
+      "result": "Result"
+    },
+    "userStatus": {
+      "invited": "Invited",
+      "suspended": "Blocked",
+      "archived": "Archived"
+    },
+    "context": {
+      "label": "Completion context",
+      "any": "Any",
+      "standalone": "Standalone assignment",
+      "in_course": "Within a course",
+      "in_program": "Within a program or trajectory"
+    }
+  },
+  "taskReport": {
+    "pick": "Pick a {type} to build the report",
+    "pickShort": "Pick a task",
+    "pickHint": "The report is built for one task: pick it in the filter above.",
+    "task": "Task",
+    "anyStatus": "Any status",
+    "unsupported": "This content type has no report yet — pick a course, a training program or a test.",
+    "exportXlsx": "Export xlsx",
+    "recalc": "Recalculate",
+    "recalcAll": "Recalculate all attempts",
+    "recalcChanged": "Recalculated with the current key — the result changed.",
+    "recalcSame": "Recalculated: the result did not change.",
+    "recalcAllDone": "Recalculated attempts: {total}, changed: {changed}.",
+    "preset": {
+      "label": "Period",
+      "all": "All time",
+      "7d": "7 days",
+      "30d": "30 days",
+      "quarter": "Quarter"
+    },
+    "overview": "Performance overview",
+    "tile": {
+      "assigned": "Assigned",
+      "notStarted": "Not started",
+      "inProgress": "In progress",
+      "failed": "Failed",
+      "done": "Passed"
+    },
+    "accesses": "Task accesses by week",
+    "accessesAria": "Bars: number of accesses and number of people per week",
+    "hits": "Accesses",
+    "users": "People",
+    "stats": "Statistics",
+    "stat": {
+      "assigned": "Assigned people",
+      "doneOk": "Completed successfully",
+      "notOpened": "Never opened the task",
+      "doneFail": "Completed unsuccessfully",
+      "inProgress": "In progress",
+      "onReview": "Under review"
+    },
+    "col": {
+      "lastAttempt": "Last attempt",
+      "best": "Best result",
+      "attemptsUsed": "Attempts used",
+      "attemptsAllowed": "Attempts allowed",
+      "progress": "Progress",
+      "due": "Due"
+    }
+  },
+  "summary": {
+    "title": "Summary report",
+    "crumb": "Summary report",
+    "reset": "Reset",
+    "stepsAria": "Wizard steps",
+    "step": {
+      "users": "People",
+      "tasks": "Tasks",
+      "config": "Configuration",
+      "result": "Result"
+    },
+    "search": "Search",
+    "tagsHint": "tags, comma separated",
+    "includeArchived": "Include archived",
+    "usersCount": "People selected: {n}",
+    "col": {
+      "registered": "Registered",
+      "task": "Task",
+      "type": "Type",
+      "assigned": "Assigned",
+      "pick": "Pick",
+      "total": "Total"
+    },
+    "columns": "Result columns",
+    "column": {
+      "status": "Status",
+      "result": "Result",
+      "assigned_at": "Assigned date",
+      "completed_at": "Completion date",
+      "due_at": "Due",
+      "attempts": "Attempts"
+    },
+    "groupBy": "Group by",
+    "group": {
+      "none": "No grouping",
+      "location": "By location",
+      "position": "By position",
+      "unit": "By unit",
+      "task": "By task"
+    },
+    "selection": "Selection",
+    "selectionHint": "The report is an intersection of two selections, not a per-course view",
+    "peoplePicked": "People picked",
+    "tasksPicked": "Tasks picked"
   }
 }

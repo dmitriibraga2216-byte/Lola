@@ -259,18 +259,20 @@
 
 | Путь | Что |
 | --- | --- |
-| `/reports/tasks/:contentType` | по типу контента; `?taskId=` даёт отчёт назначения |
-| `/reports/summary` | сводный: `{userFilter, taskFilter, columns, groupBy}` |
+| `/reports/tasks/:contentType` | по типу контента; `?taskId=` даёт отчёт назначения, `?subjectId=` — по предмету; `format=xlsx`. Четыре части: `overview`, `accesses`, `stats`, `rows` (каркас + правая часть). Пока `course`, `training_program`, `test`; остальные — 422 `report.unsupported` |
+| POST `/reports/summary` | сводный мастер: `{step: users\|tasks\|result, userFilter, taskFilter, columns, groupBy}` — каждый шаг считается сервером |
+| GET/PATCH `/settings/security` | `{emailAlerts}` — «Повідомляти про зміни на E-mail» журнала безпеки (`22` §13.4) |
 | `/reports/trajectory/:id` | колонка на элемент траектории |
 | `/reports/assessment/:id`, `/reports/checklist/:id` | анкеты; разрез чек-листа по пунктам |
 | `/reports/knowledge` | обращения к базе знаний |
-| `/logs/task-status` | протокол смены статусов |
-| `/logs/task-access` | обращения к заданиям (IP, браузер) |
+| `/logs/task-status` | протокол смены статусов (`enrollment_events` ∪ `attempt_results`), фильтры `contentType`, `contentId` |
+| `/logs/task-access` | обращения к заданиям (IP, браузер): каждое открытие и скачивание |
+| `/logs/org-conflicts` | протокол конфликтов оргструктуры (`16` §14) |
 | `/logs/security` | журнал безопасности (`16` Г-16.2) |
 | `/logs/sessions` | сессии |
 | `/logs/notifications` | уведомления + вкладка подключений Telegram |
 | `/logs/imports`, `/logs/bonuses`, `/logs/goal-statuses` | остальные журналы |
-| POST `/reports/:name/export` | фоновая выгрузка → уведомление со ссылкой |
+| POST `/reports/:name/export` | фоновая выгрузка → уведомление со ссылкой; область — по роли, активной в момент запроса. Имена: отчёты `22` §9, `tasks-<contentType>`, `summary`, `log-<kind>`, `saved:<id>`. Колонки каркаса — первые |
 | CRUD `/saved-reports` | сохранённый отчёт с расписанием (`22` Г-22.2, наш конструктор) |
 
 ## 4.15 Медиа

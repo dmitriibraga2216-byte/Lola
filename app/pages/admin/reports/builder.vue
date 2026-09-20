@@ -46,7 +46,7 @@ const fmt = (v: unknown) => v == null ? '—' : typeof v === 'boolean' ? (v ? '�
       <aside class="card">
         <h2>{{ t('rb.saved') }}</h2>
         <button v-for="s in meta?.saved ?? []" :key="s.id" :class="['item', { on: editingId === s.id }]" @click="pick(s)">
-          <b>{{ s.name }}</b><span class="sub">{{ t(`rb.entity.${s.entity}`) }}<template v-if="s.schedule"> · ⏰ {{ s.schedule.every === 'daily' ? t('rb.daily') : t('rb.weekly') }} {{ s.schedule.hour }}:00</template></span>
+          <b>{{ s.name }}</b><span class="sub">{{ t(`rb.entity.${s.entity}`) }} · {{ t('rb.origin') }}<template v-if="s.schedule"> · {{ t('rb.scheduled') }} {{ s.schedule.every === 'daily' ? t('rb.daily') : t('rb.weekly') }} {{ s.schedule.hour }}:00</template></span>
           <span class="acts"><a :href="`/api/v1/reports/builder/${s.id}/xlsx`" class="mini" @click.stop>xlsx</a><button class="mini" @click.stop="remove(s)">✕</button></span>
         </button>
         <p v-if="!meta?.saved.length" class="sub">{{ t('rb.noSaved') }}</p>

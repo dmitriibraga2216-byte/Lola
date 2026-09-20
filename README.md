@@ -142,6 +142,7 @@ Html-отчёт — в `visual-report/index.html` (`pnpm exec playwright show-re
 | [30-spec-delta-2026-09-19.md](docs/30-spec-delta-2026-09-19.md) | дельта финального пакета ТЗ к реализации и очередь доработок |
 | [31-mockups-map.md](docs/31-mockups-map.md) | мокапы 90 экранов (`docs/mockups/`) и карта соответствия экранам Lola |
 | [32-audit-2026-09-19-2.md](docs/32-audit-2026-09-19-2.md) | аудит №2: состояние по документам, список задач в порядке выполнения, решения |
+| [33-debts-2026-09-20.md](docs/33-debts-2026-09-20.md) | актуальный реестр долгов и открытых вопросов, вопросы заказчику, план пакетов `debts-N` |
 | [_conventions.md](docs/_conventions.md) | формат модульных документов и факты, снятые с эталона |
 
 Правила работы для Claude Code — в [CLAUDE.md](CLAUDE.md).

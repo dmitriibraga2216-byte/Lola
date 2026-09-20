@@ -273,7 +273,7 @@ describe('docs/25 §5, §10 — round-robin и лимит активных за�
     const j3 = withTenantSlot(tenantA.id, async () => { log.push('j3:start') })
     await new Promise(r => setTimeout(r, 120))
     expect(activeJobsOf(tenantA.id)).toBe(2)
-    expect(log).toEqual(['j1:start', 'j2:start']) // третья ждёт
+    expect([...log].sort()).toEqual(['j1:start', 'j2:start']) // третья ждёт; порядок первых двух не гарантирован (обе читают лимит из БД)
     release()
     await Promise.all([j1, j2, j3])
     expect(log.slice(-1)).toEqual(['j3:start'])

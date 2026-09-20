@@ -26,16 +26,25 @@ export async function cleanupCourses(titlePrefix: string) {
 }
 
 
-/** Вход через UI: телефон → код (из ответа API при OTP_DEBUG=1) → главная. */
-export async function loginViaUi(page: Page, phone: string) {
+/**
+ * Шаг телефона → запрос кода, без ввода кода. Вынесено из loginViaUi, чтобы визуальные тесты
+ * (tests/visual/screens.spec.ts) могли снять экран «Введіть код», не заходя дальше.
+ */
+export async function requestOtp(page: Page, phone: string): Promise<{ devCode: string }> {
   await page.goto('/login')
   const responsePromise = page.waitForResponse(r => r.url().includes('/auth/otp/request') && r.ok())
   await page.getByPlaceholder('__ ___ __ __').fill(phone.replace('+380', ''))
   await page.getByRole('button', { name: /Отримати код/ }).click()
   const res = await responsePromise
   const { data } = await res.json() as { data: { devCode: string } }
+  return { devCode: data.devCode }
+}
+
+/** Вход через UI: телефон → код (из ответа API при OTP_DEBUG=1) → главная. */
+export async function loginViaUi(page: Page, phone: string) {
+  const { devCode } = await requestOtp(page, phone)
   // Шесть ячеек кода — один скрытый input; шесть цифр отправляются сами
-  await page.getByLabel('Введіть код').fill(data.devCode)
+  await page.getByLabel('Введіть код').fill(devCode)
   await page.waitForURL(u => !u.pathname.startsWith('/login'))
 }
 

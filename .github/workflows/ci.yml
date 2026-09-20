@@ -90,6 +90,97 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  # Визуальные тесты по мокапам (docs/28 «visual-mockups», docs/32 §Б строка 21): скриншоты
+  # приложения против эталонов из docs/mockups + структурные проверки текстов мокапа.
+  # continue-on-error на шаге теста — расхождения складываются в список долгов (docs/31),
+  # не блокируют мердж; это отдельный от `ci` сигнал, поэтому свой job, свои сервисы/сид.
+  visual:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: lola
+          POSTGRES_PASSWORD: lola_dev
+          POSTGRES_DB: lola
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lola -d lola"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      DATABASE_URL: postgres://app_user:app_user_dev@localhost:5432/lola
+      DATABASE_ADMIN_URL: postgres://lola:lola_dev@localhost:5432/lola
+      PLATFORM_DATABASE_URL: postgres://platform_admin:platform_admin_dev@localhost:5432/lola
+      ENCRYPTION_KEY: ci-encryption-key
+      SESSION_SECRET: ci-session-secret
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: lola-media
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
+
+      - name: Migrate + сид
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+
+      - name: Build
+        run: pnpm build
+
+      - name: Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Эталоны из docs/mockups
+        run: pnpm visual:mockups
+
+      - name: Визуальные тесты
+        id: visual
+        continue-on-error: true
+        run: pnpm visual
+        env:
+          CI: "1"
+
+      - name: Итог в сводку CI
+        if: always()
+        run: |
+          echo "### Визуальные тесты по мокапам (docs/32 §Б строка 21)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          node scripts/visual-summary.mjs >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Полный html-отчёт — в артефакте \`visual-report\`. Расхождения не блокируют мердж (docs/28 «visual-mockups»)." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-report
+          path: visual-report/
+          retention-days: 7
+
   image:
     needs: ci
     runs-on: ubuntu-latest

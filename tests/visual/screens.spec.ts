@@ -78,14 +78,14 @@ test.describe('Main + TaskCard', () => {
     await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'Урок', resource: { body: [{ id: 'b', type: 'text', html: '<p>x</p>' }] } })
     await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'Перша публікація для візуального тесту' })
     const [emp] = await admin`select id from users where phone = ${EMPLOYEE_PHONE}`
-    const created = await api<{ id: string }>(request, csrf, 'post', '/tasks', {
+    const created = await api<{ assignmentId: string }>(request, csrf, 'post', '/tasks', {
       subjectType: 'course',
       subjectId: course.id,
       audience: { rules: [{ type: 'user', ids: [emp!.id as string] }], match: 'any' },
       dueMode: 'relative',
       dueDays: 14,
     })
-    assignmentId = created.id
+    assignmentId = created.assignmentId // POST /tasks отдаёт { ok, assignmentId, expanded }
   })
 
   test.afterAll(async () => {
@@ -111,6 +111,7 @@ test.describe('Main + TaskCard', () => {
     await loginViaUi(page, ADMIN_PHONE)
     await page.goto(`/admin/assignments/${assignmentId}`)
     await expect(page).toHaveURL(new RegExp(assignmentId))
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Касова дисципліна') // карточка грузится клиентом
     await stabilize(page)
     await checkStructure(page, 'TaskCard', mockupTexts('TaskCard'), ['БД'])
     await expect(page).toHaveScreenshot(`TaskCard-${testInfo.project.name}.png`, { maxDiffPixelRatio: MAX_DIFF_PIXEL_RATIO, mask: commonMask(page), animations: 'disabled' })

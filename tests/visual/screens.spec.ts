@@ -72,15 +72,24 @@ test.describe('Main + TaskCard', () => {
     if (testInfo.project.name !== 'desktop') return // Main/TaskCard — тільки адмінка, не готувати фікстуру двічі
     await resetOtp()
     const { csrf } = await apiLogin(request, ADMIN_PHONE)
-    // Назва — дослівно приклад з мокапа TaskCard.html (докладніше — коментар у Notice нижче)
-    const course = await api<{ id: string }>(request, csrf, 'post', '/courses', { title: `${PREFIX}Тест «Касова дисципліна на ТТ»` })
-    const mod = await api<{ id: string }>(request, csrf, 'post', `/courses/${course.id}/modules`, { title: 'Розділ' })
-    await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'Урок', resource: { body: [{ id: 'b', type: 'text', html: '<p>x</p>' }] } })
-    await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'Перша публікація для візуального тесту' })
+    // docs/33 D-067: мокап TaskCard.html показує ТЕСТ («Тест «Касова дисципліна на ТТ» · 12 питань»),
+    // а не курс — фікстура була на курсі. Назва квізу — дослівно приклад з мокапа.
+    const bank = await api<{ id: string }>(request, csrf, 'post', '/question-banks', { name: `${PREFIX}банк` })
+    const questionIds: string[] = []
+    for (let i = 0; i < 12; i++) {
+      const q = await api<{ id: string }>(request, csrf, 'post', '/questions', {
+        bankId: bank.id, kind: 'single', stem: [{ id: 's', type: 'text', html: `<p>Питання ${i + 1}</p>` }],
+        options: [{ id: 'a', text: 'Так' }, { id: 'b', text: 'Ні' }], answer: { correctId: 'a' }, points: 1,
+      })
+      questionIds.push(q.id)
+    }
+    const quiz = await api<{ id: string }>(request, csrf, 'post', '/quizzes', { title: `${PREFIX}Тест «Касова дисципліна на ТТ»` })
+    await api(request, csrf, 'put', `/quizzes/${quiz.id}/questions`, { items: questionIds.map((questionId, sort) => ({ questionId, sort })) })
+    await api(request, csrf, 'patch', `/quizzes/${quiz.id}`, { status: 'published' })
     const [emp] = await admin`select id from users where phone = ${EMPLOYEE_PHONE}`
     const created = await api<{ assignmentId: string }>(request, csrf, 'post', '/tasks', {
-      subjectType: 'course',
-      subjectId: course.id,
+      subjectType: 'test',
+      subjectId: quiz.id,
       audience: { rules: [{ type: 'user', ids: [emp!.id as string] }], match: 'any' },
       dueMode: 'relative',
       dueDays: 14,
@@ -89,9 +98,9 @@ test.describe('Main + TaskCard', () => {
   })
 
   test.afterAll(async () => {
-    await admin`delete from enrollments where subject_id in (select id from courses where title like ${`${PREFIX}%`})`
-    await admin`delete from assignments where subject_id in (select id from courses where title like ${`${PREFIX}%`})`
-    await admin`delete from courses where title like ${`${PREFIX}%`}`
+    await admin`delete from assignments where subject_id in (select id from quizzes where title like ${`${PREFIX}%`})`
+    await admin`delete from quizzes where title like ${`${PREFIX}%`}`
+    await admin`delete from question_banks where name like ${`${PREFIX}%`}`
   })
 
   test('Main: /admin/assignments', async ({ page }, testInfo) => {
@@ -145,15 +154,48 @@ test.describe('Login', () => {
 // Learn home (MyTasks) + Profile — мобильный, кабинет сотрудника
 // ---------------------------------------------------------------------------------------------
 test.describe('Learn home + Profile', () => {
+  const MT_PREFIX = 'E2E-visual-mytasks '
+
+  test.beforeAll(async ({ request }, testInfo) => {
+    if (testInfo.project.name !== 'mobile') return // MyTasks — тільки кабінет, не готувати фікстуру двічі
+    await resetOtp()
+    const { csrf } = await apiLogin(request, ADMIN_PHONE)
+    const [emp] = await admin`select id from users where phone = ${EMPLOYEE_PHONE}`
+    // docs/33 D-067: одна фікстура (курс на 14 днів, з описом «Main + TaskCard») заповнювала лише
+    // групу «Пізніше» — додаємо курс на 3 дні («Цього тижня»). Групу «Прострочено» додати сюди
+    // не можна: `taskGroupWhere('overdue')` (server/services/enrollmentStatus.ts) — окрема від
+    // new/planned/failed група, а вкладка «active» на /learn (app/pages/learn/index.vue)
+    // запитує лише new/planned/failed — прострочені картки живуть на окремій вкладці «Прострочено»
+    // і на екрані «active»-вкладки їх принципово не буває; мокап показує всі три секції разом —
+    // розбіжність мокапу з поведінкою застосунку, не борг фікстури (зафіксовано, не вигадуємо рішення мовчки).
+    for (const [suffix, dueDays] of [['тиждень', 3], ['пізніше', 45]] as const) {
+      const course = await api<{ id: string }>(request, csrf, 'post', '/courses', { title: `${MT_PREFIX}${suffix}` })
+      const mod = await api<{ id: string }>(request, csrf, 'post', `/courses/${course.id}/modules`, { title: 'Р' })
+      await api(request, csrf, 'post', `/courses/${course.id}/lessons`, { moduleId: mod.id, title: 'Урок', resource: { body: [{ id: 'b', type: 'text', html: '<p>x</p>' }] } })
+      await api(request, csrf, 'post', `/courses/${course.id}/publish`, { changelog: 'Візуальний тест' })
+      await api(request, csrf, 'post', '/tasks', {
+        subjectType: 'course', subjectId: course.id,
+        audience: { rules: [{ type: 'user', ids: [emp!.id as string] }], match: 'any' },
+        dueMode: 'relative', dueDays,
+      })
+    }
+  })
+
+  test.afterAll(async () => {
+    await admin`delete from enrollments where subject_id in (select id from courses where title like ${`${MT_PREFIX}%`})`
+    await admin`delete from assignments where subject_id in (select id from courses where title like ${`${MT_PREFIX}%`})`
+    await admin`delete from courses where title like ${`${MT_PREFIX}%`}`
+  })
+
   test('Learn home: /learn', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', 'кабінет — тільки mobile')
     await loginViaUi(page, EMPLOYEE_PHONE)
     await page.goto('/learn')
     await stabilize(page)
-    // «Аліно» в мокапі — ім'я в вітанні (приклад, не переноситься, docs/31 шапка); секційні
-    // капс-заголовки ПРОСТРОЧЕНО/ЦЬОГО ТИЖНЯ/ПІЗНІШЕ показуються тільки коли в групі є картки —
-    // однієї тестової фікстури мало, щоб заповнити всі три (docs/28 «visual-mockups»)
-    await checkStructure(page, 'MyTasks', mockupTexts('MyTasks'), ['Аліно'])
+    // «Аліно» в мокапі — ім'я в вітанні (приклад, не переноситься, docs/31 шапка); ЦЬОГО ТИЖНЯ/
+    // ПІЗНІШЕ — тепер завжди є картка (фікстура вище); ПРОСТРОЧЕНО — не буває на вкладці «active»
+    // ні за яких даних (див. коментар у beforeAll), тому в ignore, а не борг фікстури.
+    await checkStructure(page, 'MyTasks', mockupTexts('MyTasks'), ['Аліно', 'ПРОСТРОЧЕНО'])
     await expect(page).toHaveScreenshot(`MyTasks-${testInfo.project.name}.png`, { maxDiffPixelRatio: MAX_DIFF_PIXEL_RATIO, mask: commonMask(page), animations: 'disabled' })
   })
 

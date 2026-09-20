@@ -10,6 +10,7 @@ const tab = ref<Tab>('tasks')
 
 interface TaskCard {
   id: string
+  type: 'course' | 'resource'
   title: string
   summary: string | null
   estimatedMinutes: number | null
@@ -77,6 +78,8 @@ const requestModal = ref<TaskCard | null>(null)
 const requestComment = ref('')
 
 async function enrollTask(card: TaskCard) {
+  // Ресурс бази знань відкривається напряму — самозапису/заявки для ресурсу не заведено (docs/33 D-060)
+  if (card.type === 'resource') { await navigateTo(`/learn/knowledge/${card.id}`); return }
   if (card.assignMode === 'catalog_request') { requestModal.value = card; requestComment.value = ''; return }
   busyId.value = card.id
   error.value = ''
@@ -152,7 +155,7 @@ async function enrollTraj(card: TrajCard) {
     <template v-if="tab === 'tasks'">
       <p v-if="!loading && tasks.length === 0" class="empty">{{ t('learner.catalogEmpty') }}</p>
       <div class="grid">
-        <div v-for="card in tasks" :key="card.id" class="card">
+        <div v-for="card in tasks" :key="`${card.type}:${card.id}`" class="card">
           <div class="title2">{{ card.title }}</div>
           <p v-if="card.summary" class="summary">{{ card.summary }}</p>
           <div class="meta">
@@ -163,7 +166,7 @@ async function enrollTraj(card: TrajCard) {
             <NuxtLink v-if="card.enrollmentId" :to="`/learn/${card.enrollmentId}`" class="btn ghost small">{{ t('learner.alreadyEnrolled') }}</NuxtLink>
             <span v-else-if="card.requested" class="badge sun">{{ t('learner.catalogRequested') }}</span>
             <button v-else class="btn primary small" :disabled="busyId === card.id" @click="enrollTask(card)">
-              {{ card.assignMode === 'catalog_request' ? t('learner.catalogRequestButton') : t('learner.enroll') }}
+              {{ card.type === 'resource' ? t('learner.catalogOpenResource') : (card.assignMode === 'catalog_request' ? t('learner.catalogRequestButton') : t('learner.enroll')) }}
             </button>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { requireScope } from '../../../services/access'
 import { catalog } from '../../../services/learning'
 import { catalogPrograms } from '../../../services/programs'
 import { catalogTrajectories } from '../../../services/trajectories'
+import { catalogResources } from '../../../services/resources'
 import { apiData } from '../../../utils/apiResponse'
 
 interface ProgramRow {
@@ -57,5 +58,26 @@ export default defineEventHandler(async (event) => {
 
   const q = typeof query.q === 'string' ? query.q : undefined
   const categoryId = typeof query.category === 'string' ? query.category : undefined
-  return apiData(await catalog(ctx, { q, categoryId }))
+  const [courseRows, resourceRows] = await Promise.all([
+    catalog(ctx, { q, categoryId }),
+    catalogResources(ctx, { q, categoryId }),
+  ])
+  const courses = courseRows.map(c => ({ ...c, type: 'course' as const }))
+  // Ресурси бази знань у каталозі (докс/10 §5.2, docs/33 D-060): відкриваються напряму — самозапису/заявки
+  // для ресурсу не заведено (борг, зафіксовано в `resources.ts#catalogResources`), enrollmentId завжди null.
+  const resourcesOut = resourceRows.map(r => ({
+    id: r.id,
+    type: 'resource' as const,
+    title: r.title,
+    summary: r.summary,
+    estimatedMinutes: r.estimatedMinutes,
+    coverKey: r.coverKey,
+    tags: r.tags,
+    categoryId: r.categoryId,
+    categoryName: r.categoryName,
+    assignMode: r.assignMode,
+    enrollmentId: null,
+    requested: false,
+  }))
+  return apiData([...courses, ...resourcesOut])
 })

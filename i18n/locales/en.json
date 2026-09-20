@@ -664,6 +664,7 @@
     "catalogRequestButton": "Send request",
     "catalogRequested": "Request sent",
     "catalogRequestSent": "Request sent",
+    "catalogOpenResource": "Open",
     "catalogRequestTitle": "Why do you need this course?",
     "catalogRequestCommentLabel": "Comment (optional)",
     "catalogRequestSubmit": "Send request",

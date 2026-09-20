@@ -1,11 +1,12 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
-import { desc, eq, sql } from 'drizzle-orm'
-import { platformAudit, tenantLimits, tenants } from '../db/schema'
+import { and, desc, eq, sql } from 'drizzle-orm'
+import { mediaAssets, platformAudit, tenantLimits, tenants } from '../db/schema'
 import { currentRequestContext } from '../utils/requestContext'
 import { platformDb, type PlatformAuth } from './platform'
 import { invalidateTenant } from './tenantResolve'
 import { invalidateLimits } from './tenantLimits'
 import { enqueueForTenant } from './tenantQueue'
+import { enqueueMediaProcess } from './queue'
 import type { TenantLimitsInput } from '../../shared/schemas/platform'
 
 /**
@@ -82,13 +83,26 @@ export async function suspendTenant(id: string, reason: string | null, actor: Pl
   return view(after!)
 }
 
-/** Возобновление из suspended. */
+/**
+ * Медиа, застрявшие в `processing` на момент приостановки тенанта (docs/25 §5, долг из
+ * `28` Spec 25 отк. (3)): пока тенант suspended, `media.process` для них не идёт и не повторяется
+ * сам по себе — задача с сущностью, поставленная до приостановки, завершается `skipped` и не переставляется.
+ */
+async function stuckProcessingMedia(id: string): Promise<string[]> {
+  const rows = await platformDb().select({ id: mediaAssets.id }).from(mediaAssets)
+    .where(and(eq(mediaAssets.tenantId, id), eq(mediaAssets.status, 'processing')))
+  return rows.map(r => r.id)
+}
+
+/** Возобновление из suspended: заодно переставляет `media.process` для медиа, застрявших в processing. */
 export async function resumeTenant(id: string, actor: PlatformAuth): Promise<TenantActionResult> {
   const t = await loadTenant(id)
   if (!t) return { ok: false, code: 'not_found' }
   if (t.status !== 'suspended') return { ok: false, code: 'wrong_status' }
   const [after] = await platformDb().update(tenants).set({ status: 'active', updatedAt: new Date() }).where(eq(tenants.id, id)).returning()
-  await recordPlatformAudit(actor, { action: 'tenant.resume', tenantId: id, entity: 'tenant', entityId: id, before: { status: t.status }, after: { status: 'active', slug: t.slug } })
+  const stuck = await stuckProcessingMedia(id)
+  await Promise.all(stuck.map(mediaId => enqueueMediaProcess(id, mediaId).catch(err => console.error('[tenant.resume] media.process', mediaId, err))))
+  await recordPlatformAudit(actor, { action: 'tenant.resume', tenantId: id, entity: 'tenant', entityId: id, before: { status: t.status }, after: { status: 'active', slug: t.slug, requeuedMedia: stuck.length } })
   invalidateTenant(id)
   return view(after!)
 }

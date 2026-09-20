@@ -162,6 +162,8 @@ export async function createResource(ctx: Ctx, input: CreateInput) {
       cardImageKey: input.cardImageKey ?? null,
       allowPrint: input.allowPrint,
       authorIds: input.authorIds?.length ? input.authorIds : [ctx.actorId],
+      isCatalogVisible: input.isCatalogVisible ?? false,
+      assignMode: input.assignMode ?? 'catalog_free',
       status: 'draft',
     }).returning()
     await setAccessGroups(tx, ctx.tenantId, r!.id, input.accessGroupIds ?? [])
@@ -198,6 +200,8 @@ export async function updateResource(ctx: Ctx, id: string, input: UpdateInput): 
       ...(input.cardImageKey !== undefined ? { cardImageKey: input.cardImageKey } : {}),
       ...(input.allowPrint !== undefined ? { allowPrint: input.allowPrint } : {}),
       ...(input.authorIds !== undefined && input.authorIds.length ? { authorIds: input.authorIds } : {}),
+      ...(input.isCatalogVisible !== undefined ? { isCatalogVisible: input.isCatalogVisible } : {}),
+      ...(input.assignMode !== undefined ? { assignMode: input.assignMode } : {}),
       updatedAt: new Date(),
     }).where(eq(resources.id, id)).returning()
     if (input.accessGroupIds !== undefined) await setAccessGroups(tx, ctx.tenantId, id, input.accessGroupIds)
@@ -585,6 +589,84 @@ export async function canAccessResource(tx: TenantTx, userId: string, resourceId
   const members = await tx.select({ subjectType: accessGroupMembers.subjectType, subjectId: accessGroupMembers.subjectId })
     .from(accessGroupMembers).where(inArray(accessGroupMembers.groupId, groups.map(g => g.groupId)))
   return members.some(m => (subjects[m.subjectType as keyof typeof subjects] ?? []).includes(m.subjectId))
+}
+
+/**
+ * Батч-версия `canAccessResource` для списка (докс/21 §14.1) — один запрос на групи вместо N.
+ * `authorIds` — как и в `canAccessResource`, автор бачить свій ресурс завжди, навіть поза групами.
+ */
+async function accessibleResourceIds(tx: TenantTx, tenantId: string, userId: string, rows: { id: string, authorIds: string[] }[]): Promise<Set<string>> {
+  if (!rows.length) return new Set()
+  const own = new Set(rows.filter(r => r.authorIds.includes(userId)).map(r => r.id))
+  if (!(await knowledgeSettings(tx, tenantId)).restrictAccess) return new Set(rows.map(r => r.id))
+  const ids = rows.map(r => r.id)
+  const groups = await tx.select({ contentId: contentAccessGroups.contentId, groupId: contentAccessGroups.groupId }).from(contentAccessGroups)
+    .where(and(eq(contentAccessGroups.contentType, 'resource'), inArray(contentAccessGroups.contentId, ids)))
+  const gated = new Set(groups.map(g => g.contentId))
+  const open = ids.filter(id => !gated.has(id))
+  if (!groups.length) return new Set(ids)
+  const subjects = await userAccessSubjects(tx, userId)
+  const members = await tx.select({ subjectType: accessGroupMembers.subjectType, subjectId: accessGroupMembers.subjectId, groupId: accessGroupMembers.groupId })
+    .from(accessGroupMembers).where(inArray(accessGroupMembers.groupId, groups.map(g => g.groupId)))
+  const allowedGroupIds = new Set(members.filter(m => (subjects[m.subjectType as keyof typeof subjects] ?? []).includes(m.subjectId)).map(m => m.groupId))
+  const allowed = new Set([...open, ...own])
+  for (const g of groups) if (allowedGroupIds.has(g.groupId)) allowed.add(g.contentId)
+  return allowed
+}
+
+export interface CatalogResourceCard {
+  id: string
+  title: string
+  summary: string | null
+  kind: string
+  estimatedMinutes: number | null
+  coverKey: string | null
+  tags: string[]
+  categoryId: string | null
+  categoryName: string | null
+  assignMode: 'catalog_free' | 'catalog_request'
+}
+
+/**
+ * Каталог навчання: ресурси з `is_catalog_visible` (докс/10 §5.2, борг «28» Spec 10 відк. (1) /
+ * docs/33 D-060 — «ресурсам потрібні свої is_catalog_visible/assign_mode»), доступність картки —
+ * той самий доступ, що й прямий перегляд ресурсу (`canAccessResource`/`accessibleResourceIds`,
+ * тумблер бази знань, докс/21 §14.1), а не окремий тумблер каталогу (той — тільки для курсів).
+ * На відміну від курсів, самозапису/заявки для ресурсу не заведено — це окрема задача, тут лише
+ * видимість картки поверх `catalogTrajectories`-подібного збирача.
+ */
+export async function catalogResources(ctx: Ctx, opts: { q?: string, categoryId?: string } = {}): Promise<CatalogResourceCard[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.select().from(resources)
+      .where(and(
+        eq(resources.status, 'published'),
+        eq(resources.isCatalogVisible, true),
+        notDeleted(),
+        ...(opts.q ? [ilike(resources.title, `%${opts.q}%`)] : []),
+        ...(opts.categoryId ? [sql`${opts.categoryId}::uuid = any(${resources.categoryIds})`] : []),
+      ))
+      .orderBy(desc(resources.updatedAt))
+
+    const allowed = await accessibleResourceIds(tx, ctx.tenantId, ctx.actorId, rows)
+    const visible = rows.filter(r => allowed.has(r.id))
+
+    const categoryIds = [...new Set(visible.flatMap(r => r.categoryIds))]
+    const categoryRows = categoryIds.length ? await tx.select({ id: resourceCategories.id, name: resourceCategories.name }).from(resourceCategories).where(inArray(resourceCategories.id, categoryIds)) : []
+    const categoryName = new Map(categoryRows.map(c => [c.id, c.name]))
+
+    return visible.map(r => ({
+      id: r.id,
+      title: r.title,
+      summary: r.summary,
+      kind: r.kind,
+      estimatedMinutes: r.estimatedMinutes,
+      coverKey: r.cardImageKey ?? r.coverKey,
+      tags: r.tags,
+      categoryId: r.categoryIds[0] ?? null,
+      categoryName: r.categoryIds[0] ? categoryName.get(r.categoryIds[0]) ?? null : null,
+      assignMode: r.assignMode as 'catalog_free' | 'catalog_request',
+    }))
+  })
 }
 
 /**

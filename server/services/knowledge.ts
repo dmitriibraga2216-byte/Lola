@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
-import { knowledgeArticles, knowledgeFeedback, knowledgeLinks, knowledgeRevisions, questions, resources, searchQueries } from '../db/schema'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { knowledgeArticles, knowledgeFeedback, knowledgeLinks, knowledgeRevisions, questions, resourceCategories, resources, searchQueries } from '../db/schema'
 import { enqueueNotification } from './notifications'
 import { resolveAudience } from './audience'
 import type { Audience } from '../../shared/schemas/assignments'
@@ -298,6 +298,37 @@ export async function search(ctx: Ctx, q: string, limit = 20, source: 'all' | 'r
       .map(h => ({ ...h, bookmarked: marks.has(keyOf(h)) }))
     await tx.insert(searchQueries).values({ tenantId: ctx.tenantId, userId: ctx.actorId, query: q.trim().slice(0, 200), results: hits.length })
     return hits
+  })
+}
+
+/**
+ * Дерево категорій бази знань (docs/33 D-041, docs/28 Spec 21 відк. (1); мокап Knowledge —
+ * «КАТЕГОРІЇ» зліва: Інформація про компанію, Торгові точки, Кухня…). Категорії — вітрина над
+ * тим самим `resource_categories`, що й `/admin/knowledge` (без лічильників — вони вимагали б
+ * тих самих груп доступу, що й перегляд ресурсу, а порахувати їх дешево наперед не можна).
+ */
+export async function categoriesTree(ctx: Ctx): Promise<{ id: string, name: string, parentId: string | null }[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) =>
+    tx.select({ id: resourceCategories.id, name: resourceCategories.name, parentId: resourceCategories.parentId })
+      .from(resourceCategories).orderBy(asc(resourceCategories.sortOrder), asc(resourceCategories.name)))
+}
+
+/** Ресурси однієї категорії (клік по дереву) — ті самі правила доступу, що й у `search()`, без пошукового запиту. */
+export async function resourcesByCategory(ctx: Ctx, categoryId: string, limit = 50): Promise<SearchHit[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.execute(sql`
+      select r.id, r.title, r.views_count, left(coalesce(r.plain_text, ''), 160) as snippet
+      from resources r
+      where r.status = 'published' and r.deleted_at is null and ${categoryId}::uuid = any(r.category_ids)
+      order by r.title limit ${limit}
+    `) as unknown as { id: string, title: string, views_count: number, snippet: string }[]
+    const marks = await bookmarkKeys(tx, ctx.actorId)
+    const out: SearchHit[] = []
+    for (const l of rows) {
+      if (!(await canAccessResource(tx, ctx.actorId, l.id))) continue
+      out.push({ kind: 'lesson', id: l.id, title: l.title, snippet: l.snippet, score: 0, views: l.views_count, bookmarked: marks.has(`resource:${l.id}`) })
+    }
+    return out
   })
 }
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm'
 import {
   comments, courses, locations, notices, programs, quizzes, resources, roles, userPlacements, userRoles, users,
 } from '../db/schema'
@@ -51,10 +51,24 @@ async function managerOf(tx: TenantTx, userId: string): Promise<string | null> {
   return row?.managerId ?? null
 }
 
+/**
+ * Первый действующий администратор тенанта (докс/33 D-062): роль `admin` не истекла
+ * (`valid_until is null or > now()`), человек активен и не заблокирован — тот же критерий,
+ * что и в `securityLog.ts#alertAdmins` (Spec 22 §13.4), чтобы фолбек маршрутизации не уходил
+ * человеку без доступа к системе.
+ */
 async function anyAdmin(tx: TenantTx, tenantId: string): Promise<string | null> {
   const [row] = await tx.select({ userId: userRoles.userId }).from(userRoles)
     .innerJoin(roles, eq(roles.id, userRoles.roleId))
-    .where(and(eq(roles.tenantId, tenantId), eq(roles.code, 'admin')))
+    .innerJoin(users, eq(users.id, userRoles.userId))
+    .where(and(
+      eq(roles.tenantId, tenantId),
+      eq(roles.code, 'admin'),
+      eq(users.status, 'active'),
+      eq(users.isBlocked, false),
+      or(isNull(userRoles.validUntil), gt(userRoles.validUntil, new Date())),
+    ))
+    .orderBy(userRoles.createdAt)
     .limit(1)
   return row?.userId ?? null
 }

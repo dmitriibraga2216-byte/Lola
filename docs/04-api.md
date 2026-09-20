@@ -243,6 +243,8 @@
 | Метод | Путь | Описание |
 | --- | --- | --- |
 | GET | `/knowledge/search` | единый поиск: `?q=&in=all\|resources\|news\|notices` (форума и wiki нет — `30`); результаты помечены источником и закладкой |
+| GET | `/knowledge/categories` | дерево категорий `resource_categories` для витрины экрана `Knowledge` (докс/33 D-041) |
+| GET | `/knowledge/categories/:id/resources` | ресурсы категории (клик по дереву) — те же правила доступа, что и в поиске, без текста запроса |
 | CRUD | `/access-groups` | группы доступа к ресурсам (`?appliesTo=knowledge`); `GET/PATCH /settings/knowledge` — тумблер «Використовувати обмеження доступу» |
 | POST | `/knowledge/:id/bookmark` | закладка-переключатель, тело `{contentType: resource\|article\|news\|notice}`; `GET /knowledge/bookmarks` — «Мої закладки» |
 | CRUD | `/news`, `/notices`, `/simple-notices` | лента и объявления; `GET/POST /news/categories`; `GET /notices/pending` — что показать при входе, `GET /notices/mine`; `POST /simple-notices/:id/view` |

@@ -191,6 +191,36 @@ describe('лента коментарів з маршрутизацією (docs/
     expect(nReply.length).toBeGreaterThan(0)
   })
 
+  it('фолбек на адміністратора (docs/33 D-062) пропускає прострочену роль і бере чинного', async () => {
+    // Точка без керівника — форсуємо фолбек contentAuthor(self) → managerOf(null) → anyAdmin()
+    const [loc] = await admin`insert into locations (tenant_id, org_unit_id, name, address) values (${tenantId}, (select id from org_units where tenant_id = ${tenantId} and parent_id is null limit 1), ${`Без керівника ${stamp}`}, 'вул. Тестова') returning id`
+    const locId = loc!.id as string
+    const phone = `+38064${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
+    const [u] = await admin`insert into users (tenant_id, phone, full_name, status, hired_at) values (${tenantId}, ${phone}, 'Учень Без Керівника', 'active', current_date) returning id`
+    const learner = u!.id as string
+    userIds.push(learner)
+    await admin`insert into user_placements (tenant_id, user_id, location_id, position_id, is_primary) values (${tenantId}, ${learner}, ${locId}, ${posId}, true)`
+
+    // Курс автора-себе — гілка «автор» пропускається (author === actorId), йде далі по ланцюжку
+    const c = await createCourse({ tenantId, actorId: learner }, { title: `Курс без автора ${stamp}`, language: 'uk', strictOrder: true, tags: [], isCatalogVisible: false })
+    courseIds.push(c.id)
+
+    // Прострочена роль адміністратора — не має обиратись фолбеком
+    const [adminRole] = await admin`select id from roles where tenant_id = ${tenantId} and code = 'admin'`
+    const [expired] = await admin`insert into users (tenant_id, phone, full_name, status, hired_at) values (${tenantId}, ${`+38066${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`}, 'Прострочений Адмін', 'active', current_date) returning id`
+    const expiredAdminId = expired!.id as string
+    userIds.push(expiredAdminId)
+    await admin`insert into user_roles (tenant_id, user_id, role_id, scope_type, valid_until) values (${tenantId}, ${expiredAdminId}, ${adminRole!.id}, 'tenant', now() - interval '1 day')`
+
+    const comment = await createComment(ctx(learner), { sourceType: 'course', sourceId: c.id, body: 'Немає керівника точки — куди піде коментар?' })
+    expect(comment.routedTo).toBe(adminId)
+    expect(comment.routedTo).not.toBe(expiredAdminId)
+
+    await admin`delete from user_roles where user_id = ${expiredAdminId} and role_id = ${adminRole!.id}`
+    await admin`delete from user_placements where user_id = ${learner} and location_id = ${locId}`
+    await admin`delete from locations where id = ${locId}`
+  })
+
   it('чужий тенант — 404 для рішення по заявці на курс', async () => {
     const [other] = await admin`insert into tenants (slug, name) values ('test-isolation', 'Тест ізоляції') on conflict (slug) do update set name = excluded.name returning id`
     const otherTenantId = other!.id as string

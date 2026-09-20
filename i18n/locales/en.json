@@ -1501,7 +1501,8 @@
     "bookmarks": "My bookmarks",
     "noBookmarks": "No bookmarks yet — star what you come back to",
     "bookmark": "Bookmark",
-    "bookmarked": "Bookmarked"
+    "bookmarked": "Bookmarked",
+    "categories": "Categories"
   },
   "news": {
     "title": "News",
@@ -1655,7 +1656,8 @@
     "continue": "continue",
     "questionOf": "Question {n} of {total}",
     "or": "or",
-    "freeHint": "Your answer"
+    "freeHint": "Your answer",
+    "attachFile": "Attach file"
   },
   "workshop": {
     "reviewTitle": "Workshop review",
@@ -3863,7 +3865,21 @@
     "revoked": "revoked {n}",
     "months": "{n} mo.",
     "unlimited": "unlimited",
-    "empty": "No certificates issued yet"
+    "empty": "No certificates issued yet",
+    "browseIssued": "View issued",
+    "issuedTitle": "Issued certificates",
+    "searchHint": "Search by name or number",
+    "allCourses": "All courses",
+    "stateLabel": "State",
+    "allStates": "All states",
+    "stateActive": "Active",
+    "stateRevoked": "Revoked",
+    "person": "Person",
+    "number": "Number",
+    "revoke": "Revoke",
+    "revokeReasonHint": "Reason for revoking (at least 10 characters)",
+    "revokeConfirm": "Confirm revoke",
+    "revokedReasonLine": "Revoke reason: {reason}"
   },
   "settings": {
     "discard": "Discard changes",

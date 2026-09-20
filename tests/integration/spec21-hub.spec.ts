@@ -222,6 +222,26 @@ describe('дни рождения (29 Б.16), контакты (docs/21 §14.8),
     expect((await admin`select 1 from notifications where code = 'birthday_upcoming' and payload->>'name' = 'Прихований'`).length).toBe(0)
   })
 
+  it('docs/33 D-044: birthday_today — один дайджест точки на колегу, іменинники його не отримують, дедуп на день', async () => {
+    const md0 = () => { const d = new Date(); return `1990-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}` }
+    const a = await makePerson('Іменинник Дайджест А', lazarevaId, { birth_date: md0() })
+    const b = await makePerson('Іменинник Дайджест Б', lazarevaId, { birth_date: md0() })
+    const mate = await makePerson('Колега Не Іменинник', lazarevaId)
+
+    await hp.birthdayScan(tenantId)
+
+    const mateNotifs = await admin`select payload from notifications where user_id = ${mate} and code = 'birthday_today'`
+    expect(mateNotifs.length).toBe(1)
+    expect(mateNotifs[0]!.payload).toMatchObject({ count: 2 })
+    expect(String(mateNotifs[0]!.payload.names)).toContain('Іменинник Дайджест А')
+    expect(String(mateNotifs[0]!.payload.names)).toContain('Іменинник Дайджест Б')
+
+    expect((await admin`select 1 from notifications where user_id in ${admin([a, b])} and code = 'birthday_today'`).length).toBe(0)
+
+    await hp.birthdayScan(tenantId) // повторний прогін того ж дня — дедуп, новий рядок не з'являється
+    expect((await admin`select count(*)::int as n from notifications where user_id = ${mate} and code = 'birthday_today'`)[0]!.n).toBe(1)
+  })
+
   it('контакты: рабочие поля всем, личные — по people.view или настройке тенанта', async () => {
     const p = await makePerson('Контактна Особа', lazarevaId, { email: 's21@example.com', work_contacts: { ext: '+380 66 200 00 01', workEmail: 'hr@example.com' } })
     const plain = await hp.contacts(ctx(p), access(['learn.view']), { q: 'Контактна' })

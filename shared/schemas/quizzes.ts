@@ -278,4 +278,11 @@ export const revokeSchema = z.object({
   notify: z.boolean().default(true),
 })
 
+/** GET /certificates — список виданих (докс/33 D-065): пошук за ПІБ/номером, курс, стан. */
+export const certificateListQuerySchema = z.object({
+  courseId: z.string().uuid().optional(),
+  status: z.enum(['active', 'revoked']).optional(),
+  q: z.string().trim().min(1).max(200).optional(),
+})
+
 export type QuizParamsInput = z.infer<typeof quizParamsSchema>

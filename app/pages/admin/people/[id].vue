@@ -42,7 +42,7 @@ function editRole(r: Person['roles'][number]) {
   Object.assign(roleForm, { roleCode: r.code, scopeType: r.scopeType, scopeId: r.scopeId ?? '', validUntil: r.validUntil ? r.validUntil.slice(0, 10) : '', reason: r.reason ?? '' })
 }
 
-const learning = ref<{ enrollments: Record<string, unknown>[], attempts: Record<string, unknown>[], certificates: Record<string, unknown>[], assessments: Record<string, unknown>[] } | null>(null)
+const learning = ref<{ enrollments: Record<string, unknown>[], attempts: Record<string, unknown>[], certificates: Record<string, unknown>[], assessments: Record<string, unknown>[], displayAs: 'label' | 'value' } | null>(null)
 const activity = ref<Record<string, unknown>[]>([])
 const notes = ref<{ id: string, body: string, created_at: string, author: string | null }[]>([])
 const chiefs = ref<Record<string, unknown>[]>([])
@@ -318,7 +318,7 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       <div class="card">
         <h2>{{ t('person.competencies') }}</h2>
         <ul v-if="learning?.assessments.length" class="list">
-          <li v-for="a in learning.assessments" :key="String(a.id)"><b>{{ a.competency }}</b> — {{ a.level }} <span class="sub">{{ a.source }} · {{ fmt(a.assessed_at) }}</span></li>
+          <li v-for="a in learning.assessments" :key="String(a.id)"><b>{{ a.competency }}</b> — {{ learning?.displayAs === 'label' ? a.levelLabel : a.level }} <span class="sub">{{ a.source }} · {{ fmt(a.assessed_at) }}</span></li>
         </ul>
         <p v-else class="sub">{{ t('person.noData') }}</p>
       </div>

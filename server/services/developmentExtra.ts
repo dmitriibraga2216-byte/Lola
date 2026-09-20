@@ -7,8 +7,8 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import { currentLevels, defaultValidUntil, effectiveRequirements } from './development'
-import type { Requirement } from './development'
+import { currentLevels, defaultValidUntil, effectiveRequirements, levelLabel } from './development'
+import type { CompetencyLevel, Requirement } from './development'
 import { scopeSql } from './access'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { DisplayAs } from '../../shared/enums'
@@ -84,8 +84,10 @@ export async function competencyMatrix(ctx: Ctx, filter: { locationId?: string, 
     const profiles = await tx.select().from(positionProfiles).where(eq(positionProfiles.isActive, true))
     const byPosition = new Map(profiles.map(p => [p.positionId, p]))
     const compIds = [...new Set(profiles.flatMap(p => (p.competencyRequirements as Requirement[]).map(r => r.competencyId)))]
-    const comps = compIds.length ? await tx.select({ id: competencies.id, name: competencies.name, kind: competencies.kind, linkedCourses: competencies.linkedCourses }).from(competencies).where(sql`${competencies.id} in ${compIds}`) : []
+    const comps = compIds.length ? await tx.select({ id: competencies.id, name: competencies.name, kind: competencies.kind, linkedCourses: competencies.linkedCourses, levels: competencies.levels }).from(competencies).where(sql`${competencies.id} in ${compIds}`) : []
+    const levelsById = new Map(comps.map(c => [c.id, c.levels as CompetencyLevel[]]))
     const columns = comps.map(c => ({ id: c.id, name: c.name, kind: c.kind }))
+    const { competencyDisplayAs: displayAs } = await developmentSettings(tx, ctx.tenantId)
     const rows = []
     for (const u of people) {
       const profile = byPosition.get(u.position_id)
@@ -94,12 +96,16 @@ export async function competencyMatrix(ctx: Ctx, filter: { locationId?: string, 
       const cells = reqs.map((r) => {
         const cur = levels.get(r.competencyId)?.level ?? 0
         const gap = Math.max(0, r.requiredLevel - cur)
-        return { competencyId: r.competencyId, current: cur, required: r.requiredLevel, gap, isCritical: r.isCritical ?? false, color: gap === 0 ? 'teal' : gap === 1 ? 'sun' : 'coral', source: levels.get(r.competencyId)?.source ?? null }
+        const compLevels = levelsById.get(r.competencyId) ?? []
+        return {
+          competencyId: r.competencyId, current: cur, required: r.requiredLevel, gap, isCritical: r.isCritical ?? false, color: gap === 0 ? 'teal' : gap === 1 ? 'sun' : 'coral', source: levels.get(r.competencyId)?.source ?? null,
+          currentLabel: levelLabel(compLevels, cur), requiredLabel: levelLabel(compLevels, r.requiredLevel),
+        }
       })
       rows.push({ userId: u.id, fullName: u.full_name, position: u.position, location: u.location, hasProfile: reqs.length > 0, cells, fits: cells.length > 0 && cells.every(c => c.gap === 0) })
     }
     const withProfile = rows.filter(r => r.hasProfile)
-    return { columns, rows, summary: { people: rows.length, withProfile: withProfile.length, fit: withProfile.filter(r => r.fits).length, fitPct: withProfile.length ? Math.round(withProfile.filter(r => r.fits).length / withProfile.length * 100) : null } }
+    return { columns, rows, displayAs, summary: { people: rows.length, withProfile: withProfile.length, fit: withProfile.filter(r => r.fits).length, fitPct: withProfile.length ? Math.round(withProfile.filter(r => r.fits).length / withProfile.length * 100) : null } }
   })
 }
 
@@ -112,8 +118,11 @@ export async function competencyHistory(ctx: Ctx, userId: string, competencyId: 
       where a.user_id = ${userId}::uuid and a.competency_id = ${competencyId}::uuid order by a.assessed_at desc limit 50
     `) as unknown as Record<string, unknown>[]
     const [c] = await tx.select({ name: competencies.name, levels: competencies.levels, linkedCourses: competencies.linkedCourses }).from(competencies).where(eq(competencies.id, competencyId))
+    const compLevels = (c?.levels ?? []) as CompetencyLevel[]
+    const withLabel = rows.map(r => ({ ...r, levelLabel: levelLabel(compLevels, r.level as number) }))
     const courseRows = c?.linkedCourses.length ? await tx.select({ id: courses.id, title: courses.title }).from(courses).where(sql`${courses.id} in ${c.linkedCourses}`) : []
-    return { competency: c ?? null, history: rows, whatToLearn: courseRows }
+    const { competencyDisplayAs: displayAs } = await developmentSettings(tx, ctx.tenantId)
+    return { competency: c ?? null, history: withLabel, whatToLearn: courseRows, displayAs }
   })
 }
 

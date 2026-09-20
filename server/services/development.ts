@@ -14,6 +14,16 @@ interface Ctx { tenantId: string, actorId: string }
 export interface CompetencyLevel { level: number, title: string, behavior: string }
 export interface Requirement { competencyId: string, requiredLevel: number, isCritical?: boolean, positionLevelId?: string | null }
 
+/**
+ * Текст рівня компетенції по тумблеру `competencyDisplayAs` (docs/19 §14.1, docs/33 D-032):
+ * `label` — назва варіанту з власної структури рівнів компетенції, `value` — саме число.
+ * Використовується на всіх екранах виводу рівня (матриця, картка людини, історія), не тільки
+ * «Мій розвиток», де ця мітка вже була.
+ */
+export function levelLabel(levels: CompetencyLevel[], level: number): string {
+  return levels.find(l => l.level === level)?.title ?? String(level)
+}
+
 /** Приоритет источника оценки (docs/19 Г-19.2, docs/02 `user_competencies.source`): assessment > task > manual. */
 const SOURCE_PRIORITY: Record<string, number> = { assessment: 3, task: 2, manual: 1 }
 
@@ -314,7 +324,10 @@ export async function getGoal(ctx: Ctx, id: string) {
     const comments = await tx.select({ id: goalComments.id, authorName: users.fullName, body: goalComments.body, createdAt: goalComments.createdAt })
       .from(goalComments).innerJoin(users, eq(users.id, goalComments.authorId)).where(eq(goalComments.goalId, id)).orderBy(asc(goalComments.createdAt))
     const [comp] = g.competencyId ? await tx.select({ name: competencies.name, levels: competencies.levels }).from(competencies).where(eq(competencies.id, g.competencyId)) : []
-    return { ...g, status, transitions, log, comments, competency: comp ?? null }
+    const { developmentSettings } = await import('./developmentExtra')
+    const { competencyDisplayAs: displayAs } = await developmentSettings(tx, ctx.tenantId)
+    const targetLevelLabel = comp && g.targetLevel != null ? levelLabel(comp.levels as CompetencyLevel[], g.targetLevel) : null
+    return { ...g, status, transitions, log, comments, competency: comp ?? null, displayAs, targetLevelLabel }
   })
 }
 

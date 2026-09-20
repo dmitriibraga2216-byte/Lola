@@ -13,6 +13,8 @@ import { logOrgConflict } from './journals'
 import { scopeSql } from './access'
 import { hashToken } from './session'
 import { applyPositionRoles } from './positionRoleMap'
+import { levelLabel } from './development'
+import type { CompetencyLevel } from './development'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
 
@@ -694,10 +696,14 @@ export async function personLearning(ctx: Ctx, userId: string) {
         select c.id, c.number, c.score, c.issued_at, c.valid_until, c.revoked_at, c.public_token, co.title
         from certificates c left join courses co on co.id = c.course_id where c.user_id = ${userId}::uuid order by c.issued_at desc`) as unknown as Promise<Record<string, unknown>[]>,
       tx.execute(sql`
-        select ca.id, ca.level, ca.source, ca.assessed_at, ca.valid_until, ca.comment, k.name as competency
-        from competency_assessments ca join competencies k on k.id = ca.competency_id where ca.user_id = ${userId}::uuid order by ca.assessed_at desc limit 200`) as unknown as Promise<Record<string, unknown>[]>,
+        select ca.id, ca.level, ca.source, ca.assessed_at, ca.valid_until, ca.comment, k.name as competency, k.levels as competency_levels
+        from competency_assessments ca join competencies k on k.id = ca.competency_id where ca.user_id = ${userId}::uuid order by ca.assessed_at desc limit 200`) as unknown as Promise<(Record<string, unknown> & { level: number, competency_levels: CompetencyLevel[] })[]>,
     ])
-    return { enrollments: enrollmentsRows, attempts: attemptsRows, certificates: certs, assessments }
+    // docs/33 D-032: рівень компетенції — за тумблером `competencyDisplayAs` (не тільки на «Мій розвиток»)
+    const { developmentSettings } = await import('./developmentExtra')
+    const { competencyDisplayAs: displayAs } = await developmentSettings(tx, ctx.tenantId)
+    const assessmentsOut = assessments.map(({ competency_levels, ...a }) => ({ ...a, levelLabel: levelLabel(competency_levels ?? [], a.level) }))
+    return { enrollments: enrollmentsRows, attempts: attemptsRows, certificates: certs, assessments: assessmentsOut, displayAs }
   })
 }
 

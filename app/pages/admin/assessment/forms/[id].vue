@@ -76,11 +76,20 @@ async function save() {
     badNorm.value = (e.details?.criterionIds as string[] | undefined) ?? []
   }
 }
+// docs/33 D-038, docs/20 §14.4: заморожену анкету не редагувати — тільки дублювати новою версією
+async function duplicate() {
+  error.value = ''
+  try { const r = await api<{ id: string }>(`/assessment/forms/${route.params.id}/duplicate`, { method: 'POST' }); await router.push(`/admin/assessment/forms/${r.id}`) }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 </script>
 <template>
   <div>
     <PageHeader :title="form.title || t('assess.newForm')" :crumbs="[{ label: t('assess.sectionTitle') }, { label: t('assess.forms'), to: '/admin/assessment/forms' }]">
-      <template #actions><button class="btn primary" :disabled="form.title.length < 3 || !form.scaleId || !form.items.length" data-testid="form-save" @click="save">{{ t('common.save') }}</button></template>
+      <template #actions>
+        <button v-if="form.isLocked && !isNew" class="btn ghost" data-testid="form-duplicate" @click="duplicate">{{ t('assess.duplicate') }}</button>
+        <button class="btn primary" :disabled="form.title.length < 3 || !form.scaleId || !form.items.length" data-testid="form-save" @click="save">{{ t('common.save') }}</button>
+      </template>
     </PageHeader>
     <p v-if="error" class="note coral">{{ error }}<span v-if="lockedFields.length" class="sub"> ({{ lockedFields.join(', ') }})</span></p>
     <p v-if="notice" class="note teal">{{ notice }}</p>

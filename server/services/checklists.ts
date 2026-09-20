@@ -13,8 +13,12 @@ import { CHECKLIST_MUTABLE_WHEN_LOCKED } from '../../shared/schemas/assessment'
 
 interface Ctx { tenantId: string, actorId: string }
 
-/** Пункт чек-листа: вес, критичность, фото, подсказка; `criterionId` — ссылка на словарь (docs/20 §14.3). Шкала одна на чек-лист. */
-export interface ChecklistItem { id: string, group?: string, text: string, criterionId?: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string }
+/**
+ * Пункт чек-листа: вес, критичность, фото, подсказка; `criterionId` — ссылка на словарь (docs/20 §14.3). Шкала одна на чек-лист.
+ * `passThreshold` (docs/33 D-037) — свій поріг провалу пункта (％ від частки), опційно; без нього пункт провалюється
+ * по прохідному балу всього чек-листа (як і раніше).
+ */
+export interface ChecklistItem { id: string, group?: string, text: string, criterionId?: string, weight: number, isCritical?: boolean, requiresPhoto?: boolean, hint?: string, passThreshold?: number }
 export interface RunAnswer { itemId: string, value: number | null, comment?: string | null, photoMediaIds?: string[], isNa?: boolean }
 export interface ActionItem { id: string, text: string, responsibleId: string, dueAt: string, status: 'open' | 'done' | 'overdue', doneAt?: string | null }
 
@@ -43,7 +47,7 @@ function frozenDiff(before: typeof checklists.$inferSelect, input: ChecklistInpu
   }
   for (const [k, [a, b]] of Object.entries(cmp)) if (a !== b && !(CHECKLIST_MUTABLE_WHEN_LOCKED as readonly string[]).includes(k)) changed.push(k)
   const was = before.items as ChecklistItem[]
-  const norm = (i: ChecklistItem) => JSON.stringify([i.id, i.text, i.criterionId ?? null, i.weight, !!i.isCritical, !!i.requiresPhoto, i.group ?? ''])
+  const norm = (i: ChecklistItem) => JSON.stringify([i.id, i.text, i.criterionId ?? null, i.weight, !!i.isCritical, !!i.requiresPhoto, i.group ?? '', i.passThreshold ?? null])
   if (was.length !== input.items.length || was.some((i, idx) => norm(i) !== norm(input.items[idx]!))) changed.push('items')
   return changed
 }
@@ -142,7 +146,8 @@ export function scoreRun(c: ScoringRules, answers: RunAnswer[], scale: ScaleInfo
     if (a.isNa) continue
     if (it.requiresPhoto && !(a.photoMediaIds?.length)) missingPhoto.push(it.id)
     const share = Math.min(1, Math.max(0, (Number(a.value) - scale.min) / range))
-    const ok = share * 100 >= c.passScore
+    // docs/33 D-037: свій поріг пункта, якщо заданий, інакше — прохідний бал усього чек-листа
+    const ok = share * 100 >= (it.passThreshold ?? c.passScore)
     if (!ok) {
       failedItems.push(it.id)
       if (it.isCritical) criticalFailed.push(it.id)
@@ -292,17 +297,18 @@ export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: st
         select r.checklist_id, (x->>'itemId') as item_id, (x->>'value')::numeric as value, (x->>'isNa')::boolean as is_na
         from checklist_runs r cross join jsonb_array_elements(r.answers) x where ${where}
       ), it as (
-        -- Провал пункта: доля (значення − min)/(max − min) ниже прохідного бала чек-листа (та же формула, что в scoreRun)
-        select c.id as checklist_id, c.title, (i->>'id') as item_id, (i->>'text') as text, c.pass_score,
+        -- Провал пункта: доля (значення − min)/(max − min) ниже свого порога пункта (docs/33 D-037),
+        -- при его отсутствии — ниже прохідного бала чек-листа (та же формула, что в scoreRun)
+        select c.id as checklist_id, c.title, (i->>'id') as item_id, (i->>'text') as text, coalesce((i->>'passThreshold')::numeric, c.pass_score) as threshold,
                (select min(value) from scale_levels sl where sl.scale_id = c.scale_id) as smin,
                (select max(value) from scale_levels sl where sl.scale_id = c.scale_id) as smax
         from checklists c cross join jsonb_array_elements(c.items) i
       )
       select it.title as checklist, it.text, count(*)::int as total,
-             sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 < it.pass_score then 1 else 0 end)::int as failed
+             sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 < it.threshold then 1 else 0 end)::int as failed
       from a join it on it.checklist_id = a.checklist_id and it.item_id = a.item_id
       where a.is_na is not true and a.value is not null
-      group by 1, 2 having sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 < it.pass_score then 1 else 0 end) > 0 order by failed desc limit 20
+      group by 1, 2 having sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 < it.threshold then 1 else 0 end) > 0 order by failed desc limit 20
     `) as unknown as Record<string, unknown>[]
     const actions = runs.flatMap(r => (r.action_plan as ActionItem[]).map(p => ({ ...p, runId: r.id, location: r.location, checklist: r.title })))
     return { runs, byLocationWeek, topFailed, actions: { total: actions.length, done: actions.filter(a => a.status === 'done').length, overdue: actions.filter(a => a.status === 'overdue').length } }

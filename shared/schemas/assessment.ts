@@ -92,6 +92,8 @@ export const checklistItemSchema = z.object({
   isCritical: z.boolean().optional(),
   requiresPhoto: z.boolean().optional(),
   hint: z.string().max(300).optional(),
+  // docs/33 D-037: свій поріг провалу пункта (％ від частки), опційно — інакше провал по прохідному балу чек-листа
+  passThreshold: z.number().min(1).max(100).optional(),
 })
 export type ChecklistItemInput = z.infer<typeof checklistItemSchema>
 

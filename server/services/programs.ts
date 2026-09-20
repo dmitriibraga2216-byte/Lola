@@ -51,7 +51,7 @@ export async function createProgram(ctx: Ctx, input: { title: string, descriptio
   })
 }
 
-export async function updateProgram(ctx: Ctx, id: string, input: Partial<{ title: string, description: string | null, mode: 'linear' | 'graph', tags: string[], coverKey: string | null, assignmentMode: string[], automationRuleId: string | null, noAssignAfterFinish: boolean, countPriorResults: boolean, validityMonths: number | null, dueDays: number | null, status: 'draft' | 'archived' }>) {
+export async function updateProgram(ctx: Ctx, id: string, input: Partial<{ title: string, description: string | null, mode: 'linear' | 'graph', tags: string[], coverKey: string | null, code: string | null, iconKey: string | null, workload: string | null, assignmentMode: string[], automationRuleId: string | null, noAssignAfterFinish: boolean, countPriorResults: boolean, validityMonths: number | null, dueDays: number | null, status: 'draft' | 'archived' }>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [before] = await tx.select().from(programs).where(eq(programs.id, id))
     if (!before) return null

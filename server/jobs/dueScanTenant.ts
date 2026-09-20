@@ -19,7 +19,6 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const { retentionScan } = await import('../services/logs')
   const { expireExports } = await import('../services/reportExports')
   const { expireRoles } = await import('../services/positionRoleMap')
-  const { trajectoryScan } = await import('../services/trajectories')
 
   const s = await runDueScan(tenantId)
   const inactive = await inactiveScan(tenantId) // docs/16 §11 people.inactive_scan
@@ -38,8 +37,9 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const an = await noticeScan(tenantId)
   const bd = await birthdayScan(tenantId)
   const pr = await programScan(tenantId)
-  const tr = await trajectoryScan(tenantId) // docs/17: отложенные правилом прохождения, подстраховка таймеров
-  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, trajectories: tr, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpired }
+  // trajectoryScan (docs/17: отложенные правилом прохождения, подстраховка таймеров) перенесён на щогодинний
+  // assignment.sync (docs/33 D-026) — щоденний due.scan давав запізнення таймера до доби
+  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpired }
   console.log(`[due.scan] ${tenantId}:`, stats)
   return stats
 }

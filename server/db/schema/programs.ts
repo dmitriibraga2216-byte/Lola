@@ -19,6 +19,10 @@ export const programs = pgTable('programs', {
   mode: text('mode').notNull().default('linear'), // linear | graph
   coverKey: text('cover_key'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+  // Карточка програми по аналогії з курсом (docs/11 §14.1, docs/33 D-025) — мокап ContentPrograms показує «Код: PRG-B11»
+  code: text('code'), // «Код»
+  iconKey: text('icon_key'), // «Іконка»
+  workload: text('workload'), // «Оцінка зайнятості»
   status: text('status').notNull().default('draft'), // draft | published | archived
   assignmentMode: text('assignment_mode').array().notNull().default(sql`'{manual}'::text[]`), // manual | catalog_free | catalog_request | automation
   automationRuleId: uuid('automation_rule_id').references(() => automationRules.id, { onDelete: 'set null' }),

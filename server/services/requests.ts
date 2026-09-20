@@ -64,6 +64,42 @@ export async function pendingRequests(ctx: Ctx, opts: { isHr: boolean, isAdmin?:
   })
 }
 
+/**
+ * Повна таблиця заявок з фільтрами (docs/33 D-033, мокап ExternalRequests): на відміну від
+ * `pendingRequests` (тільки «на розгляд»), сюди йдуть усі стани — і завершені теж. Той самий
+ * сервіс/дані, інше подання. «ВІДПОВІДАЛЬНИЙ» — хто востаннє прийняв рішення по заявці
+ * (`approvals` — останній запис), а поки рішень не було — керівник точки людини (хто вирішує зараз).
+ */
+export async function requestsTable(ctx: Ctx, filter: { kind?: 'external' | 'career', status?: string, from?: string, to?: string } = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const actors = await tx.select({ id: users.id, fullName: users.fullName }).from(users)
+    const nameOf = new Map(actors.map(a => [a.id, a.fullName]))
+    const byRange = (col: typeof externalTrainingRequests.createdAt | typeof careerRequests.createdAt) => sql`
+      (${filter.from ? sql`${col} >= ${filter.from}::date` : sql`true`}) and (${filter.to ? sql`${col} < (${filter.to}::date + interval '1 day')` : sql`true`})
+    `
+    const withResponsible = async (userId: string, approvals: unknown[]) => {
+      const last = approvals.length ? approvals[approvals.length - 1] as { by: string } : null
+      return last ? (nameOf.get(last.by) ?? null) : await managerOf(tx, userId).then(id => id ? nameOf.get(id) ?? null : null)
+    }
+    let external: (typeof externalTrainingRequests.$inferSelect & { fullName: string, responsible: string | null, kind: 'external' })[] = []
+    if (filter.kind !== 'career') {
+      const rows = await tx.select({ r: externalTrainingRequests, fullName: users.fullName }).from(externalTrainingRequests).innerJoin(users, eq(users.id, externalTrainingRequests.userId))
+        .where(and(filter.status ? eq(externalTrainingRequests.status, filter.status) : sql`true`, byRange(externalTrainingRequests.createdAt)))
+        .orderBy(desc(externalTrainingRequests.createdAt))
+      external = await Promise.all(rows.map(async x => ({ ...x.r, fullName: x.fullName, kind: 'external' as const, responsible: await withResponsible(x.r.userId, x.r.approvals as unknown[]) })))
+    }
+    let career: (typeof careerRequests.$inferSelect & { fullName: string, targetPosition: string, responsible: string | null, kind: 'career' })[] = []
+    if (filter.kind !== 'external') {
+      const rows = await tx.select({ r: careerRequests, fullName: users.fullName, targetPosition: positions.name }).from(careerRequests)
+        .innerJoin(users, eq(users.id, careerRequests.userId)).innerJoin(positions, eq(positions.id, careerRequests.targetPositionId))
+        .where(and(filter.status ? eq(careerRequests.status, filter.status) : sql`true`, byRange(careerRequests.createdAt)))
+        .orderBy(desc(careerRequests.createdAt))
+      career = await Promise.all(rows.map(async x => ({ ...x.r, fullName: x.fullName, targetPosition: x.targetPosition, kind: 'career' as const, responsible: await withResponsible(x.r.userId, x.r.approvals as unknown[]) })))
+    }
+    return { external, career }
+  })
+}
+
 export type DecideResult = { ok: true, status: string } | { ok: false, code: 'not_found' | 'bad_step' | 'self' | 'admin_required' }
 
 /** Решение по шагу: approve двигает по маршруту, reject — в rejected. Сам себе решить нельзя. */

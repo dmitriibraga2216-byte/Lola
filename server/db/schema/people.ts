@@ -55,6 +55,9 @@ export const userPlacements = pgTable('user_placements', {
   positionLevelId: uuid('position_level_id').references(() => positionLevels.id),
   cityId: uuid('city_id').references(() => cities.id),
   orgUnitId: uuid('org_unit_id').references(() => orgUnits.id),
+  // Лінійний керівник цього розміщення (docs/16 §15 Г-16.1 `manager_external_id`, docs/33 D-023) — окремо від
+  // `functional_chiefs` (там — виключення з дерева оргструктури, тут — прямий керівник за розміщенням, з імпорту).
+  managerId: uuid('manager_id').references(() => users.id, { onDelete: 'set null' }),
   isPrimary: boolean('is_primary').notNull().default(true),
   startedAt: date('started_at').notNull().default(sql`current_date`),
   endedAt: date('ended_at'),

@@ -6,7 +6,7 @@ const { hasScope } = useAuth()
 const route = useRoute()
 interface Node { id: string, nodeType: string, itemType: string | null, itemId: string | null, itemTitle: string | null, titleOverride: string | null, sort: number, position: { x: number, y: number }, isRequired: boolean, dueDays: number | null }
 interface Edge { id: string, fromNodeId: string, toNodeId: string, condition: { type: string, value?: number }, sort: number }
-interface Program { id: string, title: string, description: string | null, mode: string, status: string, tags: string[], assignmentMode: string[], automationRuleId: string | null, noAssignAfterFinish: boolean, countPriorResults: boolean, validityMonths: number | null, dueDays: number | null, updatedAt: string, version: number, nodes: Node[], edges: Edge[], rule: { id: string, name: string } | null }
+interface Program { id: string, title: string, description: string | null, mode: string, status: string, tags: string[], code: string | null, workload: string | null, assignmentMode: string[], automationRuleId: string | null, noAssignAfterFinish: boolean, countPriorResults: boolean, validityMonths: number | null, dueDays: number | null, updatedAt: string, version: number, nodes: Node[], edges: Edge[], rule: { id: string, name: string } | null }
 const p = ref<Program | null>(null)
 const content = ref<{ type: string, id: string, title: string }[]>([])
 const rules = ref<{ id: string, name: string }[]>([])
@@ -17,13 +17,13 @@ const add = reactive({ id: '', title: '' })
 const selected = ref<string | null>(null)
 const linking = ref<string | null>(null)
 const newEdge = reactive({ condition: 'always', value: 80 })
-const settings = reactive({ title: '', description: '', tags: '', assignmentMode: ['manual'] as string[], automationRuleId: '', noAssignAfterFinish: false, countPriorResults: true, dueDays: null as number | null, validityMonths: null as number | null })
+const settings = reactive({ title: '', description: '', tags: '', code: '', workload: '', assignmentMode: ['manual'] as string[], automationRuleId: '', noAssignAfterFinish: false, countPriorResults: true, dueDays: null as number | null, validityMonths: null as number | null })
 const id = String(route.params.id)
 
 async function load() {
   try {
     p.value = await api<Program>(`/programs/${id}`)
-    Object.assign(settings, { title: p.value.title, description: p.value.description ?? '', tags: p.value.tags.join(', '), assignmentMode: [...p.value.assignmentMode], automationRuleId: p.value.automationRuleId ?? '', noAssignAfterFinish: p.value.noAssignAfterFinish, countPriorResults: p.value.countPriorResults, dueDays: p.value.dueDays, validityMonths: p.value.validityMonths })
+    Object.assign(settings, { title: p.value.title, description: p.value.description ?? '', tags: p.value.tags.join(', '), code: p.value.code ?? '', workload: p.value.workload ?? '', assignmentMode: [...p.value.assignmentMode], automationRuleId: p.value.automationRuleId ?? '', noAssignAfterFinish: p.value.noAssignAfterFinish, countPriorResults: p.value.countPriorResults, dueDays: p.value.dueDays, validityMonths: p.value.validityMonths })
     problems.value = await api(`/programs/${id}/validate`)
   } catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -46,7 +46,7 @@ const patchNode = (n: Node, patch: Record<string, unknown>) => run(() => api(`/p
 function move(i: number, dir: -1 | 1) { const ids = items.value.map(n => n.id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j]!, ids[i]!]; run(() => api(`/programs/${id}/nodes`, { method: 'PUT', body: { reorder: ids } })) }
 const removeEdge = (e: Edge) => run(() => api(`/programs/${id}/edges/${e.id}`, { method: 'DELETE' }))
 function startLink(nodeId: string) { if (linking.value === nodeId) { linking.value = null; return } if (!linking.value) { linking.value = nodeId; return } const from = linking.value; linking.value = null; run(() => api(`/programs/${id}/edges`, { method: 'PUT', body: { fromNodeId: from, toNodeId: nodeId, condition: newEdge.condition === 'score_gte' ? { type: 'score_gte', value: newEdge.value } : { type: newEdge.condition } } })) }
-const saveSettings = () => run(() => api(`/programs/${id}`, { method: 'PATCH', body: { title: settings.title, description: settings.description || null, tags: settings.tags.split(',').map(s => s.trim()).filter(Boolean), assignmentMode: settings.assignmentMode, ...(hasScope('program.link_rule') ? { automationRuleId: settings.automationRuleId || null } : {}), noAssignAfterFinish: settings.noAssignAfterFinish, countPriorResults: settings.countPriorResults, dueDays: settings.dueDays || null, validityMonths: settings.validityMonths || null } }))
+const saveSettings = () => run(() => api(`/programs/${id}`, { method: 'PATCH', body: { title: settings.title, description: settings.description || null, tags: settings.tags.split(',').map(s => s.trim()).filter(Boolean), code: settings.code.trim() || null, workload: settings.workload.trim() || null, assignmentMode: settings.assignmentMode, ...(hasScope('program.link_rule') ? { automationRuleId: settings.automationRuleId || null } : {}), noAssignAfterFinish: settings.noAssignAfterFinish, countPriorResults: settings.countPriorResults, dueDays: settings.dueDays || null, validityMonths: settings.validityMonths || null } }))
 const publish = () => run(async () => { try { await api(`/programs/${id}/publish`, { method: 'POST' }) } catch (err) { const e = apiErrorOf(err); problems.value = (e.details?.problems as typeof problems.value) ?? []; throw err } }, t('prog.published'))
 const unpublish = () => run(() => api(`/programs/${id}`, { method: 'PATCH', body: { status: 'draft' } }))
 // Автовыравнивание: слои по расстоянию от Start
@@ -150,6 +150,8 @@ function onUp() { if (!drag.value || !p.value) return; const n = p.value.nodes.f
           <input v-model="settings.title" class="field" :placeholder="t('prog.titlePh')">
           <textarea v-model="settings.description" class="field" rows="2" :placeholder="t('prog.descPh')" />
           <input v-model="settings.tags" class="field" :placeholder="t('prog.tagsPh')">
+          <label class="sub">{{ t('course.code') }} <input v-model="settings.code" class="field short" maxlength="40"></label>
+          <label class="sub">{{ t('course.workload') }} <input v-model="settings.workload" class="field" maxlength="200"></label>
           <label class="sub">{{ t('prog.dueDaysTotal') }} <input v-model.number="settings.dueDays" class="field short" type="number" min="1"></label>
           <label class="sub">{{ t('prog.validity') }} <input v-model.number="settings.validityMonths" class="field short" type="number" min="1" max="120"></label>
           <label class="check"><input v-model="settings.noAssignAfterFinish" type="checkbox"> {{ t('prog.noAssignAfterFinish') }}</label>

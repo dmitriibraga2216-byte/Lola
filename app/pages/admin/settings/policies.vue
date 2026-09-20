@@ -10,7 +10,7 @@ const { t } = useI18n()
 const { api } = useApi()
 const { fetchMe } = useAuth()
 
-interface Space { name: string, slug: string, slugLocked: boolean, locale: string, timezone: string, plan: string, accent: string, modules: Record<string, boolean>, defaults: Record<string, unknown>, quietHours: { from: number, to: number } }
+interface Space { name: string, slug: string, slugLocked: boolean, locale: string, timezone: string, plan: string, accent: string, modules: Record<string, boolean>, defaults: Record<string, unknown>, quietHours: { enabled: boolean, from: number, to: number } }
 
 const GROUPS = ['space', 'modules', 'auth', 'roles', 'subordinates', 'orgStructure', 'passwords', 'phones', 'notifications', 'tasks', 'users', 'dataProtection', 'session'] as const
 type Group = typeof GROUPS[number]

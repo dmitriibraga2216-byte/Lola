@@ -302,6 +302,7 @@
 | GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
 | GET/PUT | `/settings/email-layout` | шапка и подвал письма |
 | CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены |
+| POST | `/settings/integrations/:provider/test` | тестовое сообщение без постановки в очередь (пока только `smtp`, `23` §13.4) |
 | CRUD | `/settings/translations` | переопределение строк интерфейса: `GET ?locale&q&changedOnly&page`, `PUT {locale,key,value}`, `DELETE ?locale&key?` (без key — весь набор), `GET /export?locale`, `POST /import {locale, items}`; клиенту — `GET /translations/:locale` (любая сессия) поверх словаря |
 | GET | `/settings/usage` | потребление: активные, диск, SMS, дата последнего сбора, тариф и лимиты (`24` §4.4.1) |
 | GET/PATCH | `/settings/modules` | переключатели модулей; выключенный модуль → 403 `module.disabled` на его маршрутах (`24` §3.2) |

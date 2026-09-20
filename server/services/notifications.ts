@@ -7,6 +7,9 @@ import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { sendTelegram } from './telegram'
 import { readSettings } from './settings'
+import type { NotificationSchedule } from '../../shared/schemas/settings'
+import { tenantOverrides } from './translations'
+import { buildEmailHtml } from './emailRender'
 
 /**
  * Уведомления (docs/03 §3.10, docs/06 §6.4): ни одна задача не шлёт напрямую —
@@ -124,9 +127,15 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   settings_critical_changed: 'Змінено налаштування безпеки простору: {{group}}',
 }
 
-/** Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. */
-export function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
-  let out = tpl.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, inner: string) =>
+/**
+ * Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. `{{#_tr}}текст{{/_tr}}`
+ * (docs/23 §13.4) — особый блок: содержимое не условие, а фраза для перевода по локали получателя;
+ * `tr` — резолвер (по умолчанию тождественный, фраза как есть). Резолвится до общих блоков,
+ * иначе `_tr` попал бы под правило {{#var}} и пропал бы, если такой переменной нет.
+ */
+export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s): string {
+  let out = tpl.replace(/\{\{#_tr\}\}([\s\S]*?)\{\{\/_tr\}\}/g, (_, phrase: string) => tr(phrase))
+  out = out.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, inner: string) =>
     vars[key] ? inner : '')
   out = out.replace(/\{\{([\w.]+)\}\}/g, (_, key: string) => {
     const v = vars[key]
@@ -151,6 +160,26 @@ export function scheduleWithQuietHours(now: Date, timezone: string, quiet: { fro
   return new Date(now.getTime() + (next.getTime() - local.getTime()))
 }
 
+/** Ближайшее время HH:MM в таймзоне (docs/23 §13.2.1): если сегодняшнее уже прошло — завтра. */
+export function nextOccurrence(now: Date, timezone: string, hour: number, minute: number): Date {
+  const local = new Date(now.toLocaleString('en-US', { timeZone: timezone }))
+  const target = new Date(local)
+  target.setHours(hour, minute, 0, 0)
+  if (target.getTime() <= local.getTime()) target.setDate(target.getDate() + 1)
+  return new Date(now.getTime() + (target.getTime() - local.getTime()))
+}
+
+/**
+ * Класс события по коду (docs/23 §13.2.1: «не одне вікно тиші на все, а час на кожен клас»).
+ * `anniversaries`/`programReminder` — коды в проекте пока не заведены (долг, docs/28 «Spec 23»).
+ */
+export function eventClassOf(code: string): keyof NotificationSchedule | null {
+  if (/^birthday_/.test(code)) return 'birthdays'
+  if (/^(weekly_digest|digest_)/.test(code)) return 'managerDigest'
+  if (/^enrollment_(due_soon|due_today)$/.test(code)) return 'dueTasks'
+  return null
+}
+
 export interface EnqueueInput {
   tenantId: string
   userId: string
@@ -173,12 +202,18 @@ export const DAILY_LIMIT = 10
 /** Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален). */
 export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Promise<boolean> {
   const [tenant] = await db.select({ timezone: tenants.timezone, settings: tenants.settings }).from(tenants).where(eq(tenants.id, input.tenantId))
-  const settings = (tenant?.settings ?? {}) as { quietHours?: { from: number, to: number } }
+  const settings = await readSettings(tx, input.tenantId)
   // Тихие часы по таймзоне точки человека (docs/23 §3.3), иначе — тенанта
   const [loc] = await tx.execute(sql`select l.timezone from user_placements up join locations l on l.id = up.location_id where up.user_id = ${input.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { timezone: string | null }[]
   const [tpl] = await tx.select({ ignoreQuietHours: notificationTemplates.ignoreQuietHours }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, input.channel ?? 'telegram')))
   const now = new Date()
-  const scheduledFor = input.urgent || tpl?.ignoreQuietHours ? now : scheduleWithQuietHours(now, loc?.timezone ?? tenant?.timezone ?? 'Europe/Kyiv', settings.quietHours)
+  const timezone = loc?.timezone ?? tenant?.timezone ?? 'Europe/Kyiv'
+  const cls = eventClassOf(input.code)
+  let scheduledFor: Date
+  if (input.urgent || tpl?.ignoreQuietHours) scheduledFor = now
+  else if (cls) scheduledFor = nextOccurrence(now, timezone, settings.notificationSchedule[cls].hour, settings.notificationSchedule[cls].minute) // §13.2.1: свій час класу — понад тихі часи
+  else if (settings.quietHours.enabled) scheduledFor = scheduleWithQuietHours(now, timezone, settings.quietHours)
+  else scheduledFor = now
 
   const [row] = await tx.insert(notifications).values({
     tenantId: input.tenantId,
@@ -197,15 +232,21 @@ export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Pr
   return !!row
 }
 
-interface TemplateRow { body: string, version: number, isMandatory: boolean, throttle: { maxPerDay?: number } | null, buttons: { text: string, action: string }[] }
+interface TemplateRow { body: string, subject: string | null, bodyMjml: string | null, version: number, isMandatory: boolean, throttle: { maxPerDay?: number } | null, buttons: { text: string, action: string }[], scope: 'global' | 'custom' }
 
-/** Шаблон с учётом переопределений тенанта; отключённый → null. Fallback на uk (docs/23 §6.9). */
-async function templateFor(tx: TenantTx, tenantId: string, code: string, channel: string, locale: string): Promise<TemplateRow | null> {
+/**
+ * Шаблон с учётом переопределений тенанта; отключённый → null. Fallback на uk (docs/23 §6.9).
+ * `scope` (docs/23 §13.1, docs/30): «Глобальний» — код из `DEFAULT_TEMPLATES`, без строки в БД;
+ * «Кастомний» — правка тенанта создала свою строку в `notification_templates`. Правка тенанта
+ * не трогает стандартный текст (он остаётся в коде), «Повернути стандартний текст» — просто
+ * удаляет кастомную строку.
+ */
+export async function templateFor(tx: TenantTx, tenantId: string, code: string, channel: string, locale: string): Promise<TemplateRow | null> {
   const pick = async (loc: string) => (await tx.select().from(notificationTemplates).where(and(eq(notificationTemplates.tenantId, tenantId), eq(notificationTemplates.code, code), eq(notificationTemplates.channel, channel), eq(notificationTemplates.locale, loc))))[0]
   const t = (await pick(locale)) ?? (locale !== 'uk' ? await pick('uk') : undefined)
-  if (t) return t.isEnabled ? { body: t.body, version: t.version, isMandatory: t.isMandatory, throttle: t.throttle as TemplateRow['throttle'], buttons: t.buttons as TemplateRow['buttons'] } : null
+  if (t) return t.isEnabled ? { body: t.body, subject: t.subject, bodyMjml: t.bodyMjml, version: t.version, isMandatory: t.isMandatory, throttle: t.throttle as TemplateRow['throttle'], buttons: t.buttons as TemplateRow['buttons'], scope: 'custom' } : null
   const body = DEFAULT_TEMPLATES[code]
-  return body ? { body, version: 0, isMandatory: MANDATORY_DEFAULT(code), throttle: null, buttons: [] } : null
+  return body ? { body, subject: null, bodyMjml: null, version: 0, isMandatory: MANDATORY_DEFAULT(code), throttle: null, buttons: [], scope: 'global' } : null
 }
 /** Обязательные по умолчанию: дедлайны, аттестации, объявления, безопасность, приглашение. */
 export const MANDATORY_DEFAULT = (code: string) => (BYPASS_DAILY_LIMIT(code) && code !== 'notice_not_acknowledged') || /_due_soon$|^user_blocked$|^user_role_granted$/.test(code) // docs/23 §13: notice.assigned обязательное, напоминание — нет
@@ -218,7 +259,12 @@ async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promi
     left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
     cross join (select name from tenants where id = ${tenantId}::uuid) t where u.id = ${userId}::uuid
   `) as unknown as { full_name: string, first_name: string | null, location: string | null, position: string | null, tenant: string }[]
-  return { 'user.full_name': r?.full_name ?? '', 'user.first_name': r?.first_name ?? r?.full_name?.split(' ')[1] ?? '', 'location.name': r?.location ?? '', 'position.name': r?.position ?? '', 'tenant.name': r?.tenant ?? '', 'name': r?.full_name ?? '' }
+  const appUrl = process.env.APP_URL ?? ''
+  return {
+    'user.full_name': r?.full_name ?? '', 'user.first_name': r?.first_name ?? r?.full_name?.split(' ')[1] ?? '', 'location.name': r?.location ?? '', 'position.name': r?.position ?? '', 'tenant.name': r?.tenant ?? '', 'name': r?.full_name ?? '',
+    // docs/23 §13.4 п. 4: посилання «налаштувати сповіщення» в підвалі кожного листа — обовʼязкове
+    'mail_settings_url': `${appUrl}/learn/notifications`,
+  }
 }
 
 /** Ссылка на предмет уведомления для кнопки «Пройти» и колокольчика. */
@@ -247,7 +293,8 @@ export function isVirtualEmail(email: string, domains: string[]): boolean {
 export async function dispatchNotifications(tenantId: string, limit = 100): Promise<{ sent: number, skipped: number, failed: number }> {
   const stats = { sent: 0, skipped: 0, failed: 0 }
   await withTenant(tenantId, null, async (tx) => {
-    const virtualDomains = (await readSettings(tx, tenantId)).policies.notifications.virtualEmailDomains
+    const tenantSettings = await readSettings(tx, tenantId)
+    const virtualDomains = tenantSettings.policies.notifications.virtualEmailDomains
     const due = await tx.select({
       n: notifications,
       user: { telegramChatId: users.telegramChatId, telegramBlocked: users.telegramBlocked, locale: users.locale, fullName: users.fullName, phone: users.phone, email: users.email },
@@ -301,7 +348,10 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       }
 
       const vars = { ...(await commonVars(tx, tenantId, n.userId)), ...(n.payload as Record<string, unknown>) }
-      const text = renderTemplate(tpl.body, vars)
+      // {{#_tr}} (docs/23 §13.4): переклад фрази по локалі отримувача через ту саму таблицю `translations`
+      const trMap = await tenantOverrides(tenantId, locale === 'en' ? 'en' : 'uk')
+      const tr = (phrase: string) => trMap[phrase] ?? phrase
+      const text = renderTemplate(tpl.body, vars, tr)
 
       // Правило выбора канала (docs/23 §4): Telegram → SMS (обязательные) → in-app
       let channel = n.channel
@@ -313,7 +363,7 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
 
       if (channel === 'telegram') {
         const url = refUrl(n)
-        const res = await sendTelegram(user.telegramChatId!, text, { url, notificationId: n.id, buttons: tpl.buttons, mandatory: tpl.isMandatory })
+        const res = await sendTelegram(tenantId, user.telegramChatId!, text, { url, notificationId: n.id, buttons: tpl.buttons, mandatory: tpl.isMandatory })
         if (res.ok) await sent(n.id, text, channel, tpl.version)
         else if (res.blocked) {
           // Бот заблокирован (docs/23 §6.5): помечаем, критичное — сразу SMS, руководителю уведомление
@@ -331,7 +381,16 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       }
       else {
         const { sendViaChannel } = await import('./channels')
-        const res = await sendViaChannel(tenantId, channel as 'sms' | 'email', { userId: n.userId, text, subject: n.code })
+        // docs/23 §13.4: заголовок листа з шаблону; body_mjml → HTML поверх обвʼязки тенанта (§13.5), інакше — лише текст
+        const subject = channel === 'email' && tpl.subject ? renderTemplate(tpl.subject, vars, tr) : n.code
+        const html = channel === 'email' && tpl.bodyMjml
+          ? buildEmailHtml({
+              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr),
+              fallbackText: text,
+              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr) : '' },
+            })
+          : undefined
+        const res = await sendViaChannel(tenantId, channel as 'sms' | 'email', { userId: n.userId, text, subject, html })
         if (res.ok) await sent(n.id, text, channel, tpl.version)
         else if (res.skipped) await skip(n.id, res.error?.includes('limit') ? 'blocked' : 'no_channel', text)
         else await failed(n, text, res.error ?? 'channel error')

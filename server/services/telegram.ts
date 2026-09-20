@@ -6,15 +6,30 @@ import { withTenant } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { createSession } from './session'
 import { logSecurity } from './securityLog'
+import { getSecret, SECRET_KEYS } from './secrets'
 
 /**
- * Telegram-бот (docs/04 §4.12, docs/06 §6.4): один бот на платформу,
- * привязка chat_id по одноразовому токену, кнопки под уведомлением,
- * автологин по ссылке. Обучение в чате не ведётся.
+ * Telegram-бот (docs/04 §4.12, docs/06 §6.4; docs/09 §9.7.2, Spec 23): токен бота —
+ * атрибут тенанта (свій бот), «External Telegram Bot Token» — запасний зовнішній бот,
+ * коли тенант свого не завів; платформенний `TELEGRAM_BOT_TOKEN` лишається останнім
+ * фолбеком (dev/демо-стенд без жодного налаштованого тенанта). Вхідний webhook — один
+ * на платформу: `chat_id` в Telegram унікальний для людини незалежно від бота, тож
+ * прив'язка за `chat_id` працює, навіть якщо тенант вебхук свого бота теж наведе сюди
+ * (docs/28 «Spec 23» — довг: окремий webhook-роутинг на бота не робили).
  */
 
-const API = (token = process.env.TELEGRAM_BOT_TOKEN) => `https://api.telegram.org/bot${token}`
-const botEnabled = () => !!process.env.TELEGRAM_BOT_TOKEN
+/** Токен бота для тенанта: свій → зовнішній → платформенний (docs/09 §9.7.2). */
+export async function botTokenFor(tenantId: string | null): Promise<string | undefined> {
+  if (tenantId) {
+    const own = await getSecret(tenantId, 'telegram', SECRET_KEYS.telegram.BOT_TOKEN)
+    if (own) return own
+    const ext = await getSecret(tenantId, 'telegram', SECRET_KEYS.telegram.EXTERNAL_BOT_TOKEN)
+    if (ext) return ext
+  }
+  return process.env.TELEGRAM_BOT_TOKEN
+}
+
+const API = (token: string | undefined) => `https://api.telegram.org/bot${token}`
 /** Подмена HTTP для тестов (как setOAuthHttp). */
 let http: typeof fetch = (...args) => fetch(...args)
 export function setTelegramHttp(f: typeof fetch | null) { http = f ?? ((...args) => fetch(...args)) }
@@ -36,8 +51,9 @@ export function keyboardFor(chatId: bigint, opts: SendOpts): unknown {
   return row.length ? { inline_keyboard: [row.slice(0, 3)] } : undefined
 }
 
-export async function sendTelegram(chatId: bigint, text: string, opts?: SendOpts): Promise<SendResult> {
-  if (!botEnabled()) {
+export async function sendTelegram(tenantId: string | null, chatId: bigint, text: string, opts?: SendOpts): Promise<SendResult> {
+  const token = await botTokenFor(tenantId)
+  if (!token) {
     console.log(`[telegram:stub] chat ${chatId}: ${text}`)
     return { ok: true }
   }
@@ -45,7 +61,7 @@ export async function sendTelegram(chatId: bigint, text: string, opts?: SendOpts
   const kb = opts ? keyboardFor(chatId, opts) : undefined
   if (kb) body.reply_markup = kb
   try {
-    const res = await http(`${API()}/sendMessage`, {
+    const res = await http(`${API(token)}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -79,14 +95,14 @@ export async function createLinkToken(ctx: { tenantId: string, actorId: string }
       expiresAt: new Date(Date.now() + 15 * 60_000),
     })
   })
-  const bot = process.env.TELEGRAM_BOT_USERNAME
+  const bot = (await getSecret(ctx.tenantId, 'telegram', SECRET_KEYS.telegram.BOT_USERNAME)) ?? process.env.TELEGRAM_BOT_USERNAME
   return { token, url: bot ? `https://t.me/${bot}?start=${token}` : null }
 }
 
 interface TokenRow { token_id: string, tenant_id: string, user_id: string, kind: string, expires_at: string, consumed_at: string | null }
 
 /** /start <token> → привязать chat_id. Идёт до контекста тенанта — через SECURITY DEFINER. */
-export async function linkChat(token: string, chatId: bigint): Promise<{ ok: boolean, fullName?: string }> {
+export async function linkChat(token: string, chatId: bigint): Promise<{ ok: boolean, fullName?: string, tenantId?: string }> {
   const rows = await db.execute(sql`select * from telegram_token_lookup(${hash(token)})`)
   const row = (rows as unknown as TokenRow[])[0]
   if (!row || row.kind !== 'link' || row.consumed_at || new Date(row.expires_at) < new Date()) return { ok: false }
@@ -98,7 +114,7 @@ export async function linkChat(token: string, chatId: bigint): Promise<{ ok: boo
     return u!.fullName
   })
   await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'telegram.linked', meta: { chatId: String(chatId) } })
-  return { ok: true, fullName }
+  return { ok: true, fullName, tenantId: row.tenant_id }
 }
 
 /** Автологин по ссылке из бота: одноразовый токен 10 минут, привязан к chat_id. */
@@ -137,15 +153,15 @@ export async function handleUpdate(update: Record<string, unknown>): Promise<voi
     const chatId = BigInt(msg.chat.id)
     const cmd = msg.text.trim().split(/\s+/)[0]!.toLowerCase()
     const who = (await db.execute(sql`select * from telegram_chat_lookup(${chatId})`) as unknown as { tenant_id: string, user_id: string }[])[0]
-    if (cmd === '/help') { await sendTelegram(chatId, HELP); return }
-    if (!who) { await sendTelegram(chatId, 'Цей чат не привʼязано. Відкрийте Lola → Профіль → «Підключити Telegram».'); return }
+    if (cmd === '/help') { await sendTelegram(null, chatId, HELP); return }
+    if (!who) { await sendTelegram(null, chatId, 'Цей чат не привʼязано. Відкрийте Lola → Профіль → «Підключити Telegram».'); return }
     if (cmd === '/menu') {
       const rows = await withTenant(who.tenant_id, who.user_id, tx => tx.execute(sql`
         select e.id, coalesce(c.title, '') as title, e.due_at, e.progress_pct from enrollments e left join courses c on c.id = e.subject_id
         where e.user_id = ${who.user_id}::uuid and e.cancelled_at is null and e.status in ('not_started','in_progress') order by e.due_at nulls last limit 5`)) as unknown as { id: string, title: string, due_at: string | null, progress_pct: number }[]
       const appUrl = process.env.APP_URL || 'http://localhost:3000'
       const text = rows.length ? `Мої завдання:\n${rows.map((r, i) => `${i + 1}. ${r.title} — ${r.progress_pct}%${r.due_at ? ` (до ${String(r.due_at).slice(0, 10)})` : ''}`).join('\n')}` : 'Активних завдань немає 🎉'
-      await sendTelegram(chatId, text, rows[0] ? { url: `/learn/${rows[0].id}` } : undefined)
+      await sendTelegram(who.tenant_id, chatId, text, rows[0] ? { url: `/learn/${rows[0].id}` } : undefined)
       void appUrl
       return
     }
@@ -155,26 +171,26 @@ export async function handleUpdate(update: Record<string, unknown>): Promise<voi
       const prefs = await listPrefs(ctx)
       let n = 0
       for (const p of prefs) if (!p.isMandatory && p.enabled) { await setPref(ctx, { code: p.code, enabled: false }); n++ }
-      await sendTelegram(chatId, `Вимкнено необовʼязкових нагадувань: ${n}. Обовʼязкові (дедлайни, атестації) залишаться. Увімкнути назад можна в Lola → Профіль → Сповіщення.`)
+      await sendTelegram(who.tenant_id, chatId, `Вимкнено необовʼязкових нагадувань: ${n}. Обовʼязкові (дедлайни, атестації) залишаться. Увімкнути назад можна в Lola → Профіль → Сповіщення.`)
       return
     }
-    await sendTelegram(chatId, HELP)
+    await sendTelegram(who.tenant_id, chatId, HELP)
     return
   }
   if (msg?.chat?.id && msg.text?.startsWith('/start')) {
     const token = msg.text.split(' ')[1]
     const chatId = BigInt(msg.chat.id)
     if (!token) {
-      await sendTelegram(chatId, 'Щоб підключити Telegram, відкрий Lola → Профіль → «Підключити Telegram» і перейди за посиланням.')
+      await sendTelegram(null, chatId, 'Щоб підключити Telegram, відкрий Lola → Профіль → «Підключити Telegram» і перейди за посиланням.')
       return
     }
     const r = await linkChat(token, chatId)
-    await sendTelegram(chatId, r.ok ? `Готово, ${r.fullName}! Сюди приходитимуть нагадування.` : 'Посилання протухло або вже використане. Отримай нове в Lola.')
+    await sendTelegram(r.tenantId ?? null, chatId, r.ok ? `Готово, ${r.fullName}! Сюди приходитимуть нагадування.` : 'Посилання протухло або вже використане. Отримай нове в Lola.')
     return
   }
   const cb = update.callback_query as { id: string, data?: string, message?: { chat: { id: number } } } | undefined
   if (cb?.data && cb.message?.chat?.id) {
-    const answer = async (text: string) => { if (botEnabled()) await fetch(`${API()}/answerCallbackQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: cb.id, text }) }).catch(() => {}) }
+    const answer = async (text: string) => { const tok = await botTokenFor(who?.tenant_id ?? null); if (tok) await fetch(`${API(tok)}/answerCallbackQuery`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: cb.id, text }) }).catch(() => {}) }
     const chatId = BigInt(cb.message.chat.id)
     const who = (await db.execute(sql`select * from telegram_chat_lookup(${chatId})`) as unknown as { tenant_id: string, user_id: string }[])[0]
     if (!who) { await answer('Чат не привʼязано'); return }
@@ -186,12 +202,15 @@ export async function handleUpdate(update: Record<string, unknown>): Promise<voi
   }
 }
 
-/** telegram.health (docs/23 §10): раз в час getMe; результат — в метрики и лог. */
+/**
+ * telegram.health (docs/23 §10): раз в час getMe; результат — в метрики и лог.
+ * Перевіряє платформенний бот (env); перевірка бота кожного тенанта — довг (docs/28 «Spec 23»).
+ */
 let lastHealth: { ok: boolean, at: Date, error?: string } | null = null
 export async function telegramHealth(): Promise<{ ok: boolean, error?: string } | null> {
-  if (!botEnabled()) return null
+  if (!process.env.TELEGRAM_BOT_TOKEN) return null
   try {
-    const res = await fetch(`${API()}/getMe`, { signal: AbortSignal.timeout(8_000) })
+    const res = await fetch(`${API(process.env.TELEGRAM_BOT_TOKEN)}/getMe`, { signal: AbortSignal.timeout(8_000) })
     const json = await res.json() as { ok: boolean, description?: string }
     lastHealth = { ok: json.ok, at: new Date(), error: json.ok ? undefined : json.description }
   }

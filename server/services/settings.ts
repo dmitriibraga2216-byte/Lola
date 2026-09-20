@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { tenants } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import {
-  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type ModuleCode, type PoliciesPatch, type TenantPatch, type TenantSettings,
+  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type TenantPatch, type TenantSettings,
 } from '../../shared/schemas/settings'
 import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
@@ -73,6 +73,35 @@ export async function updateModules(ctx: Ctx, patch: Partial<Record<ModuleCode, 
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const r = await writeGroup(tx, ctx, 'modules', patch, { critical: true })
     return r.settings.modules
+  })
+}
+
+// ── Spec 23 (docs/23 §13.2.1, §13.5): час відправлення по класах подій, обвʼязка листа ──
+
+/** «Обмежити період відправлення» — тихі часи як окрема група (без інших полів tenants). */
+export async function updateQuietHours(ctx: Ctx, patch: Partial<TenantSettings['quietHours']>) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const r = await writeGroup(tx, ctx, 'quietHours', patch, { critical: true })
+    return r.settings.quietHours
+  })
+}
+
+/** «Час відправлення повідомлень» — влияет на время отправки всем, как quietHours (docs/23 §13.2.1). */
+export async function updateNotificationSchedule(ctx: Ctx, patch: Partial<NotificationSchedule>) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const before = await readSettings(tx, ctx.tenantId)
+    const merged: Record<string, unknown> = { ...before.notificationSchedule }
+    for (const [k, v] of Object.entries(patch)) if (v) merged[k] = { ...(before.notificationSchedule as Record<string, object>)[k], ...v }
+    const r = await writeGroup(tx, ctx, 'notificationSchedule', merged as Partial<TenantSettings['notificationSchedule']>, { critical: true })
+    return r.settings.notificationSchedule
+  })
+}
+
+/** «Верхня/нижня частина шаблону» листа тенанта (docs/23 §13.5). */
+export async function updateEmailLayout(ctx: Ctx, patch: Partial<EmailLayout>) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const r = await writeGroup(tx, ctx, 'emailLayout', patch)
+    return r.settings.emailLayout
   })
 }
 

@@ -168,6 +168,11 @@ export const notificationTemplates = pgTable('notification_templates', {
   escalateAfterHours: integer('escalate_after_hours'), // §6.6: без реакции → руководителю
   ignoreQuietHours: boolean('ignore_quiet_hours').notNull().default(false),
   version: integer('version').notNull().default(1),
+  // Spec 23 (docs/23 §13.1, §13.4): вёрстка письма (безопасное подмножество MJML — docs/28 «Spec 23»,
+  // без mjml-компилятора), картинка шаблона и отдельная для Telegram (§13.4 п. 3)
+  bodyMjml: text('body_mjml'),
+  imageKey: text('image_key'),
+  telegramImageKey: text('telegram_image_key'),
 }, t => [
   unique().on(t.tenantId, t.code, t.channel, t.locale),
 ])
@@ -180,6 +185,7 @@ export const notificationTemplateVersions = pgTable('notification_template_versi
   version: integer('version').notNull(),
   subject: text('subject'),
   body: text('body').notNull(),
+  bodyMjml: text('body_mjml'), // Spec 23
   authorId: uuid('author_id').references(() => users.id),
 }, t => [
   index().on(t.tenantId),

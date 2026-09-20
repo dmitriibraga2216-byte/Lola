@@ -77,7 +77,7 @@ describe('настройки: единая схема с дефолтами, п�
     expect(s.policies.roles.defaultRoleCode).toBe('employee')
     expect(s.modules.wiki).toBe(false)
     expect(s.modules.workshops).toBe(true)
-    expect(s.quietHours).toEqual({ from: 9, to: 20 })
+    expect(s.quietHours).toEqual({ enabled: true, from: 9, to: 20 }) // Spec 23: «Обмежити період відправлення» (docs/23 §13.2.1)
     expect(s.knowledge.restrictAccess).toBe(true) // Spec 21 сведён сюда
   })
 

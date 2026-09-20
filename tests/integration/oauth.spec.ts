@@ -56,13 +56,16 @@ const stateOf = (url: string) => new URL(url).searchParams.get('state')!
 
 describe('этап 11: OAuth-подключение (docs/09 §9.2, приёмка этапа 11)', () => {
   it('имена ключей: записали → прочитали → совпало (round-trip констант)', async () => {
+    const providers = Object.keys(secrets.SECRET_KEYS)
     for (const [provider, keys] of Object.entries(secrets.SECRET_KEYS)) {
       for (const key of Object.values(keys)) {
         await secrets.setSecret(ctx(), provider as never, key, `v-${key}`)
         expect(await secrets.getSecret(tenantId, provider as never, key)).toBe(`v-${key}`)
       }
     }
-    await admin`delete from tenant_secrets where tenant_id = ${tenantId} and provider in ('google', 'zoom')`
+    // Чистим за собой все провайдеры, которые тронул цикл выше — не только google/zoom (Spec 23: иначе
+    // тестовые значения smtp/telegram остаются в БД и ломают их собственные интеграционные тесты).
+    await admin`delete from tenant_secrets where tenant_id = ${tenantId} and provider in ${admin(providers)}`
   })
 
   it('«не налаштовано» ≠ «не підключено»; auth-url с offline+consent; state в БД, одноразовый, 10 минут', async () => {

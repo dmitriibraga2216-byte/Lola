@@ -639,6 +639,9 @@ create table survey_responses (
 ## 2.9 Уведомления, задачи, интеграции
 
 ```sql
+-- Реализация обросла полями `23`/`24` без правки этого наброска (buttons, is_mandatory, throttle,
+-- escalate_after_hours, ignore_quiet_hours, version — миграции 0007–0024; body_mjml, image_key,
+-- telegram_image_key — Spec 23, миграция 0036) — актуальный список см. docs/28 «Spec 23».
 create table notification_templates (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -647,6 +650,9 @@ create table notification_templates (
   locale text not null default 'uk',
   subject text,
   body text not null,                          -- шаблон с {{переменными}}
+  body_mjml text,                              -- Spec 23: вёрстка письма, безопасное подмножество MJML (docs/28)
+  image_key text,                              -- Spec 23: картинка шаблона
+  telegram_image_key text,                     -- Spec 23: отдельная картинка для Telegram
   is_enabled boolean not null default true,
   unique (tenant_id, code, channel, locale)
 );

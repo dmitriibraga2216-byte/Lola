@@ -2907,7 +2907,8 @@
     "changePassword": "Change password",
     "setPassword": "Set password",
     "currentPassword": "Current password",
-    "passwordChanged": "Password changed. Other sessions closed",
+    "passwordHint": "At least {n} characters, letters and digits",
+    "passwordSaved": "Password saved",
     "mustChangePassword": "You must change your password before continuing"
   },
   "notif": {

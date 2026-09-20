@@ -55,13 +55,13 @@ const policiesSchema = z.object({
     allowMultipleUnits: z.boolean().default(false), // только при import | hybrid
     allowMultipleImports: z.boolean().default(false), // «Дозволити імпорт декількох оргструктур»
   }).default({}),
-  /** «Паролі» (docs/24 §3.4: вход по паролю выкл, длина 8–32, по умолчанию 12) */
+  /** «Паролі» (docs/24 §3.4: вход по паролю выкл, длина 8–32, по умолчанию 8 — docs/33 D-004, решение заказчика 20.09.2026) */
   passwords: z.object({
     loginEnabled: z.boolean().default(false),
     disableRecovery: z.boolean().default(false),
     allowPhoneRecovery: z.boolean().default(false),
     maxAgeDays: z.number().int().min(1).max(365).nullable().default(null), // «Обмежити максимальний термін дії пароля»
-    minLength: z.number().int().min(8).max(32).default(12),
+    minLength: z.number().int().min(8).max(32).default(8), // docs/33 D-004: дефолт 12 → 8, нижняя граница схемы (8) не менялась
     forbidWeak: z.boolean().default(true),
     changeAfterFirstLogin: z.boolean().default(false),
     adminTwoFactor: z.boolean().default(false), // «Двухфакторность для админов» [решение]

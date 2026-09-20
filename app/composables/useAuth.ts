@@ -2,7 +2,7 @@ export interface RoleRef { id: string, code: string, name: string }
 
 export interface Me {
   user: { id: string, fullName: string, phone: string | null, email: string | null, locale: string | null, status: string, roles: RoleRef[], position: string | null, location: string | null }
-  tenant: { id: string, slug: string, name: string, locale: string, timezone: string, accent: 'sun' | 'teal' | 'coral' | 'ink', modules: Record<string, boolean>, localesEnabled: string[] }
+  tenant: { id: string, slug: string, name: string, locale: string, timezone: string, accent: 'sun' | 'teal' | 'coral' | 'ink', modules: Record<string, boolean>, localesEnabled: string[], passwordMinLength: number }
   /** Скоупы активной роли (docs/01 §1.9.2) */
   scopes: string[]
   activeRole: RoleRef | null

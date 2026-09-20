@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { COURSE_CATALOG_MODES } from './catalog'
 
 /** Блоки контента (docs/11-content-lessons.md §3.3). */
 
@@ -34,6 +35,8 @@ export const courseCreateSchema = z.object({
   estimatedMinutes: z.number().int().min(1).max(600).optional(),
   strictOrder: z.boolean().default(true),
   isCatalogVisible: z.boolean().default(false),
+  // Режим доступу каталогу (docs/10 §14.1): діє тільки коли isCatalogVisible; за замовчуванням catalog_free
+  assignMode: z.enum(COURSE_CATALOG_MODES).optional(),
   validityMonths: z.number().int().min(1).max(120).optional(),
   competencyId: z.string().uuid().nullable().optional(), // docs/19 §7.3: какую компетенцию закрывает курс
   competencyLevel: z.number().int().min(1).max(5).nullable().optional(),

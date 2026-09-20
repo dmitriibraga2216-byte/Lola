@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import {
-  courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons, mediaAssets, modules, resources,
+  courseCategories, courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons,
+  locations, mediaAssets, modules, resources, userPlacements,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { business } from '../utils/metrics'
@@ -13,6 +14,11 @@ import { currentVersion, printAllowed } from './resources'
 import { TASK_GROUPS, deriveTaskState, notCancelled, statusChange, taskGroupWhere } from './enrollmentStatus'
 import { logTaskAccess } from './journals'
 import type { TaskGroup } from './enrollmentStatus'
+import { recordAudit } from './audit'
+import { enqueueNotification } from './notifications'
+import { accessibleCatalogIds, canAccessCatalogItem } from './catalogAccess'
+import type { assignmentCreateSchema } from '../../shared/schemas/assignments'
+import type { z } from 'zod'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -83,32 +89,52 @@ export async function myTaskCounts(ctx: Ctx): Promise<Record<TaskGroup, number>>
   })
 }
 
-/** Каталог: опубликованные курсы с is_catalog_visible; уже назначенные помечены. */
-export async function catalog(ctx: Ctx, q?: string) {
+/**
+ * Каталог: опубликованные курсы с is_catalog_visible (docs/10 §5.2); уже назначенные
+ * помечены. Групи доступу каталогу (docs/10 §14.1) фільтрують список на сервері —
+ * клієнт лише показує; режим `assignMode` визначає, чи покаже клієнт «Вільний доступ»
+ * (кнопка одразу запише) чи «За заявкою» (модалка з коментарем).
+ */
+export async function catalog(ctx: Ctx, opts: { q?: string, categoryId?: string } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select().from(courses)
       .where(and(
         eq(courses.status, 'published'),
         eq(courses.isCatalogVisible, true),
         isNull(courses.deletedAt),
-        ...(q ? [sql`${courses.title} ilike ${`%${q}%`}`] : []),
+        ...(opts.q ? [sql`${courses.title} ilike ${`%${opts.q}%`}`] : []),
+        ...(opts.categoryId ? [eq(courses.categoryId, opts.categoryId)] : []),
       ))
       .orderBy(desc(courses.updatedAt))
 
-    const mine = await tx.select({ subjectId: enrollments.subjectId, id: enrollments.id })
+    const allowed = await accessibleCatalogIds(tx, ctx.tenantId, ctx.actorId, 'course', rows.map(c => c.id))
+    const visible = rows.filter(c => allowed.has(c.id))
+
+    const mine = await tx.select({ subjectId: enrollments.subjectId, id: enrollments.id, status: enrollments.status, requestedAt: enrollments.requestedAt, cancelledAt: enrollments.cancelledAt })
       .from(enrollments)
       .where(and(eq(enrollments.userId, ctx.actorId), notCancelled()))
-    const mineByCourse = new Map(mine.map(m => [m.subjectId, m.id]))
+    const mineByCourse = new Map(mine.map(m => [m.subjectId, m]))
 
-    return rows.map(c => ({
-      id: c.id,
-      title: c.title,
-      summary: c.summary,
-      coverKey: c.coverKey,
-      estimatedMinutes: c.estimatedMinutes,
-      tags: c.tags,
-      enrollmentId: mineByCourse.get(c.id) ?? null,
-    }))
+    const categoryIds = [...new Set(visible.map(c => c.categoryId).filter((x): x is string => !!x))]
+    const categoryRows = categoryIds.length ? await tx.select({ id: courseCategories.id, name: courseCategories.name }).from(courseCategories).where(inArray(courseCategories.id, categoryIds)) : []
+    const categoryName = new Map(categoryRows.map(c => [c.id, c.name]))
+
+    return visible.map((c) => {
+      const own = mineByCourse.get(c.id)
+      return {
+        id: c.id,
+        title: c.title,
+        summary: c.summary,
+        coverKey: c.coverKey,
+        estimatedMinutes: c.estimatedMinutes,
+        tags: c.tags,
+        categoryId: c.categoryId,
+        categoryName: c.categoryId ? categoryName.get(c.categoryId) ?? null : null,
+        assignMode: c.assignMode,
+        enrollmentId: own ? own.id : null,
+        requested: !!(own && own.status === 'not_assigned' && own.requestedAt),
+      }
+    })
   })
 }
 
@@ -123,15 +149,21 @@ export async function countRequired(tx: TenantTx, versionId: string): Promise<nu
 
 export type EnrollResult
   = | { ok: true, enrollmentId: string }
-    | { ok: false, code: 'not_found' | 'exists' | 'catalog_hidden' }
+    | { ok: false, code: 'not_found' | 'exists' | 'catalog_hidden' | 'requires_request' }
 
-/** Самозапись (docs/10 §6.1): enrollment с source=self на опубликованную версию. */
+/**
+ * Самозапись (docs/10 §6.1, режим «Вільний доступ через каталог навчання»):
+ * enrollment с source=self на опубликованную версию. Курс з режимом `catalog_request`
+ * сюди не пускаємо — для нього окремий `requestEnrollment` (модалка «Навіщо вам цей курс?»).
+ */
 export async function selfEnroll(ctx: Ctx, courseId: string): Promise<EnrollResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [course] = await tx.select().from(courses)
       .where(and(eq(courses.id, courseId), eq(courses.status, 'published'), isNull(courses.deletedAt)))
     if (!course || !course.publishedVersionId) return { ok: false as const, code: 'not_found' as const }
     if (!course.isCatalogVisible) return { ok: false as const, code: 'catalog_hidden' as const }
+    if (course.assignMode === 'catalog_request') return { ok: false as const, code: 'requires_request' as const }
+    if (!(await canAccessCatalogItem(tx, ctx.tenantId, ctx.actorId, 'course', courseId))) return { ok: false as const, code: 'catalog_hidden' as const }
 
     const existing = await tx.select({ id: enrollments.id }).from(enrollments)
       .where(and(eq(enrollments.userId, ctx.actorId), eq(enrollments.subjectId, courseId), notCancelled()))
@@ -150,6 +182,115 @@ export async function selfEnroll(ctx: Ctx, courseId: string): Promise<EnrollResu
     await logEvent(tx, ctx.tenantId, enrollment!.id, 'created', { source: 'self' }, ctx.actorId)
     return { ok: true as const, enrollmentId: enrollment!.id }
   })
+}
+
+/** Керівник точки людини — той, кому йде заявка через каталог (docs/10 §14.1), якщо в неї нема автора-власника. */
+async function managerFor(tx: TenantTx, userId: string): Promise<string | null> {
+  const [row] = await tx.select({ managerId: locations.managerId }).from(userPlacements)
+    .innerJoin(locations, eq(locations.id, userPlacements.locationId))
+    .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+  return row?.managerId ?? null
+}
+
+export type RequestResult
+  = | { ok: true, enrollmentId: string }
+    | { ok: false, code: 'not_found' | 'exists' | 'catalog_hidden' | 'not_request_mode' | 'already_requested' }
+
+/** Заявка через каталог (docs/10 §6.1, §14.1, режим «Подання заявки»): enrollment у стані «очікує рішення». */
+export async function requestEnrollment(ctx: Ctx, courseId: string, comment?: string): Promise<RequestResult> {
+  const r = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [course] = await tx.select().from(courses)
+      .where(and(eq(courses.id, courseId), eq(courses.status, 'published'), isNull(courses.deletedAt)))
+    if (!course || !course.publishedVersionId) return { ok: false as const, code: 'not_found' as const }
+    if (!course.isCatalogVisible) return { ok: false as const, code: 'catalog_hidden' as const }
+    if (course.assignMode !== 'catalog_request') return { ok: false as const, code: 'not_request_mode' as const }
+    if (!(await canAccessCatalogItem(tx, ctx.tenantId, ctx.actorId, 'course', courseId))) return { ok: false as const, code: 'catalog_hidden' as const }
+
+    const existing = await tx.select({ id: enrollments.id }).from(enrollments)
+      .where(and(eq(enrollments.userId, ctx.actorId), eq(enrollments.subjectId, courseId), notCancelled()))
+    if (existing.length > 0) return { ok: false as const, code: 'already_requested' as const }
+
+    const [enrollment] = await tx.insert(enrollments).values({
+      tenantId: ctx.tenantId,
+      userId: ctx.actorId,
+      subjectId: courseId,
+      versionId: course.publishedVersionId,
+      source: 'catalog',
+      status: 'not_assigned',
+      requestedAt: new Date(),
+    }).returning({ id: enrollments.id })
+
+    await logEvent(tx, ctx.tenantId, enrollment!.id, 'created', { source: 'catalog', comment: comment ?? null }, ctx.actorId)
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'enrollment.request.create', entity: 'enrollment', entityId: enrollment!.id, after: { courseId, comment: comment ?? null } })
+
+    const managerId = await managerFor(tx, ctx.actorId)
+    if (managerId) {
+      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: managerId, code: 'catalog_request_created', payload: { course: course.title, comment: comment ?? null }, dedupKey: `catalog_request_created:${enrollment!.id}`, refType: 'enrollment', refId: enrollment!.id })
+    }
+    return { ok: true as const, enrollmentId: enrollment!.id }
+  })
+  return r
+}
+
+export type CourseDecideResult
+  = | { ok: true }
+    | { ok: false, code: 'not_found' | 'not_requested' }
+
+/**
+ * Рішення по заявці на курс (docs/10 §14.1, приймання заявок): схвалення створює
+ * призначення через `tasks.ts` з `via_catalog=true` (`assignments.kind='catalog'`) —
+ * так само, як і у звичайного назначення, з аудитом і сповіщенням; відмова — з причиною.
+ */
+export async function decideCourseRequest(ctx: Ctx, enrollmentId: string, approve: boolean, reason?: string): Promise<CourseDecideResult> {
+  const pending = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [e] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId))
+    if (!e) return { ok: false as const, code: 'not_found' as const }
+    if (e.status !== 'not_assigned' || !e.requestedAt || e.cancelledAt) return { ok: false as const, code: 'not_requested' as const }
+
+    if (!approve) {
+      await tx.update(enrollments).set({ cancelledAt: new Date(), cancelledBy: ctx.actorId, cancelReason: reason ?? null, updatedAt: new Date() }).where(eq(enrollments.id, enrollmentId))
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'enrollment.request.reject', entity: 'enrollment', entityId: enrollmentId, after: { userId: e.userId, reason } })
+      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: e.userId, code: 'catalog_request_rejected', payload: { reason: reason ?? null }, dedupKey: `catalog_request_rejected:${enrollmentId}` })
+      return { ok: true as const, approved: false as const }
+    }
+    return { ok: true as const, approved: true as const, userId: e.userId, courseId: e.subjectId, versionId: e.versionId }
+  })
+  if (!pending.ok) return pending
+  if (!pending.approved) return { ok: true }
+
+  const { createAssignmentTx } = await import('./assignments')
+  const done = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [course] = await tx.select({ title: courses.title }).from(courses).where(eq(courses.id, pending.courseId))
+    const created = await createAssignmentTx(tx, ctx, {
+      subjectType: 'course',
+      subjectId: pending.courseId,
+      lockVersion: false,
+      audience: { rules: [{ type: 'user', ids: [pending.userId] }], match: 'any' },
+      exclude: undefined,
+      dueMode: 'none',
+      dueDays: 14,
+      isMandatory: false,
+      recurrence: null,
+      autoSync: false,
+      tags: [],
+      status: 'active',
+      method: { viaCatalog: true },
+    } as unknown as z.infer<typeof assignmentCreateSchema>, { kind: 'catalog' })
+    if (!created.ok) return null
+    const requiredTotal = await countRequired(tx, pending.versionId)
+    await tx.update(enrollments).set({
+      assignmentId: created.assignmentId,
+      status: 'not_started',
+      requiredTotal,
+      updatedAt: new Date(),
+    }).where(eq(enrollments.id, enrollmentId))
+    await logEvent(tx, ctx.tenantId, enrollmentId, 'created', statusChange('not_assigned', 'not_started'), ctx.actorId)
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'enrollment.request.approve', entity: 'enrollment', entityId: enrollmentId, after: { userId: pending.userId, assignmentId: created.assignmentId } })
+    await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: pending.userId, code: 'catalog_request_approved', payload: { course: course?.title ?? '' }, dedupKey: `catalog_request_approved:${enrollmentId}`, refType: 'enrollment', refId: enrollmentId })
+    return true
+  })
+  if (!done) return { ok: false as const, code: 'not_found' as const }
+  return { ok: true }
 }
 
 /** Дерево курса с прогрессом и доступностью уроков (строгий порядок). */

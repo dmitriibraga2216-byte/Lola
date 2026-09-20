@@ -19,7 +19,8 @@ export const enrollments = pgTable('enrollments', {
   subjectId: uuid('subject_id').notNull().references(() => courses.id),
   versionId: uuid('version_id').notNull().references(() => courseVersions.id),
   assignmentId: uuid('assignment_id'), // null при самозаписи (назначения — этап 4)
-  source: text('source').notNull().default('assigned'), // assigned | self | repeat | import
+  source: text('source').notNull().default('assigned'), // assigned | self | repeat | import | catalog
+  requestedAt: timestamp('requested_at', { withTimezone: true }), // заявка через каталог (catalog_request): status = not_assigned до рішення
   // enrollment_status (docs/02, пять значений): not_assigned | not_started | in_progress | done | failed.
   // «Заплановано» = starts_at > now(); «протерміновано» = due_at < now() при незавершённом;
   // автозакрытие по сроку = failed + expired_at; снятие назначения = cancelled_at (статус остаётся).

@@ -496,6 +496,59 @@
   на каждый GET панели — при росте числа операторов стоит ограничить действиями и чтением карточки тенанта;
   (6) `scripts/extract-tenant.ts` (`25` §11) и обезличенный слепок (`25` §16.3) — не делались.
 
+### Spec 10 — каталог: групи доступу, режими доступу, приймання заявок, лента коментарів з маршрутизацією (`10` §14.1–14.2; `32` §Б рядок 19)
+
+- **Групи доступу каталогу** — переиспользуем `access_groups`/`access_group_members`/`content_access_groups`
+  из #37 (`applies_to='catalog'` вже був заведений у Spec 11 наперед, `21` §14.1), нову таблицю не заводили.
+  Тумблер «Використовувати обмеження доступу до завдань в каталозі навчання» — `tenants.settings.catalog.restrictAccess`
+  (`server/services/catalogAccess.ts`), **за замовчуванням вимкнено** (докс/10 §14.1: «поки він вимкнений —
+  Завдання в Каталозі доступні усім користувачам»), на відміну від бази знань, де тумблер увімкнено за
+  замовчуванням. `GET/PATCH /settings/catalog`, екран `/admin/catalog/access` по мокапу (аналог KnowledgeAdmin).
+  `POST/PATCH/DELETE /access-groups` тепер приймають скоуп `assignment.create` для `appliesTo=catalog` —
+  `requireAnyScope` (докс `server/services/access.ts`), щоб керівник каталогу не потребував `knowledge.manage`.
+- **Режим доступу курсу** — нова колонка `courses.assign_mode` (`catalog_free` | `catalog_request`, CHECK,
+  міграція 0042), діє тільки при `is_catalog_visible=true`; значення узгоджені зі словником `assign_mode`
+  траєкторій (`17` §14.1, Spec 17), але не той самий CHECK — курсу не потрібні `manual`/`automation`
+  (ручне призначення і так є завжди, автоматизація для курсів через каталог не робилась — долг, якщо
+  знадобиться). Програми й траєкторії вже мали свій `assignment_mode`/`assign_mode` (#38) — не чіпали.
+- **Заявки на курс** — `enrollments.requested_at` (нова колонка, за зразком `program_enrollments`/
+  `trajectory_enrollments`): `POST /me/catalog/:id/request {comment?}` створює запис `status=not_assigned,
+  source='catalog'`, сповіщення керівнику точки (`catalog_request_created`). Рішення — `POST /enrollments/:id/decide
+  {approve, reason?}` (`assignment.create`): відмова обов'язково з причиною (докс `catalogDecideSchema`,
+  `superRefine`), зберігається в `enrollments.cancel_reason` (вже було); **схвалення створює призначення
+  через `createAssignmentTx` (`server/services/assignments.ts`) з `kind='catalog'`, `via_catalog=true`,
+  аудиторія — один користувач** — так «Спосіб призначення» в звітах коректно показує «За каталогом», а не
+  «Самостійно». Той самий запис `enrollments` переводиться на нове призначення (без дублю рядка) — на
+  відміну від `expandAssignment`, який вставляє нові рядки і не годиться для вже існуючої заявки.
+- **Відмова з причиною для програм і траєкторій** — `decideRequest` (`programs.ts`, `trajectories.ts`)
+  отримали необов'язковий `reason`; `program_enrollments.cancel_reason` — нова колонка (у `trajectory_enrollments`
+  вона вже була, просто не заповнювалась текстом причини). Обидва шлють `catalog_request_rejected`.
+- **Приймання заявок** — `/admin/catalog/requests` (мокап LearningRequests): дві вкладки, «Завдання»
+  (заявки на курси) і «Траєкторії навчання» (програми + траєкторії — для Lola одна сутність з двома
+  режимами показу, `17` §1, тому в одній вкладці). `GET /manage/catalog/requests?kind=tasks|trajectories`
+  (`server/services/learningRequests.ts`) — тільки читання, рішення йде в свій ендпоінт кожного типу.
+  Колонки — рівно по мокапу (Завдання · Людина · Дата заявки · Стан), не по повному переліку `10` §14.1
+  (мокап переміг текст ТЗ, `32` §В.6).
+- **Лента коментарів** — таблиця `comments` (докс/02, міграція 0042) точно за описом: `source_type
+  task|course|program|knowledge|notice`, `routed_to`, `reply_to_id`. `POST /comments` — нема в docs/04
+  явно вказаного шляху створення, додали сам (без нього стрічка нефункціональна); маршрутизація
+  [решение]: автору матеріалу (`courses.created_by` / `programs.author_ids[0]` / `resources.author_ids[0]`
+  / `notices.author_id` / `quizzes.created_by` для `task`) → якщо нема — керівнику точки автора коментаря
+  → якщо нема — будь-якому адміністратору тенанта. `POST /comments/:id/reply` — відповідь прямо зі стрічки
+  (нема в еталоні, наше рішення з `10` §14.2), одночасно позначає коментар прочитаним.
+- **Каталог кабінету** — `GET /me/catalog?kind=tasks|trajectories`: `tasks` — курси (`learning.ts#catalog`,
+  тепер з фільтром по групах доступу і категорії), `trajectories` — об'єднання `catalogPrograms` +
+  `catalogTrajectories` (два незалежні джерела, як і в коді, просто одна відповідь для мокапу Catalog).
+  Ресурси бази знань у каталог не додавали, хоча в мокапі Catalog є картка «Ресурс»: щоб це зробити,
+  ресурсам потрібні свої `is_catalog_visible`/`assign_mode`, а це окремий шматок роботи — **долг**,
+  зафіксовано тут явно, а не мовчки пропущено.
+- **Відкриті питання / долги:** (1) ресурси бази знань не потрапляють у `/me/catalog` (див. вище);
+  (2) `/manage/catalog/requests` не показує програми з `assignment_mode` без `catalog_request`, якщо
+  заявка вже була давно і `requested_at` не заповнений (заявки, створені до Spec 17/#38, якщо такі є, —
+  не мігрували заднім числом); (3) `anyAdmin()` у маршрутизації коментарів бере першого-ліпшого адміністратора
+  тенанта без урахування `valid_until`/блокування — прийнятно для фолбека, але варто звузити при наступній
+  роботі над сповіщеннями.
+
 ## 28.3 Переменные окружения, добавленные после docs/26
 
 `APP_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`,

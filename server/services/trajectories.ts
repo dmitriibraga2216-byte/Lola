@@ -429,15 +429,18 @@ export async function selfEnroll(ctx: Ctx, id: string): Promise<EnrollResult | {
   return r
 }
 
-/** Решение по заявке (catalog_request) — тем, у кого есть assignment.create. */
-export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'not_requested' }> {
+/** Решение по заявке (catalog_request) — тем, у кого есть assignment.create; відмова — з причиною (docs/10 §14.1). */
+export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean, reason?: string): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'not_requested' }> {
   const r = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [e] = await tx.select().from(trajectoryEnrollments).where(eq(trajectoryEnrollments.id, enrollmentId))
     if (!e) return { ok: false as const, code: 'not_found' as const }
     if (e.status !== 'not_assigned' || !e.requestedAt || e.cancelledAt) return { ok: false as const, code: 'not_requested' as const }
     if (approve) await tx.update(trajectoryEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
-    else await tx.update(trajectoryEnrollments).set({ cancelledAt: new Date(), cancelReason: 'request_rejected', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: approve ? 'trajectory.request.approve' : 'trajectory.request.reject', entity: 'trajectory_enrollment', entityId: enrollmentId, after: { userId: e.userId } })
+    else {
+      await tx.update(trajectoryEnrollments).set({ cancelledAt: new Date(), cancelReason: reason ?? 'request_rejected', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
+      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: e.userId, code: 'catalog_request_rejected', payload: { reason: reason ?? null }, dedupKey: `catalog_request_rejected:${enrollmentId}` })
+    }
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: approve ? 'trajectory.request.approve' : 'trajectory.request.reject', entity: 'trajectory_enrollment', entityId: enrollmentId, after: { userId: e.userId, reason } })
     return { ok: true as const }
   })
   if (r.ok && approve) await startEnrollment(ctx.tenantId, enrollmentId, ctx.actorId)

@@ -83,9 +83,9 @@
 | GET | `/me/tasks` | мои задания; `?group=new\|planned\|failed\|overdue\|done` — пять групп эталона (старый путь: `/learning/my`, до конца R1) |
 | GET | `/me/tasks/:id` | карточка задания: контент, сроки, правила, прогресс — нет вовсе, долг (docs/28 «Spec 04») |
 | GET | `/me/trajectories` | мои траектории с деревом и текущим блоком |
-| GET | `/me/catalog` | каталог: `?kind=tasks\|trajectories`, фильтр по категории (старый путь: `/learning/catalog`, до конца R1) |
-| POST | `/me/catalog/:id/enroll` | самозапись (режим «Вільний доступ») — сегодня тело `{courseId}` без `:id` в пути (`/learning/enroll`), долг (docs/28 «Spec 04») |
-| POST | `/me/catalog/:id/request` | заявка (режим «Подання заявки») — нет вовсе, долг (docs/28 «Spec 04») |
+| GET | `/me/catalog` | каталог: `?kind=tasks\|trajectories` (`tasks` — курси, `trajectories` — програми+траєкторії), `?q=&category=`; групи доступу каталогу і режим (`catalog_free`\|`catalog_request`) фільтруються сервером (Spec 10, старый путь: `/learning/catalog`, до конца R1) |
+| POST | `/me/catalog/:id/enroll` | самозапис, режим «Вільний доступ через каталог навчання» (Spec 10; старый путь `/learning/enroll` с `{courseId}` в тілі остаётся) |
+| POST | `/me/catalog/:id/request` | заявка, режим «Подання заявки через каталог навчання» — `{comment?}` (Spec 10) |
 | GET | `/me/development-plan` | планы развития: `?status=active\|inactive\|done` (старый путь: `/development/me`, до конца R1) |
 | GET | `/me/certificates`, `/me/badges` | достижения; сертифікати — старий шлях `/learning/certificates`, до кінця R1; бейджі — нема зовсім, борг (docs/28 «Spec 04») |
 | GET | `/me/study-history` | история и динамика рейтинга (свой и внешний) |
@@ -98,6 +98,7 @@
 | Метод | Путь | Описание |
 | --- | --- | --- |
 | GET | `/enrollments/:id` | состояние прохождения: дерево, прогресс, доступность элементов (старый путь: `/learning/enrollments/:id`, до конца R1) |
+| POST | `/enrollments/:id/decide` | рішення по заявці на курс через каталог (`assignment.create`): `{approve, reason?}` — `reason` обов'язковий при відмові; схвалення створює призначення через `tasks.ts` з `via_catalog=true` (Spec 10, `10` §14.1) |
 | GET | `/enrollments/:id/items/:itemId` | тело урока или ресурса, если элемент доступен — сегодня это `POST /learning/enrollments/:id/lessons/:lessonId/open` (иной метод и путь, не тривиальное переименование), долг (docs/28 «Spec 04») |
 | POST | `/enrollments/:id/items/:itemId/tick` | `{seconds, scrollPct, videoPct, blocksState}` идемпотентно, окно 15 с; ответ `{secondsSpent, scrollPct, videoPct, ready, reasons, requiredSeconds}`. Старый путь — `/learning/enrollments/:id/lessons/:lessonId/tick`, до конца R1 (там же `/acknowledge`, `/complete`, `/download`, `/open`) |
 | POST | `/enrollments/:id/items/:itemId/complete` | завершение; сервер сам проверяет условия зачёта (`11` Г-11.5) (старый путь: `/learning/enrollments/:id/lessons/:lessonId/complete`, до конца R1) |
@@ -200,7 +201,9 @@
 | GET | `/trajectories/:id/usages` | правило, число назначений узлов, прохождения |
 | GET | `/trajectories/usages?contentType=&contentId=` | траектории, где используется контент |
 | GET | `/trajectories/enrollments/:id` | лента прохождения глазами руководителя |
-| POST | `/trajectories/enrollments/:id/{cancel,decide}` | снятие с причиной / решение по заявке из каталога |
+| POST | `/trajectories/enrollments/:id/{cancel,decide}` | снятие с причиной / решение по заявке из каталога; `decide` — `{approve, reason?}`, `reason` обов'язковий при відмові (Spec 10) |
+| POST | `/program-enrollments/:id/decide` | рішення по заявці з каталогу програми: `{approve, reason?}` (Spec 10) |
+| GET | `/manage/catalog/requests` | «Прийом заявок на навчання» (`10` §14.1): `?kind=tasks\|trajectories` — черга заявок з людиною, датою подачі, станом (Spec 10) |
 | POST | `/trajectories/enrollments/:id/nodes/:nodeId/confirm` | узел «Наставник»: подтверждение наставником (керівник точки або адмін) |
 | GET | `/me/trajectories`, `/me/trajectories/:id` | мои траектории; лента шагов — только фактический путь |
 | GET/POST | `/me/trajectories/catalog`, `/me/trajectories/catalog/:id/enroll` | каталог траекторий; самозапись (`catalog_free`) или заявка (`catalog_request`) |
@@ -253,8 +256,8 @@
 | GET | `/bonuses/ledger` | книга операций с остатком в строке |
 | POST | `/bonuses/adjust` | ручное начисление или списание с причиной |
 | GET/PUT | `/guest-blocks` | гостевая страница тенанта: три блока (`21` Г-21.3) |
-| GET | `/comments` | единая лента комментариев со всех источников |
-| POST | `/comments/:id/read`, `/comments/:id/reply` | пометка и ответ автору материала |
+| GET/POST | `/comments` | єдина лента комментариев со всех источников; `?sourceType=&isRead=read\|unread&cursor=&limit=`; створення — `{sourceType: task\|course\|program\|knowledge\|notice, sourceId, body}`, маршрутизація автору матеріалу рахується сервером (Spec 10, `10` §14.2) |
+| POST | `/comments/:id/read`, `/comments/:id/reply` | пометка и ответ автору материала (Spec 10) |
 
 ## 4.14 Отчёты и журналы
 
@@ -310,6 +313,7 @@
 | GET | `/settings/usage` | потребление: активные, диск, SMS, дата последнего сбора, тариф и лимиты (`24` §4.4.1) |
 | GET/PATCH | `/settings/modules` | переключатели модулей; выключенный модуль → 403 `module.disabled` на его маршрутах (`24` §3.2) |
 | CRUD | `/course-categories`, `POST /course-categories/reorder` | «Категорії каталогу навчання» с порядком (`24` §3.7.1); категория с курсами — 409 `in_use` |
+| GET/PATCH | `/settings/catalog` | тумблер «Використовувати обмеження доступу до завдань в каталозі навчання» — `{restrictAccess}`, за замовчуванням вимкнено (`10` §14.1, Spec 10); групи доступу — той самий `/access-groups?appliesTo=catalog` |
 | GET | `/certificates/summary` | сводка сертификатов по курсам для экрана Certificates |
 | POST | `/auth/impersonation/stop` | выход из режима «от имени» с плашки → `impersonation.ended` |
 | GET | `/audit` | журнал изменений |

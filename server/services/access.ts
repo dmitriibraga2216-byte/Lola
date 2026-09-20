@@ -105,6 +105,18 @@ export async function requireScope(event: H3Event, scope: Scope | string, area?:
   return access
 }
 
+/** Как requireScope, но достаточно любого из скоупов (докс/10 §14.1: групи доступу спільні для бази знань і каталогу). */
+export async function requireAnyScope(event: H3Event, scopes: (Scope | string)[], area?: ScopeArea): Promise<Access> {
+  const access = await getAccess(event)
+  if (!access) {
+    throw createError({ statusCode: 401, data: { code: 'auth_required', message: 'Потрібен вхід' } })
+  }
+  if (!scopes.some(s => can(access, s, area))) {
+    throw createError({ statusCode: 403, data: { code: 'forbidden', message: 'Немає доступу' } })
+  }
+  return access
+}
+
 /**
  * Область видимости отчётов (docs/22 §2, §7.1): null — вся сеть (`report.tenant` или скоуп на весь тенант);
  * иначе — точки, где у человека есть роль с этим скоупом (точка напрямую или через подразделение).

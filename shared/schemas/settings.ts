@@ -98,6 +98,9 @@ const policiesSchema = z.object({
     otpTtlMinutes: z.number().int().min(1).max(15).default(5),
     otpAttempts: z.number().int().min(3).max(10).default(5),
     otpSendsPer15Min: z.number().int().min(1).max(5).default(3),
+    // Рішення замовника 20.09.2026 (docs/28 «Вхід: код на e-mail»): другий канал доставки коду.
+    otpChannels: z.array(z.enum(['sms', 'email'])).default(['sms', 'email']),
+    otpFallbackToEmail: z.boolean().default(true), // слати на пошту, якщо у тенанта не налаштований SMS-провайдер
     blockMinutes: z.number().int().min(5).max(120).default(30),
     allowedCountries: z.array(z.string().length(2)).max(250).default([]), // пусто — все
   }).default({}),

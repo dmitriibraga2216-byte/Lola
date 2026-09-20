@@ -302,6 +302,13 @@
       "when": 1789958113802,
       "tag": "0042_spec10_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789958173802,
+      "tag": "0043_otp_email_channel",
+      "breakpoints": true
     }
   ]
 }

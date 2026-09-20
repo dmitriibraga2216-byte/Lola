@@ -81,6 +81,16 @@ function addTo(list: string[], value: string, re: RegExp) {
   if (v && re.test(v) && !list.includes(v)) list.push(v)
 }
 const removeAt = (list: string[], i: number) => list.splice(i, 1)
+
+// Другий канал OTP — e-mail (docs/28 «Вхід: код на e-mail»): otpChannels — масив, на екрані — перемикач
+const otpEmailEnabled = computed({
+  get: () => draft.value?.session.otpChannels.includes('email') ?? false,
+  set: (v: boolean) => {
+    if (!draft.value) return
+    const chans = draft.value.session.otpChannels
+    draft.value.session.otpChannels = v ? [...new Set([...chans, 'email' as const])] : chans.filter(c => c !== 'email')
+  },
+})
 </script>
 
 <template>
@@ -244,6 +254,8 @@ const removeAt = (list: string[], i: number) => list.splice(i, 1)
             <div><label class="label" for="s-sends">{{ t('settings.session.otpSendsPer15Min') }}</label><input id="s-sends" v-model.number="draft.session.otpSendsPer15Min" class="field num" type="number" min="1" max="5"></div>
             <div><label class="label" for="s-block">{{ t('settings.session.blockMinutes') }}</label><input id="s-block" v-model.number="draft.session.blockMinutes" class="field num" type="number" min="5" max="120"></div>
           </div>
+          <label class="toggle row top"><input v-model="otpEmailEnabled" type="checkbox"><span>{{ t('settings.session.otpEmailEnabled') }}<span class="hint">{{ t('settings.session.otpEmailEnabledHint') }}</span></span></label>
+          <label class="toggle row" :class="{ off: !otpEmailEnabled }"><input v-model="draft.session.otpFallbackToEmail" type="checkbox" :disabled="!otpEmailEnabled"><span>{{ t('settings.session.otpFallbackToEmail') }}</span></label>
         </template>
       </section>
     </div>

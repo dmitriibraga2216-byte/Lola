@@ -47,7 +47,7 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| POST | `/auth/otp/request` | `{phone}` → отправка кода; ответ всегда 200 (не раскрываем наличие номера) |
+| POST | `/auth/otp/request` | `{phone, channel?: 'sms'\|'email'}` → отправка кода; ответ `{channel, maskedEmail?, devCode?}` (`channel='email'` — код ушёл письмом, `maskedEmail` вида `d***@gmail.com`); всегда 200, кроме `422 no_channel` (нет ни Telegram, ни SMS, ни почты — «Зверніться до менеджера точки») |
 | POST | `/auth/otp/verify` | `{phone, code}` → сессия или список тенантов для выбора |
 | POST | `/auth/tenant/select` | `{tenantId}` → сессия в выбранном тенанте |
 | POST | `/auth/password/login` | `{email, password}` (если включено политикой `passwords.loginEnabled`, иначе 403 `password_login_disabled`); ответ `{requiresTenantSelect, mustChangePassword}` либо `selectToken` + `tenants`; N неудач → 429 |

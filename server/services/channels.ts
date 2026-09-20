@@ -21,6 +21,13 @@ export async function sendViaChannel(tenantId: string, channel: 'sms' | 'email',
   return sendEmail(tenantId, u.email, msg.subject ?? 'Lola', msg.text, msg.html)
 }
 
+/** Чи налаштований реальний SMS-провайдер тенанта (docs/28 «Вхід: код на e-mail») — для автофолбека OTP на пошту. */
+export async function hasSmsProvider(tenantId: string): Promise<boolean> {
+  const provider = await getSecret(tenantId, 'sms', SECRET_KEYS.sms.PROVIDER)
+  const apiKey = await getSecret(tenantId, 'sms', SECRET_KEYS.sms.API_KEY)
+  return !!provider && !!apiKey
+}
+
 export async function sendSms(tenantId: string, phone: string, text: string): Promise<ChannelResult> {
   const provider = await getSecret(tenantId, 'sms', SECRET_KEYS.sms.PROVIDER)
   const apiKey = await getSecret(tenantId, 'sms', SECRET_KEYS.sms.API_KEY)

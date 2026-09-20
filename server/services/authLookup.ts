@@ -16,6 +16,8 @@ export interface PhoneUser {
   locale: string
   has_telegram: boolean
   tenant_status: 'active' | 'suspended' | 'archived'
+  /** Пошта людини (0043): джерело для каналу доставки коду e-mail; назовні йде тільки маскованою. */
+  email: string | null
 }
 
 /** Люди по номеру во всех тенантах, включая приостановленные (миграция 0041) — чтобы вход мог ответить 403, а не «код невірний». */

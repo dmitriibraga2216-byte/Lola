@@ -127,6 +127,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // docs/24 §8: вход «от имени» и смена критичных настроек
   impersonation_started: 'Оператор платформи {{operator}} увійшов як {{subject}}. Причина: {{reason}}',
   settings_critical_changed: 'Змінено налаштування безпеки простору: {{group}}',
+  // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
+  // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
+  otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',
 }
 
 /**
@@ -251,7 +254,7 @@ export async function templateFor(tx: TenantTx, tenantId: string, code: string, 
   return body ? { body, subject: null, bodyMjml: null, version: 0, isMandatory: MANDATORY_DEFAULT(code), throttle: null, buttons: [], scope: 'global' } : null
 }
 /** Обязательные по умолчанию: дедлайны, аттестации, объявления, безопасность, приглашение. */
-export const MANDATORY_DEFAULT = (code: string) => (BYPASS_DAILY_LIMIT(code) && code !== 'notice_not_acknowledged') || /_due_soon$|^user_blocked$|^user_role_granted$/.test(code) // docs/23 §13: notice.assigned обязательное, напоминание — нет
+export const MANDATORY_DEFAULT = (code: string) => (BYPASS_DAILY_LIMIT(code) && code !== 'notice_not_acknowledged') || /_due_soon$|^user_blocked$|^user_role_granted$|^otp_/.test(code) // docs/23 §13: notice.assigned обязательное, напоминание — нет; otp_* людина не вимикає
 
 /** Общие переменные шаблонов (docs/23 §3.4): user.*, location.name, position.name, tenant.name, link. */
 async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promise<Record<string, unknown>> {

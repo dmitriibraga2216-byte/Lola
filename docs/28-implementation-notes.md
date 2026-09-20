@@ -502,3 +502,59 @@
 `NUXT_PUBLIC_DEFAULT_TENANT`, `NUXT_PUBLIC_SUPPORT_CONTACT`, `METRICS_TOKEN`, `SENTRY_DSN`, `VIDEO_TRANSCODE`, `COOKIE_SECURE`, `GEOIP_DB_PATH`,
 `TENANT_HOST_BASE`, `TENANT_HOST_DEFAULT`, `TENANT_PURGE_DELAY_DAYS` (Spec 25).
 Полный список — `.env.example` и `.env.production.example`.
+
+## 28.4 Spec 04 — пути API и страниц по docs/04–05 (алиасами)
+
+Сверка каждого пути из `04` (метод + путь) с обработчиками `server/api/v1`; для страниц —
+`05` не даёт ни одного URL (только поведение и раскладку экрана), сверять нечего, `app/pages`
+не переименовывались. Итог парсера `tests/integration/routes-parity.spec.ts`: 368 пар
+метод+путь разобрано из таблиц `04`, 253 уже обслуживаются (напрямую, через новый алиас или
+через общий динамический файл вроде `logs/[kind].get.ts`, который буквально отвечает на
+`/logs/task-status` и подобные), 115 — долг (класс «в», ниже). Общий приём: второй файл маршрута реэкспортирует обработчик
+старого пути (`export { default } from …`) или подставляет параметры/`kind` через
+`aliasHandler()` (`server/utils/routeAlias.ts`) — второй сервис не пишется.
+
+**Алиасировано этим PR** (старый путь работает, новый добавлен поверх того же сервиса):
+- `POST /courses/:id/sections` → `modules`, `POST /courses/:id/items` → `lessons` (Spec 11, долг был назван явно в `28`/`30`).
+- `GET /enrollments/:id` → `/learning/enrollments/:id`; `POST /enrollments/:id/items/:itemId/{tick,complete,acknowledge}` →
+  `/learning/enrollments/:id/lessons/:lessonId/…` (`:itemId` подставляется под `:lessonId` через `aliasHandler`).
+- `POST /review/workshops/:id/{claim,grade}` → `/review/submissions/:id/…`.
+- `CRUD /settings/notification-templates` → `/settings/notifications` (список и правка — по-прежнему `PUT`, не `POST`/`PATCH`, это не менялось).
+- `CRUD /org-units`, `/locations`, `/positions`, `/position-levels`, `/cities` → общий `/refs/:kind` (`kind` подставляется явно); `/user-groups` и `/tags` уже были на своих путях.
+- `GET/POST /tests/:id/questions` → сервис `questions`, `:id` подставляется в `quizId` (тела/квери, не реэкспорт хендлера — фильтр по `quizId` был, путь `/tests/:id/…` не был).
+- `GET /me/tasks` → `/learning/my`, `GET /me/catalog` → `/learning/catalog`, `GET /me/certificates` → `/learning/certificates`,
+  `GET /me/development-plan` → `/development/me`, `GET/PATCH /me/notifications/prefs` → `/notifications/prefs`.
+- `POST /development-plans` → `/development/plans`, `POST /development-plans/:id/transition` → `/development/plans/:id/transition`
+  (только эти два метода и существуют по обе стороны — GET-списка/карточки и DELETE нет вовсе, см. долг ниже).
+
+**Долг — путей нет вовсе, класс «в» (не реализовывалось в этом PR)**: единый `/content*`
+(методист работает с курсами/ресурсами/тестами по отдельности, обобщающего эндпоинта над
+одиннадцатью типами контента нет — это не переименование, а новая витрина); `resources.category_id`
+(снять миграцией вместе со «снятием старых путей» в конце R1 — но это колонка схемы, не маршрут,
+трогать сейчас нельзя по правилу 5); `programs`/`program_edges` — старый граф-режим программ, снятие
+отложено явно (`28` «Spec 17»), не трогали. Помимо них — `/me/tasks/:id`, `/me/catalog/:id/{enroll,request}`
+(тело/путь не совпадают тривиально — id сегодня в теле, не в пути), `/me/badges`, `/me/bonuses`,
+`/enrollments/:id/items/:itemId` GET (тело урока — сегодня `POST …/open`, другой метод, не тривиальный алиас),
+`/enrollments/:id/migrate-version`, `/review/checklists` (очередь на согласование), `/saved-reports`,
+`/reports/trajectory/:id`, `/reports/assessment/:id`, `/reports/checklist/:id` (форма пути с `:id`
+не совпадает с текущими `reports/programs`, `reports/assessment`, `reports/checklists` — решение по
+форме, не рутинный алиас), `/gift-store/*`, `/bonuses/*`, единая лента `/comments` (нет источника, кроме
+частных `…/comments` внутри воркшопов и целей), `/competencies/:id/indicators`, `/competency-profiles`,
+`/goals`, `/goal-statuses`, `/requests` (единые пути для нескольких разных сервисов — под вопросом,
+не переименование), `/criteria-groups`, `/criteria` (Spec 20 уже переименовал их в `/assessment/groups`,
+`/assessment/criteria` — это текст `04` сам себе противоречит, актуальны пути Spec 20, не CRUD-заголовок),
+`/assessments` (Spec 20: `PUT /assessment/forms`, не `CRUD /assessments`), `/settings/integrations` без
+`:provider` (список интеграций тенанта одним списком не собран), `/settings/translations` DELETE/PATCH по
+ключу (сегодня — `PUT`/`DELETE` без key в теле, форма не совпадает буквально), `/platform/tenants/:id` GET
+(есть только список и PATCH), `/platform/tenants/:id/anonymized-dump`, tenant-scoped `/metrics`
+(только `/platform/metrics`). `/health`, `/ready`, `/metrics` из `04` §4.16 не в долге — они
+уже есть (`server/routes/{health,ready,metrics}.get.ts`), но осознанно вне `/api/v1`: health-чек
+балансировщика не должен зависеть от версии API — путь как в `04` не заводили, это не тривиальный
+алиас (пришлось бы либо дублировать хендлер под версией, либо ломать конвенцию).
+
+**Снимается одним PR в конце R1** (docs/30 «Б» п. 18): все старые пути, перечисленные выше как
+«алиасировано» — `/learning/enrollments/*`, `/review/submissions/*`, `/settings/notifications`,
+`/refs/:kind`, `/questions?quizId=`, `/learning/my|catalog|certificates`, `/development/me`,
+`/notifications/prefs`, `/development/plans`, `/courses/:id/modules|lessons`. Тест
+`tests/integration/routes-parity.spec.ts` держит `fixtures/routes-parity.baseline.json` —
+список путей `04`, покрытых на сегодня; при снятии старых путей baseline обновляется тем же PR.

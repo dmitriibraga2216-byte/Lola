@@ -278,7 +278,9 @@
 | `/logs/org-conflicts` | протокол конфликтов оргструктуры (`16` §14) |
 | `/logs/security` | журнал безопасности (`16` Г-16.2) |
 | `/logs/sessions` | сессии |
-| `/logs/notifications` | уведомления + вкладка подключений Telegram |
+| `/logs/sessions/daily` | графік «Середній час у системі» (D-003): середня тривалість сесії по днях, `?days=1..90` (за замовчуванням 30) |
+| `/logs/notifications` | уведомления |
+| `/logs/notifications/telegram` | вкладка «Telegram» (D-003): підключення `telegram_chat_id`/`telegram_blocked` по активних людях — живий знімок, не подієвий журнал |
 | `/logs/imports`, `/logs/bonuses`, `/logs/goal-statuses` | остальные журналы |
 | POST `/reports/:name/export` | фоновая выгрузка → уведомление со ссылкой; область — по роли, активной в момент запроса. Имена: отчёты `22` §9, `tasks-<contentType>`, `summary`, `log-<kind>`, `saved:<id>`. Колонки каркаса — первые |
 | CRUD `/saved-reports` | сохранённый отчёт с расписанием (`22` Г-22.2, наш конструктор) |
@@ -304,6 +306,7 @@
 | GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
 | CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1): `GET` (people.view, со счётчиками и группами скоупов), `POST`, `PATCH /:id`, `DELETE /:id` (settings.tenant); 409 `code_taken` · `admin_role` · `role_in_use` · `last_settings_role`, 403 `scope_not_owned` |
 | GET/PUT | `/settings/position-role-map` | правило «должность → роль»: `{items: [{positionId, roleCode, scopeType, scopeId?}]}` целиком; применяется при следующей смене должности или импорте |
+| POST | `/settings/position-role-map/reapply` | «Перезібрати ролі по мережі» (`28` D-001): применяет текущую карту ко всем действующим основным размещениям тенанта сразу |
 | CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` (старый путь: `/settings/notifications`, до конца R1; список и правка целиком — `PUT`, не `POST`/`PATCH`, как и было) |
 | GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
 | GET/PUT | `/settings/email-layout` | шапка и подвал письма |

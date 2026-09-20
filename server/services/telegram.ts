@@ -7,6 +7,7 @@ import { enqueueNotification } from './notifications'
 import { createSession } from './session'
 import { logSecurity } from './securityLog'
 import { getSecret, SECRET_KEYS } from './secrets'
+import { frameJoins, frameSelect } from './reportFrame'
 
 /**
  * Telegram-бот (docs/04 §4.12, docs/06 §6.4; docs/09 §9.7.2, Spec 23): токен бота —
@@ -219,3 +220,33 @@ export async function telegramHealth(): Promise<{ ok: boolean, error?: string } 
   return lastHealth
 }
 export const telegramHealthState = () => lastHealth
+
+export interface TelegramConnectionRow {
+  user_id: string
+  full_name: string
+  user_status: string
+  position: string | null
+  city: string | null
+  unit: string | null
+  location: string | null
+  tags: string[]
+  connected: boolean
+  blocked: boolean
+}
+
+/**
+ * Список підключень Telegram (docs/28 «Spec 22» отк. (4), D-003): статус `telegram_chat_id`/
+ * `telegram_blocked` по кожній активній людині — вкладка «Telegram» журналу сесій (`/admin/journals`).
+ * Живий знімок стану, не журнал подій — тому окремий запит, а не через `logs.ts`/`LOG_KINDS`
+ * (там записи незмінні й чистяться за строком зберігання, тут — поточний стан `users`).
+ */
+export async function listTelegramConnections(ctx: { tenantId: string, actorId: string }): Promise<TelegramConnectionRow[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    return tx.execute(sql`
+      select ${frameSelect()}, (u.telegram_chat_id is not null) as connected, u.telegram_blocked as blocked
+      from users u ${frameJoins()}
+      where u.status <> 'archived'
+      order by connected desc, u.full_name
+    `) as unknown as Promise<TelegramConnectionRow[]>
+  })
+}

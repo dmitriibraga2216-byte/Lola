@@ -318,6 +318,13 @@
       "breakpoints": true
     },
     {
+      "idx": 45,
+      "version": "7",
+      "when": 1789961823802,
+      "tag": "0045_drop_resources_category_id",
+      "breakpoints": true
+    },
+    {
       "idx": 46,
       "version": "7",
       "when": 1789961873802,

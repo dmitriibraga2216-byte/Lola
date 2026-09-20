@@ -76,6 +76,7 @@
       "quizzes": "Quizzes",
       "review": "Answers to review",
       "assignments": "Tasks",
+      "taskParams": "Extra parameters",
       "profiles": "Learning profiles",
       "reports": "Reports",
       "workshops": "Workshops",
@@ -126,6 +127,7 @@
       "guestPage": "Guest page",
       "policies": "Policies",
       "roles": "Roles and permissions",
+      "positionRoleMap": "Position → role",
       "scales": "Rating scales",
       "translations": "Translations",
       "usage": "Usage",
@@ -445,6 +447,7 @@
     "kind": {
       "notifications": "Notifications",
       "sessions": "Sessions",
+      "telegram": "Telegram",
       "security": "Security",
       "import": "Import",
       "automation": "Automation",
@@ -510,6 +513,7 @@
     "title": {
       "notifications": "Notifications log",
       "sessions": "User sessions log",
+      "telegram": "Telegram connections",
       "security": "Security log",
       "import": "Import log",
       "automation": "Automation log",
@@ -570,6 +574,17 @@
     "conflictSource": {
       "manual": "Manual",
       "import": "Import"
+    },
+    "telegram": {
+      "status": "Status",
+      "connected": "Connected",
+      "blocked": "Blocked the bot",
+      "notConnected": "Not connected"
+    },
+    "avgTime": {
+      "title": "Average time in the system",
+      "hint": "Average session length per day, last 30 days",
+      "empty": "No sessions in this period yet"
     },
     "statusEvent": {
       "created": "Task assigned",
@@ -729,6 +744,7 @@
     "fromTask": "from task",
     "title": "Courses",
     "import": "Import",
+    "importHint": "Import format is being agreed on",
     "add": "Add",
     "col": {
       "title": "Title",
@@ -1110,6 +1126,7 @@
       "noAuthor": "Author: —",
       "contentDesc": "Create, edit and manage content",
       "pickExisting": "Choose existing",
+      "createNew": "Create new",
       "noContent": "No content selected",
       "settings": "Settings",
       "settingsDesc": "Duration, attempts, time and other limits",
@@ -1273,6 +1290,24 @@
       },
       "assigned_n": "Assigned {n}, reopened {m}"
     }
+  },
+  "taskParams": {
+    "title": "Extra task parameters",
+    "hint": "Tenant's own fields for assignment parameters (\"Other\" group): text, dropdown, number.",
+    "add": "Add parameter",
+    "new": "New parameter",
+    "name": "Name",
+    "kind": "Type",
+    "kindOption": {
+      "text": "Text field",
+      "select": "Dropdown",
+      "number": "Number field"
+    },
+    "options": "Options",
+    "optionsHint": "comma-separated",
+    "required": "Required",
+    "empty": "No parameters yet",
+    "confirmDelete": "Delete parameter \"{name}\"?"
   },
   "profiles": {
     "hint": "Position profile: a person lands on a position → the course set is assigned automatically.",
@@ -3293,6 +3328,7 @@
     "title": "Resources",
     "found": "Found {n} resources",
     "import": "Import",
+    "importHint": "Import format is being agreed on",
     "add": "Add",
     "create": "New resource",
     "edit": "Edit resource",
@@ -4068,6 +4104,20 @@
         "programs": "Programs and trajectories",
         "settings": "Settings"
       }
+    },
+    "positionRoleMap": {
+      "title": "Position-to-role mapping",
+      "hint": "The rule applies on a position change or import. To apply it to everyone right away — \"Rebuild roles network-wide\".",
+      "reapply": "Rebuild roles network-wide",
+      "reapplyDone": "People checked: {users}, roles granted: {granted}, revoked: {revoked}",
+      "position": "Position",
+      "role": "Role",
+      "scope": "Scope",
+      "scopeValue": "Scope value",
+      "scopeTenant": "Whole network",
+      "scopePlacement": "Placement scope",
+      "addRow": "Add row",
+      "empty": "No rule set yet"
     },
     "scales": {
       "title": "Rating scales",

@@ -154,3 +154,10 @@ describe('5. Технический контекст в журналах', () =>
     expect(missing, `нет request_context: ${missing.join(', ')}`).toEqual([])
   })
 })
+
+describe('6. Долги docs/33', () => {
+  it('D-010: resources.category_id снят миграцией 0045 — колонки нет, ресурс различает категории только через category_ids', () => {
+    expect(columns.some(c => c.table === 'resources' && c.column === 'category_id')).toBe(false)
+    expect(columns.some(c => c.table === 'resources' && c.column === 'category_ids')).toBe(true)
+  })
+})

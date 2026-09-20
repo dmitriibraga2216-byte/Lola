@@ -49,7 +49,6 @@ export const resources = pgTable('resources', {
   plainText: text('plain_text').notNull().default(''), // извлечённый текст для FTS
   mediaId: uuid('media_id'), // file | video
   externalUrl: text('external_url'), // link
-  categoryId: uuid('category_id').references(() => courseCategories.id), // устарело: категория каталога; ресурс использует category_ids
   categoryIds: uuid('category_ids').array().notNull().default(sql`'{}'::uuid[]`), // «Категорії» — множественный выбор из resource_categories (docs/11 §14)
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   language: text('language').notNull().default('uk'),

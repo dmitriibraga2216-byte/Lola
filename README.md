@@ -26,6 +26,38 @@ pnpm build && pnpm test:e2e   # Playwright, 11 сценариев (docs/06 §6.1
 pnpm lint && pnpm typecheck
 ```
 
+## Визуальные тесты
+
+Playwright-скриншоты ключевых экранов приложения против эталонов, собранных из статических
+мокапов `docs/mockups/screens/*.html` (docs/28 «visual-mockups», docs/32 §Б строка 21).
+Отдельный конфиг `playwright.visual.config.ts` и отдельная папка `tests/visual/` — эти тесты
+не входят в `pnpm check` и не блокируют мердж, расхождения фиксируются как список долгов.
+
+**Снять/обновить эталоны** (после правки мокапа или если эталона ещё нет):
+```bash
+pnpm visual:mockups   # docs/mockups/screens/<Имя>.html → tests/visual/mockups/<Имя>-<project>.png
+```
+Эталоны — обычные PNG, коммитятся в репозиторий (`tests/visual/mockups/`); `<project>` —
+`desktop` или `mobile` (playwright.visual.config.ts).
+
+**Запустить**:
+```bash
+pnpm build             # тесты идут против собранного .output, как и pnpm test:e2e
+pnpm visual
+```
+Html-отчёт — в `visual-report/index.html` (`pnpm exec playwright show-report visual-report`).
+
+**Как читать отчёт**: на экран — два независимых сигнала, оба не критичны сами по себе.
+1. Скриншот приложения против эталона мокапа (порог `maxDiffPixelRatio`, не пиксель-в-пиксель —
+   экраны показывают разные данные, см. docs/28 «visual-mockups» про подбор порога и маскирование
+   дат/имён/аватаров).
+2. Структурная проверка: заметные тексты мокапа (заголовки, кнопки, чипы) должны быть видны на
+   экране — это более надёжный сигнал, список ненайденных текстов печатается в консоль теста и
+   попадает в `$GITHUB_STEP_SUMMARY` в CI (job `visual` в `.github/workflows/ci.yml`).
+
+Известные ограничения автоматического извлечения текстов (пример-данные вроде имён, не общие
+для всех фикстур блоки) — в docs/28 «visual-mockups».
+
 ## Что готово (этапы 0–11)
 
 | Этап | Модуль | Ключевое |

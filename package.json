@@ -19,6 +19,8 @@
     "test:quiet": "vitest run --reporter=dot",
     "test:e2e": "playwright test",
     "e2e:quiet": "playwright test --reporter=dot",
+    "visual:mockups": "tsx scripts/mockup-shots.ts",
+    "visual": "playwright test -c playwright.visual.config.ts",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",
     "check": "pnpm lint && pnpm typecheck && pnpm test:quiet && pnpm e2e:quiet"

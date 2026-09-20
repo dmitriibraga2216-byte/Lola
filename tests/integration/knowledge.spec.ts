@@ -266,7 +266,8 @@ describe('практикум: сдача → захват → доработка
     courseIds.push(c.id)
     const m = await addModule(ctx(), c.id, 'Р')
     const l = await addLesson(ctx(), { moduleId: m!.id, title: 'Практикум', itemType: 'workshop', workshopId, isRequired: true, videoThresholdPct: 90 })
-    lessonId = l!.id
+    if (!l.ok) throw new Error(l.code)
+    lessonId = l.lesson.id
     await publishCourse(ctx(), c.id, 'v1')
     const e = await selfEnroll(learner(), c.id)
     if (!e.ok) throw new Error(e.code)

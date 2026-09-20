@@ -26,6 +26,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/checklists', label: t('admin.nav.checklists'), show: hasScope('checklist.manage') },
   ] },
   { key: 'content', label: t('admin.section.content'), icon: 'doc', items: [
+    { to: '/admin/resources', label: t('admin.nav.resources'), show: hasScope('course.view') },
     { to: '/admin/courses', label: t('admin.nav.courses'), show: hasScope('course.view') },
     { to: '/admin/quizzes', label: t('admin.nav.quizzes'), show: hasScope('course.view') },
     { to: '/admin/workshops', label: t('admin.nav.workshops'), show: hasScope('course.view') },
@@ -33,6 +34,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/surveys', label: t('admin.nav.surveys'), show: hasScope('survey.manage') },
     { to: '/admin/meetups', label: t('admin.nav.meetups'), show: hasScope('meetup.manage') || hasScope('meetup.attendance') },
     { to: '/admin/assessment/criteria', label: t('admin.nav.assessCriteria'), show: hasScope('assessment.manage') },
+    { to: '/admin/resources/categories', label: t('admin.nav.resourceCategories'), show: hasScope('course.edit') },
   ] },
   { key: 'people', label: t('admin.section.people'), icon: 'people', items: [
     { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view') },

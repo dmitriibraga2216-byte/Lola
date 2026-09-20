@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
-  courseVersions, courses, lessons, mediaAssets, modules, resources,
+  assignments, courseVersions, courses, lessons, mediaAssets, modules, resourceVersions, resources, users,
 } from '../db/schema'
+import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
@@ -11,6 +12,7 @@ import { blocksToText } from './knowledge'
 import type {
   ContentBlock, courseCreateSchema, courseUpdateSchema, lessonCreateSchema, lessonUpdateSchema,
 } from '../../shared/schemas/content'
+import { resourceKindComplete, type ResourceKind } from '../../shared/schemas/resources'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -32,12 +34,35 @@ export function slugify(title: string): string {
   return slug.length >= 3 ? slug : `course-${randomUUID().slice(0, 8)}`
 }
 
+/** Список курсов по мокапу ContentCourses: Назва (Код · N розділів, M елементів) · Тривалість · Результат по · Автор · Дата зміни · Опубліковано. */
 export async function listCourses(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const rows = await tx.select().from(courses)
+    const rows = await tx.select({
+      course: courses,
+      authorName: users.fullName,
+    }).from(courses)
+      .leftJoin(users, eq(users.id, courses.createdBy))
       .where(isNull(courses.deletedAt))
       .orderBy(desc(courses.updatedAt))
-    return rows
+    if (!rows.length) return []
+    // Состав считается по последней версии (черновой, если есть)
+    const stats = await tx.execute(sql`
+      select v.course_id, count(distinct m.id)::int as sections, count(l.id)::int as items
+      from course_versions v
+      join (select course_id, max(version) as version from course_versions group by course_id) last
+        on last.course_id = v.course_id and last.version = v.version
+      left join modules m on m.course_version_id = v.id
+      left join lessons l on l.module_id = m.id
+      where v.course_id in ${sql.raw(`(${rows.map(r => `'${r.course.id}'`).join(',')})`)}
+      group by v.course_id
+    `) as unknown as { course_id: string, sections: number, items: number }[]
+    const statOf = new Map(stats.map(s => [s.course_id, s]))
+    return rows.map(({ course, authorName }) => ({
+      ...course,
+      authorName,
+      sections: statOf.get(course.id)?.sections ?? 0,
+      items: statOf.get(course.id)?.items ?? 0,
+    }))
   })
 }
 
@@ -59,6 +84,11 @@ export async function createCourse(ctx: Ctx, input: z.infer<typeof courseCreateS
       competencyLevel: input.competencyLevel ?? null,
       tags: input.tags,
       coverKey: input.coverKey ?? null,
+      code: input.code ?? null,
+      iconKey: input.iconKey ?? null,
+      durationDays: input.durationDays ?? null,
+      workload: input.workload ?? null,
+      resultMode: input.resultMode ?? 'pct',
       createdBy: ctx.actorId,
     }).returning()
 
@@ -99,6 +129,11 @@ export async function updateCourse(ctx: Ctx, courseId: string, input: z.infer<ty
       ...(input.competencyLevel !== undefined ? { competencyLevel: input.competencyLevel } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
       ...(input.coverKey !== undefined ? { coverKey: input.coverKey } : {}),
+      ...(input.code !== undefined ? { code: input.code } : {}),
+      ...(input.iconKey !== undefined ? { iconKey: input.iconKey } : {}),
+      ...(input.durationDays !== undefined ? { durationDays: input.durationDays } : {}),
+      ...(input.workload !== undefined ? { workload: input.workload } : {}),
+      ...(input.resultMode !== undefined ? { resultMode: input.resultMode } : {}),
       updatedAt: new Date(),
     }).where(eq(courses.id, courseId)).returning()
 
@@ -163,6 +198,7 @@ export async function ensureDraftVersion(ctx: Ctx, courseId: string): Promise<st
           minSeconds: l.minSeconds,
           videoThresholdPct: l.videoThresholdPct,
           passScorePct: l.passScorePct,
+          resourceVersionId: l.resourceVersionId,
         })))
       }
     }
@@ -207,6 +243,9 @@ export async function getCourseEditor(ctx: Ctx, courseId: string) {
         lessons: lessonRows.filter(l => l.moduleId === m.id).map(l => ({
           ...l,
           body: l.itemType === 'resource' ? (resourceById.get(l.itemId)?.body ?? []) : [],
+          resource: l.itemType === 'resource' && resourceById.get(l.itemId)
+            ? { kind: resourceById.get(l.itemId)!.kind, status: resourceById.get(l.itemId)!.status, estimatedMinutes: resourceById.get(l.itemId)!.estimatedMinutes, version: resourceById.get(l.itemId)!.version, mediaId: resourceById.get(l.itemId)!.mediaId, externalUrl: resourceById.get(l.itemId)!.externalUrl }
+            : null,
         })),
       })),
     }
@@ -228,10 +267,19 @@ export async function addModule(ctx: Ctx, courseId: string, title: string) {
   })
 }
 
-export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSchema>) {
+export type AddLessonResult
+  = | { ok: true, lesson: typeof lessons.$inferSelect }
+    | { ok: false, code: 'section_required' | 'resource_not_found' | 'resource_not_published' }
+
+/**
+ * Элемент плана. Раздел — обязательный уровень (docs/11 §14.1): без раздела элемент не создаётся.
+ * Ресурс либо создаётся из тела («Створити і підключити ресурс»), либо подключается из библиотеки
+ * по `resourceId` — только опубликованный (docs/11 §5.4: ссылок на архивированные материалы нет).
+ */
+export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSchema>): Promise<AddLessonResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [mod] = await tx.select().from(modules).where(eq(modules.id, input.moduleId))
-    if (!mod) return null
+    if (!mod) return { ok: false as const, code: 'section_required' as const }
 
     let itemId: string
     if (input.itemType === 'quiz') {
@@ -239,6 +287,13 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
     }
     else if (input.itemType === 'workshop') {
       itemId = input.workshopId!
+    }
+    else if (input.resourceId) {
+      const [existing] = await tx.select({ id: resources.id, status: resources.status, title: resources.title }).from(resources)
+        .where(and(eq(resources.id, input.resourceId), isNull(resources.deletedAt)))
+      if (!existing) return { ok: false as const, code: 'resource_not_found' as const }
+      if (existing.status !== 'published') return { ok: false as const, code: 'resource_not_published' as const }
+      itemId = existing.id
     }
     else {
       const cleanBody = sanitizeBody(input.resource!.body as ContentBlock[])
@@ -250,7 +305,7 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
         body: cleanBody,
         plainText: blocksToText(cleanBody),
         authorIds: [ctx.actorId],
-        status: 'published',
+        status: 'draft', // опубликуется (снимок версии) вместе с курсом
       }).returning({ id: resources.id })
       itemId = resource!.id
     }
@@ -268,7 +323,7 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
       videoThresholdPct: input.videoThresholdPct,
       passScorePct: input.itemType === 'quiz' && input.passScorePct != null ? String(input.passScorePct) : null,
     }).returning()
-    return lesson!
+    return { ok: true as const, lesson: lesson! }
   })
 }
 
@@ -354,12 +409,17 @@ export async function publishChecks(ctx: Ctx, courseId: string): Promise<Publish
     return rows.length === mediaIds.length && rows.every(r => r.status === 'ready')
   })
 
+  const resourceLessons = allLessons.filter(l => l.itemType === 'resource')
+  const resourcesOk = resourceLessons.every(l => l.resource && l.resource.status !== 'archived')
+
   return [
+    { code: 'has_sections', label: 'У курсі є хоча б один розділ', ok: editor.modules.length > 0 },
     { code: 'has_lessons', label: 'У курсі є хоча б один урок', ok: allLessons.length > 0 },
+    { code: 'resources_available', label: 'Немає посилань на архівовані матеріали', ok: resourcesOk },
     {
       code: 'lessons_have_content',
       label: 'У кожного уроку заповнений матеріал',
-      ok: allLessons.every(l => l.itemType !== 'resource' || (l.body as ContentBlock[]).length > 0),
+      ok: allLessons.every(l => l.itemType !== 'resource' || (!!l.resource && resourceKindComplete({ kind: l.resource.kind as ResourceKind, mediaId: l.resource.mediaId, externalUrl: l.resource.externalUrl, body: l.body as unknown[] }))),
     },
     { code: 'quizzes_have_questions', label: 'У кожного тесту є питання', ok: quizzesOk },
     { code: 'media_ready', label: 'Усі медіафайли оброблені', ok: mediaReady },
@@ -370,18 +430,26 @@ export type PublishResult
   = | { ok: true, versionId: string, version: number }
     | { ok: false, code: 'not_found' | 'not_publishable', checks?: PublishCheck[] }
 
-/** Публикация: draft → published, прошлая published → retired, одной транзакцией. */
-export async function publishCourse(ctx: Ctx, courseId: string, changelog: string): Promise<PublishResult> {
+/**
+ * Публикация: draft → published, прошлая published → retired, одной транзакцией.
+ * Уроки-ресурсы закрепляются за снимком ресурса (Г-11.3): если рабочая редакция ресурса отличается
+ * от опубликованной (или снимка ещё нет — ресурс создан в плане), публикация курса делает новый снимок.
+ * `notifyAssigned` — «Сповістити про оновлення» (docs/11 §14.2): сразу разослать назначенным,
+ * иначе — только баннер «N завдань було змінено» (docs/15 §14.6).
+ */
+export async function publishCourse(ctx: Ctx, courseId: string, changelog: string, notifyAssigned = false): Promise<PublishResult> {
   const checks = await publishChecks(ctx, courseId)
   if (!checks) return { ok: false, code: 'not_found' }
   if (checks.some(c => !c.ok)) return { ok: false, code: 'not_publishable', checks }
 
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [draft] = await tx.select().from(courseVersions)
       .where(and(eq(courseVersions.courseId, courseId), eq(courseVersions.status, 'draft')))
       .orderBy(desc(courseVersions.version))
       .limit(1)
     if (!draft) return { ok: false as const, code: 'not_found' as const }
+
+    await pinResourceVersions(tx, ctx, draft.id, `Публікація курсу, версія ${draft.version}`)
 
     await tx.update(courseVersions)
       .set({ status: 'retired', updatedAt: new Date() })
@@ -410,8 +478,48 @@ export async function publishCourse(ctx: Ctx, courseId: string, changelog: strin
       action: 'course.publish',
       entity: 'course',
       entityId: courseId,
-      after: { version: draft.version, changelog },
+      after: { version: draft.version, changelog, notifyAssigned },
     })
-    return { ok: true as const, versionId: draft.id, version: draft.version }
+    const assignmentIds = notifyAssigned
+      ? (await tx.select({ id: assignments.id }).from(assignments)
+          .where(and(eq(assignments.subjectType, 'course'), eq(assignments.subjectId, courseId), inArray(assignments.status, ['active', 'paused']))))
+          .map(a => a.id)
+      : []
+    return { ok: true as const, versionId: draft.id, version: draft.version, assignmentIds }
   })
+  if (result.ok && result.assignmentIds.length) {
+    const { notifyChanged } = await import('./tasks')
+    await notifyChanged(ctx, result.assignmentIds)
+  }
+  return result.ok ? { ok: true, versionId: result.versionId, version: result.version } : result
+}
+
+/** Снимки ресурсов для уроков версии курса: закрепить существующий или сделать новый, если редакция изменилась. */
+async function pinResourceVersions(tx: TenantTx, ctx: Ctx, courseVersionId: string, changelog: string) {
+  const rows = await tx.select({ lesson: lessons, resource: resources }).from(lessons)
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .innerJoin(resources, eq(resources.id, lessons.itemId))
+    .where(and(eq(modules.courseVersionId, courseVersionId), eq(lessons.itemType, 'resource')))
+  for (const { lesson, resource } of rows) {
+    let versionId = resource.publishedVersionId
+    let changed = !versionId
+    if (versionId) {
+      const [v] = await tx.select().from(resourceVersions).where(eq(resourceVersions.id, versionId))
+      changed = !v || v.title !== resource.title || v.kind !== resource.kind || v.mediaId !== resource.mediaId
+        || v.externalUrl !== resource.externalUrl || JSON.stringify(v.body) !== JSON.stringify(resource.body)
+    }
+    if (changed) {
+      const version = resource.publishedVersionId ? resource.version + 1 : 1
+      const [snap] = await tx.insert(resourceVersions).values({
+        tenantId: ctx.tenantId, resourceId: resource.id, version, title: resource.title, kind: resource.kind,
+        body: resource.body, plainText: resource.plainText, mediaId: resource.mediaId, externalUrl: resource.externalUrl,
+        changelog, publishedBy: ctx.actorId,
+      }).returning({ id: resourceVersions.id })
+      await tx.update(resources).set({ status: 'published', version, publishedVersionId: snap!.id, updatedAt: new Date() }).where(eq(resources.id, resource.id))
+      versionId = snap!.id
+    }
+    if (lesson.resourceVersionId !== versionId) {
+      await tx.update(lessons).set({ resourceVersionId: versionId }).where(eq(lessons.id, lesson.id))
+    }
+  }
 }

@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { readThrough } from './_lesson'
 
 const pg = await import('../../server/services/programs')
 const { createCourse, addModule, addLesson, publishCourse } = await import('../../server/services/courses')
@@ -36,7 +37,7 @@ async function passCourse(userId: string, courseId: string) {
   const tree = await enrollmentTree(ctx(userId), enr!.id as string)
   const lessonId = tree!.modules[0]!.lessons[0]!.id
   await openLesson(ctx(userId), enr!.id as string, lessonId)
-  await admin`update lesson_progress set seconds_spent = 600 where enrollment_id = ${enr!.id}`
+  await readThrough(admin, enr!.id as string, lessonId) // Г-11.5: страница дочитана
   const r = await completeLesson(ctx(userId), enr!.id as string, lessonId)
   expect(r.ok).toBe(true)
   await new Promise(r => setTimeout(r, 150)) // хук программы — вне транзакции

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
+import { COURSE_RESULT_MODES } from '#shared/schemas/content'
 
+/**
+ * План курса по мокапу CoursePlan (docs/11 §5.3, §14.1): слева библиотека ресурсов и тестов с фильтрами
+ * «Тип» · «Мітки» и «Знайдено: N», справа план — «РОЗДІЛ N», три действия («Створити і підключити ресурс»,
+ * «Створити та підключити тест», «Додати розділ»), у теста в плане «Поріг N%». Раздел обязателен:
+ * элемент подключается только в раздел. Параметры выбранного элемента — в панели справа.
+ */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'course.view' })
 
 const { t } = useI18n()
@@ -19,13 +26,20 @@ interface Lesson {
   videoThresholdPct: number
   passScorePct: string | number | null
   body: ContentBlock[]
+  resource: { kind: string, status: string, estimatedMinutes: number | null, version: number } | null
+}
+interface Course {
+  id: string, title: string, status: string, isCatalogVisible: boolean, strictOrder: boolean, summary: string | null
+  competencyId: string | null, competencyLevel: number | null
+  code: string | null, durationDays: number | null, workload: string | null, resultMode: string
 }
 interface Editor {
-  course: { id: string, title: string, status: string, isCatalogVisible: boolean, strictOrder: boolean, summary: string | null, competencyId: string | null, competencyLevel: number | null }
+  course: Course
   version: { id: string, version: number, status: string }
   modules: { id: string, title: string, lessons: Lesson[] }[]
 }
 interface Check { code: string, label: string, ok: boolean }
+interface LibItem { id: string, title: string, kind: 'resource' | 'quiz' | 'workshop', sub: string, tags: string[], questions?: number }
 
 const editor = ref<Editor | null>(null)
 const selected = ref<Lesson | null>(null)
@@ -34,24 +48,44 @@ const error = ref('')
 const notice = ref('')
 const savedAt = ref('')
 const publishOpen = ref(false)
+const cardOpen = ref(false)
 const checks = ref<Check[]>([])
 const changelog = ref('')
+const notifyAssigned = ref(false)
 const busy = ref(false)
 const newModuleTitle = ref('')
-const newLessonTitle = reactive<Record<string, string>>({})
-const quizList = ref<{ id: string, title: string }[]>([])
-const workshopList = ref<{ id: string, title: string }[]>([])
-const newLessonQuiz = reactive<Record<string, string>>({})
+const newItemTitle = ref('')
+const targetModuleId = ref('')
+const libKind = ref<'all' | 'resource' | 'quiz' | 'workshop'>('all')
+const libTag = ref('')
+const libQ = ref('')
+const library = ref<LibItem[]>([])
+const card = reactive({ title: '', code: '', durationDays: null as number | null, workload: '', resultMode: 'pct', summary: '' })
 
 const canEdit = computed(() => hasScope('course.edit'))
+
+async function loadLibrary() {
+  const [res, quizzes, workshops] = await Promise.all([
+    api<{ items: { id: string, title: string, kind: string, tags: string[], estimatedMinutes?: number | null }[] }>('/resources', { query: { status: 'published', perPage: 100 } }).catch(() => ({ items: [] })),
+    api<{ id: string, title: string, status: string, questionCount?: number, tags?: string[] }[]>('/quizzes').catch(() => []),
+    api<{ id: string, title: string, status: string, tags?: string[] }[]>('/workshops').catch(() => []),
+  ])
+  library.value = [
+    ...res.items.map(r => ({ id: r.id, title: r.title, kind: 'resource' as const, sub: t(`resource.kind.${r.kind}`), tags: r.tags })),
+    ...quizzes.filter(q => q.status === 'published').map(q => ({ id: q.id, title: q.title, kind: 'quiz' as const, sub: t('course.itemQuiz'), tags: q.tags ?? [], questions: q.questionCount })),
+    ...workshops.filter(w => w.status === 'published').map(w => ({ id: w.id, title: w.title, kind: 'workshop' as const, sub: t('course.itemWorkshop'), tags: w.tags ?? [] })),
+  ]
+}
 
 async function load() {
   try {
     editor.value = await api<Editor>(`/courses/${courseId}`)
-    if (quizList.value.length === 0) {
-      quizList.value = (await api<{ id: string, title: string, status: string }[]>('/quizzes')).filter(q => q.status === 'published')
-      workshopList.value = (await api<{ id: string, title: string, status: string }[]>('/workshops')).filter(w => w.status === 'published')
-    }
+    Object.assign(card, {
+      title: editor.value.course.title, code: editor.value.course.code ?? '', durationDays: editor.value.course.durationDays,
+      workload: editor.value.course.workload ?? '', resultMode: editor.value.course.resultMode, summary: editor.value.course.summary ?? '',
+    })
+    if (!targetModuleId.value && editor.value.modules[0]) targetModuleId.value = editor.value.modules[0].id
+    if (library.value.length === 0) await loadLibrary()
     if (selected.value) {
       const fresh = editor.value.modules.flatMap(m => m.lessons).find(l => l.id === selected.value!.id)
       if (fresh) select(fresh)
@@ -62,6 +96,13 @@ async function load() {
   }
 }
 onMounted(load)
+
+const libTags = computed(() => [...new Set(library.value.flatMap(i => i.tags))].sort())
+const libVisible = computed(() => library.value.filter(i =>
+  (libKind.value === 'all' || i.kind === libKind.value)
+  && (!libTag.value || i.tags.includes(libTag.value))
+  && (!libQ.value.trim() || i.title.toLowerCase().includes(libQ.value.trim().toLowerCase())),
+))
 
 function select(lesson: Lesson) {
   selected.value = lesson
@@ -97,31 +138,81 @@ async function save() {
   }
 }
 
+async function saveCard() {
+  busy.value = true
+  try {
+    await api(`/courses/${courseId}`, {
+      method: 'PATCH',
+      body: {
+        title: card.title.trim(), code: card.code.trim() || null, durationDays: card.durationDays || null,
+        workload: card.workload.trim() || null, resultMode: card.resultMode, summary: card.summary.trim() || undefined,
+      },
+    })
+    notice.value = t('common.saved')
+    cardOpen.value = false
+    await load()
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
+  finally {
+    busy.value = false
+  }
+}
+
 async function addModule() {
-  if (!newModuleTitle.value.trim()) return
-  await api(`/courses/${courseId}/modules`, { method: 'POST', body: { title: newModuleTitle.value.trim() } })
+  const title = newModuleTitle.value.trim()
+  if (!title) return
+  const mod = await api<{ id: string }>(`/courses/${courseId}/modules`, { method: 'POST', body: { title } })
   newModuleTitle.value = ''
+  targetModuleId.value = mod.id
   await load()
 }
 
-async function addLesson(moduleId: string) {
-  const title = newLessonTitle[moduleId]?.trim()
+/** Подключение элемента: только в раздел (docs/11 §14.1); без раздела — подсказка. */
+async function addLesson(body: Record<string, unknown>) {
+  if (!targetModuleId.value) {
+    error.value = t('course.sectionRequired')
+    return
+  }
+  error.value = ''
+  try {
+    const lesson = await api<Lesson>(`/courses/${courseId}/lessons`, { method: 'POST', body: { moduleId: targetModuleId.value, ...body } })
+    await load()
+    const fresh = editor.value?.modules.flatMap(m => m.lessons).find(l => l.id === lesson.id)
+    if (fresh) select(fresh)
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
+}
+
+function attach(item: LibItem) {
+  if (item.kind === 'resource') return addLesson({ title: item.title, itemType: 'resource', resourceId: item.id })
+  if (item.kind === 'quiz') return addLesson({ title: item.title, itemType: 'quiz', quizId: item.id })
+  return addLesson({ title: item.title, itemType: 'workshop', workshopId: item.id })
+}
+
+/** «Створити і підключити ресурс»: новая страница из блоков с названием из поля. */
+async function createResource() {
+  const title = newItemTitle.value.trim()
   if (!title) return
-  const pick = newLessonQuiz[moduleId] ?? ''
-  const [kind, itemId] = pick.includes(':') ? pick.split(':') : ['', '']
-  const lesson = await api<Lesson>(`/courses/${courseId}/lessons`, {
-    method: 'POST',
-    body: kind === 'quiz'
-      ? { moduleId, title, itemType: 'quiz', quizId: itemId }
-      : kind === 'workshop'
-        ? { moduleId, title, itemType: 'workshop', workshopId: itemId }
-        : { moduleId, title, resource: { body: [{ id: `b_${Date.now()}`, type: 'text', html: '<p></p>' }] } },
-  })
-  newLessonQuiz[moduleId] = ''
-  newLessonTitle[moduleId] = ''
-  await load()
-  const fresh = editor.value?.modules.flatMap(m => m.lessons).find(l => l.id === lesson.id)
-  if (fresh) select(fresh)
+  await addLesson({ title, itemType: 'resource', resource: { body: [{ id: `b_${Date.now()}`, type: 'text', html: '<p></p>' }] } })
+  newItemTitle.value = ''
+}
+
+/** «Створити та підключити тест»: пустой тест, вопросы — в редакторе теста. */
+async function createQuiz() {
+  const title = newItemTitle.value.trim()
+  if (!title) return
+  try {
+    const quiz = await api<{ id: string }>('/quizzes', { method: 'POST', body: { title } })
+    await addLesson({ title, itemType: 'quiz', quizId: quiz.id })
+    newItemTitle.value = ''
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
 }
 
 async function deleteLesson(lesson: Lesson) {
@@ -131,7 +222,17 @@ async function deleteLesson(lesson: Lesson) {
   await load()
 }
 
-// docs/19 §7.3: какую компетенцию и до какого уровня закрывает курс (засчитывается при сданном итоговом тесте)
+async function moveLesson(mod: Editor['modules'][number], index: number, delta: number) {
+  const target = index + delta
+  if (target < 0 || target >= mod.lessons.length) return
+  const order = [...mod.lessons]
+  const [row] = order.splice(index, 1)
+  order.splice(target, 0, row!)
+  await api('/lessons/reorder', { method: 'POST', body: { items: order.map((l, i) => ({ id: l.id, sort: i })) } })
+  await load()
+}
+
+// docs/19 §7.3: какую компетенцию и до какого уровня закрывает курс
 const competencies = ref<{ id: string, name: string, levels: { level: number, title: string }[] }[]>([])
 const comp = reactive({ competencyId: '', competencyLevel: 0 })
 watch(editor, (e) => { if (e) { comp.competencyId = e.course.competencyId ?? ''; comp.competencyLevel = e.course.competencyLevel ?? 0 } })
@@ -157,10 +258,11 @@ async function publish() {
   busy.value = true
   error.value = ''
   try {
-    const res = await api<{ version: number }>(`/courses/${courseId}/publish`, { method: 'POST', body: { changelog: changelog.value } })
+    const res = await api<{ version: number }>(`/courses/${courseId}/publish`, { method: 'POST', body: { changelog: changelog.value, notifyAssigned: notifyAssigned.value } })
     notice.value = t('course.published', { v: res.version })
     publishOpen.value = false
     changelog.value = ''
+    notifyAssigned.value = false
     await load()
   }
   catch (err) {
@@ -170,117 +272,157 @@ async function publish() {
     busy.value = false
   }
 }
+
+function itemSub(l: Lesson): string {
+  if (l.itemType === 'quiz') return t('course.itemQuiz')
+  if (l.itemType === 'workshop') return t('course.itemWorkshop')
+  return l.resource?.estimatedMinutes ? `${t('course.itemResource')} · ${t('course.minutesN', { n: l.resource.estimatedMinutes })}` : t('course.itemResource')
+}
 </script>
 
 <template>
-  <div v-if="editor" class="course-editor">
-    <header class="head">
-      <NuxtLink to="/admin/courses" class="back">← {{ t('admin.nav.courses') }}</NuxtLink>
-      <h1>{{ editor.course.title }}</h1>
-      <span :class="['badge', editor.course.status]">{{ t(`course.status.${editor.course.status}`) }}</span>
-      <span class="sub">{{ t('course.draftVersion', { v: editor.version.version }) }}</span>
-      <div class="head-actions">
-        <label class="check">
-          <input type="checkbox" :checked="editor.course.isCatalogVisible" :disabled="!canEdit" @change="toggleCatalog">
-          {{ t('course.inCatalog') }}
-        </label>
-        <button v-if="hasScope('course.publish')" class="primary" @click="openPublish">{{ t('course.publish') }}</button>
-      </div>
-    </header>
-    <div v-if="competencies.length && canEdit" class="comp-row">
-      <span class="sub">{{ t('course.closesCompetency') }}</span>
-      <select v-model="comp.competencyId" class="field" :aria-label="t('dev.competency')"><option value="">—</option><option v-for="c in competencies" :key="c.id" :value="c.id">{{ c.name }}</option></select>
-      <select v-if="comp.competencyId" v-model.number="comp.competencyLevel" class="field" :aria-label="t('dev.level')"><option :value="0">—</option><option v-for="l in (competencies.find(c => c.id === comp.competencyId)?.levels ?? [])" :key="l.level" :value="l.level">{{ t('dev.level') }} {{ l.level }} · {{ l.title }}</option></select>
-      <button class="chip" @click="saveCompetency">{{ t('common.save') }}</button>
-      <span class="sub">{{ t('course.closesCompetencyHint') }}</span>
-    </div>
+  <div v-if="editor" class="course-plan">
+    <PageHeader :title="t('course.planOf', { title: editor.course.title })" :crumbs="[{ label: t('admin.section.content') }, { label: t('course.title'), to: '/admin/courses' }]">
+      <template #actions>
+        <span :class="['badge upper', editor.course.status]">{{ t(`course.status.${editor.course.status}`) }}</span>
+        <button class="btn ghost" @click="cardOpen = !cardOpen">{{ t('course.card') }}</button>
+        <button v-if="canEdit" class="btn ghost" @click="save(); notice = t('common.saved')">{{ t('common.save') }}</button>
+        <button v-if="hasScope('course.publish')" class="btn primary" @click="openPublish">{{ t('course.publish') }}</button>
+      </template>
+    </PageHeader>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="notice" class="notice">{{ notice }}</p>
+    <p v-if="error" class="note coral" role="alert">{{ error }}</p>
+    <p v-if="notice" class="note teal" role="status">{{ notice }}</p>
+
+    <form v-if="cardOpen" class="card course-card" @submit.prevent="saveCard">
+      <label><span class="label">{{ t('course.newTitle') }}</span><input v-model="card.title" class="field" minlength="3" maxlength="200" :disabled="!canEdit"></label>
+      <label><span class="label">{{ t('course.description') }}</span><textarea v-model="card.summary" class="field" rows="2" maxlength="300" :disabled="!canEdit" /></label>
+      <div class="grid3">
+        <label><span class="label">{{ t('course.code') }}</span><input v-model="card.code" class="field" maxlength="40" :disabled="!canEdit"></label>
+        <label><span class="label">{{ t('course.durationDays') }}</span><input v-model.number="card.durationDays" class="field" type="number" min="1" max="3650" :disabled="!canEdit"></label>
+        <label><span class="label">{{ t('course.workload') }}</span><input v-model="card.workload" class="field" maxlength="200" :disabled="!canEdit"></label>
+      </div>
+      <fieldset class="modes">
+        <legend class="label">{{ t('course.resultModeLabel') }}</legend>
+        <div class="segmented">
+          <label v-for="m in COURSE_RESULT_MODES" :key="m" :class="{ on: card.resultMode === m }"><input v-model="card.resultMode" type="radio" name="resultMode" :value="m" class="sr-only" :disabled="!canEdit">{{ t(`course.resultMode.${m}`) }}</label>
+        </div>
+      </fieldset>
+      <div class="row-actions">
+        <label class="check"><input type="checkbox" :checked="editor.course.isCatalogVisible" :disabled="!canEdit" @change="toggleCatalog">{{ t('course.inCatalog') }}</label>
+        <template v-if="competencies.length && canEdit">
+          <select v-model="comp.competencyId" class="field small" :aria-label="t('course.closesCompetency')"><option value="">{{ t('course.closesCompetency') }}</option><option v-for="c in competencies" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+          <select v-if="comp.competencyId" v-model.number="comp.competencyLevel" class="field small" :aria-label="t('dev.level')"><option :value="0">—</option><option v-for="l in (competencies.find(c => c.id === comp.competencyId)?.levels ?? [])" :key="l.level" :value="l.level">{{ t('dev.level') }} {{ l.level }} · {{ l.title }}</option></select>
+          <button type="button" class="chip" @click="saveCompetency">{{ t('common.save') }}</button>
+        </template>
+        <button v-if="canEdit" type="submit" class="btn primary" :disabled="busy || card.title.trim().length < 3">{{ t('common.save') }}</button>
+      </div>
+    </form>
 
     <div class="split">
-      <aside class="tree">
-        <div v-for="mod in editor.modules" :key="mod.id" class="module">
-          <div class="module-title">{{ mod.title }}</div>
-          <button
-            v-for="lesson in mod.lessons"
-            :key="lesson.id"
-            :class="['lesson', { on: selected?.id === lesson.id }]"
-            @click="select(lesson)"
-          >
-            <span>{{ lesson.title }}</span>
-            <span v-if="!lesson.isRequired" class="sub">{{ t('learner.optional') }}</span>
-          </button>
-          <div v-if="canEdit" class="add-row">
-            <input v-model="newLessonTitle[mod.id]" :placeholder="t('course.newLesson')" @keyup.enter="addLesson(mod.id)">
-            <select v-model="newLessonQuiz[mod.id]" :title="t('course.asQuiz')">
-              <option value="">{{ t('course.material') }}</option>
-              <option v-for="q in quizList" :key="q.id" :value="`quiz:${q.id}`">? {{ q.title }}</option>
-              <option v-for="w in workshopList" :key="w.id" :value="`workshop:${w.id}`">✎ {{ w.title }}</option>
-            </select>
-            <button class="chip" @click="addLesson(mod.id)">+</button>
-          </div>
+      <aside class="library card">
+        <h2 class="panel-title">{{ t('course.library') }}</h2>
+        <div class="lib-filters">
+          <select v-model="libKind" class="field" :aria-label="t('resource.filter.kind')">
+            <option v-for="k in (['all', 'resource', 'quiz', 'workshop'] as const)" :key="k" :value="k">{{ t(`course.libKind.${k}`) }}</option>
+          </select>
+          <select v-model="libTag" class="field" :aria-label="t('resource.filter.tag')">
+            <option value="">{{ t('resource.filter.tag') }}</option>
+            <option v-for="tg in libTags" :key="tg" :value="tg">{{ tg }}</option>
+          </select>
+          <input v-model="libQ" type="search" class="field" :placeholder="t('resource.filter.search')" :aria-label="t('resource.filter.search')">
         </div>
-        <div v-if="canEdit" class="add-row module-add">
-          <input v-model="newModuleTitle" :placeholder="t('course.newModule')" @keyup.enter="addModule">
-          <button class="chip" @click="addModule">+ {{ t('course.module') }}</button>
-        </div>
+        <p class="found">{{ t('course.libFound', { n: libVisible.length }) }}</p>
+        <ul class="lib-list" role="list">
+          <li v-for="item in libVisible" :key="`${item.kind}:${item.id}`" class="lib-item">
+            <div class="lib-text"><b>{{ item.title }}</b><span class="sub">{{ item.sub }}<template v-if="item.questions != null"> · {{ t('course.questionsN', { n: item.questions }) }}</template></span></div>
+            <button v-if="canEdit" class="chip" :disabled="!targetModuleId" :title="targetModuleId ? '' : t('course.sectionRequired')" @click="attach(item)">{{ t('course.attach') }}</button>
+          </li>
+        </ul>
       </aside>
 
-      <section class="pane">
-        <template v-if="selected">
-          <div class="pane-head">
-            <input v-model="draft.title" class="title-input" :disabled="!canEdit">
-            <span v-if="savedAt" class="sub">{{ t('course.savedAt', { time: savedAt }) }}</span>
-            <button v-if="canEdit" class="chip danger" @click="deleteLesson(selected)">{{ t('course.deleteLesson') }}</button>
+      <section class="plan">
+        <div class="plan-head">
+          <h2 class="panel-title">{{ t('course.plan') }}</h2>
+        </div>
+        <div v-if="canEdit" class="plan-actions">
+          <select v-if="editor.modules.length" v-model="targetModuleId" class="field small" :aria-label="t('course.toSection')">
+            <option v-for="(m, i) in editor.modules" :key="m.id" :value="m.id">{{ t('course.sectionN', { n: i + 1 }) }} · {{ m.title }}</option>
+          </select>
+          <input v-model="newItemTitle" class="field small grow" :placeholder="t('course.newLesson')" :aria-label="t('course.newLesson')" :disabled="!targetModuleId" @keyup.enter="createResource">
+          <button class="btn ghost small" :disabled="!targetModuleId || !newItemTitle.trim()" :title="targetModuleId ? '' : t('course.sectionRequired')" @click="createResource">{{ t('course.createResource') }}</button>
+          <button class="btn ghost small" :disabled="!targetModuleId || !newItemTitle.trim()" :title="targetModuleId ? '' : t('course.sectionRequired')" @click="createQuiz">{{ t('course.createQuiz') }}</button>
+        </div>
+
+        <div v-for="(mod, mi) in editor.modules" :key="mod.id" class="section">
+          <div class="section-title"><span class="section-n">{{ t('course.sectionN', { n: mi + 1 }).toUpperCase() }}</span> {{ mod.title }}</div>
+          <div v-for="(lesson, li) in mod.lessons" :key="lesson.id" :class="['item', { on: selected?.id === lesson.id }]">
+            <button class="item-main" @click="select(lesson)">
+              <span class="item-text"><b>{{ lesson.title }}</b><span class="sub">{{ itemSub(lesson) }}<template v-if="!lesson.isRequired"> · {{ t('learner.optional') }}</template></span></span>
+              <span v-if="lesson.itemType === 'quiz'" class="badge sun">{{ t('course.threshold', { n: lesson.passScorePct == null ? 0 : Number(lesson.passScorePct) }) }}</span>
+            </button>
+            <span v-if="canEdit" class="item-move">
+              <button class="chip" :aria-label="t('resource.moveUp')" :disabled="li === 0" @click="moveLesson(mod, li, -1)">↑</button>
+              <button class="chip" :aria-label="t('resource.moveDown')" :disabled="li === mod.lessons.length - 1" @click="moveLesson(mod, li, 1)">↓</button>
+            </span>
           </div>
-          <div class="settings">
-            <label class="check">
-              <input v-model="draft.isRequired" type="checkbox" :disabled="!canEdit">
-              {{ t('course.required') }}
-            </label>
-            <label class="inline">
-              {{ t('course.minSeconds') }}
-              <input v-model.number="draft.minSeconds" type="number" min="10" max="3600" :disabled="!canEdit" class="num">
-            </label>
-            <label v-if="selected.itemType === 'quiz'" class="inline" :title="t('course.passScoreHint')">
-              {{ t('course.passScorePct') }}
-              <input v-model.number="draft.passScorePct" type="number" min="1" max="100" :disabled="!canEdit" class="num" :placeholder="t('course.fromTask')">
-            </label>
-          </div>
-          <div v-if="selected.itemType === 'quiz'" class="quiz-note">
-            {{ t('course.quizLesson') }}
-            <NuxtLink :to="`/admin/quizzes/${selected.itemId}`">{{ t('course.openQuiz') }} →</NuxtLink>
-          </div>
-          <div v-else-if="selected.itemType === 'workshop'" class="quiz-note">
-            {{ t('course.workshopLesson') }}
-            <NuxtLink to="/admin/workshops">{{ t('admin.nav.workshops') }} →</NuxtLink>
-          </div>
-          <BlockEditor v-else-if="canEdit" v-model="draft.body" />
-          <LessonBlocks v-else :blocks="draft.body" :blocks-state="{}" readonly />
-        </template>
-        <div v-else class="empty">{{ t('course.selectLesson') }}</div>
+          <p v-if="mod.lessons.length === 0" class="sub">{{ t('course.selectLesson') }}</p>
+        </div>
+
+        <div v-if="canEdit" class="add-section">
+          <input v-model="newModuleTitle" class="field" :placeholder="t('course.newSectionTitle')" @keyup.enter="addModule">
+          <button class="btn ghost small" :disabled="!newModuleTitle.trim()" @click="addModule">{{ t('course.addSection') }}</button>
+        </div>
+        <p v-if="editor.modules.length === 0" class="note sun">{{ t('course.sectionRequired') }}</p>
       </section>
+
+      <aside v-if="selected" class="pane card">
+        <div class="pane-head">
+          <input v-model="draft.title" class="field title-input" :disabled="!canEdit" :aria-label="t('course.newLesson')">
+          <span v-if="savedAt" class="sub">{{ t('course.savedAt', { time: savedAt }) }}</span>
+        </div>
+        <h2 class="panel-title">{{ t('course.settings') }}</h2>
+        <label class="check"><input v-model="draft.isRequired" type="checkbox" :disabled="!canEdit">{{ t('course.required') }}</label>
+        <label class="inline">{{ t('course.minSeconds') }}<input v-model.number="draft.minSeconds" type="number" min="10" max="3600" :disabled="!canEdit" class="field num"></label>
+        <label v-if="selected.itemType === 'quiz'" class="inline" :title="t('course.passScoreHint')">{{ t('course.passScorePct') }}<input v-model.number="draft.passScorePct" type="number" min="1" max="100" :disabled="!canEdit" class="field num" :placeholder="t('course.fromTask')"></label>
+        <p v-if="selected.itemType === 'quiz'" class="help">{{ t('course.passScoreHint') }}</p>
+
+        <div v-if="selected.itemType === 'quiz'" class="quiz-note">
+          {{ t('course.quizLesson') }}
+          <NuxtLink :to="`/admin/quizzes/${selected.itemId}`">{{ t('course.openQuiz') }} →</NuxtLink>
+        </div>
+        <div v-else-if="selected.itemType === 'workshop'" class="quiz-note">
+          {{ t('course.workshopLesson') }}
+          <NuxtLink to="/admin/workshops">{{ t('admin.nav.workshops') }} →</NuxtLink>
+        </div>
+        <template v-else>
+          <p class="help">
+            <NuxtLink :to="`/admin/resources/${selected.itemId}`" class="link">{{ t('course.openResource') }} →</NuxtLink>
+            <template v-if="selected.resource"> · {{ t(`resource.kind.${selected.resource.kind}`) }} · {{ t('course.version', { v: selected.resource.version }) }}</template>
+          </p>
+          <template v-if="selected.resource?.kind === 'article'">
+            <BlockEditor v-if="canEdit" v-model="draft.body" />
+            <LessonBlocks v-else :blocks="draft.body" :blocks-state="{}" readonly />
+          </template>
+        </template>
+        <button v-if="canEdit" class="chip coral" @click="deleteLesson(selected)">{{ t('course.deleteLesson') }}</button>
+      </aside>
     </div>
 
     <div v-if="publishOpen" class="modal-backdrop" @click.self="publishOpen = false">
-      <div class="modal">
-        <h2>{{ t('course.publish') }}</h2>
+      <div class="modal card">
+        <h2 class="panel-title">{{ t('course.publish') }}</h2>
         <ul class="checks">
-          <li v-for="c in checks" :key="c.code" :class="{ ok: c.ok, bad: !c.ok }">
-            {{ c.ok ? '✓' : '✕' }} {{ c.label }}
-          </li>
+          <li v-for="c in checks" :key="c.code" :class="{ ok: c.ok, bad: !c.ok }">{{ c.ok ? '✓' : '✕' }} {{ c.label }}</li>
         </ul>
-        <textarea v-model="changelog" rows="3" :placeholder="t('course.changelog')" />
+        <textarea v-model="changelog" class="field" rows="3" :placeholder="t('course.changelog')" />
+        <label class="toggle">
+          <input v-model="notifyAssigned" type="checkbox">
+          <span>{{ t('course.notifyAssigned') }}<span class="hint">{{ t('course.notifyAssignedHint') }}</span></span>
+        </label>
         <div class="modal-actions">
-          <button class="chip" @click="publishOpen = false">{{ t('common.cancel') }}</button>
-          <button
-            class="primary"
-            :disabled="busy || checks.some(c => !c.ok) || changelog.trim().length < 5"
-            @click="publish"
-          >
-            {{ t('course.publish') }}
-          </button>
+          <button class="btn ghost" @click="publishOpen = false">{{ t('common.cancel') }}</button>
+          <button class="btn primary" :disabled="busy || checks.some(c => !c.ok) || changelog.trim().length < 5" @click="publish">{{ t('course.publish') }}</button>
         </div>
       </div>
     </div>
@@ -288,270 +430,49 @@ async function publish() {
 </template>
 
 <style scoped>
-.head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-4);
-}
-
-.back {
-  color: var(--color-ink-muted);
-  text-decoration: none;
-  font-size: var(--font-size-body-s);
-  width: 100%;
-}
-
-h1 {
-  margin: 0;
-  font-weight: 900;
-}
-
-.head-actions {
-  margin-left: auto;
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-}
-
-.split {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: var(--space-4);
-}
-
-@media (max-width: 900px) {
-  .split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.tree {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-}
-
-.module {
-  background: var(--color-bg-soft);
-  border-radius: var(--radius-m);
-  padding: var(--space-3);
-  display: grid;
-  gap: var(--space-1);
-}
-
-.module-title {
-  font-weight: 800;
-  margin-bottom: var(--space-1);
-}
-
-.lesson {
-  font: inherit;
-  text-align: left;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-s);
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-  color: var(--color-ink);
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.lesson.on {
-  background: var(--color-sun);
-}
-
-.add-row {
-  display: flex;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-}
-
-.add-row select {
-  font: inherit;
-  border: 1px solid var(--color-bg-line);
-  border-radius: var(--radius-s);
-  background: var(--color-bg);
-  color: var(--color-ink);
-  max-width: 110px;
-}
-
-.quiz-note {
-  background: var(--color-bg);
-  border-radius: var(--radius-m);
-  padding: var(--space-4);
-  color: var(--color-ink-muted);
-  display: flex;
-  gap: var(--space-3);
-}
-
-.quiz-note a {
-  color: var(--color-teal-ink);
-  font-weight: 700;
-}
-
-.add-row input,
-.title-input,
-.num,
-textarea {
-  font: inherit;
-  border: 1px solid var(--color-bg-line);
-  border-radius: var(--radius-s);
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-bg);
-  color: var(--color-ink);
-  flex: 1;
-  min-width: 0;
-}
-
-.pane {
-  background: var(--color-bg-soft);
-  border-radius: var(--radius-m);
-  padding: var(--space-4);
-  min-height: 400px;
-}
-
-.pane-head {
-  display: flex;
-  gap: var(--space-3);
-  align-items: center;
-  margin-bottom: var(--space-3);
-}
-
-.title-input {
-  font-size: var(--font-size-title-l);
-  font-weight: 800;
-}
-
-.settings {
-  display: flex;
-  gap: var(--space-4);
-  align-items: center;
-  margin-bottom: var(--space-4);
-  font-size: var(--font-size-body-s);
-  color: var(--color-ink-muted);
-}
-
-.inline {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-}
-
-.num {
-  width: 80px;
-  flex: none;
-}
-
-.check {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  font-size: var(--font-size-body-s);
-}
-
-.chip,
-.primary {
-  font: inherit;
-  font-weight: 700;
-  border-radius: var(--radius-pill);
-  padding: var(--space-1) var(--space-3);
-  cursor: pointer;
-}
-
-.chip {
-  border: 1px solid var(--color-bg-line);
-  background: transparent;
-  color: var(--color-ink-muted);
-}
-
-.chip.danger {
-  color: var(--color-coral-ink);
-}
-
-.primary {
-  border: none;
-  background: var(--color-sun);
-  color: var(--color-ink);
-  font-weight: 800;
-  padding: var(--space-2) var(--space-4);
-}
-
-.primary:disabled {
-  opacity: 0.5;
-}
-
-.badge {
-  font-size: var(--font-size-body-s);
-  font-weight: 700;
-  border-radius: var(--radius-pill);
-  padding: 2px var(--space-3);
-  background: var(--color-bg-line-soft);
-}
-
-.badge.published { background: var(--color-teal); color: var(--color-teal-deep); }
-.badge.draft { background: var(--color-sun); color: var(--color-sun-ink); }
-
-.sub {
-  font-size: var(--font-size-body-s);
-  color: var(--color-ink-faint);
-}
-
-.empty {
-  color: var(--color-ink-faint);
-  text-align: center;
-  padding: var(--space-7);
-}
-
-.error { color: var(--color-coral-ink); }
-.notice { color: var(--color-teal-ink); }
-
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  overflow: auto;
-  background: rgb(12 15 20 / 40%);
-  display: grid;
-  place-items: start center; /* якорь сверху: модалка не «плывёт», когда меняется высота содержимого */
-  padding: 10vh var(--space-4) var(--space-4);
-}
-
-.modal {
-  background: var(--color-bg-soft);
-  border-radius: var(--radius-xl);
-  padding: var(--space-5);
-  width: min(480px, 100%);
-  box-sizing: border-box;
-  display: grid;
-  gap: var(--space-3);
-}
-
-.modal h2 {
-  margin: 0;
-  font-weight: 900;
-}
-
-.checks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--space-1);
-}
-
+.course-card { display: grid; gap: var(--space-3); margin-bottom: var(--space-4); }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
+.modes { border: none; margin: 0; padding: 0; }
+.row-actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+.field.small { width: auto; }
+.split { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: var(--space-4); align-items: start; }
+.library { display: grid; gap: var(--space-2); align-content: start; }
+.lib-filters { display: grid; gap: var(--space-2); }
+.found { margin: 0; font-weight: 700; color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
+.lib-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); max-height: 60vh; overflow: auto; }
+.lib-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); border-radius: var(--radius-s); background: var(--color-bg); }
+.lib-text, .item-text { display: grid; min-width: 0; }
+.lib-text b, .item-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan { display: grid; gap: var(--space-3); align-content: start; }
+.plan-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.plan-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.section { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); display: grid; gap: var(--space-1); }
+.section-title { font-weight: 900; margin-bottom: var(--space-1); }
+.section-n { font-size: 12px; letter-spacing: 0.06em; color: var(--color-ink-muted); margin-right: var(--space-2); }
+.item { background: var(--color-bg); border-radius: var(--radius-s); display: flex; align-items: center; gap: var(--space-2); padding-right: var(--space-2); }
+.item.on { outline: 2px solid var(--color-ink); }
+.item-main { font: inherit; text-align: left; border: none; background: transparent; padding: var(--space-2) var(--space-3); cursor: pointer; color: var(--color-ink); display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
+.item-text { flex: 1; }
+.field.grow { flex: 1 1 160px; }
+.item-move { display: flex; gap: var(--space-1); }
+.add-section { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.add-section .field { flex: 1 1 200px; }
+.pane { display: grid; gap: var(--space-3); align-content: start; }
+.pane-head { display: grid; gap: var(--space-1); }
+.title-input { font-weight: 800; }
+.inline { display: flex; gap: var(--space-2); align-items: center; font-size: var(--font-size-body-s); font-weight: 700; }
+.num { width: 90px; }
+.check { display: flex; gap: var(--space-2); align-items: center; font-weight: 700; font-size: var(--font-size-body-s); }
+.quiz-note { background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-3); color: var(--color-ink-muted); display: grid; gap: var(--space-2); }
+.quiz-note a { color: var(--color-teal-ink); font-weight: 700; }
+.chip.coral { color: var(--color-coral-ink); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.segmented label:focus-within { outline: 2px solid var(--color-ink); }
+.modal-backdrop { position: fixed; inset: 0; background: rgb(12 15 20 / 0.4); display: grid; place-items: center; padding: var(--space-4); z-index: 20; }
+.modal { width: min(560px, 100%); display: grid; gap: var(--space-3); }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .checks .ok { color: var(--color-teal-ink); }
 .checks .bad { color: var(--color-coral-ink); }
-
-.modal-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-.comp-row .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); max-width: 260px; }
-.comp-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+@media (max-width: 1100px) { .split { grid-template-columns: minmax(0, 1fr); } .grid3 { grid-template-columns: 1fr; } }
 </style>

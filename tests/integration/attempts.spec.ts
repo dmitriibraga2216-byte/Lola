@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { readThrough } from './_lesson'
 
 const { createBank, createQuestion, updateQuestion, createQuiz, setQuizQuestions } = await import('../../server/services/questions')
 const { startAttempt, getAttemptState, saveAnswer, submitAttempt, getAttemptResult, reviewQueue, gradeManual, annulAttempt, quizIntro }
@@ -229,7 +230,8 @@ describe('тест как урок курса → сертификат', () => {
     await addLesson(author(), { moduleId: mod!.id, title: 'Матеріал', itemType: 'resource', resource: { body: stem('Читай') }, isRequired: true, videoThresholdPct: 90 })
     // Порог теста в плане курса (docs/11 §14.1); попытки — умолчания тенанта
     const quizLesson = await addLesson(author(), { moduleId: mod!.id, title: 'Тест', itemType: 'quiz', quizId, isRequired: true, videoThresholdPct: 90, passScorePct: 100 })
-    lessonQuizId = quizLesson!.id
+    if (!quizLesson.ok) throw new Error(quizLesson.code)
+    lessonQuizId = quizLesson.lesson.id
     expect((await publishCourse(author(), courseId, 'v1')).ok).toBe(true)
 
     const enr = await selfEnroll(learner(), courseId)
@@ -242,6 +244,7 @@ describe('тест как урок курса → сертификат', () => {
     expect(test!.status).toBe('locked')
 
     await openLesson(learner(), enrollmentId, mat!.id)
+    await readThrough(admin, enrollmentId, mat!.id) // Г-11.5: страница дочитана
     await completeLesson(learner(), enrollmentId, mat!.id)
     await openLesson(learner(), enrollmentId, lessonQuizId)
     // Кнопкой урок-тест не закрыть

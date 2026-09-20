@@ -113,6 +113,7 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   report_export_ready: 'Вивантаження «{{report}}» готове: {{rows}} рядків. {{url}} (посилання діє 24 години)',
   report_export_failed: 'Вивантаження «{{report}}» не вдалося — спробуйте ще раз або зменшіть період',
   user_role_granted: '{{#name}}{{name}}: {{/name}}видано роль «{{role}}»',
+  role_expiring: 'Роль «{{name}}» діє ще 7 днів — за потреби продовжте термін', // docs/28 «Паритет 4» отк. (3)
   user_blocked: 'Доступ для {{name}} заблоковано',
   people_inactive: '{{n}} люд. не заходили понад 30 днів — перевірте, чи не час архівувати',
   import_finished: 'Імпорт «{{file}}» завершено: створено {{created}}, оновлено {{updated}}, помилок {{errors}}. {{url}}',

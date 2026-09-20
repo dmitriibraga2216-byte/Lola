@@ -100,6 +100,28 @@ const contentSummary = computed(() => {
   if (a.value?.subjectType === 'test' && c.summary) return `${c.title} · ${t('assign.card.questions', { n: Number(c.summary) })}`
   return c.title
 })
+
+/**
+ * «Створити новий» у блоці «Контент» (docs/28 «Spec 15» долг, D-017): веде на форму створення
+ * контенту саме того типу, що в цього призначення — шлях залежить від типу (`app/pages/admin/**`).
+ * Створення й призначення розведені (`04` §4.9): нове призначення для щойно створеного контенту
+ * заводиться окремо через «Обрати з існуючих» / «Додати призначення», як і для решти контенту.
+ */
+const CONTENT_CREATE_ROUTES: Record<string, string> = {
+  course: '/admin/courses',
+  training_program: '/admin/programs',
+  resource: '/admin/resources/new',
+  test: '/admin/quizzes',
+  complex_test: '/admin/meetups/complex',
+  workshop: '/admin/workshops',
+  poll: '/admin/surveys',
+  assessment: '/admin/assessment/forms/new',
+  check_list: '/admin/checklists',
+  meetup: '/admin/meetups',
+  webinar: '/admin/meetups?kind=webinar',
+  notice: '/admin/notices/new',
+}
+const createNewUrl = computed(() => a.value ? (CONTENT_CREATE_ROUTES[a.value.subjectType] ?? null) : null)
 </script>
 
 <template>
@@ -129,7 +151,10 @@ const contentSummary = computed(() => {
         <section class="card block">
           <div class="block-head"><b>{{ t(`contentType.${a.subjectType}`) }}</b><span class="muted">{{ t('assign.card.contentDesc') }}</span></div>
           <p class="block-body">{{ contentSummary || t('assign.card.noContent') }}</p>
-          <div class="block-actions"><NuxtLink :to="`/admin/assignments/new?type=${a.subjectType}`" class="btn ghost small">{{ t('assign.card.pickExisting') }}</NuxtLink></div>
+          <div class="block-actions">
+            <NuxtLink :to="`/admin/assignments/new?type=${a.subjectType}`" class="btn ghost small">{{ t('assign.card.pickExisting') }}</NuxtLink>
+            <NuxtLink v-if="createNewUrl" :to="createNewUrl" class="btn ghost small">{{ t('assign.card.createNew') }}</NuxtLink>
+          </div>
         </section>
         <!-- 2. Налаштування: открывается после выбора контента -->
         <section class="card block">

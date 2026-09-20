@@ -18,7 +18,7 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const { weeklyDigest } = await import('../services/reportsExtra')
   const { retentionScan } = await import('../services/logs')
   const { expireExports } = await import('../services/reportExports')
-  const { expireRoles } = await import('../services/positionRoleMap')
+  const { expireRoles, roleExpiryScan } = await import('../services/positionRoleMap')
 
   const s = await runDueScan(tenantId)
   const inactive = await inactiveScan(tenantId) // docs/16 §11 people.inactive_scan
@@ -29,6 +29,7 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const digest = monday ? await weeklyDigest(tenantId) : 0 // docs/22 §10 digest.weekly
   const retention = await retentionScan(tenantId) // docs/22 §10 logs.retention
   const expired = await expireExports(tenantId)
+  const rolesExpiring = await roleExpiryScan(tenantId) // docs/28 «Паритет 4» отк. (3): предупреждение за 7 дней
   const rolesExpired = await expireRoles(tenantId) // 29 Б.15: снятие роли по сроку
   const g = await goalDueScan(tenantId)
   const a = await assessmentScan(tenantId)
@@ -39,7 +40,7 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const pr = await programScan(tenantId)
   // trajectoryScan (docs/17: отложенные правилом прохождения, подстраховка таймеров) перенесён на щогодинний
   // assignment.sync (docs/33 D-026) — щоденний due.scan давав запізнення таймера до доби
-  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpired }
+  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, programs: pr, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired }
   console.log(`[due.scan] ${tenantId}:`, stats)
   return stats
 }

@@ -114,6 +114,27 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
   })
 }
 
+/**
+ * Графік «Середній час у системі» (docs/28 «Spec 22» отк. (4), D-003): середня тривалість
+ * сесії за добу за останні `days` днів — проста серверна агрегація для SVG-смуги без бібліотек
+ * (`SessionsLog.vue`). Дні без сесій потрапляють у ряд нулями (`generate_series`).
+ */
+export async function sessionsDailyAvg(ctx: Ctx, days = 30): Promise<{ day: string, avgMinutes: number, sessions: number }[]> {
+  const n = Math.min(90, Math.max(1, days))
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.execute(sql`
+      select to_char(d.day, 'YYYY-MM-DD') as day,
+             coalesce(round(avg(extract(epoch from (coalesce(s.revoked_at, s.updated_at, now()) - s.created_at)) / 60)::numeric, 1), 0) as avg_minutes,
+             count(s.id)::int as sessions
+      from generate_series((current_date - (${n}::int - 1)), current_date, interval '1 day') d(day)
+      left join sessions s on s.created_at::date = d.day
+      group by d.day
+      order by d.day
+    `) as unknown as { day: string, avg_minutes: string, sessions: number }[]
+    return rows.map(r => ({ day: r.day, avgMinutes: Number(r.avg_minutes), sessions: r.sessions }))
+  })
+}
+
 /** Строки журнала для выгрузки: колонки каркаса первыми, объекты — строкой. */
 export async function logRows(ctx: Ctx, kind: LogKind, f: LogFilter): Promise<Row[]> {
   const rows = await readLog(ctx, kind, { ...f, limit: 500 })

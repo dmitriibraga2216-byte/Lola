@@ -11,7 +11,7 @@ const { effectiveRoles, defaultRoleOf, rankRole, switchRole, resolveActiveRole }
 const { createSession, validateSession } = await import('../../server/services/session')
 const { loadAccess, can } = await import('../../server/services/access')
 const { assignRole, removeRole, addPlacement, isLastAdmin } = await import('../../server/services/people')
-const { getPositionRoleMap, setPositionRoleMap, applyPositionRoles, expireRoles } = await import('../../server/services/positionRoleMap')
+const { getPositionRoleMap, setPositionRoleMap, applyPositionRoles, reapplyPositionRolesNetwork, expireRoles, roleExpiryScan } = await import('../../server/services/positionRoleMap')
 const { withTenant } = await import('../../server/utils/withTenant')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
@@ -166,6 +166,21 @@ describe('срок и причина у роли (29 Б.15, docs/16 §6.2)', () 
     expect(ev!.before).toMatchObject({ roleCode: 'author', reason: 'тест' })
   })
 
+  it('за 7 дней до истечения — предупреждение role_expiring, дедуп на день (docs/28 D-002)', async () => {
+    await assignRole(ctx(), soloId, { roleCode: 'author', scopeType: 'tenant', validUntil: null, reason: null })
+    await admin`update user_roles set valid_until = current_date + 7 where user_id = ${soloId} and role_id = ${roleId.author!}`
+    const n = await roleExpiryScan(tenantId)
+    expect(n).toBeGreaterThanOrEqual(1)
+    const [authorRole] = await admin`select name from roles where id = ${roleId.author!}`
+    const rows = await admin`select code, payload from notifications where user_id = ${soloId} and code = 'role_expiring'`
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.payload).toMatchObject({ name: authorRole!.name })
+    const again = await roleExpiryScan(tenantId) // тот же день — dedupKey совпал, дубля нет
+    expect(again).toBe(0)
+    await admin`delete from notifications where user_id = ${soloId} and code = 'role_expiring'`
+    await removeRole(ctx(), soloId, 'author', 'тест: прибрати')
+  })
+
   it('последний администратор считается только по действующим ролям', async () => {
     expect(await withTenant(tenantId, adminId, tx => isLastAdmin(tx, userId))).toBe(false) // есть ещё админ сида
     await admin`update user_roles set valid_until = now() - interval '1 hour' where user_id = ${userId} and role_id = ${roleId.admin!}`
@@ -211,5 +226,26 @@ describe('position_role_map — правило «должность → роль
     await addPlacement(ctx(), soloId, { locationId: segedskaId, positionId: posPlainId, isPrimary: true })
     rows = await userRoleRows(soloId)
     expect(rows.map(r => r.code)).toEqual(['employee'])
+  })
+
+  it('«Перезібрати ролі по мережі» застосовує карту одразу до всіх активних розміщень, не чекаючи зміни посади (D-001)', async () => {
+    // Розміщення заведене в обхід сервісу (без autoapply з addPlacement) — саме такий випадок і лікує кнопка
+    await admin`update user_placements set is_primary = false where user_id = ${soloId} and is_primary`
+    await admin`insert into user_placements (tenant_id, user_id, location_id, position_id, is_primary) values (${tenantId}, ${soloId}, ${segedskaId}, ${posMappedId}, true)`
+    let rows = await userRoleRows(soloId)
+    expect(rows.find(r => r.code === 'mentor')).toBeUndefined()
+
+    const result = await reapplyPositionRolesNetwork(ctx())
+    expect(result.users).toBeGreaterThanOrEqual(1)
+    expect(result.granted).toBeGreaterThanOrEqual(2)
+
+    rows = await userRoleRows(soloId)
+    expect(rows.find(r => r.code === 'mentor')).toMatchObject({ is_org_derived: true, scope_type: 'location', scope_id: segedskaId })
+    expect(rows.find(r => r.code === 'author')).toMatchObject({ is_org_derived: true, scope_type: 'tenant' })
+
+    // Повторний виклик — без змін конкретно для цієї людини (правило вже застосоване)
+    await reapplyPositionRolesNetwork(ctx())
+    const again = await userRoleRows(soloId)
+    expect(again.map(r => r.code).sort()).toEqual(['author', 'employee', 'mentor'])
   })
 })

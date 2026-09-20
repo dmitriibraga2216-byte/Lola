@@ -24,6 +24,7 @@ interface Section { key: string, label: string, icon: string, items: Item[] }
 const sections = computed<Section[]>(() => [
   { key: 'learning', label: t('admin.section.learning'), icon: 'book', items: [
     { to: '/admin/assignments', label: t('admin.nav.assignments'), show: hasScope('assignment.create') },
+    { to: '/admin/tasks/parameters', label: t('admin.nav.taskParams'), show: hasScope('assignment.create') },
     { to: '/admin/trajectories', label: t('admin.nav.trajectories'), show: hasScope('program.manage') },
     { to: '/admin/review-workshops', label: t('admin.nav.reviewWorkshops'), show: hasScope('review.queue') },
     { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue') },
@@ -93,6 +94,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/guest-page', label: t('admin.nav.guestPage'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/policies', label: t('admin.nav.policies'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/roles', label: t('admin.nav.roles'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/position-role-map', label: t('admin.nav.positionRoleMap'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/scales', label: t('admin.nav.scales'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('settings.tenant') },

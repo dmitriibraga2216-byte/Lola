@@ -9,11 +9,11 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'aud
  */
 const { t, te } = useI18n()
 const { api, apiRaw } = useApi()
-type Kind = 'task-status' | 'task-access' | 'org-conflicts' | 'notifications' | 'sessions' | 'security' | 'import' | 'automation' | 'integrations'
+type Kind = 'task-status' | 'task-access' | 'org-conflicts' | 'notifications' | 'sessions' | 'telegram' | 'security' | 'import' | 'automation' | 'integrations'
 type Severity = 'info' | 'warning' | 'critical'
 type Geo = { country?: string | null, city?: string | null } | null
 type Row = Record<string, unknown> & { id: unknown, full_name?: string | null, position?: string | null, unit?: string | null, ip?: string | null, geo?: Geo, client?: string | null }
-const KINDS: Kind[] = ['task-status', 'task-access', 'org-conflicts', 'notifications', 'sessions', 'security', 'import', 'automation', 'integrations']
+const KINDS: Kind[] = ['task-status', 'task-access', 'org-conflicts', 'notifications', 'sessions', 'telegram', 'security', 'import', 'automation', 'integrations']
 const SEVERITIES: Severity[] = ['info', 'warning', 'critical']
 const route = useRoute()
 const { hasScope } = useAuth()
@@ -30,6 +30,17 @@ const rows = ref<Row[]>([])
 const retention = ref<number | null>(0)
 const error = ref('')
 const filters = reactive({ from: '', to: '', userId: '', type: '', severity: '', contentType: '', orgUnitId: '', state: '' })
+// D-003: графік «Середній час у системі» (журнал сесій) і вкладка «Telegram» (докс/28 «Spec 22» отк. (4))
+interface DailyAvg { day: string, avgMinutes: number, sessions: number }
+const sessionDaily = ref<DailyAvg[]>([])
+const telegramSearch = ref('')
+const telegramRows = computed(() => {
+  const q = telegramSearch.value.trim().toLowerCase()
+  return q ? rows.value.filter(r => String(r.full_name ?? '').toLowerCase().includes(q)) : rows.value
+})
+const telegramStatus = (r: Row) => r.connected ? (r.blocked ? 'blocked' : 'connected') : 'notConnected'
+const maxAvgMinutes = computed(() => Math.max(1, ...sessionDaily.value.map(d => d.avgMinutes)))
+const dayLabel = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('uk', { day: '2-digit', month: '2-digit' })
 const CONTENT_TYPES = ['course', 'training_program', 'test', 'resource']
 const CONFLICT_KINDS = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing']
 // Коды событий журнала безпеки (docs/16 §15 Г-16.2) — фильтр «Подія»; подразделения — фильтр «Підрозділ» мокапа SecurityLog
@@ -59,8 +70,17 @@ const query = () => Object.fromEntries(Object.entries(filters).filter(([k, v]) =
 async function load() {
   error.value = ''
   try {
+    if (tab.value === 'telegram') {
+      const r = await api<{ rows: Row[] }>('/logs/notifications/telegram')
+      rows.value = r.rows; retention.value = null
+      return
+    }
     const r = await api<{ rows: Row[], retentionDays: number | null }>(`/logs/${tab.value}`, { query: query() })
     rows.value = r.rows; retention.value = r.retentionDays
+    if (tab.value === 'sessions') {
+      try { sessionDaily.value = (await api<{ days: DailyAvg[] }>('/logs/sessions/daily')).days }
+      catch { sessionDaily.value = [] }
+    }
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -107,15 +127,20 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
 
 <template>
   <div>
-    <PageHeader :title="t(`journals.title.${tab}`)" :crumbs="[{ label: t('journals.crumb') }]" :subtitle="`${retentionText} · ${t('journals.immutable')}`">
+    <PageHeader :title="t(`journals.title.${tab}`)" :crumbs="[{ label: t('journals.crumb') }]" :subtitle="tab === 'telegram' ? undefined : `${retentionText} · ${t('journals.immutable')}`">
       <template #actions>
-        <a v-if="hasScope('report.export')" :href="exportUrl" class="btn-ghost" download>{{ t('journals.export') }}</a>
+        <a v-if="hasScope('report.export') && tab !== 'telegram'" :href="exportUrl" class="btn-ghost" download>{{ t('journals.export') }}</a>
       </template>
     </PageHeader>
     <div class="tabs" role="tablist">
       <button v-for="k in KINDS" :key="k" role="tab" :aria-selected="tab === k" :class="['tab', { on: tab === k }]" @click="tab = k">{{ t(`journals.kind.${k}`) }}</button>
     </div>
-    <div class="filters">
+    <template v-if="tab === 'telegram'">
+      <div class="filters">
+        <label>{{ t('people.col.name') }} <input v-model="telegramSearch" :placeholder="t('orgAdmin.searchPerson')"></label>
+      </div>
+    </template>
+    <div v-else class="filters">
       <label v-if="tab === 'security'">{{ t('journals.month') }} <input v-model="month" type="month"></label>
       <label>{{ t('reports.from') }} <input v-model="filters.from" type="date"></label>
       <label>{{ t('reports.to') }} <input v-model="filters.to" type="date"></label>
@@ -155,6 +180,29 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
     <div v-if="tab === 'sessions' && rows.length" class="stats">
       <div class="stat"><span class="stat-label">{{ t('journals.uniquePeople') }}</span><strong class="stat-value">{{ uniquePeople }}</strong></div>
       <div class="stat"><span class="stat-label">{{ t('journals.sessionsCount') }}</span><strong class="stat-value">{{ rows.length }}</strong></div>
+    </div>
+    <!-- D-003: середній час у системі — проста SVG-смуга без бібліотек, серверний агрегат по днях -->
+    <div v-if="tab === 'sessions'" class="chart-card">
+      <h2 class="panel-title">{{ t('journals.avgTime.title') }}</h2>
+      <p class="sub">{{ t('journals.avgTime.hint') }}</p>
+      <svg v-if="sessionDaily.some(d => d.sessions)" class="chart" viewBox="0 0 620 160" preserveAspectRatio="none" role="img" :aria-label="t('journals.avgTime.title')">
+        <g v-for="(d, i) in sessionDaily" :key="d.day">
+          <title>{{ dayLabel(d.day) }}: {{ t('journals.minutes', { n: d.avgMinutes }) }} ({{ d.sessions }})</title>
+          <rect
+            :x="(i / sessionDaily.length) * 620 + 1"
+            :y="140 - (d.avgMinutes / maxAvgMinutes) * 130"
+            :width="Math.max(1, 620 / sessionDaily.length - 2)"
+            :height="(d.avgMinutes / maxAvgMinutes) * 130"
+            :class="['bar', { empty: !d.sessions }]"
+          />
+        </g>
+        <line x1="0" y1="140" x2="620" y2="140" class="axis" />
+      </svg>
+      <p v-else class="sub">{{ t('journals.avgTime.empty') }}</p>
+      <div v-if="sessionDaily.length" class="chart-legend">
+        <span>{{ dayLabel(sessionDaily[0]!.day) }}</span>
+        <span>{{ dayLabel(sessionDaily[sessionDaily.length - 1]!.day) }}</span>
+      </div>
     </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="settingsError" class="error" role="alert">{{ settingsError }}</p>
@@ -259,6 +307,17 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
           </template>
         </tbody>
       </table>
+      <!-- D-003: вкладка «Telegram» — живий знімок стану підключень, не подієвий журнал -->
+      <table v-else-if="tab === 'telegram' && rows.length" class="table">
+        <thead><tr><ReportFrame part="head" :tail="false" /><th>{{ t('journals.telegram.status') }}</th></tr></thead>
+        <tbody>
+          <tr v-for="r in telegramRows" :key="String(r.user_id)">
+            <ReportFrame part="cells" :row="r" :tail="false" />
+            <td><span :class="['pill', telegramStatus(r) === 'connected' ? 'pill-ok' : telegramStatus(r) === 'blocked' ? 'pill-warning' : 'pill-info']">{{ t(`journals.telegram.${telegramStatus(r)}`) }}</span></td>
+          </tr>
+          <tr v-if="!telegramRows.length"><td colspan="6" class="sub">{{ t('reports.noData') }}</td></tr>
+        </tbody>
+      </table>
       <table v-else-if="rows.length" class="table">
         <thead><tr><ReportFrame v-if="hasFrame" part="head" :tail="false" /><th v-for="c in columns" :key="c">{{ t(`journals.col.${c}`, c) }}</th><th /></tr></thead>
         <tbody>
@@ -290,6 +349,13 @@ input, select { font: inherit; border: 1px solid var(--color-bg-line); border-ra
 .stat { display: grid; gap: var(--space-1); padding: var(--space-3) var(--space-4); background: var(--color-bg-soft); border-radius: var(--radius-m); min-width: 160px; }
 .stat-label { font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
 .stat-value { font-size: var(--font-size-title-l); font-weight: 900; color: var(--color-teal-ink); }
+/* D-003: SVG-смуга без бібліотек — тиждень середнього часу в системі */
+.chart-card { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-3); }
+.chart { width: 100%; height: 160px; display: block; margin-top: var(--space-2); }
+.chart .bar { fill: var(--color-teal); }
+.chart .bar.empty { fill: var(--color-bg-line-soft); }
+.chart .axis { stroke: var(--color-bg-line); stroke-width: 1; }
+.chart-legend { display: flex; justify-content: space-between; font-size: var(--font-size-body-s); color: var(--color-ink-muted); margin-top: var(--space-1); }
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }
 th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }

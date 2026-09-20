@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm'
 import { positionRoleMap, positions, roles, userPlacements, userRoles, users } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { enqueueNotification } from './notifications'
 
 /**
  * Правило «должность → роль» (docs/01 §1.9.1, §1.9.3; docs/02 «Сквозные таблицы»; docs/28 «Паритет 4»).
@@ -133,6 +134,45 @@ async function isLastTenantAdmin(tx: TenantTx, userId: string): Promise<boolean>
     where r.code = 'admin' and ur.scope_type = 'tenant' and (ur.valid_until is null or ur.valid_until > now()) and u.status in ('active','invited') and not u.is_blocked`) as unknown as { user_id: string }[]
   const ids = new Set(rows.map(r => r.user_id))
   return ids.has(userId) && ids.size === 1
+}
+
+/**
+ * «Перезібрати ролі по мережі» (docs/28 «Паритет 4» отк. (2), кнопка на экране карты): применяет
+ * текущую карту ко всем действующим основным размещениям тенанта — без этого правка карты (`PUT`)
+ * подхватывается только при следующей смене должности или импорте, что для оператора неочевидно.
+ */
+export async function reapplyPositionRolesNetwork(ctx: Ctx): Promise<{ users: number, granted: number, revoked: number }> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.select({ userId: userPlacements.userId })
+      .from(userPlacements)
+      .where(and(eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    let granted = 0, revoked = 0
+    for (const r of rows) {
+      const res = await applyPositionRoles(tx, ctx, r.userId)
+      granted += res.granted.length
+      revoked += res.revoked.length
+    }
+    return { users: rows.length, granted, revoked }
+  })
+}
+
+/**
+ * Предупреждение об истечении роли за 7 дней (docs/28 «Паритет 4» отк. (3), по образцу
+ * `competencyExpiryScan`): человек и его руководитель узнают заранее, пока роль ещё действует
+ * и можно продлить `valid_until` через `PUT /people/:id/roles`. Само снятие — в `expireRoles()`.
+ */
+export async function roleExpiryScan(tenantId: string): Promise<number> {
+  return withTenant(tenantId, null, async (tx) => {
+    const day = new Date().toISOString().slice(0, 10)
+    const rows = await tx.select({ id: userRoles.id, userId: userRoles.userId, name: roles.name })
+      .from(userRoles).innerJoin(roles, eq(roles.id, userRoles.roleId))
+      .where(sql`${userRoles.validUntil}::date = current_date + 7`)
+    let n = 0
+    for (const r of rows) {
+      if (await enqueueNotification(tx, { tenantId, userId: r.userId, code: 'role_expiring', payload: { name: r.name }, dedupKey: `role_exp_warn:${r.id}:${day}` })) n++
+    }
+    return n
+  })
 }
 
 /**

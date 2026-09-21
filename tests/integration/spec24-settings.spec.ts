@@ -243,10 +243,14 @@ describe('usage.collect и «Статистика» (docs/24 §4.4.1)', () => {
   })
 
   it('collectUsageDue не собирает повторно за тот же локальный день', async () => {
-    const before = (await admin`select count(*)::int as n from tenant_usage where tenant_id = ${tenantId}`)[0]!.n
+    // Сбор по расписанию идёт только в час 0 по часовому поясу тенанта (docs/24 §4.4.1), поэтому
+    // в зависимости от времени прогона первый вызов может и собрать, и пропустить; проверяем
+    // само правило «не дважды за один локальный день»: второй вызов подряд строк не добавляет.
+    await us.collectUsageDue()
+    const mid = (await admin`select count(*)::int as n from tenant_usage where tenant_id = ${tenantId}`)[0]!.n
     await us.collectUsageDue()
     const after = (await admin`select count(*)::int as n from tenant_usage where tenant_id = ${tenantId}`)[0]!.n
-    expect(after).toBe(before) // сегодня уже собирали (тест выше)
+    expect(after).toBe(mid)
   })
 })
 

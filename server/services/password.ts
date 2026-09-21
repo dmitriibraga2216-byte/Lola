@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { sessions, users } from '../db/schema'
 import type { TenantSettings } from '../../shared/schemas/settings'
 import { withTenant } from '../utils/withTenant'
+import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
 import { readSettings } from './settings'
@@ -41,7 +42,26 @@ export async function hashPassword(password: string): Promise<string> {
   return argonHash(password)
 }
 
-export type SetPasswordResult = { ok: true } | { ok: false, code: 'not_found' | 'too_short' | 'weak' | 'wrong_current', message: string }
+export type SetPasswordResult = { ok: true } | { ok: false, code: 'not_found' | 'too_short' | 'weak' | 'wrong_current' | 'recovery_disabled', message: string }
+
+export type PasswordRecovery = { ok: true } | { ok: false, code: 'wrong_current' | 'recovery_disabled', message: string }
+
+/**
+ * Відновлення пароля (docs/24 §3.4.1 «Паролі», docs/33 D-021): людина, що забула пароль, входить за кодом і задає
+ * новий без поточного. Дозволено, якщо політика «Відключити можливість відновлення пароля» вимкнена і сесія
+ * відкрита кодом: на e-mail — завжди, з телефону (SMS/Telegram) — лише при «Дозволити відновлення за номером телефону».
+ * Сесія за паролем, Google чи «від імені» — поточний пароль обов'язковий.
+ */
+export async function passwordRecoveryAllowed(tx: TenantTx, policy: PasswordPolicy, sessionId: string | null | undefined): Promise<PasswordRecovery> {
+  const needCurrent: PasswordRecovery = { ok: false, code: 'wrong_current', message: 'Вкажіть поточний пароль. Забули його — увійдіть за кодом і задайте новий' }
+  if (!sessionId) return needCurrent
+  const [s] = await tx.select({ loginMethod: sessions.loginMethod }).from(sessions).where(eq(sessions.id, sessionId))
+  const method = s?.loginMethod ?? null
+  if (!method || !method.startsWith('otp')) return needCurrent
+  if (policy.disableRecovery) return { ok: false, code: 'recovery_disabled', message: 'Відновлення пароля вимкнено адміністратором простору — зверніться до нього' }
+  if (method !== 'otp_email' && !policy.allowPhoneRecovery) return { ok: false, code: 'recovery_disabled', message: 'Відновлення за кодом з телефону вимкнено — увійдіть за кодом на e-mail і задайте новий пароль' }
+  return { ok: true }
+}
 
 /**
  * Смена пароля администратором (docs/04 §4.11 `POST /people/:id/password`, скоуп `people.password`):
@@ -69,15 +89,24 @@ export async function changeOwnPassword(ctx: Ctx, input: { currentPassword?: str
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [u] = await tx.select({ id: users.id, email: users.email, phone: users.phone, passwordHash: users.passwordHash }).from(users).where(eq(users.id, ctx.actorId))
     if (!u) return { ok: false as const, code: 'not_found' as const, message: 'Людину не знайдено' }
-    if (u.passwordHash && !(input.currentPassword && await argonVerify(u.passwordHash, input.currentPassword))) return { ok: false as const, code: 'wrong_current' as const, message: 'Поточний пароль невірний' }
     const policy = (await readSettings(tx, ctx.tenantId)).policies.passwords
+    let recovered = false
+    if (u.passwordHash && !input.currentPassword) {
+      // docs/33 D-021: без поточного пароля — лише як відновлення після входу за кодом
+      const r = await passwordRecoveryAllowed(tx, policy, input.sessionId)
+      if (!r.ok) return r
+      recovered = true
+    }
+    else if (u.passwordHash && !(await argonVerify(u.passwordHash, input.currentPassword!))) {
+      return { ok: false as const, code: 'wrong_current' as const, message: 'Поточний пароль невірний' }
+    }
     const check = checkPasswordPolicy(input.password, policy, u)
     if (!check.ok) return check
     await tx.update(users).set({ passwordHash: await hashPassword(input.password), passwordChangedAt: new Date(), mustChangePassword: false, updatedAt: new Date() }).where(eq(users.id, ctx.actorId))
     // Остальные сессии закрываются — пароль сменён (docs/16 §12 по аналогии со сменой телефона)
     await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, ctx.actorId), isNull(sessions.revokedAt), input.sessionId ? ne(sessions.id, input.sessionId) : sql`true`))
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.password_change', entity: 'user', entityId: ctx.actorId })
-    await logSecurity({ tenantId: ctx.tenantId, userId: ctx.actorId, event: 'password.changed' })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'people.password_change', entity: 'user', entityId: ctx.actorId, after: { recovered } })
+    await logSecurity({ tenantId: ctx.tenantId, userId: ctx.actorId, event: 'password.changed', meta: { recovered } })
     return { ok: true as const }
   })
 }

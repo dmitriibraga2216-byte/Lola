@@ -8,7 +8,7 @@ interface Opt { value: number, label: string }
 interface Crit { id: string, text: string, description: string | null, norm: number }
 interface Group { id: string, name: string, description: string | null, criteria: Crit[] }
 interface FormRules { allowCommentGroups: boolean, commentGroupsRequired: boolean, commentWhenAboveNorm: boolean, commentWhenBelowNorm: boolean, commentWhenEqual: boolean, zeroMeansNoGrade: boolean }
-interface Data { task: { id: string, status: string, raterKind: string }, cycle: { title: string, anonymousForSubject: boolean }, subject: { fullName: string }, structure: { form: FormRules, scale: { options: Opt[] }, groups: Group[] }, answers: { criterionId: string, value: number | null, comment: string | null, isNa: boolean }[], groupComments: Record<string, string>, commentsVisibleTo: string, isAnonymous: boolean, minRatersToShow: number }
+interface Data { task: { id: string, status: string, raterKind: string }, cycle: { title: string, anonymousForSubject: boolean }, subject: { fullName: string }, structure: { form: FormRules, scale: { options: Opt[] }, groups: Group[] }, answers: { criterionId: string, value: number | null, comment: string | null, isNa: boolean }[], groupComments: Record<string, string>, commentsVisibleTo: string, isAnonymous: boolean, minRatersToShow: number, byProfile?: boolean }
 const data = ref<Data | null>(null)
 const answers = reactive<Record<string, { value: number | null, comment: string, isNa: boolean }>>({})
 const groupComments = reactive<Record<string, string>>({})
@@ -89,7 +89,7 @@ function setGroupComment(id: string, v: string) { groupComments[id] = v; if (tim
     <NuxtLink to="/learn/assessment" class="back">← {{ t('assess.title') }}</NuxtLink>
     <h1>{{ t('assess.rateTitle') }}</h1>
     <p class="who">{{ t('assess.youRate', { name: data.subject.fullName, role: t(`assess.kindAs.${data.task.raterKind}`) }) }}<template v-if="data.isAnonymous"> {{ t('assess.anonNote', { n: data.minRatersToShow }) }}</template></p>
-    <p class="sub">{{ data.cycle.title }}</p>
+    <p class="sub">{{ data.cycle.title }}<template v-if="data.byProfile"> · {{ t('assess.byProfile') }}</template></p>
     <p v-if="error" class="error">{{ error }}</p>
     <div class="sticky">
       <span>{{ t('assess.progress', { n: done, total: all.length }) }}</span>

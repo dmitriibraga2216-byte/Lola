@@ -208,6 +208,9 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
       if (p.responsibleId !== ctx.actorId) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: p.responsibleId, code: 'action_item_due', payload: { text: p.text, due: p.dueAt, title: c!.title }, dedupKey: `ai_new:${runId}:${p.id}` })
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.run.finish', entity: 'checklist_run', entityId: runId, after: { score: score.score, passed: score.passed } })
+    // docs/33 D-020: чек-лист заповнено — завдання спостерігача виконане (результат — відсоток прогону; провал точки — не провал завдання)
+    const { onTaskCompleted } = await import('./taskCompletion')
+    await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'check_list', contentId: r.checklistId, status: 'done', result: score.score, sourceKind: 'checklist_run', sourceId: runId })
     return { ok: true as const, score }
   })
 }

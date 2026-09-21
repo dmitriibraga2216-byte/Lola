@@ -54,7 +54,7 @@ async function setBirthdayConsent(v: boolean) {
 }
 // Пароль (docs/16 §14.5 «Безпека → Зміна пароля»): два поля; форма раскрыта сразу, если политика требует смены после первого входа
 const route = useRoute()
-const meUser = computed(() => me.value?.user as { hasPassword?: boolean, mustChangePassword?: boolean } | undefined)
+const meUser = computed(() => me.value?.user as { hasPassword?: boolean, mustChangePassword?: boolean, canRecoverPassword?: boolean } | undefined)
 const passwordMinLength = computed(() => me.value?.tenant?.passwordMinLength ?? 8)
 const pwd = reactive({ open: route.query.password === '1' || !!meUser.value?.mustChangePassword, current: '', next: '', repeat: '', done: false, busy: false })
 // Ошибка формы пароля — под полями, не в общем `error` вверху страницы (docs/33 D-005)
@@ -63,7 +63,7 @@ async function changePassword() {
   pwdError.value = ''
   pwd.busy = true
   try {
-    await api('/me/password', { method: 'POST', body: { ...(meUser.value?.hasPassword ? { currentPassword: pwd.current } : {}), password: pwd.next } })
+    await api('/me/password', { method: 'POST', body: { ...(meUser.value?.hasPassword && pwd.current ? { currentPassword: pwd.current } : {}), password: pwd.next } })
     Object.assign(pwd, { open: false, current: '', next: '', repeat: '', done: true })
     await fetchMe()
   }
@@ -130,7 +130,8 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
       <form v-if="pwd.open" class="pwd" @submit.prevent="changePassword">
         <p v-if="meUser?.mustChangePassword" class="muted">{{ t('profile.mustChangePassword') }}</p>
         <p class="hint">{{ t('profile.passwordHint', { n: passwordMinLength }) }}</p>
-        <label v-if="meUser?.hasPassword"><span>{{ t('profile.currentPassword') }}</span><input v-model="pwd.current" type="password" autocomplete="current-password" required></label>
+        <label v-if="meUser?.hasPassword"><span>{{ t('profile.currentPassword') }}</span><input v-model="pwd.current" type="password" autocomplete="current-password" :required="!meUser?.canRecoverPassword"></label>
+        <p v-if="meUser?.hasPassword && meUser?.canRecoverPassword" class="hint">{{ t('profile.recoverHint') }}</p>
         <label><span>{{ t('person.newPassword') }}</span><input v-model="pwd.next" type="password" :minlength="passwordMinLength" autocomplete="new-password" required></label>
         <label><span>{{ t('person.repeatPassword') }}</span><input v-model="pwd.repeat" type="password" :minlength="passwordMinLength" autocomplete="new-password" required></label>
         <p v-if="pwd.repeat && pwd.repeat !== pwd.next" class="error">{{ t('person.passwordsDiffer') }}</p>

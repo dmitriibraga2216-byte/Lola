@@ -90,6 +90,23 @@ export type CompetencySource = typeof COMPETENCY_SOURCES[number]
 export const DISPLAY_AS = ['label', 'value'] as const
 export type DisplayAs = typeof DISPLAY_AS[number]
 
+/**
+ * Роли оценщиков (docs/02 `assessment_raters.rater_kind`, docs/20 Г-20.1; docs/33 D-036). Не в `ENUMS`: в разделе
+ * «Перечисления, снятые с эталона» docs/02 этого списка нет — он наш `[решение]`. Вес и анонимность —
+ * свойство роли (Г-20.2): `manager` и `self` всегда именные, `self` показывается, но не считается.
+ */
+export const RATER_KINDS = ['self', 'manager', 'functional_manager', 'peer', 'subordinate', 'external'] as const
+export type RaterKind = typeof RATER_KINDS[number]
+export interface RaterRole { kind: RaterKind, weight: number, isAnonymous: boolean }
+export const RATER_ROLE_DEFAULTS: Record<RaterKind, RaterRole> = {
+  manager: { kind: 'manager', weight: 2, isAnonymous: false },
+  functional_manager: { kind: 'functional_manager', weight: 1, isAnonymous: false },
+  self: { kind: 'self', weight: 0, isAnonymous: false },
+  peer: { kind: 'peer', weight: 1, isAnonymous: true },
+  subordinate: { kind: 'subordinate', weight: 1, isAnonymous: true },
+  external: { kind: 'external', weight: 1, isAnonymous: false },
+}
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,

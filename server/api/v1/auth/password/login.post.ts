@@ -34,7 +34,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const user = users[0]!
-  const { token } = await createSession({ tenantId: user.tenant_id, userId: user.user_id, userAgent: getHeader(event, 'user-agent'), ip: clientIp(event) })
+  const { token } = await createSession({ tenantId: user.tenant_id, userId: user.user_id, userAgent: getHeader(event, 'user-agent'), ip: clientIp(event), loginMethod: 'password' })
   setSessionCookies(event, token)
   await logSecurity({ tenantId: user.tenant_id, userId: user.user_id, event: 'login.success', meta: { method: 'password' }, ip: clientIp(event), userAgent: getHeader(event, 'user-agent') })
   return apiData({ requiresTenantSelect: false, mustChangePassword: user.mustChangePassword })

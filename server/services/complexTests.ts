@@ -151,6 +151,9 @@ export async function syncComplex(ctx: Ctx, complexAttemptId: string) {
       passed = !minFail && score >= passScore
       status = expired && !allDone ? 'expired' : passed ? 'passed' : 'failed'
       await tx.update(complexTestAttempts).set({ partsState: ps, status, score: String(score), passed, finishedAt: new Date(), updatedAt: new Date() }).where(eq(complexTestAttempts.id, a.id))
+      // docs/33 D-020: комплексний тест завершено — єдиний хук (passed → done, інакше failed)
+      const { onTaskCompleted } = await import('./taskCompletion')
+      await onTaskCompleted(tx, ctx.tenantId, a.userId, { contentType: 'complex_test', contentId: a.complexTestId, status: passed ? 'done' : 'failed', result: score, assignmentId: a.assignmentId, sourceKind: 'complex_attempt', sourceId: a.id })
     }
     else if (JSON.stringify(ps) !== JSON.stringify(a.partsState)) {
       await tx.update(complexTestAttempts).set({ partsState: ps, updatedAt: new Date() }).where(eq(complexTestAttempts.id, a.id))

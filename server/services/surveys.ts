@@ -241,6 +241,9 @@ export async function answerQuestion(ctx: Ctx, surveyId: string, questionId: str
     // Финал: ответ отдельно от участия; у анонимного опроса — без user_id, черновик стирается
     await tx.insert(surveyResponses).values({ tenantId: ctx.tenantId, surveyId, userId: s.isAnonymous ? null : ctx.actorId, enrollmentId: part.enrollmentId, answers: draft.answers, path: draft.path })
     await tx.update(surveyParticipations).set({ status: 'submitted', draft: {}, submittedAt: new Date(), updatedAt: new Date() }).where(eq(surveyParticipations.id, part.id))
+    // docs/33 D-020: опитування пройдено — єдиний хук (участь іменна навіть в анонімному опитуванні, відповідь — ні)
+    const { onTaskCompleted } = await import('./taskCompletion')
+    await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'poll', contentId: surveyId, status: 'done', enrollmentId: part.enrollmentId, sourceKind: 'survey_response', sourceId: part.id })
     const results = s.showResults ? await reportTx(tx, s, { withRespondents: false }) : null
     return { ok: true as const, done: true as const, results }
   })

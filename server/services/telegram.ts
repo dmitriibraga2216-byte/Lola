@@ -140,7 +140,7 @@ export async function consumeLoginToken(token: string, meta: { userAgent?: strin
   await withTenant(row.tenant_id, row.user_id, async (tx) => {
     await tx.update(telegramTokens).set({ consumedAt: new Date() }).where(eq(telegramTokens.id, row.token_id))
   })
-  const { token: sessionToken } = await createSession({ tenantId: row.tenant_id, userId: row.user_id, userAgent: meta.userAgent, ip: meta.ip })
+  const { token: sessionToken } = await createSession({ tenantId: row.tenant_id, userId: row.user_id, userAgent: meta.userAgent, ip: meta.ip, loginMethod: 'otp_telegram' })
   await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'login.success', meta: { method: 'telegram' }, ip: meta.ip })
   return { sessionToken }
 }

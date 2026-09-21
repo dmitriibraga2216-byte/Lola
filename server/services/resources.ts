@@ -689,7 +689,10 @@ export async function viewResource(ctx: Ctx, id: string, opts: { assignmentId?: 
     const v = await currentVersion(tx, id, pinnedVersionId)
     if (!v) return null
     await tx.update(resources).set({ viewsCount: sql`${resources.viewsCount} + 1` }).where(eq(resources.id, id))
-    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'resource', contentId: id, title: v.title }) // docs/22 §13.4
+    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'resource', contentId: id, title: v.title, assignmentId: opts.assignmentId ?? null }) // docs/22 §13.4
+    // docs/33 D-020: ресурс «виконано» з першого перегляду (правил зарахування у самостійного ресурсу немає, docs/11 §14) — хук не дублює done
+    const { onTaskCompleted } = await import('./taskCompletion')
+    await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'resource', contentId: id, status: 'done', assignmentId: opts.assignmentId ?? null, sourceKind: 'resource_view', sourceId: v.id })
     return {
       id: r.id, title: v.title, kind: v.kind, body: v.body as ContentBlock[], mediaId: v.mediaId, externalUrl: v.externalUrl,
       version: v.version, versionId: v.id, pinned: !!pinnedVersionId, estimatedMinutes: r.estimatedMinutes, canPrint: await printAllowed(tx, ctx.tenantId, r.allowPrint),

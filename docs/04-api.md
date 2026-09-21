@@ -51,7 +51,7 @@
 | POST | `/auth/otp/verify` | `{phone, code}` → сессия или список тенантов для выбора |
 | POST | `/auth/tenant/select` | `{tenantId}` → сессия в выбранном тенанте |
 | POST | `/auth/password/login` | `{email, password}` (если включено политикой `passwords.loginEnabled`, иначе 403 `password_login_disabled`); ответ `{requiresTenantSelect, mustChangePassword}` либо `selectToken` + `tenants`; N неудач → 429 |
-| POST | `/me/password` | `{currentPassword?, password}` — свой пароль; текущий обязателен, если он был (403 `wrong_current`); остальные сессии закрываются |
+| POST | `/me/password` | `{currentPassword?, password}` — свой пароль; текущий обязателен, если он был (403 `wrong_current`), кроме восстановления (docs/33 D-021): без текущего — после входа по коду (e-mail всегда, телефон при `passwords.allowPhoneRecovery`), при `passwords.disableRecovery` — 403 `recovery_disabled`; `/auth/me` отдаёт `user.canRecoverPassword`; остальные сессии закрываются |
 | POST | `/auth/invite/accept` | `{token}` → активация и сессия |
 | POST | `/auth/logout` | текущая сессия |
 | POST | `/auth/logout-all` | все сессии пользователя |
@@ -235,7 +235,7 @@
 | CRUD | `/development-plans` | планы развития; заведены только создание и переход по статусу (старый путь: `/development/plans`, до конца R1) — списка, карточки и удаления нет вовсе, долг (docs/28 «Spec 04») |
 | CRUD | `/goals`, `/goal-statuses` | цели и справочник их статусов |
 | CRUD | `/requests` | заявки: `kind=external_learning\|career`, маршрут согласования (`19` Г-19.1) |
-| POST | `/assessments/:id/cycles` | цикл оценки: состав оценщиков по ролям |
+| POST | `/assessments/:id/cycles` | цикл оценки: состав оценщиков по ролям; в коде `POST /assessment/cycles` — `raterKinds[]` из шести ролей `02` и `raterRoles[{kind, weight 0–9.99, isAnonymous}]` поверх умолчаний Г-20.1 (docs/33 D-036) |
 | GET | `/assessments/:id/cycles/:cid/report` | результат с порогом показа (`20` Г-20.2) |
 
 ## 4.13 Хаб
@@ -251,7 +251,7 @@
 | POST | `/notices/:id/acknowledge` | «Ознайомлений» — подтверждение (`21` §14.5); объявление назначается через `POST /tasks {subjectType: notice}` |
 | GET | `/notices/:id/coverage` | кто подтвердил, кто нет, по точкам; `POST /notices/:id/remind` — «Нагадати тим, хто не підтвердив» |
 | GET | `/birthdays`, `/contacts`, `/events` | дни рождения (`?tab=upcoming\|past&from=&to=`), контакты (`?q=&orgUnitId=&positionId=&cityId=`), события; `POST /events`, `PATCH /events/:id`, `POST /events/:id/register`; `PATCH /me/birthday-consent` |
-| GET | `/public/guest-page` | гостевая страница без входа: тенант по поддомену `Host` или `?slug=`; неизвестный — 404 |
+| GET | `/public/guest-page` | гостевая страница без входа: тенант по поддомену `Host` или `?slug=`; неизвестный — 404; `passwordLogin`, `hideLoginForm` (политика «Приховати форму входу», действует при настроенном Google; тогда код/пароль → 403 `login_form_hidden`) |
 | CRUD | `/gift-store/items` | товары магазина |
 | POST | `/gift-store/items/:id/order` | покупка → резерв |
 | POST | `/gift-store/orders/:id/status` | `ready` \| `issued` \| `cancelled` (`21` Г-21.1) |

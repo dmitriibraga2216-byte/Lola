@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
     userId: invite.user_id,
     userAgent: getHeader(event, 'user-agent'),
     ip: clientIp(event),
+    loginMethod: 'invite',
   })
   setSessionCookies(event, token)
 

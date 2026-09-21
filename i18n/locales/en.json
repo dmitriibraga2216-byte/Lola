@@ -57,7 +57,8 @@
     "byCode": "Sign in with phone code",
     "byPasswordHint": "For methodologists and administrators, if the space allows password sign-in",
     "email": "E-mail",
-    "password": "Password"
+    "password": "Password",
+    "formHidden": "This space allows sign-in only with the corporate Google account."
   },
   "home": {
     "logout": "Sign out",
@@ -2127,7 +2128,8 @@
       "manager": "Manager",
       "peer": "Peers",
       "subordinate": "Subordinates",
-      "mentor": "Mentor"
+      "functional_manager": "Functional manager",
+      "external": "External (mentor, mystery guest)"
     },
     "progress": "{n} of {total}",
     "saving": "Saving…",
@@ -2254,7 +2256,8 @@
       "manager": "manager",
       "peer": "peer",
       "subordinate": "subordinate",
-      "mentor": "mentor"
+      "functional_manager": "functional manager",
+      "external": "external rater"
     },
     "commentBelowNorm": "Score below the norm — please explain",
     "groupComment": "Comment on the criteria group",
@@ -2277,7 +2280,12 @@
       "avg": "Average score",
       "byGroup": "Score by criteria group",
       "normGap": "Gap to norm"
-    }
+    },
+    "role": "Role",
+    "raterWeight": "Weight",
+    "raterAnonymous": "Anonymous",
+    "weightedTotal": "Weighted total by roles",
+    "byProfile": "Items come from the position profile requirements"
   },
   "cl": {
     "title": "Checklists",
@@ -2963,7 +2971,8 @@
     "currentPassword": "Current password",
     "passwordHint": "At least {n} characters, letters and digits",
     "passwordSaved": "Password saved",
-    "mustChangePassword": "You must change your password before continuing"
+    "mustChangePassword": "You must change your password before continuing",
+    "recoverHint": "You signed in with a code, so the current password is optional — just set a new one."
   },
   "notif": {
     "title": "Notifications",
@@ -3213,7 +3222,7 @@
     "addDistractor": "Add distractor",
     "image": "Image (16:9, jpg, png, gif, svg, webp)",
     "addArea": "Add area",
-    "areasHint": "Areas are set in percent of the image size, so taps do not drift on phones. Mark the correct ones.",
+    "areasHint": "Drag on the image to draw an area; drag an area to move it. The numbers below are for precise keyboard tuning (percent of the image). Mark the correct ones.",
     "toleranceType": "Tolerance type",
     "unit": "Unit",
     "allowTypos": "Typos allowed",
@@ -3232,7 +3241,10 @@
     "tags": "Tags",
     "tagPh": "Add a tag and press Enter",
     "criticalHint": "Mistake = failed test",
-    "difficulty": "Difficulty"
+    "difficulty": "Difficulty",
+    "shape": "Area shape",
+    "shapeRect": "Rectangle",
+    "shapeCircle": "Circle"
   },
   "attemptRequests": {
     "title": "Test attempt requests",

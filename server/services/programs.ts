@@ -347,6 +347,9 @@ async function persistState(tx: TenantTx, tenantId: string, enr: typeof programE
   if (r.completed && enr.status !== 'done') {
     await enqueueNotification(tx, { tenantId, userId: enr.userId, code: 'program_completed', payload: { title: p.title }, dedupKey: `prog_done:${enr.id}` })
     await recordAudit(tx, { tenantId, actorId: null, action: 'program.complete', entity: 'program_enrollment', entityId: enr.id })
+    // docs/33 D-020: програму завершено — єдиний хук (журнал + компетенції призначення)
+    const { onTaskCompleted } = await import('./taskCompletion')
+    await onTaskCompleted(tx, tenantId, enr.userId, { contentType: 'training_program', contentId: p.id, status: 'done', result: pct, assignmentId: enr.assignmentId, enrollmentId: enr.id, sourceKind: 'program_enrollment', sourceId: enr.id })
   }
 }
 

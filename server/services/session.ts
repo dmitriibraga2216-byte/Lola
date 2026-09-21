@@ -19,16 +19,42 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
 }
 
+/** Чем подтверждена личность при входе (`sessions.login_method`, docs/33 D-021): по нему решается, можно ли восстановить пароль. */
+export type LoginMethod = 'otp' | 'otp_sms' | 'otp_telegram' | 'otp_email' | 'password' | 'password_otp' | 'google' | 'invite' | 'impersonation'
+export const OTP_LOGIN_METHODS: readonly LoginMethod[] = ['otp', 'otp_sms', 'otp_telegram', 'otp_email']
+
+/** 403 `login_form_hidden` — политика «Приховати форму входу» (docs/24 §3.4.1, docs/33 D-021): вход только через Google. */
+export class LoginFormHiddenError extends Error {
+  statusCode = 403
+  data = { code: 'login_form_hidden', message: 'Вхід за кодом чи паролем вимкнено — увійдіть через корпоративний обліковий запис Google' }
+  constructor() { super('login_form_hidden') }
+}
+
+/**
+ * «Приховати форму входу» действует только когда есть чем заменить форму — Google настроен на платформе
+ * (docs/09 §9.1); иначе политика игнорируется, чтобы администратор не запер всех снаружи.
+ */
+export async function loginFormHidden(tenantId: string, userId: string): Promise<boolean> {
+  const { isConfigured } = await import('./oauth')
+  if (!isConfigured('google')) return false
+  const { readSettings } = await import('./settings')
+  const settings = await withTenant(tenantId, userId, tx => readSettings(tx, tenantId))
+  return settings.policies.auth.hideLoginForm === true
+}
+
 export async function createSession(input: {
   tenantId: string
   userId: string
   userAgent?: string | null
   ip?: string | null
   impersonatedBy?: string | null
+  loginMethod?: LoginMethod | null
 }): Promise<{ token: string, sessionId: string, expiresAt: Date }> {
   // docs/25 §8, §14 п. 10: в приостановленный или удаляемый тенант не входит никто — ни по коду, ни по паролю, ни «от имени»
   const tenant = await tenantById(input.tenantId)
   if (tenant && tenant.status !== 'active') throw new TenantClosedError()
+  // docs/33 D-021: при скрытой форме входа код и пароль не пускают — только Google, приглашение и «от имени»
+  if (input.loginMethod && (OTP_LOGIN_METHODS.includes(input.loginMethod) || input.loginMethod === 'password') && await loginFormHidden(input.tenantId, input.userId)) throw new LoginFormHiddenError()
   const token = randomBytes(32).toString('base64url')
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
 
@@ -43,6 +69,7 @@ export async function createSession(input: {
       ip: input.ip ?? null,
       requestContext: currentRequestContext(),
       impersonatedBy: input.impersonatedBy ?? null,
+      loginMethod: input.loginMethod ?? null,
       activeRoleId,
       expiresAt,
     }).returning({ id: sessions.id })

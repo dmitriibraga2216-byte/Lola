@@ -22,7 +22,8 @@ const quizId = (route.query.quizId as string) || ''
 
 interface Opt { id: string, text: string }
 interface Group { id: string, title: string }
-interface Area { id: string, shape: 'rect', x: number, y: number, w: number, h: number }
+/** Області в редакторі — у відсотках від зображення (у схемі `mapAreaSchema` — частки 0..1). */
+type Area = { id: string, shape: 'rect', x: number, y: number, w: number, h: number } | { id: string, shape: 'circle', cx: number, cy: number, r: number }
 interface QuizEditor { quiz: { id: string, title: string, questionCount: number }, items: { questionId: string }[], groups: Group[] }
 interface Bank { id: string, name: string }
 
@@ -142,7 +143,11 @@ function fill(q: Record<string, unknown> & { kind: QuestionKind, stem: ContentBl
     case 'answer_by_map': {
       const o = q.options as { imageMediaId: string, areas: Area[] }
       f.imageMediaId = o.imageMediaId
-      f.areas = o.areas
+      // Схема зберігає частки 0..1 — у редакторі відсотки (старі записи у відсотках лишаємо як є)
+      const pct = (v: number) => Math.round((v <= 1 ? v * 100 : v) * 10) / 10
+      f.areas = (o.areas ?? []).map(ar => ar.shape === 'circle'
+        ? { id: ar.id, shape: 'circle' as const, cx: pct(ar.cx), cy: pct(ar.cy), r: pct(ar.r) }
+        : { id: ar.id, shape: 'rect' as const, x: pct(ar.x), y: pct(ar.y), w: pct(ar.w), h: pct(ar.h) })
       f.correctAreas = (a.areaIds as string[]) ?? []
       loadImage()
       break
@@ -193,7 +198,63 @@ function move(list: Opt[], i: number, dir: -1 | 1) {
   if (j < 0 || j >= list.length) return
   ;[list[i], list[j]] = [list[j]!, list[i]!]
 }
-const addArea = () => f.areas.push({ id: nid(), shape: 'rect', x: 10, y: 10, w: 30, h: 30 })
+const addArea = () => f.areas.push(drawShape.value === 'circle' ? { id: nid(), shape: 'circle', cx: 25, cy: 25, r: 10 } : { id: nid(), shape: 'rect', x: 10, y: 10, w: 30, h: 30 })
+
+// ── Малювання областей мишею (docs/33 D-014): тягнути по порожньому місцю — нова область, тягнути область — перемістити.
+// Без бібліотек: pointer-події на контейнері, координати у відсотках, як і в числових полях (ті лишаються для клавіатури).
+const drawShape = ref<'rect' | 'circle'>('rect')
+const mapEl = ref<HTMLElement | null>(null)
+const draft = ref<Area | null>(null)
+let drag: { kind: 'draw', x0: number, y0: number } | { kind: 'move', id: string, dx: number, dy: number } | null = null
+const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, Math.round(v * 10) / 10))
+function mapPoint(e: PointerEvent) {
+  const r = mapEl.value!.getBoundingClientRect()
+  return { x: clamp(((e.clientX - r.left) / r.width) * 100), y: clamp(((e.clientY - r.top) / r.height) * 100) }
+}
+function areaStyle(a: Area) {
+  return a.shape === 'rect'
+    ? { left: `${a.x}%`, top: `${a.y}%`, width: `${a.w}%`, height: `${a.h}%` }
+    : { left: `${a.cx - a.r}%`, top: `${a.cy - a.r}%`, width: `${a.r * 2}%`, height: `${a.r * 2}%`, borderRadius: '50%' }
+}
+function mapDown(e: PointerEvent, areaId?: string) {
+  if (e.button !== 0 || !mapEl.value) return
+  const p = mapPoint(e)
+  if (areaId) {
+    const a = f.areas.find(x => x.id === areaId)!
+    drag = a.shape === 'rect' ? { kind: 'move', id: areaId, dx: p.x - a.x, dy: p.y - a.y } : { kind: 'move', id: areaId, dx: p.x - a.cx, dy: p.y - a.cy }
+  }
+  else {
+    drag = { kind: 'draw', x0: p.x, y0: p.y }
+    draft.value = drawShape.value === 'circle' ? { id: 'draft', shape: 'circle', cx: p.x, cy: p.y, r: 0 } : { id: 'draft', shape: 'rect', x: p.x, y: p.y, w: 0, h: 0 }
+  }
+  mapEl.value.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+function mapMove(e: PointerEvent) {
+  if (!drag) return
+  const p = mapPoint(e)
+  if (drag.kind === 'draw' && draft.value) {
+    if (draft.value.shape === 'rect') Object.assign(draft.value, { x: Math.min(drag.x0, p.x), y: Math.min(drag.y0, p.y), w: Math.abs(p.x - drag.x0), h: Math.abs(p.y - drag.y0) })
+    else draft.value.r = clamp(Math.hypot(p.x - drag.x0, p.y - drag.y0), 0, 50)
+  }
+  else if (drag.kind === 'move') {
+    const a = f.areas.find(x => x.id === (drag as { id: string }).id)
+    if (!a) return
+    if (a.shape === 'rect') { a.x = clamp(p.x - drag.dx, 0, 100 - a.w); a.y = clamp(p.y - drag.dy, 0, 100 - a.h) }
+    else { a.cx = clamp(p.x - drag.dx); a.cy = clamp(p.y - drag.dy) }
+  }
+}
+function mapUp(e: PointerEvent) {
+  if (!drag) return
+  if (drag.kind === 'draw' && draft.value) {
+    const d = draft.value
+    // Клік без протягування — не область (мінімум 2% за меншою стороною)
+    if (d.shape === 'rect' ? d.w >= 2 && d.h >= 2 : d.r >= 1) f.areas.push({ ...d, id: nid() })
+  }
+  draft.value = null
+  drag = null
+  mapEl.value?.releasePointerCapture(e.pointerId)
+}
 const addTag = () => {
   const v = f.tagInput.trim()
   if (v && !f.tags.includes(v)) f.tags.push(v)
@@ -226,7 +287,9 @@ function build() {
       break
     }
     case 'answer_by_map':
-      options = { imageMediaId: f.imageMediaId, areas: f.areas.map(a => ({ id: a.id, shape: 'rect', x: a.x / 100, y: a.y / 100, w: a.w / 100, h: a.h / 100 })) }
+      options = { imageMediaId: f.imageMediaId, areas: f.areas.map(a => a.shape === 'circle'
+        ? { id: a.id, shape: 'circle', cx: a.cx / 100, cy: a.cy / 100, r: Math.max(0.01, a.r / 100) }
+        : { id: a.id, shape: 'rect', x: a.x / 100, y: a.y / 100, w: Math.max(0.01, a.w / 100), h: Math.max(0.01, a.h / 100) }) }
       answer = { areaIds: f.correctAreas }
       break
     case 'number': answer = { value: f.number.value, tolerance: f.number.tolerance, toleranceType: f.number.toleranceType, ...(f.number.unit ? { unit: f.number.unit } : {}) }; break
@@ -401,22 +464,47 @@ const title = computed(() => quiz.value
         <template v-else-if="f.kind === 'answer_by_map'">
           <label class="label" for="q-image">{{ t('questionEditor.image') }}</label>
           <input id="q-image" type="file" accept="image/jpeg,image/png,image/gif,image/svg+xml,image/webp" class="field" @change="pickImage">
-          <div v-if="imageUrl" class="map">
-            <img :src="imageUrl" alt="">
+          <div v-if="imageUrl" class="shape-row" role="radiogroup" :aria-label="t('questionEditor.shape')">
+            <label class="toggle"><input v-model="drawShape" type="radio" value="rect"><span>{{ t('questionEditor.shapeRect') }}</span></label>
+            <label class="toggle"><input v-model="drawShape" type="radio" value="circle"><span>{{ t('questionEditor.shapeCircle') }}</span></label>
+          </div>
+          <div
+            v-if="imageUrl"
+            ref="mapEl"
+            class="map draw"
+            data-testid="map-canvas"
+            @pointerdown="mapDown($event)"
+            @pointermove="mapMove"
+            @pointerup="mapUp"
+            @pointercancel="mapUp"
+          >
+            <img :src="imageUrl" alt="" draggable="false">
             <div
-              v-for="a in f.areas"
+              v-for="(a, i) in f.areas"
               :key="a.id"
               :class="['area', { on: f.correctAreas.includes(a.id) }]"
-              :style="{ left: `${a.x}%`, top: `${a.y}%`, width: `${a.w}%`, height: `${a.h}%` }"
-            />
+              :style="areaStyle(a)"
+              :title="String(i + 1)"
+              @pointerdown.stop="mapDown($event, a.id)"
+            >
+              <span class="n">{{ i + 1 }}</span>
+            </div>
+            <div v-if="draft" class="area draft" :style="areaStyle(draft)" />
           </div>
           <div v-for="(a, i) in f.areas" :key="a.id" class="opt-card area-row">
             <input type="checkbox" :checked="f.correctAreas.includes(a.id)" :aria-label="t('questionEditor.correct')" @change="f.correctAreas = f.correctAreas.includes(a.id) ? f.correctAreas.filter(x => x !== a.id) : [...f.correctAreas, a.id]">
             <span class="n">{{ i + 1 }}</span>
-            <label>x% <input v-model.number="a.x" type="number" min="0" max="100" class="field num"></label>
-            <label>y% <input v-model.number="a.y" type="number" min="0" max="100" class="field num"></label>
-            <label>w% <input v-model.number="a.w" type="number" min="1" max="100" class="field num"></label>
-            <label>h% <input v-model.number="a.h" type="number" min="1" max="100" class="field num"></label>
+            <template v-if="a.shape === 'rect'">
+              <label>x% <input v-model.number="a.x" type="number" min="0" max="100" class="field num"></label>
+              <label>y% <input v-model.number="a.y" type="number" min="0" max="100" class="field num"></label>
+              <label>w% <input v-model.number="a.w" type="number" min="1" max="100" class="field num"></label>
+              <label>h% <input v-model.number="a.h" type="number" min="1" max="100" class="field num"></label>
+            </template>
+            <template v-else>
+              <label>cx% <input v-model.number="a.cx" type="number" min="0" max="100" class="field num"></label>
+              <label>cy% <input v-model.number="a.cy" type="number" min="0" max="100" class="field num"></label>
+              <label>r% <input v-model.number="a.r" type="number" min="1" max="50" class="field num"></label>
+            </template>
             <button class="btn ghost small" type="button" :aria-label="t('questionEditor.remove')" @click="f.areas = f.areas.filter(x => x.id !== a.id)">✕</button>
           </div>
           <button class="btn ghost" type="button" @click="addArea">+ {{ t('questionEditor.addArea') }}</button>
@@ -516,6 +604,11 @@ const title = computed(() => quiz.value
 .map img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .area { position: absolute; border: 2px dashed var(--color-coral); border-radius: var(--radius-s); }
 .area.on { border-style: solid; border-color: var(--color-teal); background: color-mix(in srgb, var(--color-teal) 25%, transparent); }
+.map.draw { cursor: crosshair; touch-action: none; user-select: none; }
+.map.draw .area { cursor: move; }
+.map.draw .area .n { position: absolute; left: 2px; top: 2px; font-size: var(--font-size-body-s); font-weight: 800; color: var(--color-ink); background: var(--color-bg); border-radius: var(--radius-pill); padding: 0 var(--space-1); pointer-events: none; }
+.area.draft { border-color: var(--color-sun); pointer-events: none; }
+.shape-row { display: flex; gap: var(--space-3); margin-bottom: var(--space-2); }
 .value { margin: 0; font-size: 28px; font-weight: 900; }
 input[type="range"] { width: 100%; }
 </style>

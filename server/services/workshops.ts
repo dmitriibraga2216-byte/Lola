@@ -343,6 +343,12 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     const code = input.decision === 'accepted' ? 'workshop_accepted' : input.decision === 'rework' ? 'workshop_rework' : 'workshop_rejected'
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s.userId, code, payload: { title: w.title, comment, submissionId }, dedupKey: `ws_${code}:${submissionId}:${s.reworkCount}` })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.grade', entity: 'workshop_submission', entityId: submissionId, after: { decision: input.decision, score } })
+    // docs/33 D-020: рішення наставника по самостійному практикуму — єдиний хук (accepted → done, rejected → failed; rework — ще не завершено).
+    // Практикум усередині курсу (`lesson_id`) фіксує курс.
+    if (!s.lessonId && (input.decision === 'accepted' || input.decision === 'rejected')) {
+      const { onTaskCompleted } = await import('./taskCompletion')
+      await onTaskCompleted(tx, ctx.tenantId, s.userId, { contentType: 'workshop', contentId: s.workshopId, status: input.decision === 'accepted' ? 'done' : 'failed', result: score ?? null, enrollmentId: s.enrollmentId, sourceKind: 'workshop_submission', sourceId: submissionId, actorId: ctx.actorId })
+    }
     return { ok: true as const, status: input.decision, enrollmentId: s.enrollmentId, lessonId: s.lessonId, learnerId: s.userId, workshopId: s.workshopId }
   }).then((r) => {
     // Практикум как узел программы (docs/17 §7.4)

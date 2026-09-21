@@ -89,6 +89,9 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
         if (open && daysOver >= autoCloseAfterDays) {
           await tx.update(enrollments).set({ status: 'failed', expiredAt: now, updatedAt: now }).where(eq(enrollments.id, e.id))
           await tx.insert(enrollmentEvents).values({ tenantId, enrollmentId: e.id, event: 'expired', payload: { dueAt: e.dueAt, autoClosedAfterDays: autoCloseAfterDays, from: e.status, to: 'failed' } })
+          // docs/33 D-020: автозакриття за строком — теж через єдиний хук (status failed)
+          const { onTaskCompleted } = await import('./taskCompletion')
+          await onTaskCompleted(tx, tenantId, e.userId, { contentType: 'course', contentId: e.subjectId, status: 'failed', assignmentId: e.assignmentId, enrollmentId: e.id, sourceKind: 'enrollment', sourceId: e.id })
           stats.expired++
         }
         // После срока — каждые N дней, не больше M раз (после пятого вопрос решает руководитель, а не бот)

@@ -631,6 +631,11 @@ async function settle(run: Run): Promise<void> {
     await enqueueNotification(run.tx, { tenantId: run.tenantId, userId: run.enr.userId, code: 'trajectory_finished', payload: { title: run.t.title }, dedupKey: `trajectory_finished:${run.enr.id}`, refType: 'trajectory_enrollment', refId: run.enr.id })
     await recordAudit(run.tx, { tenantId: run.tenantId, actorId: null, action: 'trajectory.finished', entity: 'trajectory_enrollment', entityId: run.enr.id, after: { userId: run.enr.userId } })
   }
+  // docs/33 D-020: траєкторію завершено/зупинено — єдиний хук (без призначення: траєкторія — не контент)
+  if (status !== run.enr.status && (status === 'done' || status === 'failed')) {
+    const { onTaskCompleted } = await import('./taskCompletion')
+    await onTaskCompleted(run.tx, run.tenantId, run.enr.userId, { contentType: 'trajectory', contentId: run.t.id, status, result: finished ? 100 : pct, enrollmentId: run.enr.id, sourceKind: 'trajectory_enrollment', sourceId: run.enr.id })
+  }
 }
 
 async function applyEffects(tenantId: string, fx: Effects) {

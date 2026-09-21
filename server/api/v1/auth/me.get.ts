@@ -37,7 +37,11 @@ export default defineEventHandler(async (event) => {
       .leftJoin(positions, eq(positions.id, userPlacements.positionId))
       .leftJoin(locations, eq(locations.id, userPlacements.locationId))
       .where(and(eq(userPlacements.userId, auth.userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-    return { ...u, position: placement?.position ?? null, location: placement?.location ?? null }
+    // docs/33 D-021: чи можна задати новий пароль без поточного (вхід за кодом + політики «Паролі»)
+    const { readSettings } = await import('../../../services/settings')
+    const { passwordRecoveryAllowed } = await import('../../../services/password')
+    const canRecoverPassword = u.hasPassword ? (await passwordRecoveryAllowed(tx, (await readSettings(tx, auth.tenantId)).policies.passwords, auth.sessionId)).ok : false
+    return { ...u, canRecoverPassword, position: placement?.position ?? null, location: placement?.location ?? null }
   })
   if (!profile) return apiError(event, 401, 'auth_required', 'Користувача не знайдено')
 

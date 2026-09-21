@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RATER_KINDS, RATER_ROLE_DEFAULTS } from '#shared/enums'
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assessment.run' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -10,7 +11,7 @@ const locations = ref<{ id: string, name: string }[]>([])
 const error = ref('')
 const notice = ref('')
 const step = ref(1)
-const form = reactive({ title: '', formId: '', periodFrom: '', periodTo: '', startsAt: '', endsAt: '', positionIds: [] as string[], locationIds: [] as string[], raterKinds: ['self', 'manager'] as string[], peersCount: 2, anonymousForSubject: true, minRatersToShow: 3, selfFirst: false, calibration: false })
+const form = reactive({ title: '', formId: '', periodFrom: '', periodTo: '', startsAt: '', endsAt: '', positionIds: [] as string[], locationIds: [] as string[], raterKinds: ['self', 'manager'] as string[], raterRoles: RATER_KINDS.map(k => ({ ...RATER_ROLE_DEFAULTS[k] })), peersCount: 2, anonymousForSubject: true, minRatersToShow: 3, selfFirst: false, calibration: false })
 async function load() {
   try { items.value = await api('/assessment/cycles'); forms.value = await api('/assessment/forms'); positions.value = await api('/refs/positions'); locations.value = await api('/refs/locations'); form.formId ||= forms.value[0]?.id ?? '' }
   catch (err) { error.value = apiErrorOf(err).message }
@@ -22,7 +23,7 @@ async function create() {
   if (form.positionIds.length) rules.push({ type: 'position', ids: form.positionIds, locationIds: form.locationIds.length ? form.locationIds : undefined })
   else if (form.locationIds.length) rules.push({ type: 'location', ids: form.locationIds })
   try {
-    const c = await api<{ id: string }>('/assessment/cycles', { method: 'POST', body: { title: form.title, formId: form.formId, periodFrom: form.periodFrom, periodTo: form.periodTo, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), subjects: { rules, match: 'any' }, raterKinds: form.raterKinds, peersCount: form.peersCount, anonymousForSubject: form.anonymousForSubject, minRatersToShow: form.minRatersToShow, selfFirst: form.selfFirst, calibration: form.calibration } })
+    const c = await api<{ id: string }>('/assessment/cycles', { method: 'POST', body: { title: form.title, formId: form.formId, periodFrom: form.periodFrom, periodTo: form.periodTo, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), subjects: { rules, match: 'any' }, raterKinds: form.raterKinds, raterRoles: form.raterRoles.filter(r => form.raterKinds.includes(r.kind)), peersCount: form.peersCount, anonymousForSubject: form.anonymousForSubject, minRatersToShow: form.minRatersToShow, selfFirst: form.selfFirst, calibration: form.calibration } })
     const r = await api<{ tasks: number, subjects: number }>(`/assessment/cycles/${c.id}/start`, { method: 'POST' })
     notice.value = t('assess.started', { subjects: r.subjects, tasks: r.tasks })
     step.value = 1; form.title = ''
@@ -63,7 +64,18 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
         <div class="row"><label v-for="l in locations" :key="l.id" class="check"><input v-model="form.locationIds" type="checkbox" :value="l.id"> {{ l.name }}</label></div>
       </div>
       <div v-if="step === 3" class="grid">
-        <div class="row"><label v-for="k in ['self', 'manager', 'peer', 'subordinate', 'mentor']" :key="k" class="check"><input v-model="form.raterKinds" type="checkbox" :value="k"> {{ t(`assess.kind.${k}`) }}</label></div>
+        <div class="row"><label v-for="k in RATER_KINDS" :key="k" class="check"><input v-model="form.raterKinds" type="checkbox" :value="k"> {{ t(`assess.kind.${k}`) }}</label></div>
+        <!-- docs/33 D-036 (Г-20.1/Г-20.2): вага і анонімність — властивість ролі; керівник і самооцінка завжди іменні -->
+        <table class="roles" data-testid="rater-roles">
+          <thead><tr><th>{{ t('assess.role') }}</th><th>{{ t('assess.raterWeight') }}</th><th>{{ t('assess.raterAnonymous') }}</th></tr></thead>
+          <tbody>
+            <tr v-for="r in form.raterRoles.filter(r => form.raterKinds.includes(r.kind))" :key="r.kind">
+              <td>{{ t(`assess.kind.${r.kind}`) }}</td>
+              <td><input v-model.number="r.weight" class="field short" type="number" min="0" max="9.99" step="0.5" :aria-label="t('assess.raterWeight')"></td>
+              <td><input v-model="r.isAnonymous" type="checkbox" :disabled="r.kind === 'manager' || r.kind === 'self'" :aria-label="t('assess.raterAnonymous')"></td>
+            </tr>
+          </tbody>
+        </table>
         <label v-if="form.raterKinds.includes('peer')" class="sub">{{ t('assess.peersCount') }} <input v-model.number="form.peersCount" class="field short" type="number" min="1" max="10"></label>
         <label class="check"><input v-model="form.selfFirst" type="checkbox"> {{ t('assess.selfFirst') }}</label>
       </div>

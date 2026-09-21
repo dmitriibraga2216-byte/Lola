@@ -20,6 +20,9 @@ async function pickRole(id: string) {
 interface Cert { id: string, number: string, validUntil: string | null, revokedAt: string | null, courseTitle: string, publicToken: string | null }
 const certs = ref<Cert[]>([])
 const counts = ref<{ done: number, new: number, overdue: number } | null>(null)
+// Мокап Profile: перша плитка — «Рейтинг» (те саме число, що й на StudyHistory, docs/22 §13.5) —
+// значення вже рахує сервер у /me/study-history, тут лише перевикористовуємо його.
+const rating = ref<number | null>(null)
 const week = ref<{ days: { date: string, events: number }[], total: number } | null>(null)
 const weekMax = computed(() => Math.max(1, ...(week.value?.days.map(d => d.events) ?? [1])))
 const dayLabel = (iso: string) => new Date(iso).toLocaleDateString('uk', { weekday: 'short' }).replace('.', '')
@@ -28,14 +31,16 @@ const error = ref('')
 
 onMounted(async () => {
   try {
-    const [c, my, w] = await Promise.all([
+    const [c, my, w, h] = await Promise.all([
       api<Cert[]>('/learning/certificates'),
       api<{ items: unknown[], counts: { done: number, new: number, overdue: number } }>('/learning/my', { query: { group: 'done', counts: 1 } }),
       api<{ days: { date: string, events: number }[], total: number }>('/learning/activity'),
+      api<{ currentRating: number }>('/me/study-history'),
     ])
     certs.value = c.filter(x => !x.revokedAt)
     counts.value = my.counts
     week.value = w
+    rating.value = h.currentRating
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -92,9 +97,10 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
     </template>
 
     <div class="tiles">
+      <div class="tile"><b>{{ rating ?? '—' }}</b><span>{{ t('profile.tiles.rating') }}</span></div>
+      <!-- «Бонуси» — магазин і баланс бонусів R3 (docs/31 рядок Profile), сервер балансу поки не рахує -->
+      <div class="tile"><b>—</b><span>{{ t('profile.tiles.bonuses') }}</span></div>
       <div class="tile teal"><b>{{ counts?.done ?? '—' }}</b><span>{{ t('profile.tiles.done') }}</span></div>
-      <div class="tile"><b>{{ counts?.new ?? '—' }}</b><span>{{ t('profile.tiles.active') }}</span></div>
-      <div :class="['tile', { coral: (counts?.overdue ?? 0) > 0 }]"><b>{{ counts?.overdue ?? '—' }}</b><span>{{ t('profile.tiles.overdue') }}</span></div>
     </div>
 
     <p v-if="error" class="error-text">{{ error }}</p>

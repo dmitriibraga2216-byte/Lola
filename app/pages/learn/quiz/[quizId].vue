@@ -317,7 +317,11 @@ function retry() {
           <p>{{ t('quiz.onReviewHint') }}</p>
         </div>
         <div v-else :class="['result-card', result.passed ? 'teal' : 'coral']">
-          <div class="score">{{ result.score ?? '—' }}%</div>
+          <div class="badge-icon" aria-hidden="true">
+            <svg v-if="result.passed" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5" /></svg>
+            <svg v-else width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </div>
+          <div :class="['score', result.passed ? 'teal' : 'coral']">{{ result.score ?? '—' }}%</div>
           <p class="verdict">{{ result.passed ? t('quiz.passed') : t('quiz.failed') }}</p>
           <p class="pass-line">
             {{ t('quiz.thresholdLine', { pass: result.passScore, earned: result.earned, max: result.maxScore }) }}
@@ -540,28 +544,31 @@ dd {
 }
 
 .result-card {
+  /* Мокап TestResult: нейтральна картка з кольоровою рамкою й бейджем-іконкою,
+     а не суцільна заливка кольором стану (docs/12 §14) */
+  background: var(--color-bg-soft);
+  border: 2px solid transparent;
   border-radius: var(--radius-l);
-  padding: var(--space-5);
+  padding: var(--space-6) var(--space-5);
   text-align: center;
   display: grid;
+  justify-items: center;
   gap: var(--space-2);
 }
 
-.result-card.teal {
-  background: var(--color-teal);
-  color: var(--color-teal-deep);
-}
+.result-card.teal { border-color: var(--color-teal); }
+.result-card.coral { border-color: var(--color-coral); }
 
-.result-card.coral {
-  background: var(--color-coral);
-  color: var(--color-coral-deep);
+.badge-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-pill);
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-2);
 }
-
-.result-card .score,
-.result-card .verdict,
-.result-card .pass-line {
-  color: inherit;
-}
+.result-card.teal .badge-icon { background: var(--color-teal); color: var(--color-teal-deep); }
+.result-card.coral .badge-icon { background: var(--color-coral); color: var(--color-coral-deep); }
 
 .mistakes-title {
   margin: 0;

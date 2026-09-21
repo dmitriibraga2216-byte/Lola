@@ -88,7 +88,6 @@ const shortName = (n: string | null) => (n ? n.split(' ').map((p, i) => (i === 0
   <div>
     <PageHeader :title="t('course.title')" :crumbs="[{ label: t('admin.section.content') }]">
       <template #actions>
-        <button class="btn ghost" disabled :title="t('course.importHint')">{{ t('course.import') }}</button>
         <button v-if="hasScope('course.create')" class="btn primary" @click="formOpen = true">{{ t('course.add') }}</button>
       </template>
     </PageHeader>

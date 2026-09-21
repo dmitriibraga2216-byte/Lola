@@ -745,8 +745,6 @@
     "passScoreHint": "Threshold only for this test in the course plan. The threshold on the task (assignment) takes precedence.",
     "fromTask": "from task",
     "title": "Courses",
-    "import": "Import",
-    "importHint": "Import format is being agreed on",
     "add": "Add",
     "col": {
       "title": "Title",
@@ -2366,7 +2364,12 @@
     "weightVsNorm": "A checklist has item weights, an assessment form has norms. These are different scoring mechanics",
     "col": {
       "items": "Items",
-      "scoring": "Scoring"
+      "scoring": "Scoring",
+      "weight": "Weight",
+      "done": "Done",
+      "share": "Share",
+      "dynamics": "Dynamics",
+      "avgScore": "Avg %"
     },
     "scoringLabel": {
       "percent": "Percent",
@@ -2380,7 +2383,19 @@
     "pointsOf": "of {max} points",
     "skip": "Skip",
     "commentRequired": "Comment required",
-    "finishRun": "Finish the check"
+    "finishRun": "Finish the check",
+    "reportTitle": "Checklist report",
+    "reportSubtitle": {
+      "items": "by item",
+      "people": "by person",
+      "locations": "by location"
+    },
+    "reportHint": "This is the point of the cut: not to punish one shift, but to see that the display case is dusted poorly everywhere",
+    "byItem": "By item",
+    "byPerson": "By person",
+    "byLocation": "By location",
+    "allChecklists": "All checklists",
+    "of": "of"
   },
   "mt": {
     "title": "Schedule",
@@ -3363,8 +3378,6 @@
   "resource": {
     "title": "Resources",
     "found": "Found {n} resources",
-    "import": "Import",
-    "importHint": "Import format is being agreed on",
     "add": "Add",
     "create": "New resource",
     "edit": "Edit resource",

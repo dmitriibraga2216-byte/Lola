@@ -3,6 +3,7 @@ import { checklistRuns, checklists, locations, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import { frameJoins, frameSelect, frameTail } from './reportFrame'
+import type { SQL } from 'drizzle-orm'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
@@ -275,15 +276,22 @@ export async function addAction(ctx: Ctx, runId: string, item: { text: string, r
 
 // ── Отчёты (docs/20 §9) ─────────────────────────────────────────────────
 
-export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: string, locationId?: string, checklistId?: string, scope?: string[] | null, canSeeUnpublished?: boolean } = {}) {
+export interface ChecklistReportFilter { from?: string, to?: string, locationId?: string, checklistId?: string, scope?: string[] | null, canSeeUnpublished?: boolean }
+
+/** Общее условие выборки прогонов для всех разрезов отчёта чек-листів (докс/31 ChecklistReport). */
+function checklistRunsWhere(filter: ChecklistReportFilter): SQL {
+  // Прогоны тайного покупателя до публикации волны видит только руководство сети (docs/20 §7.8)
+  return sql`r.status = 'finished'
+    ${filter.canSeeUnpublished ? sql`` : sql`and (r.wave_id is null or exists (select 1 from mystery_waves w where w.id = r.wave_id and w.status = 'published'))`}
+    ${filter.from ? sql`and r.started_at >= ${filter.from}::date` : sql``}
+    ${filter.to ? sql`and r.started_at < (${filter.to}::date + 1)` : sql``}
+    ${scopeSql(filter.scope ?? null, sql`r.location_id`)}
+    ${filter.checklistId ? sql`and r.checklist_id = ${filter.checklistId}::uuid` : sql``}`
+}
+
+export async function checklistReport(ctx: Ctx, filter: ChecklistReportFilter = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    // Прогоны тайного покупателя до публикации волны видит только руководство сети (docs/20 §7.8)
-    const where = sql`r.status = 'finished'
-      ${filter.canSeeUnpublished ? sql`` : sql`and (r.wave_id is null or exists (select 1 from mystery_waves w where w.id = r.wave_id and w.status = 'published'))`}
-      ${filter.from ? sql`and r.started_at >= ${filter.from}::date` : sql``}
-      ${filter.to ? sql`and r.started_at < (${filter.to}::date + 1)` : sql``}
-      ${scopeSql(filter.scope ?? null, sql`r.location_id`)}
-      ${filter.checklistId ? sql`and r.checklist_id = ${filter.checklistId}::uuid` : sql``}`
+    const where = checklistRunsWhere(filter)
     const runs = await tx.execute(sql`
       select r.id, r.started_at, r.finished_at, r.score, r.passed, r.critical_failed, r.action_plan, c.title, c.kind, l.name as location, u.full_name as observer
       from checklist_runs r join checklists c on c.id = r.checklist_id left join locations l on l.id = r.location_id join users u on u.id = r.observer_id
@@ -315,6 +323,74 @@ export async function checklistReport(ctx: Ctx, filter: { from?: string, to?: st
     `) as unknown as Record<string, unknown>[]
     const actions = runs.flatMap(r => (r.action_plan as ActionItem[]).map(p => ({ ...p, runId: r.id, location: r.location, checklist: r.title })))
     return { runs, byLocationWeek, topFailed, actions: { total: actions.length, done: actions.filter(a => a.status === 'done').length, overdue: actions.filter(a => a.status === 'overdue').length } }
+  })
+}
+
+/**
+ * Розріз «По пунктах» (докс/31 ChecklistReport, мокап): ПУНКТ · ВАГА · ВИКОНАНО · ЧАСТКА —
+ * по кожному пункту серед усіх чек-листів під фільтром скільки разів пункт зараховано (доля
+ * (значення − min)/(max − min) не нижче порога пункта — та ж формула, що в `scoreRun`/`topFailed`,
+ * тільки лічимо виконані, а не провалені, і не ховаємо пункти без провалів).
+ */
+export async function checklistItemsReport(ctx: Ctx, filter: ChecklistReportFilter = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const where = checklistRunsWhere(filter)
+    return tx.execute(sql`
+      with a as (
+        select r.checklist_id, (x->>'itemId') as item_id, (x->>'value')::numeric as value, (x->>'isNa')::boolean as is_na
+        from checklist_runs r cross join jsonb_array_elements(r.answers) x where ${where}
+      ), it as (
+        select c.id as checklist_id, c.title, (i->>'id') as item_id, (i->>'text') as text, ((i->>'weight')::float8) as weight,
+               coalesce((i->>'passThreshold')::numeric, c.pass_score) as threshold,
+               (select min(value) from scale_levels sl where sl.scale_id = c.scale_id) as smin,
+               (select max(value) from scale_levels sl where sl.scale_id = c.scale_id) as smax
+        from checklists c cross join jsonb_array_elements(c.items) i
+        where ${filter.checklistId ? sql`c.id = ${filter.checklistId}::uuid` : sql`true`}
+      )
+      select it.title as checklist, it.text, it.weight, count(*)::int as total,
+             sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 >= it.threshold then 1 else 0 end)::int as done,
+             round(sum(case when (a.value - it.smin) / greatest(it.smax - it.smin, 0.000001) * 100 >= it.threshold then 1 else 0 end)::numeric / count(*) * 100, 1) as share
+      from a join it on it.checklist_id = a.checklist_id and it.item_id = a.item_id
+      where a.is_na is not true and a.value is not null
+      group by it.title, it.text, it.weight
+      order by share asc, it.title, it.text limit 200
+    `) as unknown as Promise<{ checklist: string, text: string, weight: number, total: number, done: number, share: string }[]>
+  })
+}
+
+/** Розріз «По точках» (докс/31 ChecklistReport): точка · прогонів · середній %. */
+export async function checklistLocationsReport(ctx: Ctx, filter: ChecklistReportFilter = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const where = checklistRunsWhere(filter)
+    return tx.execute(sql`
+      select l.id as location_id, l.name as location, count(*)::int as runs, round(avg(r.score), 1) as avg_score,
+             sum(case when r.passed then 1 else 0 end)::int as passed
+      from checklist_runs r join locations l on l.id = r.location_id
+      where ${where}
+      group by l.id, l.name
+      order by avg_score asc nulls last, l.name limit 200
+    `) as unknown as Promise<{ location_id: string, location: string, runs: number, avg_score: string | null, passed: number }[]>
+  })
+}
+
+/**
+ * Розріз «По людях» (докс/31 ChecklistReport): хто проводив перевірки — єдиний каркас
+ * `reportFrame` (докс/22 §13.3) плюс кількість прогонів і середній результат у «результаті».
+ */
+export async function checklistPeopleReport(ctx: Ctx, filter: ChecklistReportFilter = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const where = checklistRunsWhere(filter)
+    return tx.execute(sql`
+      select ${frameSelect()},
+             ${frameTail({ assignedAt: sql`min(r.started_at)`, completedAt: sql`max(r.finished_at)`, status: sql`'done'`, result: sql`round(avg(r.score), 1)` })},
+             count(*)::int as runs
+      from checklist_runs r
+      join users u on u.id = r.observer_id
+      ${frameJoins()}
+      where ${where}
+      group by u.id, u.full_name, u.status, p.name, ci.name, ou.name, l.name, u.tags
+      order by result asc nulls last, full_name limit 500
+    `) as unknown as Promise<Record<string, unknown>[]>
   })
 }
 

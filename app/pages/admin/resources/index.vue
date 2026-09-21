@@ -84,7 +84,6 @@ const pages = computed(() => (list.value ? Math.max(1, Math.ceil(list.value.tota
   <div>
     <PageHeader :title="t('resource.title')" :crumbs="[{ label: t('admin.section.content') }]">
       <template #actions>
-        <button class="btn ghost" disabled :title="t('resource.importHint')">{{ t('resource.import') }}</button>
         <NuxtLink v-if="hasScope('course.create')" to="/admin/resources/new" class="btn primary">{{ t('resource.add') }}</NuxtLink>
       </template>
     </PageHeader>

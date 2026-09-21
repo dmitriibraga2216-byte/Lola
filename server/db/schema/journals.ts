@@ -72,6 +72,7 @@ export const taskStatusLog = pgTable('task_status_log', {
   index().on(t.tenantId, t.assignmentId),
 ])
 
+/**
  * Протокол змін статусу проходження програми або траєкторії (docs/33 D-045; docs/22 §13.4).
  * У записей на курс есть `enrollment_events`, у `program_enrollments`/`trajectory_enrollments` журнала
  * не было — журнал `task-status` показывал только курсы и тесты. Одна таблица на оба типа:

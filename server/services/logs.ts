@@ -39,7 +39,8 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     switch (kind) {
       case 'task-status':
-        // Протокол змін статусу завдань (docs/22 §13.4): записи курса — из enrollment_events, тесты — из attempt_results.
+        // Протокол змін статусу завдань (docs/22 §13.4): записи курса — из enrollment_events, тесты — из attempt_results,
+        // программы и траектории — из pass_events (docs/33 D-045; content_type строки — training_program | trajectory).
         // Статус на момент события — payload.to (Spec 22), для старых записей — по коду события.
         return tx.execute(sql`
           select * from (
@@ -58,6 +59,18 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
             left join quizzes qz on qz.id = at.quiz_id left join assignments a on a.id = at.assignment_id
             where true ${period(sql`ar.created_at`)} ${cursor(sql`ar.created_at`)} ${byUser(sql`at.user_id`)} ${f.type ? sql`and 'attempt.' || ar.reason = ${f.type}` : sql``}
               ${f.contentType && f.contentType !== 'test' ? sql`and false` : sql``} ${f.contentId ? sql`and at.quiz_id = ${f.contentId}::uuid` : sql``}
+            union all
+            select pe.id::text, pe.created_at, ${person},
+                   ${frameTail({ assignedAt: sql`coalesce(pr.created_at, tr.created_at)`, completedAt: sql`coalesce(pr.completed_at, tr.completed_at)`, status: sql`case when pe.payload->>'to' in ('not_assigned', 'not_started', 'in_progress', 'done', 'failed') then pe.payload->>'to' else case pe.event when 'created' then 'not_started' when 'started' then 'in_progress' when 'completed' then 'done' when 'failed' then 'failed' when 'reset' then 'not_started' else coalesce(pr.status, tr.status) end end`, result: sql`coalesce((pe.payload->>'result')::int, round(coalesce(pr.progress_pct, tr.progress_pct))::int)` })},
+                   coalesce(a.title, prg.title, trj.title), pe.subject_type, pe.event, pe.payload, case when pe.payload->>'from' in ('not_assigned', 'not_started', 'in_progress', 'done', 'failed') then pe.payload->>'from' end, pe.actor_id, ${context(sql`pe.request_context`, null)}
+            from pass_events pe join users u on u.id = pe.user_id ${joins}
+            left join program_enrollments pr on pr.id = pe.enrollment_id and pe.subject_type = 'training_program'
+            left join trajectory_enrollments tr on tr.id = pe.enrollment_id and pe.subject_type = 'trajectory'
+            left join programs prg on prg.id = pe.subject_id and pe.subject_type = 'training_program'
+            left join trajectories trj on trj.id = pe.subject_id and pe.subject_type = 'trajectory'
+            left join assignments a on a.id = pr.assignment_id
+            where true ${period(sql`pe.created_at`)} ${cursor(sql`pe.created_at`)} ${byUser(sql`pe.user_id`)} ${f.type ? sql`and pe.event = ${f.type}` : sql``}
+              ${f.contentType ? (f.contentType === 'training_program' ? sql`and pe.subject_type = 'training_program'` : sql`and false`) : sql``} ${f.contentId ? sql`and pe.subject_id = ${f.contentId}::uuid` : sql``}
           ) x order by created_at desc limit ${limit}`) as unknown as Promise<Row[]>
       case 'task-access':
         // Звіт звернень до завдань: каждое открытие — строка; IP и браузер — из request_context

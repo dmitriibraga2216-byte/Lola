@@ -1,13 +1,13 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
   assignmentCompetencies, assignments, competencies, competencyAssessments, competencyCategories, courses, developmentGoals, developmentPlans, goalStatuses,
-  positionProfiles, strategicPlans, userPlacements,
+  positionProfilePositions, positionProfiles, strategicPlans, userPlacements,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import { currentLevels, defaultValidUntil, effectiveRequirements, levelLabel } from './development'
+import { currentLevels, defaultValidUntil, effectiveRequirements, levelLabel, profileForPosition } from './development'
 import type { CompetencyLevel, Requirement } from './development'
 import { scopeSql } from './access'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
@@ -82,7 +82,11 @@ export async function competencyMatrix(ctx: Ctx, filter: { locationId?: string, 
       order by l.name, u.full_name limit 300
     `) as unknown as { id: string, full_name: string, position_id: string, position_level_id: string | null, position: string, location: string, location_id: string }[]
     const profiles = await tx.select().from(positionProfiles).where(eq(positionProfiles.isActive, true))
+    // D-031: профіль може покривати кілька посад — карта посада → профіль через position_profile_positions
+    const links = profiles.length ? await tx.select({ profileId: positionProfilePositions.profileId, positionId: positionProfilePositions.positionId }).from(positionProfilePositions) : []
+    const byId = new Map(profiles.map(p => [p.id, p]))
     const byPosition = new Map(profiles.map(p => [p.positionId, p]))
+    for (const l of links) { const p = byId.get(l.profileId); if (p && !byPosition.has(l.positionId)) byPosition.set(l.positionId, p) }
     const compIds = [...new Set(profiles.flatMap(p => (p.competencyRequirements as Requirement[]).map(r => r.competencyId)))]
     const comps = compIds.length ? await tx.select({ id: competencies.id, name: competencies.name, kind: competencies.kind, linkedCourses: competencies.linkedCourses, levels: competencies.levels }).from(competencies).where(sql`${competencies.id} in ${compIds}`) : []
     const levelsById = new Map(comps.map(c => [c.id, c.levels as CompetencyLevel[]]))
@@ -178,7 +182,7 @@ export async function externalTrainingReport(ctx: Ctx, filter: { from?: string, 
 /** «Готовність до підвищення»: кто соответствует профилю указанной (следующей) должности. */
 export async function promotionReadiness(ctx: Ctx, positionId: string, scope: string[] | null = null) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, positionId), eq(positionProfiles.isActive, true)))
+    const profile = await profileForPosition(tx, positionId)
     if (!profile) return { profile: null, people: [] }
     // Кандидат ещё не на этой должности — берём общее требование (без привязки к уровню посади).
     const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, null)
@@ -202,13 +206,20 @@ export async function promotionReadiness(ctx: Ctx, positionId: string, scope: st
 
 // ── Профиль → люди на должности (docs/19 §5.5) ───────────────────────
 
+/** Усі посади профілю (D-031): головна + додаткові; головна — завжди, навіть якщо зв'язків ще немає. */
+async function profilePositionIds(tx: TenantTx, profileId: string, headPositionId: string): Promise<string[]> {
+  const rows = await tx.select({ positionId: positionProfilePositions.positionId }).from(positionProfilePositions).where(eq(positionProfilePositions.profileId, profileId))
+  return [...new Set([headPositionId, ...rows.map(r => r.positionId)])]
+}
+
 /** «Застосувати до людей на посаді»: создаёт назначения обязательного контента профиля тем, у кого его нет. */
 export async function applyPositionProfile(ctx: Ctx, profileId: string): Promise<{ assignments: number, enrolled: number } | null> {
   const created = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [p] = await tx.select().from(positionProfiles).where(eq(positionProfiles.id, profileId))
     if (!p || !p.isActive) return null
     const items = p.mandatoryContent as { subjectType: string, subjectId: string, dueDays?: number }[]
-    const audience = { rules: [{ type: 'position', ids: [p.positionId] }], match: 'any' }
+    const positionIds = await profilePositionIds(tx, p.id, p.positionId)
+    const audience = { rules: [{ type: 'position', ids: positionIds }], match: 'any' }
     const ids: string[] = []
     for (const item of items) {
       const [existing] = await tx.select({ id: assignments.id }).from(assignments).where(and(eq(assignments.subjectId, item.subjectId), eq(assignments.kind, 'auto'), sql`${assignments.status} <> 'archived'`, sql`${assignments.audience}::text = ${JSON.stringify(audience)}`))
@@ -236,7 +247,8 @@ export async function profileCoverage(ctx: Ctx, profileId: string) {
     const [p] = await tx.select().from(positionProfiles).where(eq(positionProfiles.id, profileId))
     if (!p) return null
     const allReqs = p.competencyRequirements as Requirement[]
-    const people = await tx.select({ userId: userPlacements.userId, positionLevelId: userPlacements.positionLevelId }).from(userPlacements).where(and(eq(userPlacements.positionId, p.positionId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    const positionIds = await profilePositionIds(tx, p.id, p.positionId)
+    const people = await tx.select({ userId: userPlacements.userId, positionLevelId: userPlacements.positionLevelId }).from(userPlacements).where(and(inArray(userPlacements.positionId, positionIds), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
     let fit = 0
     const ids: string[] = []
     for (const u of people) {
@@ -293,7 +305,7 @@ export async function confirmAssignmentCompetencies(tx: TenantTx, tenantId: stri
     const [pl] = await tx.select({ positionId: userPlacements.positionId, positionLevelId: userPlacements.positionLevelId })
       .from(userPlacements).where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
     if (!pl) return 0
-    const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.positionId), eq(positionProfiles.isActive, true)))
+    const profile = await profileForPosition(tx, pl.positionId)
     if (!profile) return 0
     const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.positionLevelId)
       .filter(r => compIds.includes(r.competencyId))
@@ -317,7 +329,7 @@ export async function gapDetectedOnPlacement(tenantId: string, userId: string) {
   return withTenant(tenantId, null, async (tx) => {
     const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, manager_id: string | null, full_name: string }[]
     if (!pl?.manager_id) return 0
-    const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.position_id), eq(positionProfiles.isActive, true)))
+    const profile = await profileForPosition(tx, pl.position_id)
     if (!profile) return 0
     const levels = await currentLevels(tx, userId)
     const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.position_level_id)
@@ -357,7 +369,7 @@ export async function competencyExpiryScan(tenantId: string): Promise<{ warned: 
       // Истечение могло открыть критический разрыв по профилю должности — та же логика, что при смене должности (docs/19 §12).
       const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${e.user_id}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, manager_id: string | null, full_name: string }[]
       if (!pl?.manager_id) continue
-      const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.position_id), eq(positionProfiles.isActive, true)))
+      const profile = await profileForPosition(tx, pl.position_id)
       if (!profile) continue
       const req = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.position_level_id).find(r => r.competencyId === e.competency_id)
       if (!req?.isCritical) continue
@@ -429,7 +441,7 @@ export async function requestReportScan(tenantId: string): Promise<number> {
 
 /** Назначить обязательное обучение профиля целевой должности; при настроенной анкете — открыть цикл оценки готовности. */
 export async function careerApproved(tx: TenantTx, ctx: Ctx, r: { id: string, userId: string, targetPositionId: string }, formId: string | null) {
-  const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, r.targetPositionId), eq(positionProfiles.isActive, true)))
+  const profile = await profileForPosition(tx, r.targetPositionId)
   const items = (profile?.mandatoryContent ?? []) as { subjectType: string, subjectId: string, dueDays?: number }[]
   const ids: string[] = []
   for (const item of items) {

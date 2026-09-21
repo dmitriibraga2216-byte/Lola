@@ -968,6 +968,7 @@ session_registrations(session_id, user_id, status,  -- registered | waitlist | a
 ```sql
 competencies(name, description, levels jsonb)                    -- уровни 1..5 с поведением
 position_profiles(position_id, competency_id, required_level int)
+position_profile_positions(profile_id, position_id, unique(profile_id, position_id))   -- docs/33 D-031: усі посади профілю, головна — position_profiles.position_id
 position_profile_courses(position_id, course_id, due_days int, is_mandatory boolean)
 development_plans(user_id, period_from date, period_to date, owner_id, status)
 development_goals(plan_id, title, description, metric text, due_at, status,
@@ -982,8 +983,9 @@ Spec 19: `position_profiles` (в коде — `competency_requirements jsonb` в
 `use_position_levels boolean`, `goals jsonb`, `responsibilities jsonb` (`19` §14.2: «Цілі посади»,
 «Обов'язки посади»); элементы `competency_requirements[]` — необязательный `position_level_id`
 (разные требования для «Бариста» и «Бариста 2 рівня» в одном профиле, применяется только при
-`use_position_levels = true`). `[решение]`: один профиль — одна должность (`positionId`), «несколько
-посад на профіль» эталона (`19` §14.2) не делали — долг `28` «Spec 19».
+`use_position_levels = true`). Несколько должностей на профиль (`19` §14.2) — `position_profile_positions`
+(`debts-6`, D-031): `position_id` профиля — головна посада, остальные — строки связи; одна должность
+состоит не более чем в одном профиле.
 
 ## Оценка и чек-листы
 
@@ -1191,6 +1193,14 @@ task_status_log(
   source_kind text not null,      -- enrollment | attempt | complex_attempt | resource_view | meetup_attendance | notice_ack | survey_response | assessment_cycle | checklist_run | workshop_submission | program_enrollment | trajectory_enrollment
   source_id uuid, actor_id uuid,  -- строка-источник; кто зафиксировал (наставник, наблюдатель), null — сам/система
   request_context jsonb, created_at
+-- Протокол змін статусу завдань — это enrollment_events (payload {from, to, result}) ∪ attempt_results ∪ pass_events.
+-- Программы и траектории (docs/33 D-045): своя таблица событий по аналогии с enrollment_events
+pass_events(
+  id, tenant_id, subject_type text,   -- training_program | trajectory
+  subject_id uuid, enrollment_id uuid, user_id uuid,
+  event text,                          -- created | started | completed | failed | cancelled | reset
+  payload jsonb,                       -- {from, to, result, reason, source}
+  actor_id uuid, request_context jsonb, created_at
 )
 -- report_exports.active_role_id uuid — роль, активная в момент запроса выгрузки (`01` §1.9.2); область считается по ней.
 

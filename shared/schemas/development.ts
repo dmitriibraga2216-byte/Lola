@@ -30,6 +30,7 @@ export type PositionRequirement = z.infer<typeof positionRequirementSchema>
 
 export const positionProfileUpsertSchema = z.object({
   positionId: z.string().uuid(),
+  positionIds: z.array(z.string().uuid()).max(30).optional(), // додаткові посади профілю (docs/19 §14.2, docs/33 D-031); головна — positionId
   positionLevelId: z.string().uuid().nullable().optional(),
   description: z.string().max(2000).optional(),
   goals: z.unknown().optional(), // wysiwyg-блоки «Цілі посади»

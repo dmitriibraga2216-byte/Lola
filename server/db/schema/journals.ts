@@ -71,3 +71,27 @@ export const taskStatusLog = pgTable('task_status_log', {
   index().on(t.tenantId, t.userId, t.contentType, t.contentId, t.createdAt.desc()),
   index().on(t.tenantId, t.assignmentId),
 ])
+
+/**
+ * Протокол змін статусу проходження програми або траєкторії (docs/33 D-045; docs/22 §13.4).
+ * У записей на курс есть `enrollment_events`, у `program_enrollments`/`trajectory_enrollments` журнала
+ * не было — журнал `task-status` показывал только курсы и тесты. Одна таблица на оба типа:
+ * `subject_type` — training_program | trajectory; `event` — как у enrollment_events
+ * (created | started | completed | failed | cancelled | reset); `payload` — {from, to, result, reason, source}.
+ */
+export const passEvents = pgTable('pass_events', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  subjectType: text('subject_type').notNull(), // training_program | trajectory
+  subjectId: uuid('subject_id').notNull(), // programs.id | trajectories.id
+  enrollmentId: uuid('enrollment_id').notNull(), // program_enrollments.id | trajectory_enrollments.id
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  event: text('event').notNull(),
+  payload: jsonb('payload').notNull().default('{}'),
+  actorId: uuid('actor_id'), // null — системное событие (движок, сканер)
+  requestContext: jsonb('request_context'),
+}, t => [
+  index().on(t.tenantId, t.createdAt.desc()),
+  index().on(t.tenantId, t.userId, t.createdAt.desc()),
+  index().on(t.tenantId, t.subjectType, t.subjectId),
+])

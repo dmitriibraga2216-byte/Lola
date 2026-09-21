@@ -179,7 +179,7 @@ export type AckResult = { ok: true, ackedAt: Date } | { ok: false, code: 'not_fo
 
 /** «Ознайомлений» — один тап (docs/21 §14.5), отметка с датой и устройством; повтор — идемпотентен. */
 export async function acknowledge(ctx: Ctx, id: string): Promise<AckResult> {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  const r = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [n] = await tx.select({ id: notices.id, title: notices.title, kind: notices.kind }).from(notices).where(and(eq(notices.id, id), isNull(notices.deletedAt), eq(notices.status, 'published')))
     if (!n) return { ok: false as const, code: 'not_found' as const }
     const { userIds } = await noticeAudience(tx, id)
@@ -191,11 +191,14 @@ export async function acknowledge(ctx: Ctx, id: string): Promise<AckResult> {
       // docs/33 D-020: підтверджене оголошення — завершене завдання типу notice
       const { onTaskCompleted } = await import('./taskCompletion')
       await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'notice', contentId: id, status: 'done', sourceKind: 'notice_ack' })
-      return { ok: true as const, ackedAt: row.ackedAt }
+      return { ok: true as const, ackedAt: row.ackedAt, fresh: true }
     }
     const [existing] = await tx.select({ ackedAt: noticeAcks.ackedAt }).from(noticeAcks).where(and(eq(noticeAcks.noticeId, id), eq(noticeAcks.userId, ctx.actorId)))
-    return { ok: true as const, ackedAt: existing!.ackedAt }
+    return { ok: true as const, ackedAt: existing!.ackedAt, fresh: false }
   })
+  // docs/33 D-027: «Ознайомлений» — результат узла-объявления траектории (вне транзакции, как у курса и теста)
+  if (r.ok && r.fresh) import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, ctx.actorId, 'notice', id, { passed: true })).catch(err => console.error('trajectory notice hook', err))
+  return r.ok ? { ok: true, ackedAt: r.ackedAt } : r
 }
 
 /** Охват (`GET /notices/:id/coverage`): аудитория назначений против подтверждений, по точкам и поимённо. */

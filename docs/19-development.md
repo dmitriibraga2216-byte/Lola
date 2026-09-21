@@ -236,7 +236,7 @@
 | Метод | Путь |
 | --- | --- |
 | CRUD | `/competencies`, `/competency-categories` |
-| CRUD | `/position-profiles` |
+| CRUD | `/position-profiles` — `PUT` приймає `positionId` (головна посада) + `positionIds[]` (додаткові, docs/33 D-031); посада в іншому профілі — 409 `position_taken` |
 | POST | `/position-profiles/:id/apply` |
 | GET | `/development/me` |
 | CRUD | `/development/plans`, `/development/goals` |

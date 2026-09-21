@@ -2091,6 +2091,9 @@
     "responsibilities": "Position responsibilities",
     "usePositionLevels": "Use position levels for this profile",
     "usePositionLevelsHint": "One profile can set different requirements for, e.g., \"Barista\" and \"Barista level 2\"",
+    "alsoPositions": "Also for positions",
+    "alsoPositionsHint": "One profile can cover several positions: requirements and mandatory content apply to each of them.",
+    "alsoPositionsNone": "All other positions already have a profile.",
     "anyLevel": "Any position level",
     "sourceHint": "Where the level comes from:",
     "sourceHintExpiry": "An assessment older than 12 months is shown grey and does not count as confirmed",
@@ -2511,7 +2514,25 @@
     "cancelledOk": "Meetup cancelled",
     "reportAttendance": "Attendance",
     "reportTrainers": "By trainer",
-    "reportPeople": "Misses by person"
+    "reportPeople": "Misses by person",
+    "reportSessionsPeople": "Session participants",
+    "col": {
+      "session": "Session",
+      "regStatus": "Registration",
+      "presence": "Presence",
+      "markedBy": "Marked by",
+      "markedAt": "Marked at",
+      "minutes": "Minutes watched"
+    },
+    "reg": {
+      "registered": "Registered",
+      "waitlist": "Waitlisted",
+      "not_registered": "Not registered"
+    },
+    "presence": {
+      "came": "Present",
+      "missed": "Absent"
+    }
   },
   "cx": {
     "intro": "Complex test of {n} parts, pass score {pass}%",
@@ -3621,7 +3642,7 @@
     "pickHint": "The report is built for one task: pick it in the filter above.",
     "task": "Task",
     "anyStatus": "Any status",
-    "unsupported": "This content type has no report yet — pick a course, a training program or a test.",
+    "unsupported": "No report for notices — they have no completion, only the \"Acknowledged\" mark (coverage is on the notice page).",
     "exportXlsx": "Export xlsx",
     "recalc": "Recalculate",
     "recalcAll": "Recalculate all attempts",
@@ -3662,7 +3683,8 @@
       "attemptsUsed": "Attempts used",
       "attemptsAllowed": "Attempts allowed",
       "progress": "Progress",
-      "due": "Due"
+      "due": "Due",
+      "lastActivity": "Last activity"
     }
   },
   "summary": {

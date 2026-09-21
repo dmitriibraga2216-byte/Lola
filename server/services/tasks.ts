@@ -12,6 +12,7 @@ import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
 import { parseImportFile } from './importPeople'
 import { matchesConditions, ruleConditions } from './automation'
+import { logPassEvent } from './passEvents'
 import {
   DEFAULT_REMINDERS, METHOD_KEYS, paramsFor, parseTaskParams, remindersSchema,
 } from '../../shared/schemas/assignments'
@@ -291,16 +292,18 @@ export async function removeFromAudience(ctx: Ctx, id: string, userId: string, r
     await tx.update(assignments).set({ audience, exclude, updatedAt: new Date() }).where(eq(assignments.id, id))
 
     const now = new Date()
-    const rows = a.subjectType === 'course'
+    const rows: { id: string, programId?: string, status?: string }[] = a.subjectType === 'course'
       ? await tx.update(enrollments).set({ cancelledAt: now, cancelledBy: ctx.actorId, cancelReason: reason, updatedAt: now })
           .where(and(eq(enrollments.assignmentId, id), eq(enrollments.userId, userId), isNull(enrollments.cancelledAt))).returning({ id: enrollments.id })
       : a.subjectType === 'training_program'
         ? await tx.update(programEnrollments).set({ cancelledAt: now, updatedAt: now })
-            .where(and(eq(programEnrollments.assignmentId, id), eq(programEnrollments.userId, userId), isNull(programEnrollments.cancelledAt))).returning({ id: programEnrollments.id })
+            .where(and(eq(programEnrollments.assignmentId, id), eq(programEnrollments.userId, userId), isNull(programEnrollments.cancelledAt))).returning({ id: programEnrollments.id, programId: programEnrollments.programId, status: programEnrollments.status })
         : []
     if (a.subjectType === 'course' && rows.length) {
       await tx.insert(enrollmentEvents).values(rows.map(r => ({ tenantId: ctx.tenantId, enrollmentId: r.id, event: 'cancelled', payload: { reason }, actorId: ctx.actorId, requestContext: currentRequestContext() })))
     }
+    // docs/33 D-045: снятие с программы — в протокол статусов, как у курса
+    for (const r of rows) if (r.programId) await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: r.programId, enrollmentId: r.id, userId, event: 'cancelled', payload: { from: r.status, reason }, actorId: ctx.actorId })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.audience.remove', entity: 'assignment', entityId: id, after: { userId, cancelled: rows.length, reason } })
     return { ok: true, cancelled: rows.length }
   })
@@ -621,12 +624,13 @@ export async function applyOnLeaveForRules(tenantId: string): Promise<{ programs
       const cond = await ruleConditions(tx, rule)
       const unstartedOnly = rule.onLeaveCondition === 'cancel_unstarted'
       // Программы: open — не снятые, не завершённые
-      const progs = await tx.select({ id: programEnrollments.id, userId: programEnrollments.userId, status: programEnrollments.status }).from(programEnrollments)
+      const progs = await tx.select({ id: programEnrollments.id, userId: programEnrollments.userId, status: programEnrollments.status, programId: programEnrollments.programId }).from(programEnrollments)
         .where(and(eq(programEnrollments.ruleId, rule.id), isNull(programEnrollments.cancelledAt), inArray(programEnrollments.status, ['not_assigned', 'not_started', 'in_progress'])))
       for (const e of progs) {
         if (unstartedOnly && e.status === 'in_progress') continue
         if (await matchesConditions(tx, e.userId, cond)) continue
         await tx.update(programEnrollments).set({ cancelledAt: new Date(), updatedAt: new Date() }).where(eq(programEnrollments.id, e.id))
+        await logPassEvent(tx, tenantId, { subjectType: 'training_program', subjectId: e.programId, enrollmentId: e.id, userId: e.userId, event: 'cancelled', payload: { from: e.status, reason: `on_leave:${rule.onLeaveCondition}` } })
         await recordAudit(tx, { tenantId, actorId: null, action: 'program.on_leave', entity: 'program_enrollment', entityId: e.id, after: { userId: e.userId, onLeaveCondition: rule.onLeaveCondition, ruleId: rule.id } })
         programsN++
       }

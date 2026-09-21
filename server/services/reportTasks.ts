@@ -19,10 +19,20 @@ export type TaskReportFilter = TaskReportQuery & { scope?: string[] | null }
  * 2. «Кількість звернень» по датам — из журнала обращений к заданиям (`task_access_log`): звернень и людей;
  * 3. «Статистика» из шести строк: призначених · виконали успішно · не відкривали · виконали неуспішно · в процесі · на перевірці;
  * 4. таблица людей: единый каркас + правая часть по типу (для теста — кращий результат · результат · спроб · ліміт).
- * Поддержаны типы с записями прохождения: course, training_program, test. Остальные — `unsupported` (docs/28 «Spec 22»).
+ * Типы с записями прохождения: course, training_program, test — свои запросы; остальные восемь (docs/33 D-047) —
+ * по записям завершения модуля (`recordRows`): resource — task_access_log, workshop — workshop_submissions,
+ * poll — survey_participations, assessment — assessment_tasks (человек = оцениваемый), check_list — checklist_runs,
+ * meetup/webinar — meetup_session_registrations ∪ meetup_registrations, complex_test — complex_test_attempts.
+ * Люди — аудитория активных назначений плюс все, у кого есть запись; статус — по последней записи. `notice` — `unsupported`.
  */
 
-export const TASK_REPORT_TYPES: ContentType[] = ['course', 'training_program', 'test']
+export const TASK_REPORT_TYPES: ContentType[] = ['course', 'training_program', 'test', 'resource', 'complex_test', 'workshop', 'poll', 'assessment', 'check_list', 'meetup', 'webinar']
+
+/** Тип контента → таблица предмета (название) для шапки отчёта. */
+const SUBJECT_TABLE: Record<ContentType, SQL> = {
+  course: sql`courses`, training_program: sql`programs`, test: sql`quizzes`, resource: sql`resources`, complex_test: sql`complex_tests`,
+  workshop: sql`workshops`, poll: sql`surveys`, assessment: sql`assessment_forms`, check_list: sql`checklists`, meetup: sql`meetups`, webinar: sql`meetups`, notice: sql`notices`,
+}
 
 export interface TaskReport {
   contentType: ContentType
@@ -65,7 +75,7 @@ async function taskOf(tx: TenantTx, contentType: ContentType, taskId?: string, s
     : []
   if (taskId && !a) return null
   const sid = subjectId ?? (a ? String(a.subject_id) : undefined)
-  const table = contentType === 'course' ? sql`courses` : contentType === 'training_program' ? sql`programs` : sql`quizzes`
+  const table = SUBJECT_TABLE[contentType]
   const [s] = sid ? await tx.execute(sql`select id, title from ${table} where id = ${sid}::uuid`) as unknown as Row[] : []
   if (sid && !s) return null
   return {
@@ -156,6 +166,100 @@ async function testRows(tx: TenantTx, f: TaskReportFilter, quizId: string | unde
   return rows.filter(r => !r._drop)
 }
 
+type RecordType = Exclude<ContentType, 'course' | 'training_program' | 'test' | 'notice'>
+
+/**
+ * Записи завершения по типу (docs/33 D-047): одна строка на человека — последняя запись по предмету.
+ * Колонки: user_id · status (пять enrollment_status) · result (%) · completed_at · first_at · last_at · on_review · record_id.
+ * Статусы модулей сведены к пяти (CLAUDE.md п. 12): attended/accepted/passed/finished/submitted → done,
+ * missed/rejected/failed/expired → failed, черновик/в работе/на проверке → in_progress, иначе not_started.
+ */
+function recordsSql(contentType: RecordType, subjectId: string): SQL {
+  const sid = sql`${subjectId}::uuid`
+  switch (contentType) {
+    case 'resource':
+      // Ресурс — «ознайомлення»: первое открытие = done (записи прохождения у ресурса нет, docs/28 Spec 22)
+      return sql`
+        select t.user_id, 'done' as status, null::int as result, min(t.created_at) as completed_at, min(t.created_at) as first_at, max(t.created_at) as last_at, false as on_review, null::uuid as record_id
+        from task_access_log t where t.content_type = 'resource' and t.content_id = ${sid} group by t.user_id`
+    case 'workshop':
+      return sql`
+        select distinct on (w.user_id) w.user_id,
+               case w.status when 'accepted' then 'done' when 'rejected' then 'failed' when 'expired' then 'failed' when 'annulled' then 'failed' else 'in_progress' end as status,
+               round(w.score)::int as result, case when w.status = 'accepted' then coalesce(w.reviewed_at, w.updated_at) end as completed_at,
+               w.created_at as first_at, coalesce(w.reviewed_at, w.submitted_at, w.updated_at) as last_at, (w.status in ('submitted', 'in_review')) as on_review, w.id as record_id
+        from workshop_submissions w where w.workshop_id = ${sid} order by w.user_id, w.created_at desc`
+    case 'poll':
+      return sql`
+        select p.user_id, case p.status when 'submitted' then 'done' else 'in_progress' end as status, null::int as result, p.submitted_at as completed_at,
+               p.created_at as first_at, coalesce(p.submitted_at, p.updated_at) as last_at, false as on_review, p.id as record_id
+        from survey_participations p where p.survey_id = ${sid}`
+    case 'assessment':
+      // Оценка 360: человек = оцениваемый (subject) в циклах по анкете; done — цикл завершён, иначе — есть ли сданные анкеты
+      return sql`
+        select t.subject_user_id as user_id,
+               case when bool_or(c.status = 'finished') then 'done' when bool_or(t.status in ('in_progress', 'submitted')) then 'in_progress' else 'not_started' end as status,
+               null::int as result, max(c.finished_at) as completed_at, min(t.created_at) as first_at, max(coalesce(t.submitted_at, t.updated_at)) as last_at,
+               bool_or(c.status = 'calibration') as on_review, null::uuid as record_id
+        from assessment_tasks t join assessment_cycles c on c.id = t.cycle_id where c.form_id = ${sid} group by t.subject_user_id`
+    case 'check_list':
+      return sql`
+        select distinct on (r.subject_user_id) r.subject_user_id as user_id,
+               case when r.status = 'finished' and r.passed = false then 'failed' when r.status = 'finished' then 'done' else 'in_progress' end as status,
+               round(r.score)::int as result, r.finished_at as completed_at, r.started_at as first_at, coalesce(r.finished_at, r.updated_at) as last_at, false as on_review, r.id as record_id
+        from checklist_runs r where r.checklist_id = ${sid} and r.subject_user_id is not null order by r.subject_user_id, r.started_at desc`
+    case 'meetup':
+    case 'webinar':
+      // Сесії (meetup_session_registrations) — основной путь; старые записи на карточку (meetup_registrations) — тоже
+      return sql`
+        select distinct on (x.user_id) x.user_id, x.status, x.result, x.completed_at, x.first_at, x.last_at, false as on_review, x.record_id from (
+          select r.user_id, case r.status when 'attended' then 'done' when 'missed' then 'failed' when 'registered' then 'in_progress' when 'waitlist' then 'in_progress' else 'not_started' end as status,
+                 round(r.watch_pct)::int as result, case when r.status = 'attended' then coalesce(r.checked_in_at, r.updated_at) end as completed_at,
+                 r.registered_at as first_at, coalesce(r.checked_in_at, r.updated_at) as last_at, r.id as record_id, s.starts_at as at
+          from meetup_session_registrations r join meetup_sessions s on s.id = r.session_id where s.meetup_id = ${sid}
+          union all
+          select r.user_id, case r.status when 'attended' then 'done' when 'missed' then 'failed' when 'registered' then 'in_progress' when 'waitlist' then 'in_progress' else 'not_started' end,
+                 null::int, case when r.status = 'attended' then coalesce(r.checked_in_at, r.updated_at) end, r.registered_at, coalesce(r.checked_in_at, r.updated_at), r.id, m.starts_at
+          from meetup_registrations r join meetups m on m.id = r.meetup_id where r.meetup_id = ${sid}
+        ) x order by x.user_id, x.at desc nulls last`
+    case 'complex_test':
+      return sql`
+        select a.user_id,
+               case when bool_or(a.status = 'passed') then 'done' when (array_agg(a.status order by a.started_at desc))[1] in ('failed', 'expired') then 'failed' else 'in_progress' end as status,
+               max(round(a.score))::int as result, max(case when a.status = 'passed' then coalesce(a.finished_at, a.updated_at) end) as completed_at,
+               min(a.started_at) as first_at, max(coalesce(a.finished_at, a.started_at)) as last_at, false as on_review, (array_agg(a.id order by a.started_at desc))[1] as record_id
+        from complex_test_attempts a where a.complex_test_id = ${sid} group by a.user_id`
+  }
+}
+
+/** Часть 4 для остальных восьми типов: аудитория назначений ∪ люди с записью; статус — по записи, без записи — not_started. */
+async function recordRows(tx: TenantTx, contentType: RecordType, f: TaskReportFilter, subjectId: string | undefined): Promise<Row[]> {
+  if (!subjectId) return []
+  const assigned = await tx.execute(sql`select id, audience, exclude, created_at from assignments where subject_type = ${contentType} and subject_id = ${subjectId}::uuid and status = 'active' ${f.taskId ? sql`and id = ${f.taskId}::uuid` : sql``}`) as unknown as Row[]
+  const audience = new Map<string, { assignedAt: unknown }>()
+  for (const a of assigned) {
+    const ids = await resolveAudience(tx, a.audience as Audience, a.exclude as Audience | null)
+    for (const id of ids) if (!audience.has(id)) audience.set(id, { assignedAt: a.created_at })
+  }
+  const ids = [...audience.keys()]
+  const idList = ids.length ? sql`select unnest(array[${sql.join(ids.map(i => sql`${i}::uuid`), sql`, `)}])` : sql`select null::uuid where false`
+  const rows = await tx.execute(sql`
+    with rec as (${recordsSql(contentType, subjectId)}),
+    people as (select id as user_id from (${idList}) x(id) union select user_id from rec)
+    select ${frameSelect()},
+           ${frameTail({ assignedAt: sql`null::timestamptz`, completedAt: sql`rec.completed_at`, status: sql`coalesce(rec.status, 'not_started')`, result: sql`rec.result` })},
+           rec.first_at, rec.last_at as last_activity_at, coalesce(rec.on_review, false) as on_review, rec.record_id, 'standalone' as context, null::text as context_title
+    from people pe join users u on u.id = pe.user_id ${frameJoins()}
+    left join rec on rec.user_id = u.id
+    where true ${frameWhere(f)}
+    order by u.full_name limit 5000`) as unknown as Row[]
+  for (const r of rows) {
+    r.assigned_at = audience.get(String(r.user_id))?.assignedAt ?? r.first_at ?? null
+    if (f.status && r.status !== f.status) r._drop = true
+  }
+  return rows.filter(r => !r._drop)
+}
+
 export async function taskReport(ctx: Ctx, contentType: ContentType, f: TaskReportFilter): Promise<TaskReport | { error: 'unsupported' | 'not_found' }> {
   if (!TASK_REPORT_TYPES.includes(contentType)) return { error: 'unsupported' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -164,7 +268,9 @@ export async function taskReport(ctx: Ctx, contentType: ContentType, f: TaskRepo
     const subjectId = head.subject?.id
     const rows = contentType === 'test'
       ? await testRows(tx, f, subjectId)
-      : (await tx.execute(enrollmentRows(contentType as 'course' | 'training_program', f))) as unknown as Row[]
+      : contentType === 'course' || contentType === 'training_program'
+        ? (await tx.execute(enrollmentRows(contentType, f))) as unknown as Row[]
+        : await recordRows(tx, contentType as RecordType, f, subjectId)
     const accesses = await accessesOf(tx, contentType, { subjectId, taskId: f.taskId, from: f.from, to: f.to })
     return { contentType, subject: head.subject, task: head.task, overview: overviewOf(rows), accesses, stats: statsOf(rows), rows, period: { from: f.from, to: f.to } }
   })
@@ -174,5 +280,5 @@ export async function taskReport(ctx: Ctx, contentType: ContentType, f: TaskRepo
 export async function taskReportRows(ctx: Ctx, contentType: ContentType, f: TaskReportFilter): Promise<Row[]> {
   const r = await taskReport(ctx, contentType, f)
   if ('error' in r) return []
-  return frameFirst(r.rows.map(({ enrollment_id: _e, last_attempt_id: _l, on_review: _o, first_at: _f, ...rest }) => rest))
+  return frameFirst(r.rows.map(({ enrollment_id: _e, last_attempt_id: _l, on_review: _o, first_at: _f, record_id: _r, ...rest }) => rest))
 }

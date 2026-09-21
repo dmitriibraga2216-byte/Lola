@@ -99,7 +99,7 @@ describe.skipIf(!BUILT)('Spec 22 по HTTP', () => {
     expect(r.accesses.length).toBe(1)
     for (const k of ['full_name', 'position', 'city', 'unit', 'tags', 'assigned_at', 'completed_at', 'status', 'result', 'context']) expect(k in r.rows[0]!).toBe(true)
     expect((await fetch(`${BASE}/api/v1/reports/tasks/course?taskId=${taskId}&locationId=${otherLocationId}`, { headers: { cookie } })).status).toBe(404)
-    expect((await fetch(`${BASE}/api/v1/reports/tasks/poll`, { headers: { cookie } })).status).toBe(422)
+    expect((await fetch(`${BASE}/api/v1/reports/tasks/notice`, { headers: { cookie } })).status).toBe(422)
     expect((await fetch(`${BASE}/api/v1/reports/tasks/nope`, { headers: { cookie } })).status).toBe(404)
     const xlsx = await fetch(`${BASE}/api/v1/reports/tasks/course?taskId=${taskId}&format=xlsx`, { headers: { cookie } })
     expect(xlsx.status).toBe(200)

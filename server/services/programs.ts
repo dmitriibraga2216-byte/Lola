@@ -7,6 +7,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { countRequired } from './learning'
 import { enqueueNotification } from './notifications'
+import { eventForTransition, logPassEvent } from './passEvents'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -316,6 +317,8 @@ export async function enrollProgram(tx: TenantTx, tenantId: string, programId: s
     availableFrom: opts.availableFrom ?? null, dueAt: p.dueDays ? new Date(Date.now() + p.dueDays * 86_400_000) : null, status: 'not_started',
   }).onConflictDoNothing().returning()
   if (!enr) { const [again] = await tx.select({ id: programEnrollments.id }).from(programEnrollments).where(and(eq(programEnrollments.programId, programId), eq(programEnrollments.userId, userId), eq(programEnrollments.programVersion, p.version))); return { ok: true, enrollmentId: again!.id, created: false } }
+  // docs/33 D-045: протокол статусов программы — как enrollment_events у курса
+  await logPassEvent(tx, tenantId, { subjectType: 'training_program', subjectId: programId, enrollmentId: enr.id, userId, event: 'created', payload: { from: null, to: 'not_started', source: opts.source }, actorId: opts.actorId ?? null })
   if (!opts.availableFrom || opts.availableFrom.getTime() <= Date.now()) await openEnrollment(tx, tenantId, enr.id)
   await recordAudit(tx, { tenantId, actorId: opts.actorId ?? null, action: 'program.enroll', entity: 'program_enrollment', entityId: enr.id, after: { programId, userId, source: opts.source } })
   await enqueueNotification(tx, { tenantId, userId, code: 'program_assigned', payload: { title: p.title, due: p.dueDays ? new Date(Date.now() + p.dueDays * 86_400_000).toISOString() : '' }, dedupKey: `prog_assigned:${enr.id}` })
@@ -340,6 +343,8 @@ async function persistState(tx: TenantTx, tenantId: string, enr: typeof programE
   const now = new Date()
   const status = r.completed ? 'done' : (enr.status === 'not_started' && Object.values(r.state).some(s => s.status !== 'locked' && s.via !== 'prior' && s.status !== 'available') && done > 0) ? 'in_progress' : enr.status === 'completed' ? 'completed' : enr.status
   await tx.update(programEnrollments).set({ nodesState: r.state, progressPct: String(pct), currentNodeId: current?.id ?? null, status, availableFrom: null, ...(r.completed && !enr.completedAt ? { completedAt: now } : {}), lastActivityAt: now, updatedAt: now }).where(eq(programEnrollments.id, enr.id))
+  const ev = eventForTransition(enr.status, status)
+  if (ev) await logPassEvent(tx, tenantId, { subjectType: 'training_program', subjectId: p.id, enrollmentId: enr.id, userId: enr.userId, event: ev, payload: { from: enr.status, to: status, result: r.completed ? 100 : pct } })
   for (const id of r.unlocked) {
     const n = nodes.find(x => x.id === id)!
     if (Object.keys(enr.nodesState as NodesState).length) await enqueueNotification(tx, { tenantId, userId: enr.userId, code: 'program_node_unlocked', payload: { title: p.title, step: n.titleOverride ?? '' }, dedupKey: `prog_unlock:${enr.id}:${id}` })
@@ -407,6 +412,7 @@ export async function openNode(ctx: Ctx, enrollmentId: string, nodeId: string): 
     else if (n.itemType === 'meetup' || n.itemType === 'webinar') to = `/learn/meetups/${n.itemId}`
     else if (n.itemType === 'resource') to = `/learn/knowledge/lesson/${n.itemId}`
     await tx.update(programEnrollments).set({ nodesState: state, status: enr.status === 'not_started' ? 'in_progress' : enr.status, startedAt: enr.startedAt ?? new Date(), lastActivityAt: new Date(), currentNodeId: nodeId, updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
+    if (enr.status === 'not_started') await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: enr.programId, enrollmentId, userId: enr.userId, event: 'started', payload: { from: 'not_started', to: 'in_progress', result: Number(enr.progressPct) }, actorId: ctx.actorId })
     return { ok: true as const, to }
   })
 }
@@ -462,7 +468,8 @@ export async function selfEnrollProgram(ctx: Ctx, programId: string): Promise<En
     if (!p) return { ok: false as const, code: 'not_found' as const }
     if (p.assignmentMode.includes('catalog_free')) return enrollProgram(tx, ctx.tenantId, programId, ctx.actorId, { source: 'catalog', actorId: ctx.actorId })
     if (p.assignmentMode.includes('catalog_request')) {
-      await tx.insert(programEnrollments).values({ tenantId: ctx.tenantId, programId, userId: ctx.actorId, programVersion: p.version, source: 'catalog', status: 'not_assigned', requestedAt: new Date() }).onConflictDoNothing()
+      const [req] = await tx.insert(programEnrollments).values({ tenantId: ctx.tenantId, programId, userId: ctx.actorId, programVersion: p.version, source: 'catalog', status: 'not_assigned', requestedAt: new Date() }).onConflictDoNothing().returning({ id: programEnrollments.id })
+      if (req) await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: programId, enrollmentId: req.id, userId: ctx.actorId, event: 'created', payload: { from: null, to: 'not_assigned', source: 'catalog' }, actorId: ctx.actorId })
       const mgr = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${ctx.actorId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
       if (mgr[0]?.manager_id) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr[0].manager_id, code: 'program_request', payload: { title: p.title, programId }, dedupKey: `prog_req:${programId}:${ctx.actorId}` })
       return { ok: false as const, code: 'requested' as const }
@@ -479,11 +486,13 @@ export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boo
     if (!enr) return null
     if (!approve) {
       await tx.update(programEnrollments).set({ cancelledAt: new Date(), cancelReason: reason ?? null, updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
+      await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: enr.programId, enrollmentId, userId: enr.userId, event: 'cancelled', payload: { from: 'not_assigned', reason: reason ?? 'request_rejected' }, actorId: ctx.actorId })
       await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'program_enrollment.request.reject', entity: 'program_enrollment', entityId: enrollmentId, after: { userId: enr.userId, reason } })
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: enr.userId, code: 'catalog_request_rejected', payload: { reason: reason ?? null }, dedupKey: `catalog_request_rejected:${enrollmentId}` })
       return { status: 'cancelled' }
     }
     await tx.update(programEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
+    await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: enr.programId, enrollmentId, userId: enr.userId, event: 'created', payload: { from: 'not_assigned', to: 'not_started', source: 'catalog' }, actorId: ctx.actorId })
     await openEnrollment(tx, ctx.tenantId, enrollmentId)
     const [p] = await tx.select({ title: programs.title }).from(programs).where(eq(programs.id, enr.programId))
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'program_enrollment.request.approve', entity: 'program_enrollment', entityId: enrollmentId, after: { userId: enr.userId } })
@@ -550,7 +559,9 @@ export async function programScan(tenantId: string): Promise<{ opened: number, s
     const soon = await tx.execute(sql`select e.id, e.user_id, p.title, e.due_at from program_enrollments e join programs p on p.id = e.program_id where e.status in ('not_started','in_progress') and e.due_at between now() and now() + interval '3 days'`) as unknown as { id: string, user_id: string, title: string, due_at: string }[]
     for (const s of soon) if (await enqueueNotification(tx, { tenantId, userId: s.user_id, code: 'program_due_soon', payload: { title: s.title, due: s.due_at }, dedupKey: `prog_due:${s.id}:${day}` })) out.dueSoon++
     // Автозакрытие по сроку: failed через 14 дней просрочки (как у записей на курс, dueScan)
-    await tx.update(programEnrollments).set({ status: 'failed', updatedAt: new Date() }).where(and(inArray(programEnrollments.status, ['not_started', 'in_progress']), isNull(programEnrollments.cancelledAt), sql`${programEnrollments.dueAt} < now() - interval '14 days'`))
+    const expired = await tx.update(programEnrollments).set({ status: 'failed', updatedAt: new Date() }).where(and(inArray(programEnrollments.status, ['not_started', 'in_progress']), isNull(programEnrollments.cancelledAt), sql`${programEnrollments.dueAt} < now() - interval '14 days'`))
+      .returning({ id: programEnrollments.id, programId: programEnrollments.programId, userId: programEnrollments.userId, progressPct: programEnrollments.progressPct })
+    for (const e of expired) await logPassEvent(tx, tenantId, { subjectType: 'training_program', subjectId: e.programId, enrollmentId: e.id, userId: e.userId, event: 'failed', payload: { to: 'failed', result: Number(e.progressPct), reason: 'expired' } })
   })
   return out
 }

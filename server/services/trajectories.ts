@@ -1,13 +1,14 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
-  assignments, automationRules, enrollments, locations, trajectories, trajectoryEdges, trajectoryEnrollments,
+  assignments, automationRules, enrollments, locations, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
   trajectoryNodeStates, trajectoryNodes, userPlacements, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
+import { eventForTransition, logPassEvent } from './passEvents'
 import { findContent } from './taskContent'
 import { createAssignmentTx, expandAssignment } from './assignments'
 import { assignmentCreateSchema } from '../../shared/schemas/assignments'
@@ -351,6 +352,8 @@ export async function enrollTx(tx: TenantTx, tenantId: string, trajectoryId: str
       availableFrom: opts.availableFrom ?? null, startedAt: null, completedAt: null, cancelledAt: null, cancelReason: null, progressPct: '0', updatedAt: new Date(),
     }).where(eq(trajectoryEnrollments.id, prev.id)).returning({ id: trajectoryEnrollments.id })
     await recordAudit(tx, { tenantId, actorId: opts.actorId, action: 'trajectory.enroll', entity: 'trajectory_enrollment', entityId: row!.id, after: { userId, trajectoryId, source: opts.source, repeat: true } })
+    // docs/33 D-045: протокол статусов траектории — как enrollment_events у курса
+    await logPassEvent(tx, tenantId, { subjectType: 'trajectory', subjectId: trajectoryId, enrollmentId: row!.id, userId, event: 'reset', payload: { from: prev.status, to: opts.requested ? 'not_assigned' : 'not_started', source: opts.source }, actorId: opts.actorId })
     return { ok: true, enrollmentId: row!.id, created: true, started: false }
   }
   const [row] = await tx.insert(trajectoryEnrollments).values({
@@ -358,6 +361,7 @@ export async function enrollTx(tx: TenantTx, tenantId: string, trajectoryId: str
     requestedAt: opts.requested ? new Date() : null, availableFrom: opts.availableFrom ?? null,
   }).returning({ id: trajectoryEnrollments.id })
   await recordAudit(tx, { tenantId, actorId: opts.actorId, action: 'trajectory.enroll', entity: 'trajectory_enrollment', entityId: row!.id, after: { userId, trajectoryId, source: opts.source, availableFrom: opts.availableFrom ?? null } })
+  await logPassEvent(tx, tenantId, { subjectType: 'trajectory', subjectId: trajectoryId, enrollmentId: row!.id, userId, event: 'created', payload: { from: null, to: opts.requested ? 'not_assigned' : 'not_started', source: opts.source }, actorId: opts.actorId })
   if (!opts.requested) await enqueueNotification(tx, { tenantId, userId, code: 'trajectory_assigned', payload: { title: t.title, availableFrom: opts.availableFrom?.toISOString() ?? null }, dedupKey: `trajectory_assigned:${row!.id}`, refType: 'trajectory_enrollment', refId: row!.id })
   return { ok: true, enrollmentId: row!.id, created: true, started: false }
 }
@@ -435,9 +439,13 @@ export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boo
     const [e] = await tx.select().from(trajectoryEnrollments).where(eq(trajectoryEnrollments.id, enrollmentId))
     if (!e) return { ok: false as const, code: 'not_found' as const }
     if (e.status !== 'not_assigned' || !e.requestedAt || e.cancelledAt) return { ok: false as const, code: 'not_requested' as const }
-    if (approve) await tx.update(trajectoryEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
+    if (approve) {
+      await tx.update(trajectoryEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
+      await logPassEvent(tx, ctx.tenantId, { subjectType: 'trajectory', subjectId: e.trajectoryId, enrollmentId, userId: e.userId, event: 'created', payload: { from: 'not_assigned', to: 'not_started', source: e.source }, actorId: ctx.actorId })
+    }
     else {
       await tx.update(trajectoryEnrollments).set({ cancelledAt: new Date(), cancelReason: reason ?? 'request_rejected', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
+      await logPassEvent(tx, ctx.tenantId, { subjectType: 'trajectory', subjectId: e.trajectoryId, enrollmentId, userId: e.userId, event: 'cancelled', payload: { from: 'not_assigned', reason: reason ?? 'request_rejected' }, actorId: ctx.actorId })
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: e.userId, code: 'catalog_request_rejected', payload: { reason: reason ?? null }, dedupKey: `catalog_request_rejected:${enrollmentId}` })
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: approve ? 'trajectory.request.approve' : 'trajectory.request.reject', entity: 'trajectory_enrollment', entityId: enrollmentId, after: { userId: e.userId, reason } })
@@ -504,6 +512,11 @@ async function activate(run: Run, node: Node): Promise<void> {
       await setState(run, node.id, { status: 'available', activatedAt: now })
       const assignmentId = await createNodeAssignment(run, node)
       await setState(run, node.id, { assignmentId })
+      // docs/33 D-027: узел-объявление — прохождение по notice_acks; уже подтверждённое объявление зачитывается сразу
+      if (assignmentId && node.contentType === 'notice' && node.contentId && await noticeAcked(run.tx, node.contentId, run.enr.userId)) {
+        await setState(run, node.id, { status: 'done', passed: true, finishedAt: now })
+        return complete(run, node)
+      }
       await enqueueNotification(run.tx, { tenantId: run.tenantId, userId: run.enr.userId, code: 'trajectory_next_unlocked', payload: { title: run.t.title, step: node.title ?? null }, dedupKey: `trajectory_next:${run.enr.id}:${node.id}`, refType: 'trajectory_enrollment', refId: run.enr.id })
       return
     }
@@ -542,6 +555,12 @@ async function activate(run: Run, node: Node): Promise<void> {
       return
     }
   }
+}
+
+/** Подтверждено ли объявление человеком (docs/21 §14.5 «Ознайомлений») — прохождение узла-объявления (D-027). */
+async function noticeAcked(tx: TenantTx, noticeId: string, userId: string): Promise<boolean> {
+  const [row] = await tx.select({ id: noticeAcks.id }).from(noticeAcks).where(and(eq(noticeAcks.noticeId, noticeId), eq(noticeAcks.userId, userId)))
+  return !!row
 }
 
 /** Узел выполнен → активировать следующие (кроме branch — он выбирает ветку сам). */
@@ -627,6 +646,8 @@ async function settle(run: Run): Promise<void> {
   else if (!active && run.enr.status !== 'not_assigned') status = 'failed' // некуда идти: доступ закрыт или контент недоступен
   else if (run.enr.status === 'not_started' || run.enr.status === 'not_assigned') status = 'in_progress'
   await run.tx.update(trajectoryEnrollments).set({ status, completedAt, progressPct: String(finished ? 100 : pct), lastActivityAt: now, updatedAt: now }).where(eq(trajectoryEnrollments.id, run.enr.id))
+  const ev = eventForTransition(run.enr.status, status)
+  if (ev) await logPassEvent(run.tx, run.tenantId, { subjectType: 'trajectory', subjectId: run.t.id, enrollmentId: run.enr.id, userId: run.enr.userId, event: ev, payload: { from: run.enr.status, to: status, result: finished ? 100 : pct }, actorId: run.actorId })
   if (finished && run.enr.status !== 'done') {
     await enqueueNotification(run.tx, { tenantId: run.tenantId, userId: run.enr.userId, code: 'trajectory_finished', payload: { title: run.t.title }, dedupKey: `trajectory_finished:${run.enr.id}`, refType: 'trajectory_enrollment', refId: run.enr.id })
     await recordAudit(run.tx, { tenantId: run.tenantId, actorId: null, action: 'trajectory.finished', entity: 'trajectory_enrollment', entityId: run.enr.id, after: { userId: run.enr.userId } })
@@ -654,6 +675,7 @@ export async function startEnrollment(tenantId: string, enrollmentId: string, ac
     if (!run || run.enr.cancelledAt || run.enr.status === 'not_assigned' || run.enr.startedAt) return false
     if (run.enr.availableFrom && run.enr.availableFrom > new Date()) return false
     await tx.update(trajectoryEnrollments).set({ startedAt: new Date(), status: 'in_progress', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
+    await logPassEvent(tx, tenantId, { subjectType: 'trajectory', subjectId: run.t.id, enrollmentId, userId: run.enr.userId, event: 'started', payload: { from: run.enr.status, to: 'in_progress', result: 0 }, actorId })
     run.enr = { ...run.enr, startedAt: new Date(), status: 'in_progress' }
     const start = run.g.nodes.find(n => n.kind === 'start')
     if (start) await activate(run, start)
@@ -664,7 +686,7 @@ export async function startEnrollment(tenantId: string, enrollmentId: string, ac
   return ok
 }
 
-const RESULT_TYPE: Record<string, ContentType> = { course: 'course', quiz: 'test', test: 'test', workshop: 'workshop', meetup: 'meetup', webinar: 'webinar', resource: 'resource', complex_test: 'complex_test', training_program: 'training_program', poll: 'poll', assessment: 'assessment', check_list: 'check_list' }
+const RESULT_TYPE: Record<string, ContentType> = { course: 'course', quiz: 'test', test: 'test', workshop: 'workshop', meetup: 'meetup', webinar: 'webinar', resource: 'resource', complex_test: 'complex_test', training_program: 'training_program', poll: 'poll', assessment: 'assessment', check_list: 'check_list', notice: 'notice' }
 
 /**
  * Результат по контенту у человека (вызывается там же, где programs.onItemResult).
@@ -786,6 +808,7 @@ export async function cancelTrajectoryEnrollment(tenantId: string, enrollmentId:
     if (!e || e.cancelledAt || e.status === 'done') return false
     const now = new Date()
     await tx.update(trajectoryEnrollments).set({ cancelledAt: now, cancelReason: opts.reason, updatedAt: now }).where(eq(trajectoryEnrollments.id, enrollmentId))
+    await logPassEvent(tx, tenantId, { subjectType: 'trajectory', subjectId: e.trajectoryId, enrollmentId, userId: e.userId, event: 'cancelled', payload: { from: e.status, result: Number(e.progressPct), reason: opts.reason }, actorId: opts.actorId })
     const open = await tx.select().from(trajectoryNodeStates).where(and(eq(trajectoryNodeStates.enrollmentId, enrollmentId), inArray(trajectoryNodeStates.status, ['available', 'in_progress'])))
     for (const s of open) {
       await tx.update(trajectoryNodeStates).set({ status: 'skipped', reason: 'cancelled', finishedAt: now, firesAt: null, updatedAt: now }).where(eq(trajectoryNodeStates.id, s.id))

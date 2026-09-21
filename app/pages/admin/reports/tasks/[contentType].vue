@@ -12,8 +12,8 @@ const router = useRouter()
 const { api } = useApi()
 const { hasScope } = useAuth()
 
-type CT = 'course' | 'training_program' | 'test'
-type Row = Record<string, unknown> & { user_id: string, status: string | null, result: number | null, last_attempt_id?: string | null, best_pct?: number | null, attempts_used?: number, attempts_allowed?: number | null, last_attempt_at?: string | null, progress_pct?: number | null, due_at?: string | null, overdue?: boolean, context?: string, context_title?: string | null }
+type CT = 'course' | 'training_program' | 'test' | 'resource' | 'complex_test' | 'workshop' | 'poll' | 'assessment' | 'check_list' | 'meetup' | 'webinar'
+type Row = Record<string, unknown> & { user_id: string, status: string | null, result: number | null, last_attempt_id?: string | null, best_pct?: number | null, attempts_used?: number, attempts_allowed?: number | null, last_attempt_at?: string | null, last_activity_at?: string | null, progress_pct?: number | null, due_at?: string | null, overdue?: boolean, context?: string, context_title?: string | null }
 interface Report {
   contentType: CT
   subject: { id: string, title: string } | null
@@ -23,9 +23,11 @@ interface Report {
   stats: { assigned: number, doneOk: number, notOpened: number, doneFail: number, inProgress: number, onReview: number }
   rows: Row[]
 }
-const SUPPORTED: CT[] = ['course', 'training_program', 'test']
+// docs/33 D-047: усі типи, крім оголошення (у нього немає прохождення — лише підтвердження)
+const SUPPORTED: CT[] = ['course', 'training_program', 'test', 'resource', 'complex_test', 'workshop', 'poll', 'assessment', 'check_list', 'meetup', 'webinar']
 const contentType = computed(() => String(route.params.contentType) as CT)
 const supported = computed(() => SUPPORTED.includes(contentType.value))
+const byRecords = computed(() => !['course', 'training_program', 'test'].includes(contentType.value))
 const tasks = ref<{ id: string, title: string, assigned: number }[]>([])
 const locations = ref<{ id: string, name: string }[]>([])
 const report = ref<Report | null>(null)
@@ -197,6 +199,9 @@ const title = computed(() => report.value?.task?.title ?? report.value?.subject?
                   <th class="num">{{ t('taskReport.col.attemptsAllowed') }}</th>
                   <th />
                 </template>
+                <template v-else-if="byRecords">
+                  <th>{{ t('taskReport.col.lastActivity') }}</th>
+                </template>
                 <template v-else>
                   <th class="num">{{ t('taskReport.col.progress') }}</th>
                   <th>{{ t('taskReport.col.due') }}</th>
@@ -213,6 +218,9 @@ const title = computed(() => report.value?.task?.title ?? report.value?.subject?
                   <td class="num">{{ r.attempts_used ?? 0 }}</td>
                   <td class="num">{{ r.attempts_allowed ? r.attempts_allowed : '∞' }}</td>
                   <td><button v-if="r.last_attempt_id && hasScope('question.manage')" class="btn ghost small" :disabled="recalculating === r.user_id" @click="recalc(r)">{{ t('taskReport.recalc') }}</button></td>
+                </template>
+                <template v-else-if="byRecords">
+                  <td>{{ dateOf(r.last_activity_at) }}</td>
                 </template>
                 <template v-else>
                   <td class="num">{{ r.progress_pct ?? 0 }}%</td>

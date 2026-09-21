@@ -8,6 +8,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { completeLesson } from './learning'
+import { frameFirst, frameJoins, frameSelect, frameTail, frameWhere, periodSql } from './reportFrame'
 import type { SessionAttendanceInput, SessionCreateInput } from '../../shared/schemas/meetupSessions'
 
 /**
@@ -467,9 +468,21 @@ export async function reminderScan(tenantId: string): Promise<number> {
 
 // ── Звіт (docs/18 §9, Г-18.2) ─────────────────────────────────────────────
 
-export async function attendanceReport(ctx: Ctx, filter: { from?: string, to?: string } = {}) {
+export interface SessionReportFilter { from?: string, to?: string, scope?: string[] | null, meetupId?: string, sessionId?: string }
+
+/**
+ * Звіт по сесіях занять і вебінарів (docs/18 §9, Г-18.2; docs/33 D-030) — на єдиному каркасі звітів (docs/22 §13.3).
+ * `sessions` — зведення по сесіях (як і раніше); `people` — рядки «людина × сесія»: перші колонки — каркас
+ * (ПІБ · Посада · Місто · Підрозділ · Мітки · Призначено · Завершено · Стан · Результат), далі Г-18.2:
+ * очне — Сесія (дата і місце) · Статус реєстрації · Присутність · Хто відмітив · Час відмітки;
+ * вебінар — Сесія · Час входу · Час виходу · Хвилин у трансляції · Доля від тривалості.
+ * Стан каркаса: attended → done, missed → failed, решта — not_started; результат — доля перегляду вебінару.
+ * «Запізнився» в реєстрації немає (Г-18.1: статуси registered|waitlist|attended|missed|cancelled|excused) — не показуємо.
+ */
+export async function attendanceReport(ctx: Ctx, filter: SessionReportFilter = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const where = sql`s.status in ('finished','ongoing','cancelled') ${filter.from ? sql`and s.starts_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and s.starts_at < (${filter.to}::date + 1)` : sql``}`
+    const bySession = sql`${filter.meetupId ? sql`and s.meetup_id = ${filter.meetupId}::uuid` : sql``} ${filter.sessionId ? sql`and s.id = ${filter.sessionId}::uuid` : sql``}`
+    const where = sql`s.status in ('finished','ongoing','cancelled') ${periodSql(sql`s.starts_at`, filter)} ${bySession}`
     const rows = await tx.execute(sql`
       select s.id, m.title, m.kind, s.starts_at, s.status, s.trainer_ids,
              (select count(*)::int from meetup_session_registrations r where r.session_id = s.id and r.status in ('registered','attended','missed','excused')) as registered,
@@ -477,8 +490,37 @@ export async function attendanceReport(ctx: Ctx, filter: { from?: string, to?: s
              (select string_agg(u.full_name, ', ') from meetup_session_registrations r join users u on u.id = r.user_id where r.session_id = s.id and r.status = 'missed') as missed_names
       from meetup_sessions s join meetups m on m.id = s.meetup_id where ${where} order by s.starts_at desc limit 300
     `) as unknown as Record<string, unknown>[]
-    return { sessions: rows }
+    const people = await tx.execute(sql`
+      select ${frameSelect()},
+             ${frameTail({
+               assignedAt: sql`r.registered_at`,
+               completedAt: sql`case when r.status = 'attended' then coalesce(r.checked_in_at, r.updated_at) end`,
+               status: sql`case r.status when 'attended' then 'done' when 'missed' then 'failed' else 'not_started' end`,
+               result: sql`case when m.kind = 'webinar' then round(r.watch_pct)::int end`,
+             })},
+             s.id as session_id, m.id as meetup_id, m.title as session_title, m.kind, s.starts_at as session_at, s.ends_at as session_ends_at,
+             nullif(concat_ws(', ', sl.name, s.room, s.address), '') as session_place,
+             case r.status when 'waitlist' then 'waitlist' when 'cancelled' then 'not_registered' else 'registered' end as registration_status,
+             case r.status when 'attended' then 'came' when 'missed' then 'missed' end as presence,
+             mb.full_name as marked_by, r.checked_in_at as marked_at, r.check_in_method,
+             case when m.kind = 'webinar' then r.registered_at end as joined_at, case when m.kind = 'webinar' then r.last_tick_at end as left_at,
+             case when m.kind = 'webinar' then round(r.seconds_watched / 60.0)::int end as minutes_watched, r.watch_pct
+      from meetup_session_registrations r
+      join meetup_sessions s on s.id = r.session_id join meetups m on m.id = s.meetup_id
+      join users u on u.id = r.user_id ${frameJoins()}
+      left join locations sl on sl.id = s.location_id
+      left join users mb on mb.id = r.checked_in_by
+      where ${where} ${frameWhere({ scope: filter.scope ?? null })}
+      order by s.starts_at desc, u.full_name limit 5000
+    `) as unknown as Record<string, unknown>[]
+    return { sessions: rows, people }
   })
+}
+
+/** Рядки «людина × сесія» для вивантаження: каркас першими (docs/22 §13.3). */
+export async function attendanceReportRows(ctx: Ctx, filter: SessionReportFilter = {}) {
+  const r = await attendanceReport(ctx, filter)
+  return frameFirst(r.people.map(({ session_id: _s, meetup_id: _m, ...rest }) => rest))
 }
 
 export function toIcs(s: { id: string, title: string, startsAt: Date, endsAt: Date, room?: string | null, address?: string | null, location?: { name: string } | null }): string {

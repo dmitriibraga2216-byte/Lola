@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import {
   competencies, competencyAssessments, courses, developmentGoals, developmentPlans, goalComments, goalStatusLog,
-  goalStatuses, positionProfiles, positions, userPlacements, users,
+  goalStatuses, positionProfilePositions, positionProfiles, positions, userPlacements, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -89,32 +89,62 @@ export async function updateCompetency(ctx: Ctx, id: string, input: Partial<{ na
 
 // ── Профили должностей ─────────────────────────────────────────────────
 
+/** Посади профілю (docs/33 D-031): усі, включно з головною (першою) — для «Список посад» (docs/19 §14.2). */
+const profilePositionsSql = sql<string[]>`coalesce((select array_agg(pp.position_id order by (pp.position_id = ${positionProfiles.positionId}) desc, pp.created_at) from ${positionProfilePositions} pp where pp.profile_id = ${positionProfiles.id}), array[${positionProfiles.positionId}]::uuid[])`
+
+/**
+ * Активний профіль за посадою — через `position_profile_positions` (D-031: один профіль на кілька посад).
+ * Раніше — `position_profiles.position_id = X`; головна посада теж лежить у таблиці зв'язку (бекфіл міграцією 0051).
+ */
+export async function profileForPosition(tx: TenantTx, positionId: string) {
+  const [profile] = await tx.select().from(positionProfiles)
+    .where(and(eq(positionProfiles.isActive, true), sql`${positionProfiles.id} in (select pp.profile_id from ${positionProfilePositions} pp where pp.position_id = ${positionId}::uuid)`))
+    .orderBy(asc(positionProfiles.createdAt)).limit(1)
+  return profile ?? null
+}
+
 export async function listPositionProfiles(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     return tx.select({
       id: positionProfiles.id, positionId: positionProfiles.positionId, positionName: positions.name, positionLevelId: positionProfiles.positionLevelId,
+      positionIds: profilePositionsSql,
+      positionNames: sql<string[]>`coalesce((select array_agg(ps.name order by (ps.id = ${positionProfiles.positionId}) desc, ps.name) from ${positionProfilePositions} pp join ${positions} ps on ps.id = pp.position_id where pp.profile_id = ${positionProfiles.id}), array[${positions.name}]::text[])`,
       description: positionProfiles.description, goals: positionProfiles.goals, responsibilities: positionProfiles.responsibilities, usePositionLevels: positionProfiles.usePositionLevels,
       competencyRequirements: positionProfiles.competencyRequirements, mandatoryContent: positionProfiles.mandatoryContent,
       probationDays: positionProfiles.probationDays, isActive: positionProfiles.isActive, updatedAt: positionProfiles.updatedAt,
-      people: sql<number>`(select count(*)::int from ${userPlacements} up where up.position_id = ${positionProfiles.positionId} and up.ended_at is null)`,
+      people: sql<number>`(select count(*)::int from ${userPlacements} up where up.position_id = any(${profilePositionsSql}) and up.ended_at is null)`,
     }).from(positionProfiles).innerJoin(positions, eq(positions.id, positionProfiles.positionId)).orderBy(asc(positions.name))
   })
 }
 
-export async function upsertPositionProfile(ctx: Ctx, input: { positionId: string, positionLevelId?: string | null, description?: string, goals?: unknown, responsibilities?: unknown, usePositionLevels?: boolean, competencyRequirements: Requirement[], mandatoryContent?: { subjectType: string, subjectId: string, dueDays: number }[], probationDays?: number | null }) {
+export type UpsertProfileResult = { ok: true, profile: typeof positionProfiles.$inferSelect, positionIds: string[] } | { ok: false, code: 'position_taken', positionId: string }
+
+/**
+ * Профіль: головна посада (`positionId`) + додаткові (`positionIds`, D-031). Одна посада — в одному профілі:
+ * якщо посада вже є в іншому профілі — `position_taken`, щоб вимоги до людини не двоїлися.
+ */
+export async function upsertPositionProfile(ctx: Ctx, input: { positionId: string, positionIds?: string[], positionLevelId?: string | null, description?: string, goals?: unknown, responsibilities?: unknown, usePositionLevels?: boolean, competencyRequirements: Requirement[], mandatoryContent?: { subjectType: string, subjectId: string, dueDays: number }[], probationDays?: number | null }): Promise<UpsertProfileResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const values = {
       description: input.description ?? null, goals: input.goals ?? null, responsibilities: input.responsibilities ?? null, usePositionLevels: input.usePositionLevels ?? false,
       competencyRequirements: input.competencyRequirements, mandatoryContent: input.mandatoryContent ?? [], probationDays: input.probationDays ?? null, updatedBy: ctx.actorId,
     }
-    const [p] = await tx.insert(positionProfiles).values({
-      tenantId: ctx.tenantId, positionId: input.positionId, positionLevelId: input.positionLevelId ?? null, ...values,
-    }).onConflictDoUpdate({
-      target: [positionProfiles.tenantId, positionProfiles.positionId, positionProfiles.positionLevelId],
-      set: { ...values, updatedAt: new Date() },
-    }).returning()
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'position_profile.upsert', entity: 'position_profile', entityId: p!.id })
-    return p!
+    const positionIds = [input.positionId, ...(input.positionIds ?? []).filter(id => id !== input.positionId)]
+    // Посада вже в іншому профілі (не з цією головною посадою) — відмова до запису
+    const [taken] = await tx.select({ positionId: positionProfilePositions.positionId }).from(positionProfilePositions)
+      .innerJoin(positionProfiles, eq(positionProfiles.id, positionProfilePositions.profileId))
+      .where(and(inArray(positionProfilePositions.positionId, positionIds), sql`${positionProfiles.positionId} <> ${input.positionId}::uuid`)).limit(1)
+    if (taken) return { ok: false as const, code: 'position_taken' as const, positionId: taken.positionId }
+    // Пошук існуючого — через `is not distinct from`: unique-індекс з NULL у position_level_id не спрацьовує на upsert
+    const [existing] = await tx.select({ id: positionProfiles.id }).from(positionProfiles)
+      .where(and(eq(positionProfiles.positionId, input.positionId), sql`${positionProfiles.positionLevelId} is not distinct from ${input.positionLevelId ?? null}::uuid`))
+    const [p] = existing
+      ? await tx.update(positionProfiles).set({ ...values, updatedAt: new Date() }).where(eq(positionProfiles.id, existing.id)).returning()
+      : await tx.insert(positionProfiles).values({ tenantId: ctx.tenantId, positionId: input.positionId, positionLevelId: input.positionLevelId ?? null, ...values }).returning()
+    await tx.delete(positionProfilePositions).where(and(eq(positionProfilePositions.profileId, p!.id), sql`${positionProfilePositions.positionId} <> all(array[${sql.join(positionIds.map(id => sql`${id}::uuid`), sql`, `)}]::uuid[])`))
+    await tx.insert(positionProfilePositions).values(positionIds.map(positionId => ({ tenantId: ctx.tenantId, profileId: p!.id, positionId }))).onConflictDoNothing()
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'position_profile.upsert', entity: 'position_profile', entityId: p!.id, after: { positionIds } })
+    return { ok: true as const, profile: p!, positionIds }
   })
 }
 
@@ -164,7 +194,7 @@ export async function competencyGap(ctx: Ctx, userId: string) {
       .from(userPlacements).innerJoin(positions, eq(positions.id, userPlacements.positionId))
       .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
     if (!pl) return { position: null, profile: null, items: [], displayAs: 'label' as const }
-    const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.positionId), eq(positionProfiles.isActive, true)))
+    const profile = await profileForPosition(tx, pl.positionId)
     if (!profile) return { position: pl, profile: null, items: [], displayAs: 'label' as const }
 
     const allReqs = profile.competencyRequirements as Requirement[]

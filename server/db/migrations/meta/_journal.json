@@ -358,6 +358,13 @@
       "when": 1789990300802,
       "tag": "0050_debts4_task_status_log_raters_login",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1790019923875,
+      "tag": "0051_debts6_pass_events_profile_positions",
+      "breakpoints": true
     }
   ]
 }

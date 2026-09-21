@@ -59,6 +59,21 @@ export const positionProfiles = pgTable('position_profiles', {
   unique().on(t.tenantId, t.positionId, t.positionLevelId),
 ])
 
+/**
+ * Посади профілю (docs/33 D-031; docs/19 §14.2 «несколько должностей на один профиль»).
+ * `position_profiles.position_id` — головна посада (як і раніше: унікальність, сумісність),
+ * тут — усі посади профілю, включно з головною. Пошук профілю за посадою — тільки через цю таблицю.
+ */
+export const positionProfilePositions = pgTable('position_profile_positions', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  profileId: uuid('profile_id').notNull().references(() => positionProfiles.id, { onDelete: 'cascade' }),
+  positionId: uuid('position_id').notNull().references(() => positions.id, { onDelete: 'cascade' }),
+}, t => [
+  unique().on(t.profileId, t.positionId),
+  index().on(t.tenantId, t.positionId),
+])
+
 /** Лог оценок уровня (docs/02 `user_competencies`): source_ref_id = evidenceId, reason = comment. */
 export const competencyAssessments = pgTable('competency_assessments', {
   ...baseColumns,

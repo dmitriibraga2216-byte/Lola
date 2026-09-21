@@ -269,7 +269,7 @@
 
 | Путь | Что |
 | --- | --- |
-| `/reports/tasks/:contentType` | по типу контента; `?taskId=` даёт отчёт назначения, `?subjectId=` — по предмету; `format=xlsx`. Четыре части: `overview`, `accesses`, `stats`, `rows` (каркас + правая часть). Пока `course`, `training_program`, `test`; остальные — 422 `report.unsupported` |
+| `/reports/tasks/:contentType` | по типу контента; `?taskId=` даёт отчёт назначения, `?subjectId=` — по предмету; `format=xlsx`. Четыре части: `overview`, `accesses`, `stats`, `rows` (каркас + правая часть). Все типы, кроме `notice` (422 `report.unsupported`): `course`/`training_program` — по записям, `test` — по попыткам, остальные — по записям завершения модуля (`debts-6`, D-047) |
 | POST `/reports/summary` | сводный мастер: `{step: users\|tasks\|result, userFilter, taskFilter, columns, groupBy}` — каждый шаг считается сервером |
 | GET/PATCH `/settings/security` | `{emailAlerts}` — «Повідомляти про зміни на E-mail» журнала безпеки (`22` §13.4) |
 | `/reports/trajectory/:id` | колонка на элемент траектории |
@@ -380,4 +380,6 @@
 | GET | `/meetup-sessions/:id/ics` | файл календаря сесії |
 
 `GET /reports/attendance` тепер віддає й розділ `sessions` (звіт по сесіях) поряд зі старим
-`meetups` (події, docs/28 «Spec 18»).
+`meetups` (події, docs/28 «Spec 18»), а з `debts-6` (docs/33 D-030) — ще `people`: рядки
+«людина × сесія» на єдиному каркасі звітів (docs/22 §13.3) з колонками Г-18.2; фільтри
+`?from=&to=&meetupId=&sessionId=`, область видимості — як у всіх звітів.

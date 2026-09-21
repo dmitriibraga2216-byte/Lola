@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   const ct = taskReportContentTypeSchema.safeParse(getRouterParam(event, 'contentType'))
   if (!ct.success) return apiError(event, 404, 'not_found', 'Невідомий тип контенту')
   const a = await requireScope(event, 'report.team')
-  if (!TASK_REPORT_TYPES.includes(ct.data)) return apiError(event, 422, 'report.unsupported', 'Звіт для цього типу контенту ще не будується — оберіть курс, програму або тест')
+  if (!TASK_REPORT_TYPES.includes(ct.data)) return apiError(event, 422, 'report.unsupported', 'Звіт для цього типу контенту не будується — у оголошення немає прохождення, лише підтвердження')
   const q = taskReportQuerySchema.safeParse(getQuery(event))
   if (!q.success) return apiError(event, 400, 'validation_failed', 'Перевірте фільтри', { issues: q.error.issues })
   const visible = await reportScope(a)

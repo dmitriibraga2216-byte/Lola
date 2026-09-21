@@ -4,7 +4,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'pos
 const { t } = useI18n()
 const { api } = useApi()
 interface Req { competencyId: string, requiredLevel: number, isCritical?: boolean, positionLevelId?: string | null }
-interface P { id: string, positionId: string, positionName: string, description: string | null, goals: ContentBlock[] | null, responsibilities: ContentBlock[] | null, usePositionLevels: boolean, competencyRequirements: Req[], mandatoryContent: { subjectType: string, subjectId: string, dueDays: number }[], probationDays: number | null }
+interface P { id: string, positionId: string, positionIds: string[], positionName: string, description: string | null, goals: ContentBlock[] | null, responsibilities: ContentBlock[] | null, usePositionLevels: boolean, competencyRequirements: Req[], mandatoryContent: { subjectType: string, subjectId: string, dueDays: number }[], probationDays: number | null }
 const items = ref<P[]>([])
 const positions = ref<{ id: string, name: string }[]>([])
 const positionLevels = ref<{ id: string, name: string }[]>([])
@@ -14,7 +14,7 @@ const error = ref('')
 const notice = ref('')
 const emptyBlocks: ContentBlock[] = [{ id: 'b1', type: 'text', html: '<p></p>' } as unknown as ContentBlock]
 const form = reactive({
-  positionId: '', description: '', goals: [...emptyBlocks] as ContentBlock[], responsibilities: [...emptyBlocks] as ContentBlock[], usePositionLevels: false,
+  positionId: '', positionIds: [] as string[], description: '', goals: [...emptyBlocks] as ContentBlock[], responsibilities: [...emptyBlocks] as ContentBlock[], usePositionLevels: false,
   probationDays: 90 as number | null, competencyRequirements: [] as Req[], mandatoryContent: [] as { subjectType: string, subjectId: string, dueDays: number }[],
 })
 
@@ -29,8 +29,10 @@ async function load() {
 }
 onMounted(load)
 function pick(positionId: string) {
-  form.positionId = positionId
-  const p = items.value.find(x => x.positionId === positionId)
+  // docs/33 D-031: посада може бути додатковою в чужому профілі — відкриваємо той профіль (головна посада — його)
+  const p = items.value.find(x => x.positionId === positionId) ?? items.value.find(x => (x.positionIds ?? []).includes(positionId))
+  form.positionId = p?.positionId ?? positionId
+  form.positionIds = p ? (p.positionIds ?? []).filter(id => id !== p.positionId) : []
   form.description = p?.description ?? ''
   form.goals = p?.goals?.length ? p.goals.map(b => ({ ...b })) : [...emptyBlocks]
   form.responsibilities = p?.responsibilities?.length ? p.responsibilities.map(b => ({ ...b })) : [...emptyBlocks]
@@ -49,6 +51,9 @@ async function save() {
 const compName = (id: string) => comps.value.find(c => c.id === id)?.name ?? '?'
 const coverage = ref<{ people: number, fit: number } | null>(null)
 const current = computed(() => items.value.find(x => x.positionId === form.positionId))
+/** Посади, які можна додати до профілю: не головна і не зайняті іншим профілем. */
+const freePositions = computed(() => positions.value.filter(p => p.id !== form.positionId && !items.value.some(x => x.positionId !== form.positionId && (x.positionIds ?? [x.positionId]).includes(p.id))))
+function togglePosition(id: string) { form.positionIds = form.positionIds.includes(id) ? form.positionIds.filter(x => x !== id) : [...form.positionIds, id] }
 watch(current, async (p) => { coverage.value = p ? await api<{ people: number, fit: number }>(`/position-profiles/${p.id}/coverage`).catch(() => null) : null }, { immediate: true })
 async function applyToPeople() {
   if (!current.value) return
@@ -65,7 +70,7 @@ async function applyToPeople() {
     <div class="grid">
       <aside class="list">
         <button v-for="p in positions" :key="p.id" :class="['item', { on: form.positionId === p.id }]" :data-testid="`pos-${p.id}`" @click="pick(p.id)">
-          {{ p.name }}<span v-if="items.some(x => x.positionId === p.id)" class="dot" />
+          {{ p.name }}<span v-if="items.some(x => (x.positionIds ?? [x.positionId]).includes(p.id))" class="dot" />
         </button>
       </aside>
       <section v-if="form.positionId" class="card">
@@ -73,6 +78,12 @@ async function applyToPeople() {
         <p v-if="coverage" class="sub">{{ t('dev.coverage', { fit: coverage.fit, people: coverage.people }) }} <NuxtLink v-if="coverage.people" :to="{ path: '/admin/people', query: { positionId: form.positionId } }" class="link">→</NuxtLink></p>
         <textarea v-model="form.description" class="field" rows="2" :placeholder="t('dev.profileDesc')" />
         <label class="sub">{{ t('dev.probation') }} <input v-model.number="form.probationDays" class="field short" type="number" min="1" max="365"></label>
+        <h3>{{ t('dev.alsoPositions') }}</h3>
+        <p class="sub">{{ t('dev.alsoPositionsHint') }}</p>
+        <div class="chips">
+          <label v-for="p in freePositions" :key="p.id" class="check chip-check" :data-testid="`also-pos-${p.id}`"><input type="checkbox" :checked="form.positionIds.includes(p.id)" @change="togglePosition(p.id)"> {{ p.name }}</label>
+          <span v-if="!freePositions.length" class="sub">{{ t('dev.alsoPositionsNone') }}</span>
+        </div>
         <h3>{{ t('dev.positionGoals') }}</h3>
         <BlockEditor v-model="form.goals" />
         <h3>{{ t('dev.responsibilities') }}</h3>
@@ -123,6 +134,9 @@ h3 { font-size: var(--font-size-body); margin-top: var(--space-2); }
 .grow { flex: 1; }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .check { display: flex; gap: var(--space-1); align-items: center; font-size: var(--font-size-body-s); }
+.chips { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.chip-check { border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
+.chip-check:has(input:checked) { border-color: var(--color-ink); font-weight: 800; }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; justify-self: start; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; justify-self: start; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }

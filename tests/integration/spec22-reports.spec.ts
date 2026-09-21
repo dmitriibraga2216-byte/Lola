@@ -174,7 +174,8 @@ describe('отчёт по типу контента из четырёх част
   })
 
   it('неподдерживаемый тип и чужое назначение', async () => {
-    expect(await taskReport(ctx(), 'poll', {})).toEqual({ error: 'unsupported' })
+    // docs/33 D-047: опитування тепер підтримане (по survey_participations); без прохождення лишилось лише оголошення
+    expect(await taskReport(ctx(), 'notice', {})).toEqual({ error: 'unsupported' })
     expect(await taskReport(ctx(), 'course', { taskId: crypto.randomUUID() })).toEqual({ error: 'not_found' })
   })
 })

@@ -111,6 +111,34 @@ function selectNode(n: Node) {
 }
 function removeEdge(e: Edge) { edges.value = edges.value.filter(x => x !== e); dirty.value = true }
 function moveNode(n: Node, dx: number, dy: number) { n.x = Math.max(0, n.x + dx); n.y = Math.max(0, n.y + dy); dirty.value = true }
+
+/**
+ * Перетягування блоку мишею/пальцем (docs/33 D-024): pointer events без бібліотек. Координати полотна = CSS-пікселі
+ * `.canvas-inner` (стрілки в SVG малюються в тих самих одиницях). Клік без зсуву (< 4px) — вибір блоку, як і раніше;
+ * після перетягування клік ігнорується, щоб не змінити вибір. Позиція зберігається разом із полотном («Зберегти»).
+ */
+const drag = ref<{ id: string, pointerId: number, startX: number, startY: number, x0: number, y0: number, moved: boolean } | null>(null)
+function onNodePointerDown(ev: PointerEvent, n: Node) {
+  if (published.value || ev.button !== 0) return
+  drag.value = { id: n.id, pointerId: ev.pointerId, startX: ev.clientX, startY: ev.clientY, x0: n.x, y0: n.y, moved: false }
+  ;(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId)
+}
+function onNodePointerMove(ev: PointerEvent, n: Node) {
+  const d = drag.value
+  if (!d || d.id !== n.id || d.pointerId !== ev.pointerId) return
+  const dx = ev.clientX - d.startX, dy = ev.clientY - d.startY
+  if (!d.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+  d.moved = true
+  n.x = Math.max(0, Math.round(d.x0 + dx)); n.y = Math.max(0, Math.round(d.y0 + dy)); dirty.value = true
+}
+function onNodePointerUp(ev: PointerEvent, n: Node) {
+  const d = drag.value
+  if (!d || d.id !== n.id) return
+  ;(ev.currentTarget as HTMLElement).releasePointerCapture?.(ev.pointerId)
+  // Клік після перетягування — не вибір: гасимо наступний click один раз
+  if (d.moved) { const off = (e: Event) => { e.stopPropagation(); e.preventDefault() }; (ev.currentTarget as HTMLElement).addEventListener('click', off, { capture: true, once: true }) }
+  drag.value = null
+}
 function onNodeKey(ev: KeyboardEvent, n: Node) {
   const step = ev.shiftKey ? 40 : 10
   if (ev.key === 'ArrowLeft') { moveNode(n, -step, 0); ev.preventDefault() }
@@ -268,10 +296,11 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
             </svg>
             <div
               v-for="n in nodes" :key="n.id"
-              :class="['node', n.kind, { sel: selected === n.id, bad: problemNodes.has(n.id), link: linkFrom === n.id }]"
+              :class="['node', n.kind, { sel: selected === n.id, bad: problemNodes.has(n.id), link: linkFrom === n.id, dragging: drag?.id === n.id && drag?.moved }]"
               :style="{ left: `${n.x}px`, top: `${n.y}px`, width: `${NODE_W[n.kind]}px` }"
-              role="button" tabindex="0" :aria-pressed="selected === n.id" :aria-label="`${nodeLabel(n)} — ${nodeSub(n)}`"
+              role="button" tabindex="0" :aria-pressed="selected === n.id" :aria-label="`${nodeLabel(n)} — ${nodeSub(n)}`" :data-testid="`traj-node-${n.kind}`"
               @click="selectNode(n)" @keydown="onNodeKey($event, n)"
+              @pointerdown="onNodePointerDown($event, n)" @pointermove="onNodePointerMove($event, n)" @pointerup="onNodePointerUp($event, n)" @pointercancel="drag = null"
             >
               <div class="node-title">{{ nodeLabel(n) }}</div>
               <div class="node-sub">{{ nodeSub(n) }}</div>
@@ -398,7 +427,7 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
 .wire.sel { stroke: var(--color-ink); stroke-width: 3; }
 .arrow { fill: var(--color-ink-muted); }
 .wire-label { font-size: 11px; font-weight: 800; fill: var(--color-ink); }
-.node { position: absolute; box-sizing: border-box; height: 56px; padding: var(--space-2) var(--space-3); border: 2px solid var(--color-ink); border-radius: var(--radius-s); background: var(--color-bg-soft); color: var(--color-ink); cursor: pointer; overflow: hidden; }
+.node { position: absolute; box-sizing: border-box; height: 56px; padding: var(--space-2) var(--space-3); border: 2px solid var(--color-ink); border-radius: var(--radius-s); background: var(--color-bg-soft); color: var(--color-ink); cursor: pointer; overflow: hidden; touch-action: none; user-select: none; }
 .node.start { background: var(--color-teal); }
 .node.finish { background: var(--color-ink); color: var(--color-bg); }
 .node.and, .node.or { background: var(--color-sun); }
@@ -409,6 +438,7 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
 .node.sel { outline: 3px solid var(--color-teal); outline-offset: 2px; }
 .node.bad { border-color: var(--color-coral); box-shadow: inset 0 0 0 2px var(--color-coral); }
 .node.link { border-style: dashed; }
+.node.dragging { cursor: grabbing; box-shadow: 0 6px 16px rgb(12 15 20 / 0.18); z-index: 2; }
 .node-title { font-size: 13px; font-weight: 900; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node-sub { font-size: 11px; font-weight: 700; opacity: 0.8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .check-row { display: flex; gap: var(--space-3); align-items: center; margin-top: var(--space-3); flex-wrap: wrap; }

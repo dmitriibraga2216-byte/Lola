@@ -93,7 +93,10 @@ function action(card: Card): string {
   if (card.status === 'done') return t('learner.action.review')
   if (card.status === 'failed') return t('learner.action.retry')
   if (card.status === 'in_progress') return t('learner.action.continue')
-  return t('learner.action.start')
+  // Мокап MyTasks: не розпочатий курс/ознайомлення відкривають («Відкрити»), окремого типу
+  // «тест» (кнопка «Пройти») цей список поки не розрізняє — /learning/my віддає лише курси
+  // (docs/31 рядок MyTasks); тип предмета в відповіді сервера — окремий борг, не вигадуємо.
+  return t('learner.action.open')
 }
 function stateLine(card: Card): string {
   if (card.status === 'done') return t('learner.state.progress', { pct: 100 })

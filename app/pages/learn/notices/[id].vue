@@ -21,7 +21,8 @@ async function ack() {
     <NuxtLink to="/learn/notices" class="link back">← {{ t('notices.title') }}</NuxtLink>
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <template v-if="n">
-      <span class="badge sun">{{ t(`notices.kind.${n.kind}`) }}</span>
+      <!-- Мокап Notice: бейдж «Ознайомлення» — бірюзовий (color-teal), не сонячний; для інших типів мокапу немає, лишаємо сонячний -->
+      <span :class="['badge', n.kind === 'acknowledge' ? 'teal' : 'sun']">{{ t(`notices.kind.${n.kind}`) }}</span>
       <h1>{{ n.title }}</h1>
       <p class="muted meta"><template v-if="n.publishedAt">{{ t('notices.publishedOn', { d: d(n.publishedAt) }) }}</template><template v-if="n.endsAt"> · {{ t('notices.activeUntil', { d: d(n.endsAt) }) }}</template><template v-if="n.dueAt && !n.ackedAt"> · {{ t('notices.ackUntil', { d: d(n.dueAt) }) }}</template></p>
       <div class="body"><LessonBlocks :blocks="n.body as never" :blocks-state="{}" readonly /></div>

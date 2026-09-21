@@ -22,6 +22,11 @@ interface TaskCard {
   requested: boolean
 }
 
+// Мокап Catalog: обкладинка-плашка ліворуч від картки — кольорова заглушка (реальних
+// обкладинок курсів ще не завантажують), колір циклічно чергується по картках.
+const COVER_TONES = ['sun', 'teal', 'coral'] as const
+function coverTone(i: number): string { return COVER_TONES[i % COVER_TONES.length]! }
+
 interface TrajCard {
   id: string
   type: 'program' | 'trajectory'
@@ -155,19 +160,22 @@ async function enrollTraj(card: TrajCard) {
     <template v-if="tab === 'tasks'">
       <p v-if="!loading && tasks.length === 0" class="empty">{{ t('learner.catalogEmpty') }}</p>
       <div class="grid">
-        <div v-for="card in tasks" :key="`${card.type}:${card.id}`" class="card">
-          <div class="title2">{{ card.title }}</div>
-          <p v-if="card.summary" class="summary">{{ card.summary }}</p>
-          <div class="meta">
-            <span v-if="card.estimatedMinutes">{{ t('learner.minutes', { n: card.estimatedMinutes }) }}</span>
-          </div>
-          <div class="row">
-            <span class="badge muted">{{ card.assignMode === 'catalog_request' ? t('learner.catalogRequestMode') : t('learner.catalogFreeMode') }}</span>
-            <NuxtLink v-if="card.enrollmentId" :to="`/learn/${card.enrollmentId}`" class="btn ghost small">{{ t('learner.alreadyEnrolled') }}</NuxtLink>
-            <span v-else-if="card.requested" class="badge sun">{{ t('learner.catalogRequested') }}</span>
-            <button v-else class="btn primary small" :disabled="busyId === card.id" @click="enrollTask(card)">
-              {{ card.type === 'resource' ? t('learner.catalogOpenResource') : (card.assignMode === 'catalog_request' ? t('learner.catalogRequestButton') : t('learner.enroll')) }}
-            </button>
+        <div v-for="(card, i) in tasks" :key="`${card.type}:${card.id}`" class="card">
+          <div :class="['cover', coverTone(i)]" aria-hidden="true" />
+          <div class="card-body">
+            <div class="title2">{{ card.title }}</div>
+            <p v-if="card.summary" class="summary">{{ card.summary }}</p>
+            <div class="meta">
+              <span v-if="card.estimatedMinutes">{{ t('learner.minutes', { n: card.estimatedMinutes }) }}</span>
+            </div>
+            <div class="row">
+              <span class="badge muted">{{ card.assignMode === 'catalog_request' ? t('learner.catalogRequestMode') : t('learner.catalogFreeMode') }}</span>
+              <NuxtLink v-if="card.enrollmentId" :to="`/learn/${card.enrollmentId}`" class="btn ghost small">{{ t('learner.alreadyEnrolled') }}</NuxtLink>
+              <span v-else-if="card.requested" class="badge sun">{{ t('learner.catalogRequested') }}</span>
+              <button v-else class="btn primary small" :disabled="busyId === card.id" @click="enrollTask(card)">
+                {{ card.type === 'resource' ? t('learner.catalogOpenResource') : (card.assignMode === 'catalog_request' ? t('learner.catalogRequestButton') : t('learner.enroll')) }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -224,7 +232,12 @@ async function enrollTraj(card: TrajCard) {
 }
 
 .grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-2); align-content: start; }
+.card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: flex; gap: var(--space-3); align-items: flex-start; }
+.card-body { flex: 1; min-width: 0; display: grid; gap: var(--space-2); align-content: start; }
+.cover { width: 66px; height: 66px; flex: none; border-radius: var(--radius-m); }
+.cover.sun { background: var(--color-sun); }
+.cover.teal { background: var(--color-teal); }
+.cover.coral { background: var(--color-coral); }
 .title2 { font-weight: 800; font-size: var(--font-size-title-l); }
 .summary { margin: 0; color: var(--color-ink-muted); font-size: var(--font-size-body-s); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .meta { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }

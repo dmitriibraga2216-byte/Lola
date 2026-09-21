@@ -203,7 +203,8 @@ function pairFor(leftId: string) {
 }
 
 .opt.on {
-  background: var(--color-bg);
+  /* Мокап Test: вибраний варіант — солонцевий (сонячний) відтінок, не тон фону сторінки */
+  background: var(--color-sun-soft);
   border-color: var(--color-ink);
   font-weight: 700;
 }

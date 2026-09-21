@@ -636,6 +636,7 @@
     "dueBy": "до {date}",
     "action": {
       "start": "Почати",
+      "open": "Відкрити",
       "continue": "Продовжити",
       "review": "Переглянути",
       "retry": "Пройти ще раз"
@@ -652,7 +653,7 @@
       "tomorrow": "Завтра",
       "overdueDays": "{n} дн. тому"
     },
-    "searchCatalog": "Пошук курсу",
+    "searchCatalog": "Пошук за назвою",
     "catalogEmpty": "У каталозі поки порожньо",
     "alreadyEnrolled": "Вже призначено",
     "enroll": "Записатися",
@@ -2155,7 +2156,7 @@
     "scaleName": "Назва шкали",
     "scaleOptionsHint": "значення:підпис через кому",
     "passFrom": "норма від",
-    "weight": "вага",
+    "weight": "Вага",
     "commentBelow": "Коментар, якщо оцінка нижча за норму",
     "critText": "Що оцінюємо",
     "critHow": "Як розуміти",
@@ -2993,7 +2994,9 @@
     "tiles": {
       "done": "Виконано",
       "active": "Актуальні",
-      "overdue": "Прострочено"
+      "overdue": "Прострочено",
+      "rating": "Рейтинг",
+      "bonuses": "Бонуси"
     },
     "certificates": "Мої сертифікати",
     "noCertificates": "Сертифікатів поки немає",

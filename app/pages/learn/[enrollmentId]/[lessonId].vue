@@ -203,6 +203,18 @@ function onVideoTime(e: Event) {
   if (v.duration) onVideo(Math.floor(v.currentTime / v.duration * 100))
 }
 
+// Мокап Lesson: плашка «Відео · 1:40» на плитці відео — тривалість беремо з метаданих файлу.
+const videoDuration = ref<number | null>(null)
+function onVideoMeta(e: Event) {
+  const v = e.target as HTMLVideoElement
+  if (Number.isFinite(v.duration)) videoDuration.value = v.duration
+}
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 async function acknowledge() {
   try {
     applyTick(await api<TickRes>(`/learning/enrollments/${enrollmentId}/lessons/${lessonId}/acknowledge`, { method: 'POST' }))
@@ -281,7 +293,8 @@ async function next() {
 
         <template v-if="data.lesson.kind === 'video'">
           <div v-if="media?.status === 'ready' && media.urls.original" class="video-wrap">
-            <video controls playsinline preload="metadata" :poster="media.urls.poster" :src="media.urls.original" @timeupdate="onVideoTime" />
+            <video controls playsinline preload="metadata" :poster="media.urls.poster" :src="media.urls.original" @timeupdate="onVideoTime" @loadedmetadata="onVideoMeta" />
+            <span v-if="videoDuration != null" class="video-pill">{{ t('learner.videoOf') }} · {{ formatDuration(videoDuration) }}</span>
             <span class="sub">{{ t('learner.videoOf') }} · {{ videoPct }}%</span>
           </div>
           <p v-else class="note sun">{{ t('resource.videoNotReady') }}</p>
@@ -339,8 +352,14 @@ async function next() {
 .body { flex: 1; padding: var(--space-4); padding-bottom: 120px; max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .section-label { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; color: var(--color-ink-muted); margin-bottom: var(--space-1); }
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
-.video-wrap { display: grid; gap: var(--space-1); margin-bottom: var(--space-4); }
-.video-wrap video { width: 100%; border-radius: var(--radius-m); background: var(--color-ink); }
+.video-wrap { position: relative; display: grid; gap: var(--space-1); margin-bottom: var(--space-4); }
+.video-wrap video { width: 100%; border-radius: var(--radius-m); background: var(--color-teal); }
+.video-pill {
+  position: absolute; left: var(--space-4); top: var(--space-4);
+  background: var(--color-bg-soft); border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3); font-size: var(--font-size-body-s); font-weight: 800;
+  pointer-events: none;
+}
 .file-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
 .doc { width: 100%; height: 70vh; border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-m); background: var(--color-bg-soft); }
 .skeleton { height: 240px; background: var(--color-bg-soft); border-radius: var(--radius-m); opacity: 0.6; }

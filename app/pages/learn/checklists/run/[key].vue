@@ -186,7 +186,7 @@ h1 { margin: var(--space-2) 0; font-weight: 900; font-size: 20px; letter-spacing
 .item.open, .item.na { background: var(--color-bg); border: 2px solid var(--color-bg-line); border-radius: var(--radius-l); padding: var(--space-3); }
 .weight { font-size: 12px; font-weight: 700; color: var(--color-ink-muted); margin-top: 2px; }
 .comment.req { background: var(--color-coral-soft); border: 2px solid var(--color-coral); border-radius: var(--radius-l); padding: var(--space-2) var(--space-3); }
-.req-label { font-size: 12px; font-weight: 900; letter-spacing: 0.06em; color: var(--color-coral-deep); margin-bottom: var(--space-1); }
+.req-label { font-size: 12px; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-coral-deep); margin-bottom: var(--space-1); }
 h2, h3 { margin: 0; font-weight: 800; }
 .group { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-3); margin-bottom: var(--space-3); }
 .item { display: grid; gap: var(--space-2); }

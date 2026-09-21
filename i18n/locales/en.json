@@ -636,6 +636,7 @@
     "dueBy": "by {date}",
     "action": {
       "start": "Start",
+      "open": "Open",
       "continue": "Continue",
       "review": "Review",
       "retry": "Retry"
@@ -652,7 +653,7 @@
       "tomorrow": "Tomorrow",
       "overdueDays": "{n} days ago"
     },
-    "searchCatalog": "Search courses",
+    "searchCatalog": "Search by name",
     "catalogEmpty": "Catalog is empty",
     "alreadyEnrolled": "Already enrolled",
     "enroll": "Enroll",
@@ -2155,7 +2156,7 @@
     "scaleName": "Scale name",
     "scaleOptionsHint": "value:label, comma-separated",
     "passFrom": "pass from",
-    "weight": "weight",
+    "weight": "Weight",
     "commentBelow": "Comment when the score is below the norm",
     "critText": "What we rate",
     "critHow": "How to read it",
@@ -2993,7 +2994,9 @@
     "tiles": {
       "done": "Done",
       "active": "Current",
-      "overdue": "Overdue"
+      "overdue": "Overdue",
+      "rating": "Rating",
+      "bonuses": "Bonuses"
     },
     "certificates": "My certificates",
     "noCertificates": "No certificates yet",

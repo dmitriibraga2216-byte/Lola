@@ -19,7 +19,7 @@ const critText = (id: string) => res.value?.structure.flatMap(g => g.criteria).f
 const R = 110
 const pt = (i: number, v: number, n: number) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / n; const r = (v / 5) * R; return `${(150 + r * Math.cos(a)).toFixed(1)},${(150 + r * Math.sin(a)).toFixed(1)}` }
 const poly = (kind: string) => res.value!.groups.map((g, i) => pt(i, g.byKind[kind]?.avg ?? 0, res.value!.groups.length)).join(' ')
-const colors: Record<string, string> = { self: 'var(--color-sun-ink)', manager: 'var(--color-teal-deep)', peer: 'var(--color-coral-deep)', subordinate: 'var(--color-ink-muted)', mentor: 'var(--color-ink)' }
+const colors: Record<string, string> = { self: 'var(--color-sun-ink)', manager: 'var(--color-teal-deep)', functional_manager: 'var(--color-teal)', peer: 'var(--color-coral-deep)', subordinate: 'var(--color-ink-muted)', external: 'var(--color-ink)' }
 </script>
 <template>
   <div>
@@ -28,6 +28,7 @@ const colors: Record<string, string> = { self: 'var(--color-sun-ink)', manager: 
     <template v-if="res">
       <h1>{{ res.cycle.title }}</h1>
       <div class="legend"><span v-for="k in kinds" :key="k" :style="{ color: colors[k] }">● {{ t(`assess.kind.${k}`) }}<template v-if="res.overall[k] != null"> {{ res.overall[k] }}</template></span></div>
+      <p v-if="res.overall.weighted != null" class="weighted" data-testid="assess-weighted">{{ t('assess.weightedTotal') }}: <b>{{ res.overall.weighted }}</b></p>
       <svg v-if="res.groups.length >= 3" viewBox="0 0 300 300" class="radar">
         <polygon v-for="lvl in [1, 2, 3, 4, 5]" :key="lvl" :points="res.groups.map((_, i) => pt(i, lvl, res!.groups.length)).join(' ')" fill="none" stroke="var(--color-bg-line)" />
         <polygon v-for="k in kinds" :key="k" :points="poly(k)" :stroke="colors[k]" fill="none" stroke-width="2" />

@@ -11,6 +11,6 @@ export default defineEventHandler(async (event) => {
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Пароль має бути не коротшим за 8 знаків', { issues: p.error.issues })
   const auth = event.context.auth as AuthContext | undefined
   const r = await changeOwnPassword({ tenantId: a.tenantId, actorId: a.userId }, { ...p.data, sessionId: auth?.sessionId })
-  if (!r.ok) return apiError(event, r.code === 'wrong_current' ? 403 : 400, r.code, r.message)
+  if (!r.ok) return apiError(event, r.code === 'wrong_current' || r.code === 'recovery_disabled' ? 403 : 400, r.code, r.message)
   return apiData({ ok: true })
 })

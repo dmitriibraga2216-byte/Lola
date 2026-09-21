@@ -37,7 +37,7 @@ const CONTENT_COLUMN_EXCEPTIONS = new Set(['lessons.pass_score_pct', 'questions.
 const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
 
 /** Журналы (docs/22 §13.4): технический контекст пишется одинаково во все. */
-const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events', 'notifications', 'import_jobs', 'goal_status_log', 'automation_runs', 'task_access_log', 'org_conflicts']
+const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events', 'notifications', 'import_jobs', 'goal_status_log', 'automation_runs', 'task_access_log', 'org_conflicts', 'task_status_log']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

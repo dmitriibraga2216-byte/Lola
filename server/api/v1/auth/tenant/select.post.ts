@@ -30,6 +30,7 @@ export default defineEventHandler(async (event) => {
     userId: user.user_id,
     userAgent: getHeader(event, 'user-agent'),
     ip: clientIp(event),
+    loginMethod: byEmail ? 'password' : 'otp',
   })
   setSessionCookies(event, token)
 

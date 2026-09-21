@@ -32,7 +32,7 @@ const codeHelp = ref(false)
 const codeInput = ref<HTMLInputElement | null>(null)
 const supportContact = String(useRuntimeConfig().public.supportContact || '')
 // Гостевая страница (docs/21 Г-21.3, docs/25 §4): три блока тенанта до входа; тенант — по поддомену Host, в dev — ?tenant=
-interface Guest { name: string, slug: string, passwordLogin?: boolean, blocks: { welcome: unknown[], supportContact: { name?: string, phone?: string, email?: string, telegram?: string }, policyUrl: string | null } }
+interface Guest { name: string, slug: string, passwordLogin?: boolean, hideLoginForm?: boolean, blocks: { welcome: unknown[], supportContact: { name?: string, phone?: string, email?: string, telegram?: string }, policyUrl: string | null } }
 const guest = ref<Guest | null>(null)
 onMounted(async () => {
   try { guest.value = (await rawFetch<{ data: Guest }>(`/api/v1/public/guest-page?slug=${encodeURIComponent(tenantSlug.value)}`)).data }
@@ -167,7 +167,12 @@ async function selectTenant(tenantId: string) {
     <div class="card">
       <h1 class="brand">{{ t('app.name') }}</h1>
 
-      <template v-if="step === 'phone'">
+      <template v-if="step === 'phone' && guest?.hideLoginForm">
+        <!-- docs/24 §3.4.1 «Приховати форму входу» (docs/33 D-021): лише корпоративний вхід -->
+        <p class="hint" data-testid="login-form-hidden">{{ t('login.formHidden') }}</p>
+        <button class="primary" data-testid="login-google" @click="loginGoogle">{{ t('login.google') }}</button>
+      </template>
+      <template v-else-if="step === 'phone'">
         <label class="label" for="phone">{{ t('login.phoneLabel') }}</label>
         <div class="phone-row">
           <span class="prefix">+380</span>

@@ -114,7 +114,7 @@ export async function requestOtp(phone: string, ip: string, opts: { channel?: 's
 }
 
 export type OtpVerifyResult
-  = | { ok: true }
+  = | { ok: true, channel: 'telegram' | 'sms' | 'email' }
     | { ok: false, code: 'otp_invalid' | 'rate_limited', attemptsLeft?: number }
 
 export async function verifyOtp(phone: string, code: string): Promise<OtpVerifyResult> {
@@ -147,5 +147,5 @@ export async function verifyOtp(phone: string, code: string): Promise<OtpVerifyR
   }
 
   await db.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, row.id))
-  return { ok: true }
+  return { ok: true, channel: row.channel as 'telegram' | 'sms' | 'email' }
 }

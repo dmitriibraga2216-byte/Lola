@@ -304,6 +304,11 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, s: typeof meetupSessions.$
   if (status === 'attended' || status === 'missed') {
     const [m] = await tx.select({ kind: meetups.kind }).from(meetups).where(eq(meetups.id, s.meetupId))
     const itemType = m?.kind === 'webinar' ? 'webinar' : 'meetup'
+    // docs/33 D-020: сесія самостійного заняття — єдиний хук; у складі курсу фіксує курс
+    if (!r.lessonId) {
+      const { onTaskCompleted } = await import('./taskCompletion')
+      await onTaskCompleted(tx, ctx.tenantId, r.userId, { contentType: itemType, contentId: s.meetupId, status: status === 'attended' ? 'done' : 'failed', enrollmentId: r.enrollmentId, sourceKind: 'meetup_attendance', sourceId: r.id, actorId: ctx.actorId === r.userId ? null : ctx.actorId })
+    }
     setImmediate(() => {
       import('./programs').then(p => p.onItemResult(ctx.tenantId, r.userId, itemType, s.meetupId, { passed: status === 'attended' })).catch(() => {})
       import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, r.userId, itemType, s.meetupId, { passed: status === 'attended' })).catch(() => {})

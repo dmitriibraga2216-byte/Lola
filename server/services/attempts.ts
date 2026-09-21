@@ -281,6 +281,22 @@ export async function saveAnswer(ctx: Ctx, attemptId: string, questionId: string
 }
 
 /** Автопроверка по снапшоту и финализация (docs/12 §7.4–7.6). */
+/**
+ * docs/33 D-020: завершена спроба самостійного тесту — рядок у `task_status_log` через єдиний хук
+ * (passed → done, failed → failed, результат у %). Тест усередині курсу (`lesson_id`) не є окремим
+ * завданням — його завершення фіксує курс (`completeLesson`), інакше компетенції призначення курсу
+ * підтверджувалися б після першого ж внутрішнього тесту.
+ */
+async function logAttemptCompletion(tx: TenantTx, tenantId: string, attempt: typeof attempts.$inferSelect, status: 'passed' | 'failed', totals: { score: number, maxScore: number }, actorId: string | null = null) {
+  if (attempt.lessonId) return
+  const { onTaskCompleted } = await import('./taskCompletion')
+  await onTaskCompleted(tx, tenantId, attempt.userId, {
+    contentType: 'test', contentId: attempt.quizId, status: status === 'passed' ? 'done' : 'failed',
+    result: totals.maxScore > 0 ? Math.round((totals.score / totals.maxScore) * 10000) / 100 : null,
+    assignmentId: attempt.assignmentId, enrollmentId: attempt.enrollmentId, sourceKind: 'attempt', sourceId: attempt.id, actorId,
+  })
+}
+
 async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts.$inferSelect, reason: 'submit' | 'expire') {
   const snapshot = attempt.snapshot as SnapshotQuestion[]
   const params = attempt.params as QuizParams
@@ -322,6 +338,7 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
   await writeResult(tx, ctx, attempt.id, 'submit', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, reason === 'expire' ? 'expired' : null)
 
   if (status === 'passed') await onAttemptPassed(tx, ctx, attempt)
+  if (status !== 'review') await logAttemptCompletion(tx, ctx.tenantId, attempt, status, totals)
   if (status !== 'review') {
     const { emitWebhook } = await import('./webhooks')
     await emitWebhook(tx, ctx.tenantId, status === 'passed' ? 'attempt.passed' : 'attempt.failed', { attemptId: attempt.id, userId: attempt.userId, quizId: attempt.quizId, score: totals.score })
@@ -782,6 +799,7 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
     }).where(eq(attempts.id, row.att.id))
     await writeResult(tx, ctx, row.att.id, 'review', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, null, ctx.actorId)
     if (status === 'passed') await onAttemptPassed(tx, ctx, row.att)
+    await logAttemptCompletion(tx, ctx.tenantId, row.att, status, totals, ctx.actorId)
     const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, row.att.quizId))
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: row.att.userId, code: 'review_done', payload: { quiz: quiz?.title, status: status === 'passed' ? 'зараховано' : 'не зараховано' }, dedupKey: `review_done:${row.att.id}` })
 

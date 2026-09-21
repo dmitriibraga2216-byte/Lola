@@ -1,8 +1,11 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import {
   assessmentAnswers, assessmentCycles, assessmentForms, assessmentItems, assessmentTasks, competencies, competencyAssessments, criteria, criteriaGroups,
-  locations, scaleLevels, scales, userPlacements, users,
+  functionalChiefs, locations, positionProfiles, scaleLevels, scales, userPlacements, users,
 } from '../db/schema'
+import type { Requirement } from './development'
+import { RATER_KINDS, RATER_ROLE_DEFAULTS as RATER_ROLE_DEFAULTS_BY_KIND } from '../../shared/enums'
+import type { RaterKind, RaterRole } from '../../shared/enums'
 import type { Audience } from '../../shared/schemas/assignments'
 import type { AssessmentFormInput, CriteriaGroupInput, CriterionInput } from '../../shared/schemas/assessment'
 import { withTenant } from '../utils/withTenant'
@@ -95,14 +98,31 @@ export async function deleteCriterion(ctx: Ctx, id: string): Promise<DeleteCrite
 
 // ── Анкеты (docs/20 §14.2, §14.4) ─────────────────────────────────────────
 
-/** Роли оценщиков по умолчанию (docs/20 Г-20.1): вес и анонимность — свойство роли (Г-20.2). */
-export const RATER_ROLE_DEFAULTS = [
-  { kind: 'manager', weight: 2, anonymous: false },
-  { kind: 'self', weight: 0, anonymous: false },
-  { kind: 'peer', weight: 1, anonymous: true },
-  { kind: 'subordinate', weight: 1, anonymous: true },
-  { kind: 'mentor', weight: 1, anonymous: false },
-] as const
+/**
+ * Роли оценщиков по умолчанию (docs/20 Г-20.1, docs/02 `assessment_raters`): вес и анонимность — свойство
+ * роли (Г-20.2), не анкеты. `self` показывается, но не считается (вес 0); `manager` и `self` всегда
+ * именные; `peer`/`subordinate` анонимные с порогом показа; `external` (наставник, тайный покупатель) —
+ * по настройке цикла; `functional_manager` (docs/16 §3.5 `functional_chiefs`) — именной, как линейный
+ * руководитель `[решение docs/33 D-036]`. Цикл хранит свой набор в `assessment_cycles.rater_roles`,
+ * задача оценщика — снимок веса/анонимности на момент старта (`assessment_tasks.weight/is_anonymous`).
+ */
+export const RATER_ROLE_DEFAULTS: readonly RaterRole[] = RATER_KINDS.map(k => RATER_ROLE_DEFAULTS_BY_KIND[k])
+
+/** Роли цикла: свои поверх умолчаний (вес 0..9.99, как numeric(4,2) в docs/02). */
+export function resolveRaterRoles(custom: unknown): RaterRole[] {
+  const list = Array.isArray(custom) ? custom as Partial<RaterRole>[] : []
+  return RATER_ROLE_DEFAULTS.map((d) => {
+    const c = list.find(x => x?.kind === d.kind)
+    const weight = c && typeof c.weight === 'number' && Number.isFinite(c.weight) ? Math.min(9.99, Math.max(0, Math.round(c.weight * 100) / 100)) : d.weight
+    // Г-20.2: manager и self — всегда именные, анонимность у них не переопределяется
+    const isAnonymous = d.kind === 'manager' || d.kind === 'self' ? false : (c && typeof c.isAnonymous === 'boolean' ? c.isAnonymous : d.isAnonymous)
+    return { kind: d.kind, weight, isAnonymous }
+  })
+}
+
+export function raterRoleOf(roles: readonly RaterRole[], kind: string): RaterRole {
+  return roles.find(r => r.kind === kind) ?? { kind: kind as RaterKind, weight: 1, isAnonymous: false }
+}
 
 export async function listForms(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -211,27 +231,77 @@ export interface FormGroup { id: string, name: string, description: string | nul
 export interface FormStructure { form: typeof assessmentForms.$inferSelect, scale: ScaleInfo, groups: FormGroup[] }
 
 /** Анкета в развёрнутом виде: группы (из словаря) с критериями и нормами, одна шкала — для заполнения и подсчёта. */
-export async function formStructure(tx: TenantTx, formId: string): Promise<FormStructure | null> {
+/** Склад анкети для конкретного оцінюваного (docs/33 D-039): `assessment_tasks.items`, null — склад анкети. */
+export interface SubjectItem { criterionId: string, norm: number, cluster?: string | null }
+
+export async function formStructure(tx: TenantTx, formId: string, override?: SubjectItem[] | null): Promise<FormStructure | null> {
   const [form] = await tx.select().from(assessmentForms).where(eq(assessmentForms.id, formId))
   if (!form) return null
   const scale = await loadScale(tx, form.scaleId)
   if (!scale) return null
+  const groups: FormGroup[] = []
+  const push = (group: typeof criteriaGroups.$inferSelect, crit: typeof criteria.$inferSelect, norm: number, cluster: string | null) => {
+    let g = groups.find(x => x.id === group.id)
+    if (!g) { g = { id: group.id, name: group.name, description: group.description, weight: Number(group.weight), criteria: [] }; groups.push(g) }
+    g.criteria.push({ id: crit.id, text: crit.text, description: crit.description, weight: Number(crit.weight), isCritical: crit.isCritical, competencyId: crit.competencyId, norm, cluster })
+  }
+  if (override && override.length) {
+    const rows = await tx.select({ crit: criteria, group: criteriaGroups })
+      .from(criteria).innerJoin(criteriaGroups, eq(criteriaGroups.id, criteria.groupId))
+      .where(inArray(criteria.id, override.map(i => i.criterionId))).orderBy(asc(criteriaGroups.sort), asc(criteria.sort))
+    for (const i of override) {
+      const r = rows.find(x => x.crit.id === i.criterionId)
+      if (r) push(r.group, r.crit, Number(i.norm), i.cluster ?? null)
+    }
+    return { form, scale, groups }
+  }
   const rows = await tx.select({ item: assessmentItems, crit: criteria, group: criteriaGroups })
     .from(assessmentItems).innerJoin(criteria, eq(criteria.id, assessmentItems.criterionId)).innerJoin(criteriaGroups, eq(criteriaGroups.id, criteria.groupId))
     .where(eq(assessmentItems.formId, formId)).orderBy(asc(criteriaGroups.sort), asc(assessmentItems.sortOrder))
-  const groups: FormGroup[] = []
-  for (const r of rows) {
-    let g = groups.find(x => x.id === r.group.id)
-    if (!g) { g = { id: r.group.id, name: r.group.name, description: r.group.description, weight: Number(r.group.weight), criteria: [] }; groups.push(g) }
-    g.criteria.push({ id: r.crit.id, text: r.crit.text, description: r.crit.description, weight: Number(r.crit.weight), isCritical: r.crit.isCritical, competencyId: r.crit.competencyId, norm: Number(r.item.norm), cluster: r.item.cluster })
-  }
+  for (const r of rows) push(r.group, r.crit, Number(r.item.norm), r.item.cluster)
   return { form, scale, groups }
+}
+
+/**
+ * docs/33 D-039: у анкети `by_competencies` склад для оцінюваного береться з вимог профілю його посади
+ * (docs/19 §3.3, Г-19.2): з критеріїв анкети лишаються ті, чия компетенція (`criteria.competency_id`)
+ * є у вимогах; якщо анкета порожня — критерії довідника за цими компетенціями. Норма — з анкети, якщо
+ * критерій у ній є; інакше — необхідний рівень профілю, якщо він є значенням шкали; інакше — максимум шкали.
+ * Немає профілю/вимог/критеріїв — null (склад анкети, як досі).
+ */
+export async function subjectItemsFromProfile(tx: TenantTx, form: typeof assessmentForms.$inferSelect, subjectUserId: string): Promise<SubjectItem[] | null> {
+  if (form.kind !== 'by_competencies') return null
+  const [pl] = await tx.select({ positionId: userPlacements.positionId, positionLevelId: userPlacements.positionLevelId })
+    .from(userPlacements).where(and(eq(userPlacements.userId, subjectUserId), eq(userPlacements.isPrimary, true), sql`${userPlacements.endedAt} is null`))
+  if (!pl) return null
+  const [profile] = await tx.select().from(positionProfiles).where(and(eq(positionProfiles.positionId, pl.positionId), eq(positionProfiles.isActive, true)))
+  if (!profile) return null
+  const { effectiveRequirements } = await import('./development')
+  const reqs = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.positionLevelId)
+  if (!reqs.length) return null
+  const byComp = new Map(reqs.map(r => [r.competencyId, r.requiredLevel]))
+  const formItems = new Map((await tx.select({ criterionId: assessmentItems.criterionId, norm: assessmentItems.norm, cluster: assessmentItems.cluster }).from(assessmentItems).where(eq(assessmentItems.formId, form.id))).map(i => [i.criterionId, i]))
+  // Склад анкети звужується до потрібних компетенцій; порожня анкета — критерії довідника за цими компетенціями
+  const crits = await tx.select({ id: criteria.id, competencyId: criteria.competencyId, groupSort: criteriaGroups.sort, sort: criteria.sort })
+    .from(criteria).innerJoin(criteriaGroups, eq(criteriaGroups.id, criteria.groupId))
+    .where(and(inArray(criteria.competencyId, [...byComp.keys()]), ...(formItems.size ? [inArray(criteria.id, [...formItems.keys()])] : [])))
+    .orderBy(asc(criteriaGroups.sort), asc(criteria.sort))
+  if (!crits.length) return null
+  const scale = await loadScale(tx, form.scaleId)
+  const fallbackNorm = scale?.max ?? 1
+  return crits.map((c) => {
+    const item = formItems.get(c.id)
+    const required = byComp.get(c.competencyId!)!
+    const norm = item ? Number(item.norm) : (scale?.options.some(o => o.value === required) ? required : fallbackNorm)
+    return { criterionId: c.id, norm, cluster: item?.cluster ?? null }
+  })
 }
 
 // ── Циклы (docs/20 §3.3, §7.1) ─────────────────────────────────────────
 
-export const RATER_KINDS = ['self', 'manager', 'peer', 'subordinate', 'mentor'] as const
-export type RaterKind = typeof RATER_KINDS[number]
+/** docs/02 «Оценка»: self | manager | functional_manager | peer | subordinate | external (`mentor` прежних циклов → `external`, миграция 0050) — из `shared/enums`. */
+export { RATER_KINDS }
+export type { RaterKind, RaterRole }
 
 export async function listCycles(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -249,12 +319,13 @@ export async function listCycles(ctx: Ctx) {
 
 export async function createCycle(ctx: Ctx, input: {
   title: string, formId: string, periodFrom: string, periodTo: string, startsAt: string, endsAt: string, subjects: Audience,
-  raterKinds: RaterKind[], peersCount?: number, peersSelection?: string, anonymousForSubject?: boolean, minRatersToShow?: number, selfFirst?: boolean, calibration?: boolean,
+  raterKinds: RaterKind[], raterRoles?: Partial<RaterRole>[], peersCount?: number, peersSelection?: string, anonymousForSubject?: boolean, minRatersToShow?: number, selfFirst?: boolean, calibration?: boolean,
 }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [c] = await tx.insert(assessmentCycles).values({
       tenantId: ctx.tenantId, title: input.title, formId: input.formId, periodFrom: input.periodFrom, periodTo: input.periodTo,
       startsAt: new Date(input.startsAt), endsAt: new Date(input.endsAt), subjects: input.subjects, raterKinds: input.raterKinds,
+      raterRoles: resolveRaterRoles(input.raterRoles).filter(r => input.raterKinds.includes(r.kind)),
       peersCount: input.peersCount ?? null, peersSelection: input.peersSelection ?? 'auto', anonymousForSubject: input.anonymousForSubject ?? true,
       minRatersToShow: input.minRatersToShow ?? 3, selfFirst: input.selfFirst ?? false, calibration: input.calibration ?? false, createdBy: ctx.actorId,
     }).returning()
@@ -274,9 +345,12 @@ async function placementsOf(tx: TenantTx, userIds: string[]): Promise<Map<string
 }
 
 /**
- * Назначение оценщиков (docs/20 §7.1): self — сам; manager — руководитель точки;
+ * Назначение оценщиков (docs/20 §7.1, Г-20.1): self — сам; manager — руководитель точки;
+ * functional_manager — функциональные руководители из `functional_chiefs` (docs/16 §3.5);
  * peer — коллеги той же точки и позиции, случайно, не больше 5 оцениваемых на одного;
- * subordinate — люди точки, где оцениваемый руководитель; mentor — наставники точки.
+ * subordinate — люди точки, где оцениваемый руководитель; external — наставники точки (роль `mentor`).
+ * Каждая задача получает снимок веса и анонимности роли (docs/02 `assessment_raters`), а у анкеты
+ * `by_competencies` — свой состав из профиля должности оцениваемого (docs/33 D-039).
  */
 export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true, tasks: number, subjects: number } | { ok: false, code: 'not_found' | 'bad_status' | 'no_subjects' }> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -287,13 +361,20 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
     if (!subjects.length) return { ok: false as const, code: 'no_subjects' as const }
 
     const kinds = c.raterKinds as RaterKind[]
+    const roles = resolveRaterRoles(c.raterRoles)
+    const [form] = await tx.select().from(assessmentForms).where(eq(assessmentForms.id, c.formId))
     const pl = await placementsOf(tx, subjects)
     const load = new Map<string, number>() // rater → сколько уже оценивает
-    const tasks: { subjectUserId: string, raterUserId: string, raterKind: string }[] = []
+    const tasks: { subjectUserId: string, raterUserId: string, raterKind: string, weight: string, isAnonymous: boolean, items: SubjectItem[] | null }[] = []
+    const subjectItems = new Map<string, SubjectItem[] | null>()
     const add = (s: string, r: string, kind: string) => {
       if (tasks.some(t => t.subjectUserId === s && t.raterUserId === r)) return
-      tasks.push({ subjectUserId: s, raterUserId: r, raterKind: kind })
+      const role = raterRoleOf(roles, kind)
+      tasks.push({ subjectUserId: s, raterUserId: r, raterKind: kind, weight: String(role.weight), isAnonymous: role.isAnonymous, items: subjectItems.get(s) ?? null })
       load.set(r, (load.get(r) ?? 0) + 1)
+    }
+    if (form?.kind === 'by_competencies') {
+      for (const s of subjects) subjectItems.set(s, await subjectItemsFromProfile(tx, form, s))
     }
 
     // Все активные люди с размещением — для peer/subordinate/mentor
@@ -306,6 +387,10 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
       const p = pl.get(s)
       if (kinds.includes('self')) add(s, s, 'self')
       if (kinds.includes('manager') && p?.managerId && p.managerId !== s) add(s, p.managerId, 'manager')
+      if (kinds.includes('functional_manager')) {
+        const chiefs = await tx.select({ chiefId: functionalChiefs.chiefId }).from(functionalChiefs).where(and(eq(functionalChiefs.userId, s), eq(functionalChiefs.kind, 'functional')))
+        for (const ch of chiefs) if (ch.chiefId !== s) add(s, ch.chiefId, 'functional_manager')
+      }
       if (kinds.includes('peer') && p) {
         const pool = everyone.filter(e => e.userId !== s && e.locationId === p.locationId && e.positionId === p.positionId && (load.get(e.userId) ?? 0) < 5)
         for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j]!, pool[i]!] }
@@ -316,8 +401,8 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
         const locIds = new Set(managed.map(l => l.id))
         for (const e of everyone.filter(e => locIds.has(e.locationId) && e.userId !== s).slice(0, 5)) add(s, e.userId, 'subordinate')
       }
-      if (kinds.includes('mentor') && p) {
-        for (const e of everyone.filter(e => e.locationId === p.locationId && mentorIds.has(e.userId) && e.userId !== s)) add(s, e.userId, 'mentor')
+      if (kinds.includes('external') && p) {
+        for (const e of everyone.filter(e => e.locationId === p.locationId && mentorIds.has(e.userId) && e.userId !== s)) add(s, e.userId, 'external')
       }
     }
 
@@ -328,7 +413,7 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
       }
     }
     await tx.update(assessmentCycles).set({ status: 'active', updatedAt: new Date() }).where(eq(assessmentCycles.id, cycleId))
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.cycle.start', entity: 'assessment_cycle', entityId: cycleId, after: { tasks: tasks.length, subjects: subjects.length } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.cycle.start', entity: 'assessment_cycle', entityId: cycleId, after: { tasks: tasks.length, subjects: subjects.length, byProfile: [...subjectItems.values()].filter(Boolean).length } })
     return { ok: true as const, tasks: tasks.length, subjects: subjects.length }
   })
 }
@@ -389,18 +474,18 @@ export async function getTask(ctx: Ctx, taskId: string) {
     if (!t) return null
     const [c] = await tx.select().from(assessmentCycles).where(eq(assessmentCycles.id, t.cycleId))
     const [subject] = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.id, t.subjectUserId))
-    const structure = await formStructure(tx, c!.formId)
+    const structure = await formStructure(tx, c!.formId, t.items as SubjectItem[] | null)
     const answers = await tx.select().from(assessmentAnswers).where(eq(assessmentAnswers.taskId, taskId))
     // Кто увидит комментарии (docs/20 §5.2): при анонимности — руководитель; иначе и сам человек
     const commentsVisibleTo = c!.anonymousForSubject ? 'manager' : 'subject_and_manager'
-    const role = RATER_ROLE_DEFAULTS.find(r => r.kind === t.raterKind)
     return {
       task: t, cycle: c!, subject, structure,
       answers: answers.map(a => ({ criterionId: a.criterionId, value: a.value != null ? Number(a.value) : null, comment: a.comment, isNa: a.isNa })),
       groupComments: t.groupComments as Record<string, string>,
       commentsVisibleTo,
-      // Г-20.2: анонимность — свойство роли; порог показа — из цикла
-      isAnonymous: role?.anonymous ?? false, minRatersToShow: c!.minRatersToShow,
+      // Г-20.2: анонимность и вес — снимок роли на задаче (docs/02 assessment_raters); порог показа — из цикла
+      isAnonymous: t.isAnonymous, weight: Number(t.weight), minRatersToShow: c!.minRatersToShow,
+      byProfile: !!t.items,
     }
   })
 }
@@ -411,7 +496,7 @@ export async function saveAnswers(ctx: Ctx, taskId: string, answers: { criterion
     const [t] = await tx.select().from(assessmentTasks).where(and(eq(assessmentTasks.id, taskId), eq(assessmentTasks.raterUserId, ctx.actorId)))
     if (!t || !['pending', 'in_progress'].includes(t.status)) return null
     const [c] = await tx.select({ formId: assessmentCycles.formId }).from(assessmentCycles).where(eq(assessmentCycles.id, t.cycleId))
-    const structure = await formStructure(tx, c!.formId)
+    const structure = await formStructure(tx, c!.formId, t.items as SubjectItem[] | null)
     if (!structure) return null
     const known = new Set(structure.groups.flatMap(g => g.criteria.map(cr => cr.id)))
     const scaleValues = new Set(structure.scale.options.map(o => o.value))
@@ -447,7 +532,7 @@ export async function submitTask(ctx: Ctx, taskId: string): Promise<SubmitResult
     if (!t) return { ok: false as const, code: 'not_found' as const }
     if (!['pending', 'in_progress'].includes(t.status)) return { ok: false as const, code: 'bad_status' as const }
     const [c] = await tx.select().from(assessmentCycles).where(eq(assessmentCycles.id, t.cycleId))
-    const structure = await formStructure(tx, c!.formId)
+    const structure = await formStructure(tx, c!.formId, t.items as SubjectItem[] | null)
     if (!structure) return { ok: false as const, code: 'not_found' as const }
     const answers = new Map((await tx.select().from(assessmentAnswers).where(eq(assessmentAnswers.taskId, taskId))).map(a => [a.criterionId, a]))
     const missing: string[] = []
@@ -503,17 +588,24 @@ export async function declineTask(ctx: Ctx, taskId: string, reason: string) {
 
 export interface GroupScore { groupId: string, name: string, weight: number, byKind: Record<string, { avg: number | null, n: number }> }
 
-/** Средние по группам и видам оценщиков: Σ(оценка×вес)/Σ(вес), n/a вне знаменателя. */
+/**
+ * Средние по группам и видам оценщиков: Σ(оценка×вес)/Σ(вес), n/a вне знаменателя.
+ * Взвешенный итог по ролям (docs/33 D-036, Г-20.1): `overall.weighted` = Σ(итог роли × вес роли) / Σ(вес) по ролям
+ * с ответами; вес и анонимность — снимок на задаче (`assessment_tasks.weight/is_anonymous`), роли с весом 0
+ * (`self`) показываются, но в итог не входят. Состав анкеты — состав оцениваемого (`tasks.items`, D-039).
+ */
 export async function computeResults(tx: TenantTx, cycleId: string, subjectUserId: string) {
   const [c] = await tx.select().from(assessmentCycles).where(eq(assessmentCycles.id, cycleId))
   if (!c) return null
-  const structure = await formStructure(tx, c.formId)
-  if (!structure) return null
   const tasks = await tx.select().from(assessmentTasks).where(and(eq(assessmentTasks.cycleId, cycleId), eq(assessmentTasks.subjectUserId, subjectUserId), eq(assessmentTasks.status, 'submitted')))
+  const structure = await formStructure(tx, c.formId, (tasks.find(t => t.items)?.items ?? null) as SubjectItem[] | null)
+  if (!structure) return null
   const answers = tasks.length ? await tx.select().from(assessmentAnswers).where(inArray(assessmentAnswers.taskId, tasks.map(t => t.id))) : []
   const kindOfTask = new Map(tasks.map(t => [t.id, t.raterKind]))
   const ratersByKind: Record<string, number> = {}
   for (const t of tasks) ratersByKind[t.raterKind] = (ratersByKind[t.raterKind] ?? 0) + 1
+  const roles: Record<string, { weight: number, isAnonymous: boolean }> = {}
+  for (const t of tasks) roles[t.raterKind] ??= { weight: Number(t.weight), isAnonymous: t.isAnonymous }
   // «Значення 0 означає відсутність оцінки» — ноль вне знаменателя, как n/a
   const counted = (a: typeof assessmentAnswers.$inferSelect) => !a.isNa && a.value != null && !(structure.form.zeroMeansNoGrade && Number(a.value) === 0)
 
@@ -536,6 +628,11 @@ export async function computeResults(tx: TenantTx, cycleId: string, subjectUserI
     for (const g of groups) { const v = g.byKind[kind]?.avg; if (v != null) { num += v * g.weight; den += g.weight } }
     overall[kind] = den ? Math.round((num / den) * 100) / 100 : null
   }
+  {
+    let num = 0, den = 0
+    for (const [kind, v] of Object.entries(overall)) { const w = roles[kind]?.weight ?? 1; if (v != null && w > 0) { num += v * w; den += w } }
+    overall.weighted = den ? Math.round((num / den) * 100) / 100 : null
+  }
   // «Розрив із нормою» (Г-20.3): факт (среднее по всем оценщикам, кроме самооценки) минус норма критерия
   const criteriaGaps = structure.groups.flatMap(g => g.criteria.map((cr) => {
     const vals = answers.filter(a => a.criterionId === cr.id && kindOfTask.get(a.taskId) !== 'self' && counted(a)).map(a => Number(a.value))
@@ -544,7 +641,7 @@ export async function computeResults(tx: TenantTx, cycleId: string, subjectUserI
   }))
   // Комментарии по критериям (для отображения с учётом анонимности)
   const comments = answers.filter(a => (a.comment ?? '').trim()).map(a => ({ criterionId: a.criterionId, kind: kindOfTask.get(a.taskId)!, comment: a.comment!, taskId: a.taskId }))
-  return { cycle: c, structure, groups, overall, ratersByKind, comments, criteriaGaps }
+  return { cycle: c, structure, groups, overall, ratersByKind, roles, comments, criteriaGaps }
 }
 
 /** Результат для человека (docs/20 §7.2): при анонимности — без авторов; блок коллег скрыт, если их меньше порога. */
@@ -554,15 +651,16 @@ export async function resultsFor(ctx: Ctx, subjectUserId: string, cycleId: strin
     if (!r) return null
     const isSelf = subjectUserId === ctx.actorId
     const anon = r.cycle.anonymousForSubject && isSelf
+    // Г-20.2: порог показа — у анонимных ролей (снимок на задаче), а не у фиксированного списка
     const hiddenKinds = new Set<string>()
-    for (const kind of ['peer', 'subordinate', 'mentor']) {
-      if ((r.ratersByKind[kind] ?? 0) > 0 && (r.ratersByKind[kind] ?? 0) < r.cycle.minRatersToShow && !opts.asManager) hiddenKinds.add(kind)
+    for (const [kind, role] of Object.entries(r.roles)) {
+      if (role.isAnonymous && (r.ratersByKind[kind] ?? 0) > 0 && (r.ratersByKind[kind] ?? 0) < r.cycle.minRatersToShow && !opts.asManager) hiddenKinds.add(kind)
     }
     const groups = r.groups.map(g => ({ ...g, byKind: Object.fromEntries(Object.entries(g.byKind).filter(([k]) => !hiddenKinds.has(k))) }))
     const overall = Object.fromEntries(Object.entries(r.overall).filter(([k]) => !hiddenKinds.has(k)))
     const gaps = groups.map(g => ({ groupId: g.groupId, selfVsManager: g.byKind.self?.avg != null && g.byKind.manager?.avg != null ? Math.round((g.byKind.self.avg - g.byKind.manager.avg) * 100) / 100 : null }))
     const comments = r.comments.filter(c => !hiddenKinds.has(c.kind)).map(c => anon ? { criterionId: c.criterionId, kind: c.kind, comment: c.comment } : c)
-    return { cycle: { id: r.cycle.id, title: r.cycle.title, status: r.cycle.status, minRatersToShow: r.cycle.minRatersToShow, anonymousForSubject: r.cycle.anonymousForSubject }, groups, overall, gaps, ratersByKind: r.ratersByKind, hiddenKinds: [...hiddenKinds], comments, criteriaGaps: r.criteriaGaps, scale: r.structure.scale, structure: r.structure.groups.map(g => ({ id: g.id, name: g.name, criteria: g.criteria.map(c => ({ id: c.id, text: c.text, norm: c.norm })) })) }
+    return { cycle: { id: r.cycle.id, title: r.cycle.title, status: r.cycle.status, minRatersToShow: r.cycle.minRatersToShow, anonymousForSubject: r.cycle.anonymousForSubject }, groups, overall, gaps, ratersByKind: r.ratersByKind, roles: r.roles, hiddenKinds: [...hiddenKinds], comments, criteriaGaps: r.criteriaGaps, scale: r.structure.scale, structure: r.structure.groups.map(g => ({ id: g.id, name: g.name, criteria: g.criteria.map(c => ({ id: c.id, text: c.text, norm: c.norm })) })) }
   })
 }
 
@@ -617,6 +715,9 @@ export async function finishCycle(ctx: Ctx | { tenantId: string, actorId: null }
         }
       }
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s, code: 'assessment_results_ready', payload: { title: c.title }, dedupKey: `at_results:${cycleId}:${s}` })
+      // docs/33 D-020/D-034: завершення анкети для оцінюваного — через єдиний хук (журнал + компетенції призначення)
+      const { onTaskCompleted } = await import('./taskCompletion')
+      await onTaskCompleted(tx, ctx.tenantId, s, { contentType: 'assessment', contentId: c.formId, status: 'done', result: r.overall.weighted ?? null, sourceKind: 'assessment_cycle', sourceId: cycleId, actorId: ctx.actorId })
     }
     await tx.update(assessmentCycles).set({ status: 'finished', finishedAt: new Date(), updatedAt: new Date() }).where(eq(assessmentCycles.id, cycleId))
     if (c.createdBy) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: c.createdBy, code: 'assessment_cycle_finished', payload: { title: c.title, subjects: subjects.length }, dedupKey: `at_finished:${cycleId}` })

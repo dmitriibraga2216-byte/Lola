@@ -92,7 +92,8 @@ export const assessmentCycles = pgTable('assessment_cycles', {
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
   endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
   subjects: jsonb('subjects').notNull(), // Audience (docs/15 §3.2)
-  raterKinds: text('rater_kinds').array().notNull(), // self | manager | peer | subordinate | mentor
+  raterKinds: text('rater_kinds').array().notNull(), // self | manager | functional_manager | peer | subordinate | external (docs/02, Г-20.1)
+  raterRoles: jsonb('rater_roles').notNull().default('[]'), // [{kind, weight, isAnonymous}] — вага і анонімність ролі (Г-20.1/Г-20.2, docs/33 D-036); порожньо — RATER_ROLE_DEFAULTS
   peersCount: integer('peers_count'),
   peersSelection: text('peers_selection').default('auto'), // auto | by_subject | by_manager
   anonymousForSubject: boolean('anonymous_for_subject').notNull().default(true),
@@ -112,7 +113,10 @@ export const assessmentTasks = pgTable('assessment_tasks', {
   cycleId: uuid('cycle_id').notNull().references(() => assessmentCycles.id, { onDelete: 'cascade' }),
   subjectUserId: uuid('subject_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   raterUserId: uuid('rater_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  raterKind: text('rater_kind').notNull(),
+  raterKind: text('rater_kind').notNull(), // self | manager | functional_manager | peer | subordinate | external
+  weight: numeric('weight', { precision: 4, scale: 2 }).notNull().default('1'), // знімок ваги ролі на момент старту циклу (docs/02 assessment_raters.weight)
+  isAnonymous: boolean('is_anonymous').notNull().default(false), // знімок анонімності ролі (docs/02 assessment_raters.is_anonymous)
+  items: jsonb('items'), // by_competencies (docs/33 D-039): склад анкети для цього оцінюваного [{criterionId, norm}] з вимог профілю посади; null — склад анкети
   status: text('status').notNull().default('pending'), // pending | in_progress | submitted | declined | expired
   dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
   submittedAt: timestamp('submitted_at', { withTimezone: true }),

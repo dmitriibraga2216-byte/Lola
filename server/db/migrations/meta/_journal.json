@@ -351,6 +351,13 @@
       "when": 1789990200802,
       "tag": "0049_debts8_preview_module_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789990300802,
+      "tag": "0050_debts4_task_status_log_raters_login",
+      "breakpoints": true
     }
   ]
 }

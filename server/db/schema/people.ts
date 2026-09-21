@@ -124,6 +124,7 @@ export const sessions = pgTable('sessions', {
   // а не по власних ролях людини; знята роль (delete) сама скидає перегляд. Мутації заборонені (middleware 03.guards).
   previewRoleId: uuid('preview_role_id').references(() => roles.id, { onDelete: 'set null' }),
   requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
+  loginMethod: text('login_method'), // чем подтверждена личность при входе (docs/33 D-021): otp_sms | otp_telegram | otp_email | password | password_otp | google | invite | impersonation
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, t => [

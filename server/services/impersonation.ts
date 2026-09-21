@@ -71,7 +71,7 @@ export async function startImpersonation(tenantId: string, userId: string, reaso
     const expiresAt = new Date(Date.now() + IMPERSONATION_MINUTES * 60_000)
     const [row] = await tx.insert(sessions).values({
       tenantId, userId, tokenHash: hashToken(token), userAgent: `platform:${actor.email}`, ip: null,
-      requestContext: currentRequestContext(), impersonatedBy: null, impersonatorAdminId: actor.adminId, impersonationReason: reason,
+      requestContext: currentRequestContext(), impersonatedBy: null, impersonatorAdminId: actor.adminId, impersonationReason: reason, loginMethod: 'impersonation',
       activeRoleId: defaultRoleOf(list)?.id ?? null, expiresAt,
     }).returning({ id: sessions.id })
     const sessionId = row!.id

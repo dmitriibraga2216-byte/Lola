@@ -946,6 +946,9 @@ webinars(title, description jsonb, attachments jsonb, tags text[], status)
 -- имя `sessions` занято автентифікацією (`sessions.active_role_id`, parity-4-active-role).
 -- Старые поля даты/места/вместимости на `meetups`/`webinars` для kind=meetup|webinar не убраны
 -- (используются старыми записями и kind=event, Spec 21) — долг «полное разведение», `28` «Spec 18».
+-- sessions (аутентификация).login_method text — чем подтверждена личность (docs/33 D-021, миграция 0050):
+-- otp | otp_sms | otp_telegram | otp_email | password | password_otp | google | invite | impersonation (CHECK);
+-- по нему решается, можно ли задать новый пароль без текущего («Відновлення пароля», `24` §3.4.1).
 sessions(                                  -- общая для очных занятий и вебинаров
   id, tenant_id, task_id,                  -- сессия принадлежит НАЗНАЧЕНИЮ, не карточке
   content_type text,                       -- meetup | webinar
@@ -1024,6 +1027,11 @@ assessment_cycles(assessment_id, task_id, period_from, period_to, status, min_ra
 assessment_raters(cycle_id, subject_user_id, rater_user_id,
           rater_kind text,          -- self | manager | functional_manager | peer | subordinate | external
           weight numeric(4,2), is_anonymous boolean, status text, due_at)
+-- В коде assessment_raters = assessment_tasks (docs/33 D-036, миграция 0050): rater_kind с CHECK по шести ролям
+-- (mentor прежних циклов → external), weight/is_anonymous — снимок роли на момент старта цикла;
+-- набор ролей цикла — assessment_cycles.rater_roles jsonb [{kind, weight, isAnonymous}] поверх умолчаний Г-20.1;
+-- assessment_tasks.items jsonb [{criterionId, norm, cluster}] — состав анкеты by_competencies для оцениваемого
+-- из вимог профиля его должности (docs/33 D-039), null — состав анкеты.
 assessment_answers(cycle_id, rater_id, item_id, value numeric(6,2), comment text,
           photo_keys text[])
 ```
@@ -1144,7 +1152,7 @@ saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
 -- Формат поля request_context jsonb:
 --   {ip, geo:{country,country_code,city}, user_agent, browser, os, device}
 -- Журналы: audit_log, security_log, sessions, enrollment_events, notifications,
--- import_jobs, goal_status_log, automation_runs, task_access_log, org_conflicts
+-- import_jobs, goal_status_log, automation_runs, task_access_log, org_conflicts, task_status_log
 -- (+ points_ledger, когда появится).
 -- Заполняет server/utils/requestContext.ts; вне HTTP-запроса (очередь, вебхук) — null.
 -- security_log.severity text not null default 'info' — security_severity (см. перечисления).
@@ -1167,7 +1175,23 @@ org_conflicts(
   import_job_id uuid, details jsonb, actor_id uuid,
   request_context jsonb, resolved_at timestamptz, resolved_by uuid, created_at   -- разрешение: details.resolution {action acknowledge|close_placement, placementId, comment, by, at}
 )
--- Протокол змін статусу завдань — это enrollment_events (payload {from, to, result}) ∪ attempt_results; отдельной таблицы нет.
+-- Протокол змін статусу завдань (docs/33 D-020, D-034; `debts-4`): единая точка «завдання завершено» для всех
+-- 11 типов контента + траектория. Пишет только хук `onTaskCompleted` (server/services/taskCompletion.ts) из
+-- модуля, фиксирующего завершение; из него же подтверждаются компетенции назначения (Г-19.2). Отчёт по типам
+-- без собственной записи прохождения (resource, workshop, poll, assessment, check_list, meetup, webinar, notice)
+-- читает последний статус отсюда; enrollment_events для курса/программы остаются.
+task_status_log(
+  id, tenant_id, user_id,
+  content_type text not null,     -- content_type | trajectory (CHECK)
+  content_id uuid not null,
+  assignment_id uuid,             -- назначение, по которому завершено; null — самостоятельно/каталог
+  enrollment_id uuid,
+  status text not null,           -- enrollment_status: только done | failed (CHECK); повтор того же статуса не пишется
+  result text,                    -- %, балл — числом строкой, как enrollments.score
+  source_kind text not null,      -- enrollment | attempt | complex_attempt | resource_view | meetup_attendance | notice_ack | survey_response | assessment_cycle | checklist_run | workshop_submission | program_enrollment | trajectory_enrollment
+  source_id uuid, actor_id uuid,  -- строка-источник; кто зафиксировал (наставник, наблюдатель), null — сам/система
+  request_context jsonb, created_at
+)
 -- report_exports.active_role_id uuid — роль, активная в момент запроса выгрузки (`01` §1.9.2); область считается по ней.
 
 -- Правило автоматизации (`17` §14.2)

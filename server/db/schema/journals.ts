@@ -43,3 +43,31 @@ export const orgConflicts = pgTable('org_conflicts', {
   index().on(t.tenantId, t.createdAt.desc()),
   index().on(t.tenantId, t.userId),
 ])
+
+/**
+ * Єдиний журнал «завдання завершено» для всіх типів контенту (docs/33 D-020, D-034): курс, тест, ресурс,
+ * заняття/вебінар, оголошення, опитування, анкета, чек-лист, практикум, програма, комплексний тест,
+ * траєкторія. Пише лише хук `onTaskCompleted` (`server/services/taskCompletion.ts`) — одна точка,
+ * з якої підтверджуються компетенції призначення і з якої звіти читають прохождення типів, у яких
+ * немає власного запису (`enrollments` є лише у курсу й програми). Статуси — п'ять `enrollment_status`
+ * (CLAUDE.md п. 12), у журналі — тільки `done` і `failed`.
+ */
+export const taskStatusLog = pgTable('task_status_log', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  contentType: text('content_type').notNull(), // content_type (docs/02) + trajectory (не назначаемый контент, но завершается так само)
+  contentId: uuid('content_id').notNull(),
+  assignmentId: uuid('assignment_id'), // назначение, по которому завершено (null — контент без назначения: самостоятельно/каталог)
+  enrollmentId: uuid('enrollment_id'), // запись курса/программы, если есть
+  status: text('status').notNull(), // enrollment_status: done | failed
+  result: text('result'), // результат (%, бали) на момент завершения — числом строкой, как enrollments.score
+  sourceKind: text('source_kind').notNull(), // откуда пришло: enrollment | attempt | complex_attempt | resource_view | meetup_attendance | notice_ack | survey_response | assessment_cycle | checklist_run | workshop_submission | program_enrollment | trajectory_enrollment
+  sourceId: uuid('source_id'), // id строки-источника (попытки, прогона, участия…)
+  actorId: uuid('actor_id'), // кто зафиксировал (наставник, наблюдатель); null — сам человек или система
+  requestContext: jsonb('request_context'), // {ip, geo, user_agent, browser, os, device}
+}, t => [
+  index().on(t.tenantId, t.createdAt.desc()),
+  index().on(t.tenantId, t.userId, t.contentType, t.contentId, t.createdAt.desc()),
+  index().on(t.tenantId, t.assignmentId),
+])

@@ -767,7 +767,12 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       lastActivityAt: new Date(),
       updatedAt: new Date(),
     }).where(eq(enrollments.id, enrollmentId))
-    if (courseCompleted && enrollment.status !== 'done') business.inc({ event: 'course_completed' })
+    if (courseCompleted && enrollment.status !== 'done') {
+      business.inc({ event: 'course_completed' })
+      // docs/33 D-020: єдина точка «завдання завершено» — журнал + компетенції призначення (D-034), у тій самій транзакції
+      const { onTaskCompleted } = await import('./taskCompletion')
+      await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'course', contentId: enrollment.subjectId, status: 'done', result: score ?? progressPct, assignmentId: enrollment.assignmentId, enrollmentId, sourceKind: 'enrollment', sourceId: enrollmentId })
+    }
 
     await logEvent(tx, ctx.tenantId, enrollmentId, courseCompleted ? 'completed' : 'progress', {
       lessonId,
@@ -792,8 +797,7 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       if (e) import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, ctx.actorId, 'course', e.courseId, { passed: true })).catch(err => console.error('trajectory course hook', err))
       // docs/19 §7.3: курс с компетенцией и сданным итоговым тестом → оценка уровня source=task
       if (e) import('./developmentExtra').then(d => d.onCourseCompletedCompetency(ctx.tenantId, ctx.actorId, e.courseId, enrollmentId)).catch(err => console.error('competency course hook', err))
-      // docs/19 Г-19.2, долг Spec 15 (assignment_competencies): завершённое назначение частично подтверждает привязанные компетенции
-      if (e) import('./developmentExtra').then(d => d.onAssignmentCompletedCompetencies(ctx.tenantId, ctx.actorId, e.assignmentId, enrollmentId)).catch(err => console.error('competency task hook', err))
+      // docs/19 Г-19.2 (assignment_competencies): підтвердження компетенцій призначення — всередині onTaskCompleted (docs/33 D-034)
       if (e) {
         const { triggerCourseFeedback } = await import('./surveys')
         triggerCourseFeedback(ctx.tenantId, ctx.actorId, e.courseId, enrollmentId).catch(err => console.error('survey trigger', err))

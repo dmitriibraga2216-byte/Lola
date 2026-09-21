@@ -188,6 +188,9 @@ export async function acknowledge(ctx: Ctx, id: string): Promise<AckResult> {
       .onConflictDoNothing().returning({ ackedAt: noticeAcks.ackedAt })
     if (row) {
       await emitWebhook(tx, ctx.tenantId, 'notice.acknowledged', { noticeId: id, userId: ctx.actorId, title: n.title, ackedAt: row.ackedAt.toISOString() })
+      // docs/33 D-020: підтверджене оголошення — завершене завдання типу notice
+      const { onTaskCompleted } = await import('./taskCompletion')
+      await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'notice', contentId: id, status: 'done', sourceKind: 'notice_ack' })
       return { ok: true as const, ackedAt: row.ackedAt }
     }
     const [existing] = await tx.select({ ackedAt: noticeAcks.ackedAt }).from(noticeAcks).where(and(eq(noticeAcks.noticeId, id), eq(noticeAcks.userId, ctx.actorId)))

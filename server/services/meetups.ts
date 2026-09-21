@@ -320,6 +320,11 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, m: typeof meetups.$inferSe
       .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: now } })
     setImmediate(() => completeLesson({ tenantId: ctx.tenantId, actorId: r.userId }, enrollmentId, lessonId).catch(() => {}))
   }
+  // docs/33 D-020: відмітка відвідування самостійного заняття/вебінару — єдиний хук (attended → done, missed → failed); у складі курсу фіксує курс
+  if ((status === 'attended' || status === 'missed') && !r.lessonId) {
+    const { onTaskCompleted } = await import('./taskCompletion')
+    await onTaskCompleted(tx, ctx.tenantId, r.userId, { contentType: m.kind === 'webinar' ? 'webinar' : 'meetup', contentId: m.id, status: status === 'attended' ? 'done' : 'failed', enrollmentId: r.enrollmentId, sourceKind: 'meetup_attendance', sourceId: r.id, actorId: ctx.actorId === r.userId ? null : ctx.actorId })
+  }
   // Занятие как узел программы (docs/17 §7.4)
   if (status === 'attended' || status === 'missed') setImmediate(() => { import('./programs').then(p => p.onItemResult(ctx.tenantId, r.userId, m.kind === 'webinar' ? 'webinar' : 'meetup', m.id, { passed: status === 'attended' })).catch(() => {}); import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, r.userId, m.kind === 'webinar' ? 'webinar' : 'meetup', m.id, { passed: status === 'attended' })).catch(() => {}) })
 }

@@ -278,7 +278,16 @@ export async function onCourseCompletedCompetency(tenantId: string, userId: stri
  */
 export async function onAssignmentCompletedCompetencies(tenantId: string, userId: string, assignmentId: string | null, enrollmentId: string): Promise<number> {
   if (!assignmentId) return 0
-  return withTenant(tenantId, null, async (tx) => {
+  return withTenant(tenantId, null, tx => confirmAssignmentCompetencies(tx, tenantId, userId, assignmentId, enrollmentId))
+}
+
+/**
+ * Та сама логіка всередині вже відкритої транзакції — для єдиного хука «завдання завершено»
+ * (`taskCompletion.ts`, docs/33 D-020/D-034): підтвердження компетенцій і запис журналу атомарні.
+ * `evidenceId` — id джерела (запис курсу, попытка, прогон чек-листа …), не обов'язково enrollment.
+ */
+export async function confirmAssignmentCompetencies(tx: TenantTx, tenantId: string, userId: string, assignmentId: string, evidenceId: string | null): Promise<number> {
+  {
     const compIds = (await tx.select({ id: assignmentCompetencies.competencyId }).from(assignmentCompetencies).where(eq(assignmentCompetencies.assignmentId, assignmentId))).map(r => r.id)
     if (!compIds.length) return 0
     const [pl] = await tx.select({ positionId: userPlacements.positionId, positionLevelId: userPlacements.positionLevelId })
@@ -295,11 +304,11 @@ export async function onAssignmentCompletedCompetencies(tenantId: string, userId
       const cur = levels.get(r.competencyId)?.level ?? 0
       if (cur >= r.requiredLevel) continue
       const level = Math.min(cur + 1, r.requiredLevel)
-      await tx.insert(competencyAssessments).values({ tenantId, userId, competencyId: r.competencyId, level, source: 'task', evidenceId: enrollmentId, comment: 'Завершено призначення з привʼязаною компетенцією', validUntil: defaultValidUntil() })
+      await tx.insert(competencyAssessments).values({ tenantId, userId, competencyId: r.competencyId, level, source: 'task', evidenceId, comment: 'Завершено призначення з привʼязаною компетенцією', validUntil: defaultValidUntil() })
       n++
     }
     return n
-  })
+  }
 }
 
 // ── Смена должности → пересчёт разрыва, критический → руководителю (docs/19 §12) ──

@@ -70,7 +70,7 @@ describe.skipIf(!BUILT)('Spec 21 по HTTP', () => {
     const ok = await fetch(`${BASE}/api/v1/public/guest-page?slug=kappi`)
     expect(ok.status).toBe(200)
     const g = await data<{ name: string, slug: string, blocks: { welcome: unknown[], supportContact: object, policyUrl: string | null } }>(ok)
-    expect(Object.keys(g).sort()).toEqual(['blocks', 'name', 'passwordLogin', 'slug']) // passwordLogin — единственный флаг политик наружу (Spec 16)
+    expect(Object.keys(g).sort()).toEqual(['blocks', 'hideLoginForm', 'name', 'passwordLogin', 'slug']) // наружу только флаги политик входа: passwordLogin (Spec 16), hideLoginForm (D-021)
     expect(Object.keys(g.blocks).sort()).toEqual(['policyUrl', 'supportContact', 'welcome'])
     expect((await fetch(`${BASE}/api/v1/public/guest-page?slug=no-such-space`)).status).toBe(404)
     expect((await fetch(`${BASE}/api/v1/public/guest-page`)).status).toBe(404) // без Host-поддомена и slug — тоже 404

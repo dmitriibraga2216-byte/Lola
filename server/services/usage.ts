@@ -99,17 +99,29 @@ export async function collectUsageAll(): Promise<number> {
  * и за сегодняшний локальный день сбора ещё нет. Так «00:00 по таймзоне тенанта» не требует задачи на каждый тенант.
  */
 export async function collectUsageDue(): Promise<number> {
+  // Кандидаты — активные тенанты, у которых сейчас час 0 по их поясу. Проверка «сегодня уже
+  // собирали» — внутри withTenant: `tenant_usage` под RLS, и с общего соединения app_user строк
+  // не видно (из-за этого сбор шёл каждый вызов подряд — docs/33, найдено 22.09).
   const rows = await db.execute(sql`
-    select t.id from tenants t
-    where t.status = 'active'
-      and extract(hour from (now() at time zone t.timezone)) = 0
-      and not exists (
-        select 1 from tenant_usage u where u.tenant_id = t.id
-          and (u.collected_at at time zone t.timezone)::date = (now() at time zone t.timezone)::date
-      )
-  `) as unknown as { id: string }[]
-  for (const t of rows) await collectUsage(t.id)
-  return rows.length
+    select t.id, t.timezone from tenants t
+    where t.status = 'active' and extract(hour from (now() at time zone t.timezone)) = 0
+  `) as unknown as { id: string, timezone: string }[]
+  let n = 0
+  for (const t of rows) {
+    const done = await withTenant(t.id, null, async (tx) => {
+      const r = await tx.execute(sql`
+        select 1 from tenant_usage u
+        where u.tenant_id = ${t.id}
+          and (u.collected_at at time zone ${t.timezone})::date = (now() at time zone ${t.timezone})::date
+        limit 1
+      `) as unknown as unknown[]
+      return r.length > 0
+    })
+    if (done) continue
+    await collectUsage(t.id)
+    n++
+  }
+  return n
 }
 
 export interface UsageView {

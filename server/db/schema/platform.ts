@@ -37,6 +37,9 @@ export const plans = pgTable('plans', {
   maxStorageGb: integer('max_storage_gb'),
   maxSmsPerMonth: integer('max_sms_per_month'),
   features: jsonb('features').notNull().default(sql`'{}'::jsonb`), // {knowledge, workshops, surveys, api, webhooks}
+  // Замок модуля по тарифу (docs/24 §3.2, §4.4; докс/33 D-053): null — без обмежень (усі модулі),
+  // масив — лише перелічені `ModuleCode` доступні на цьому тарифі, решта — 403 `module.plan_locked`.
+  modules: text('modules').array(),
   priceUah: integer('price_uah'),
   sort: integer('sort').notNull().default(0),
 })

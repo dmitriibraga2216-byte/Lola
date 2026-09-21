@@ -10,7 +10,7 @@ const { t } = useI18n()
 const { api } = useApi()
 const { fetchMe } = useAuth()
 
-interface Space { name: string, slug: string, slugLocked: boolean, locale: string, timezone: string, plan: string, accent: string, modules: Record<string, boolean>, defaults: Record<string, unknown>, quietHours: { enabled: boolean, from: number, to: number } }
+interface Space { name: string, slug: string, slugLocked: boolean, locale: string, timezone: string, plan: string, accent: string, modules: Record<string, boolean>, lockedModules: Record<string, string>, defaults: Record<string, unknown>, quietHours: { enabled: boolean, from: number, to: number } }
 
 const GROUPS = ['space', 'modules', 'auth', 'roles', 'subordinates', 'orgStructure', 'passwords', 'phones', 'notifications', 'tasks', 'users', 'dataProtection', 'session'] as const
 type Group = typeof GROUPS[number]
@@ -135,7 +135,9 @@ const otpEmailEnabled = computed({
         <template v-else-if="active === 'modules'">
           <p class="help">{{ t('settings.modules.hint') }}</p>
           <label v-for="m in MODULES" :key="m" class="toggle row">
-            <input v-model="modules[m]" type="checkbox"><span>{{ t(`settings.modules.names.${m}`) }}</span>
+            <input v-model="modules[m]" type="checkbox" :disabled="!!space?.lockedModules?.[m]">
+            <span>{{ t(`settings.modules.names.${m}`) }}</span>
+            <span v-if="space?.lockedModules?.[m]" class="badge sun">{{ t('settings.modules.locked', { plan: space.lockedModules[m] }) }}</span>
           </label>
         </template>
 

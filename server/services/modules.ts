@@ -1,4 +1,7 @@
+import { eq } from 'drizzle-orm'
 import type { ModuleCode } from '../../shared/schemas/settings'
+import { db } from '../db/client'
+import { plans, tenants } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { readSettings } from './settings'
 
@@ -87,4 +90,40 @@ export function invalidateModules(tenantId: string): void {
 
 export async function isModuleEnabled(tenantId: string, module: ModuleCode): Promise<boolean> {
   return (await tenantModules(tenantId))[module]
+}
+
+// ── Замок модуля по тарифу (docs/24 §3.2, §4.4; докс/33 D-053) ──
+
+const LOCK_TTL_MS = 60_000
+interface PlanRow { code: string, name: string, modules: string[] | null, sort: number }
+let plansCache: { at: number, rows: PlanRow[] } | null = null
+
+async function allPlans(): Promise<PlanRow[]> {
+  if (plansCache && Date.now() - plansCache.at < LOCK_TTL_MS) return plansCache.rows
+  const rows = await db.select({ code: plans.code, name: plans.name, modules: plans.modules, sort: plans.sort }).from(plans).orderBy(plans.sort)
+  plansCache = { at: Date.now(), rows }
+  return rows
+}
+
+/** Сбрасывается панелью оператора при правке `plans` (сейчас правка идёт напрямую в БД — задел на будущий CRUD `/platform/plans`). */
+export function invalidatePlans(): void {
+  plansCache = null
+}
+
+/** `null` в `modules` — тариф без обмежень (усі модулі доступні). */
+const planAllows = (p: PlanRow, module: ModuleCode) => p.modules === null || p.modules.includes(module)
+
+/**
+ * null — модуль доступний на поточному тарифі тенанта. Інакше — найдешевший (за `sort`) тариф,
+ * що включає модуль, для підпису «Доступно на тарифі «…»»; немає жодного — теж null (не блокуємо
+ * мовчки, якщо модуль ніде не перелічений — ознака помилки налаштування тарифів, не заборони).
+ */
+export async function moduleLock(tenantId: string, module: ModuleCode): Promise<{ planCode: string, planName: string } | null> {
+  const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId))
+  if (!t) return null
+  const rows = await allPlans()
+  const current = rows.find(p => p.code === t.plan)
+  if (!current || planAllows(current, module)) return null
+  const cheapest = rows.find(p => planAllows(p, module))
+  return cheapest ? { planCode: cheapest.code, planName: cheapest.name } : null
 }

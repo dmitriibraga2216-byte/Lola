@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import type { H3Event } from 'h3'
-import { users } from '../db/schema'
+import { roles as rolesTable, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { Scope } from '../../shared/domain/roles'
 import type { AuthContext } from './session'
@@ -40,6 +40,16 @@ export async function loadAccess(auth: AuthContext): Promise<Access | null> {
     const [user] = await tx.select({ status: users.status, isBlocked: users.isBlocked })
       .from(users).where(eq(users.id, auth.userId))
     if (!user || user.status !== 'active' || user.isBlocked) return null
+
+    // «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052): права рахуються тільки по цій ролі,
+    // власні ролі людини на час перегляду не діють. Область — весь тенант (як у API-токена): режим
+    // призначений показати, що бачить роль загалом, а не перевірити конкретну прив'язку до точки.
+    if (auth.previewRoleId) {
+      const [role] = await tx.select().from(rolesTable).where(eq(rolesTable.id, auth.previewRoleId))
+      if (!role) return { userId: auth.userId, tenantId: auth.tenantId, grants: [], activeRole: null, roles: [] }
+      const ref = { id: role.id, code: role.code, name: role.name }
+      return { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: role.scopes, scopeType: 'tenant', scopeId: null }], activeRole: ref, roles: [ref] }
+    }
 
     const list = await effectiveRoles(tx, auth.userId)
     const active = await resolveActiveRole(tx, auth, list)

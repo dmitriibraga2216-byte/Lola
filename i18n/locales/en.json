@@ -3853,6 +3853,10 @@
     "expires": "{min} min left",
     "exit": "Exit"
   },
+  "previewAs": {
+    "banner": "Viewing the system as role «{role}»",
+    "exit": "Exit"
+  },
   "certificates": {
     "title": "Certificates",
     "hint": "Number, validity and a public verification page are our addition; in the reference a certificate is just a file",
@@ -3927,6 +3931,7 @@
     },
     "modules": {
       "hint": "A disabled module disappears from the menu and API; data is kept and its reports stay available to the admin",
+      "locked": "Available on the «{plan}» plan",
       "names": {
         "workshops": "Workshops",
         "programs": "Programs",
@@ -4109,6 +4114,7 @@
       "clearGroup": "clear all",
       "delete": "Delete role",
       "confirmDelete": "Delete role \"{name}\"?",
+      "previewAs": "View system as this role",
       "group": {
         "learn": "Learning",
         "content": "Content",

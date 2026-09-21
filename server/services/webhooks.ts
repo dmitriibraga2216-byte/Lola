@@ -6,6 +6,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
+import { effectiveLimits } from './tenantLimits'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -33,8 +34,15 @@ export async function listEndpoints(ctx: Ctx) {
   })
 }
 
-/** Секрет показывается один раз при создании. */
-export async function createEndpoint(ctx: Ctx, input: { url: string, events: string[], description?: string }) {
+export type CreateEndpointResult = { ok: true, id: string, secret: string } | { ok: false, code: 'webhooks_limit' }
+
+/** Секрет показывается один раз при создании. Лимит вебхуков (docs/25 §10, докс/33 D-055) — переопределение тенанта, иначе тариф. */
+export async function createEndpoint(ctx: Ctx, input: { url: string, events: string[], description?: string }): Promise<CreateEndpointResult> {
+  const limit = (await effectiveLimits(ctx.tenantId)).webhooks
+  if (limit != null) {
+    const rows = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select({ count: sql<number>`count(*)::int` }).from(webhookEndpoints))
+    if ((rows[0]?.count ?? 0) >= limit) return { ok: false, code: 'webhooks_limit' }
+  }
   const secret = `whsec_${randomBytes(24).toString('base64url')}`
   const { ciphertext, nonce } = encrypt(secret)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -42,7 +50,7 @@ export async function createEndpoint(ctx: Ctx, input: { url: string, events: str
       tenantId: ctx.tenantId, url: input.url, secretEncrypted: ciphertext, nonce, events: input.events, description: input.description ?? null, createdBy: ctx.actorId,
     }).returning({ id: webhookEndpoints.id })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'webhook.create', entity: 'webhook_endpoint', entityId: e!.id, after: { url: input.url, events: input.events } })
-    return { id: e!.id, secret }
+    return { ok: true as const, id: e!.id, secret }
   })
 }
 

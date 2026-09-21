@@ -44,12 +44,13 @@ export default defineEventHandler(async (event) => {
     const { validateBearer } = await import('../services/apiTokens')
     const r = await validateBearer(bearer.slice(7).trim())
     if (!r.ok) {
-      throw createError({ statusCode: r.code === 'rate_limited' ? 429 : 401, data: { code: r.code === 'rate_limited' ? 'rate_limited' : 'auth_required', message: r.code === 'rate_limited' ? 'Ліміт 60 запитів на хвилину' : 'Невірний токен' } })
+      // Ліміт — `tenant_limits.apiPerMinute` (докс/33 D-055), текст не називає число, бо воно може бути перевизначене тенанту
+      throw createError({ statusCode: r.code === 'rate_limited' ? 429 : 401, data: { code: r.code === 'rate_limited' ? 'rate_limited' : 'auth_required', message: r.code === 'rate_limited' ? 'Перевищено ліміт запитів на хвилину' : 'Невірний токен' } })
     }
     const hostTenant = event.context.hostTenant as ResolvedTenant | undefined
     if (hostTenant && hostTenant.id !== r.auth.tenantId) throw createError({ statusCode: 401, data: { code: 'auth_required', message: 'Токен не належить цьому простору' } })
     await assertTenantOpen(r.auth.tenantId)
-    event.context.auth = { sessionId: `token:${r.auth.tokenId}`, tenantId: r.auth.tenantId, userId: r.auth.actorId ?? '', impersonatedBy: null, activeRoleId: null }
+    event.context.auth = { sessionId: `token:${r.auth.tokenId}`, tenantId: r.auth.tenantId, userId: r.auth.actorId ?? '', impersonatedBy: null, activeRoleId: null, previewRoleId: null }
     event.context.tokenScopes = r.auth.scopes
     return
   }

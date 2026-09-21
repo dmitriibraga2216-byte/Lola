@@ -7,5 +7,7 @@ export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'settings.integrations')
   const p = schema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Перевірте поля', { issues: p.error.issues })
-  return apiData(await createEndpoint({ tenantId: a.tenantId, actorId: a.userId }, p.data))
+  const r = await createEndpoint({ tenantId: a.tenantId, actorId: a.userId }, p.data)
+  if (!r.ok) return apiError(event, 409, 'webhooks_limit', 'Ліміт вебхуків на тарифі вичерпано — зверніться до підтримки Lola')
+  return apiData({ id: r.id, secret: r.secret })
 })

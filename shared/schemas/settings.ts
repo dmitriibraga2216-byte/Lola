@@ -128,11 +128,11 @@ const clockSchema = z.object({ hour: z.number().int().min(0).max(23), minute: z.
  */
 const notificationScheduleShape = z.object({
   birthdays: clockSchema.default({ hour: 9, minute: 0 }),
-  anniversaries: clockSchema.default({ hour: 9, minute: 0 }), // «Річниці» — довг: подія ще не реалізована (docs/28 «Spec 23»)
+  anniversaries: clockSchema.default({ hour: 9, minute: 0 }), // «Річниці» — подія `anniversaryScan` (докс/33 D-049), клас часу тут
   autoClosedTasks: clockSchema.default({ hour: 0, minute: 0 }), // «Автоматично завершені завдання» — службова розсилка вночі
   managerDigest: clockSchema.default({ hour: 9, minute: 0 }), // дайджест керівнику
   dueTasks: clockSchema.default({ hour: 9, minute: 0 }), // термін виконання закінчується
-  programReminder: clockSchema.default({ hour: 9, minute: 0 }), // нагадування за день до старту елемента програми — довг
+  programReminder: clockSchema.default({ hour: 9, minute: 0 }), // нагадування за день до старту програми — подія `programReminderScan` (докс/33 D-049)
 })
 export const notificationScheduleSchema = notificationScheduleShape.default({})
 export type NotificationSchedule = z.infer<typeof notificationScheduleSchema>
@@ -301,3 +301,6 @@ export const categoryReorderSchema = z.object({ ids: z.array(z.string().uuid()).
 // ── Impersonation (docs/24 §4.5, docs/29 Б.13) ──
 export const IMPERSONATION_MINUTES = 60
 export const impersonateSchema = z.object({ userId: z.string().uuid(), reason: z.string().trim().min(10).max(500) })
+
+// ── «Переглянути систему як роль» (docs/24 §3.5, §9; докс/33 D-052) ──
+export const previewAsSchema = z.object({ roleId: z.string().uuid() })

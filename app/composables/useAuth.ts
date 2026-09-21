@@ -11,6 +11,8 @@ export interface Me {
   impersonated: boolean
   /** Вход «от имени» (docs/24 §4.5): оператор, причина, до когда — для плашки */
   impersonation: { operator: string | null, reason: string | null, expiresAt: string } | null
+  /** «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052): не null, поки триває перегляд */
+  preview: RoleRef | null
 }
 
 export function useAuth() {
@@ -54,6 +56,20 @@ export function useAuth() {
     finally { me.value = null; await navigateTo('/login') }
   }
 
+  /** «Переглянути систему як роль» (docs/24 §3.5): старт із екрана ролей. */
+  async function startPreview(roleId: string): Promise<void> {
+    await api('/settings/roles/preview-as', { method: 'POST', body: { roleId } })
+    await fetchMe()
+    await navigateTo(homeFor(me.value))
+  }
+
+  /** Кнопка «Вихід» на плашці перегляду — повертає власні права без виходу з сесії. */
+  async function stopPreview(): Promise<void> {
+    await api('/settings/roles/preview-as', { method: 'DELETE' })
+    await fetchMe()
+    await navigateTo(homeFor(me.value))
+  }
+
   /**
    * Переключение активной роли без выхода (docs/01 §1.9.2): сервер меняет сессию,
    * профиль перечитывается, экран уходит на стартовую — меню под новой ролью может не содержать текущего раздела.
@@ -68,7 +84,7 @@ export function useAuth() {
   /** Инициалы для аватара: «Ткаченко Аліна» → «ТА». */
   const initials = computed(() => (me.value?.user.fullName ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join(''))
 
-  return { me, loaded, fetchMe, logout, hasScope, moduleOn, stopImpersonation, switchRole, initials }
+  return { me, loaded, fetchMe, logout, hasScope, moduleOn, stopImpersonation, startPreview, stopPreview, switchRole, initials }
 }
 
 /** Стартовый экран под активную роль: админка, если роль даёт туда доступ, иначе кабинет. */

@@ -6,6 +6,7 @@ import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
 import { hitRateLimit } from './rateLimit'
+import { DEFAULT_API_PER_MINUTE, effectiveLimits } from './tenantLimits'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -54,7 +55,9 @@ export async function validateBearer(raw: string): Promise<{ ok: true, auth: Tok
   const rows = await db.execute(sql`select * from auth_api_token(${hash(raw)})`) as unknown as { token_id: string, tenant_id: string, scopes: string[], expires_at: string | null, revoked_at: string | null, created_by: string | null }[]
   const row = rows[0]
   if (!row || row.revoked_at || (row.expires_at && new Date(row.expires_at) < new Date())) return { ok: false, code: 'invalid' }
-  if (!await hitRateLimit(`api:${row.token_id}`, 60, 60)) return { ok: false, code: 'rate_limited' }
+  // Лимит запросов в минуту — `tenant_limits.apiPerMinute` (docs/25 §10, докс/33 D-055), иначе константа по умолчанию.
+  const perMinute = (await effectiveLimits(row.tenant_id)).apiPerMinute ?? DEFAULT_API_PER_MINUTE
+  if (!await hitRateLimit(`api:${row.token_id}`, perMinute, 60)) return { ok: false, code: 'rate_limited' }
   await withTenant(row.tenant_id, null, async (tx) => {
     await tx.update(apiTokens).set({ lastUsedAt: new Date() }).where(eq(apiTokens.id, row.token_id))
   }).catch(() => {})

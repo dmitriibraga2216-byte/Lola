@@ -128,13 +128,15 @@ export async function requireAnyScope(event: H3Event, scopes: (Scope | string)[]
 }
 
 /**
- * Область видимости отчётов (docs/22 §2, §7.1): null — вся сеть (`report.tenant` или скоуп на весь тенант);
- * иначе — точки, где у человека есть роль с этим скоупом (точка напрямую или через подразделение).
- * Пустой массив — не видит ничего. Фильтр «точка» из запроса может только сузить (см. narrowScope).
+ * Область видимости по паре скоупов «весь тенант / своя команда»: null — вся сеть (тенантный
+ * скоуп или грант на весь тенант); иначе — точки, где у человека есть роль с командным скоупом
+ * (точка напрямую или через подразделение). Пустой массив — не видит ничего.
+ * Общая часть `reportScope` (docs/22 §2, §7.1) и видимости по роли в «Розвиток» (docs/19 §2) —
+ * тот самый принцип «tenant-скоуп бачить усе, team-скоуп — тільки свою область».
  */
-export async function reportScope(access: Access, scope: Scope | string = 'report.team'): Promise<string[] | null> {
-  if (can(access, 'report.tenant')) return null
-  const grants = access.grants.filter(g => g.scopes.includes(scope))
+export async function scopeForGrants(access: Access, tenantScope: Scope | string, teamScope: Scope | string): Promise<string[] | null> {
+  if (can(access, tenantScope)) return null
+  const grants = access.grants.filter(g => g.scopes.includes(teamScope))
   if (grants.some(g => g.scopeType === 'tenant')) return null
   const locs = new Set(grants.filter(g => g.scopeType === 'location' && g.scopeId).map(g => g.scopeId!))
   const units = grants.filter(g => g.scopeType === 'org_unit' && g.scopeId).map(g => g.scopeId!)
@@ -146,6 +148,24 @@ export async function reportScope(access: Access, scope: Scope | string = 'repor
     for (const r of rows) locs.add(r.id)
   }
   return [...locs]
+}
+
+/**
+ * Область видимости отчётов (docs/22 §2, §7.1): null — вся сеть (`report.tenant` или скоуп на весь тенант);
+ * иначе — точки, где у человека есть роль с этим скоупом (точка напрямую или через подразделение).
+ * Пустой массив — не видит ничего. Фильтр «точка» из запроса может только сузить (см. narrowScope).
+ */
+export async function reportScope(access: Access, scope: Scope | string = 'report.team'): Promise<string[] | null> {
+  return scopeForGrants(access, 'report.tenant', scope)
+}
+
+/**
+ * Область видимости «Планів розвитку» (docs/19 §2, `31` DevelopmentPlans, spec-development):
+ * `development.manage` (адмін/методист) — уся мережа; `development.team` (наставник/керівник) —
+ * лише точки з роллю цього скоупа. Той самий принцип, що й `reportScope`, інша пара скоупів.
+ */
+export async function developmentPlanScope(access: Access): Promise<string[] | null> {
+  return scopeForGrants(access, 'development.manage', 'development.team')
 }
 
 /** Сужение области фильтром из запроса: точка вне области → пусто, а не расширение. */

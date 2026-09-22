@@ -972,7 +972,8 @@ position_profile_positions(profile_id, position_id, unique(profile_id, position_
 position_profile_courses(position_id, course_id, due_days int, is_mandatory boolean)
 development_plans(user_id, period_from date, period_to date, owner_id, mentor_id, status)   -- mentor_id [рішення] screens-7, docs/19 §3.4
 development_goals(plan_id, title, description, metric text, due_at, status,
-          status_changed_at, approved_by)
+          status_changed_at, approved_by,
+          parent_id, is_strategic boolean)   -- [рішення] spec-development, docs/19 §14.4: дерево «Стратегічний план»
 goal_status_log(goal_id, from_status, to_status, actor_id, comment)
 external_training_requests(user_id, title, provider, cost numeric, currency text,
           status, approved_by, decided_at, comment)
@@ -986,6 +987,17 @@ Spec 19: `position_profiles` (в коде — `competency_requirements jsonb` в
 `use_position_levels = true`). Несколько должностей на профиль (`19` §14.2) — `position_profile_positions`
 (`debts-6`, D-031): `position_id` профиля — головна посада, остальные — строки связи; одна должность
 состоит не более чем в одном профиле.
+
+**`development_goals.parent_id`/`is_strategic`** (`[рішення]` spec-development, `19` §14.4). Ре-аудит
+эталона показал «Стратегічний план» (`/mbo`) как дерево целей компании («Напрямок»), каскадом
+раскрывающееся до личных целей людей, с тем же жизненным циклом статусов и протоколом, что и у
+целей ИПР. Вместо отдельной таблицы — тот же `development_goals`: `parent_id` (self-FK, `on delete
+cascade` — удаление узла удаляет и поддерево) строит вложенность, `is_strategic` (`boolean`,
+по умолчанию `false`) отделяет узлы дерева от личных целей ИПР той же самой таблицы (иначе цель
+компании, «принадлежащая» руководителю через `user_id`, утекла бы в его личный «Мій розвиток»).
+`due_at` стал необязательным — у корневого узла «Напрямок» в мокапе `Goals` срока нет, он есть
+только у дочерних целей людей. `kind='result'` — ближайшее из уже существующего перечня
+(`competency|learning|result|project`, CLAUDE.md п. 13 — новое значение не заводили).
 
 ## Оценка и чек-листы
 

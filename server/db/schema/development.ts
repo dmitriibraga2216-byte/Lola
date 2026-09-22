@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm'
+import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import {
   boolean, date, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
@@ -144,7 +145,10 @@ export const developmentGoals = pgTable('development_goals', {
   targetLevel: integer('target_level'),
   metric: text('metric'),
   linkedContent: jsonb('linked_content').notNull().default('[]'), // [{subjectType, subjectId}]
-  dueAt: date('due_at').notNull(),
+  // Дата не обов'язкова (nullable) через дерево цілей (docs/19 §14.4 [рішення] нижче): у кореневого
+  // елемента «Напрямок» мокап Goals строку строку дати не показує — тільки в дочірніх цілей.
+  // Особиста ціль ІПР (`createGoal`) продовжує вимагати дату на рівні zod-схеми ендпоінта.
+  dueAt: date('due_at'),
   statusCode: text('status_code').notNull(),
   progressPct: integer('progress_pct').notNull().default(0),
   mentorId: uuid('mentor_id').references(() => users.id),
@@ -157,9 +161,15 @@ export const developmentGoals = pgTable('development_goals', {
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   returnComment: text('return_comment'),
   createdBy: uuid('created_by').references(() => users.id),
+  // Дерево цілей «Стратегічний план» (docs/19 §14.4 [рішення], spec-development): та сама таблиця
+  // цілей ІПР — parentId будує вкладеність, isStrategic відділяє цілі компанії («Напрямок» та їх
+  // каскад) від особистих цілей людини, щоб вони не змішувались у «Мій розвиток»/«Цілі співробітників».
+  parentId: uuid('parent_id').references((): AnyPgColumn => developmentGoals.id, { onDelete: 'cascade' }),
+  isStrategic: boolean('is_strategic').notNull().default(false),
 }, t => [
   index().on(t.tenantId, t.userId, t.statusCode),
   index().on(t.tenantId, t.dueAt),
+  index().on(t.tenantId, t.isStrategic, t.parentId),
 ])
 
 export const goalStatusLog = pgTable('goal_status_log', {

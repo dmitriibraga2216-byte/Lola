@@ -1,6 +1,6 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { mediaAssets, platformAudit, tenantLimits, tenants } from '../db/schema'
+import { mediaAssets, platformAudit, tenantLimits, tenantSecrets, tenants } from '../db/schema'
 import { currentRequestContext } from '../utils/requestContext'
 import { platformDb, type PlatformAuth } from './platform'
 import { invalidateTenant } from './tenantResolve'
@@ -177,6 +177,33 @@ export async function setTenantLimits(id: string, input: TenantLimitsInput, acto
   await recordPlatformAudit(actor, { action: 'tenant.limits', tenantId: id, entity: 'tenant_limits', entityId: id, before: before.overrides, after: values })
   invalidateLimits(id)
   return getTenantLimits(id)
+}
+
+/**
+ * «Ігнорувати помилки TLS» для SMTP тенанта (docs/09 §9.7.1 п. 3, докс/33 D-050) — небезпечний
+ * прапорець самопідписаного сертифіката релею; на відміну від решти полів SMTP тенант його не
+ * бачить і не редагує, лише оператор платформи, і кожна зміна — у `platform_audit`. Пишемо
+ * напряму в `tenant_secrets` через `platformDb()` (BYPASSRLS): тенантський `setSecret` тут не
+ * підходить — `created_by` посилається на `users(id)`, а актор тут — `platformAdmins`.
+ */
+export async function setSmtpIgnoreTlsErrors(tenantId: string, ignoreTlsErrors: boolean, actor: PlatformAuth): Promise<void> {
+  const { encrypt } = await import('./crypto')
+  const { SECRET_KEYS } = await import('./secrets')
+  const key = SECRET_KEYS.smtp.IGNORE_TLS_ERRORS
+  const { ciphertext, nonce } = encrypt(String(ignoreTlsErrors))
+  await platformDb().insert(tenantSecrets).values({
+    tenantId, provider: 'smtp', key, valueEncrypted: ciphertext, nonce, status: 'active', createdBy: null,
+  }).onConflictDoUpdate({
+    target: [tenantSecrets.tenantId, tenantSecrets.provider, tenantSecrets.key],
+    set: { valueEncrypted: ciphertext, nonce, status: 'active', updatedAt: new Date() },
+  })
+  await recordPlatformAudit(actor, { action: 'tenant.smtp_ignore_tls_errors', tenantId, entity: 'tenant_secret', after: { ignoreTlsErrors } })
+}
+
+/** Читання того самого прапорця (для екрана оператора): звичайний `getSecret` — читання не потребує BYPASSRLS. */
+export async function getSmtpIgnoreTlsErrors(tenantId: string): Promise<boolean> {
+  const { getSecret, SECRET_KEYS } = await import('./secrets')
+  return (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.IGNORE_TLS_ERRORS)) === 'true'
 }
 
 // ── Purge ─────────────────────────────────────────────────────────────

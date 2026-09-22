@@ -14,15 +14,31 @@ export const SECRET_KEYS = {
   // docs/09 §9.7.2: свій бот тенанта і зовнішній (fallback), коли тенант свого не завів
   telegram: { BOT_TOKEN: 'bot_token', BOT_USERNAME: 'bot_username', EXTERNAL_BOT_TOKEN: 'external_bot_token' },
   sms: { API_KEY: 'api_key', SENDER: 'sender', PROVIDER: 'provider' },
-  // docs/09 §9.7.1: повний склад полів SMTP тенанта; URL/FROM лишились для сумісності зі старими записами
-  smtp: { HOST: 'host', PORT: 'port', LOGIN: 'login', PASSWORD: 'password', FROM_NAME: 'from_name', FROM_EMAIL: 'from_email', REPLY_TO: 'reply_to', URL: 'url', FROM: 'from' },
+  // docs/09 §9.7.1: повний склад полів SMTP тенанта; URL/FROM лишились для сумісності зі старими записами.
+  // Докс/33 D-050 — розширені поля: SSL/«Режим відлагодження»/черга/вкладення — тенант; «Ігнорувати
+  // помилки TLS» — виключення, дивись PLATFORM_ONLY_KEYS нижче (лише оператор платформи, §9.7.1 п. 3).
+  smtp: {
+    HOST: 'host', PORT: 'port', LOGIN: 'login', PASSWORD: 'password', FROM_NAME: 'from_name', FROM_EMAIL: 'from_email', REPLY_TO: 'reply_to', URL: 'url', FROM: 'from',
+    SSL: 'ssl', DEBUG_MODE: 'debug_mode', QUEUE_DELAY_MS: 'queue_delay_ms', MAX_ATTACHMENT_MB: 'max_attachment_mb', IGNORE_TLS_ERRORS: 'ignore_tls_errors',
+  },
   s3: { ACCESS_KEY: 'access_key', SECRET_KEY: 'secret_key', ENDPOINT: 'endpoint', BUCKET: 'bucket' },
-  // OAuth-провайдеры (docs/09 §9.2): храним только refresh_token, access_token запрашиваем каждый раз
+  // OAuth-провайдеры (docs/09 §9.2): храним только refresh_token, access_token запрашиваем каждый раз.
+  // «Вебінари» з мокапу `Integrations` (докс/09 §9.7) — це саме zoom (докс/09 §9.1 «Zoom / Google Meet»).
   google: { REFRESH_TOKEN: 'refresh_token', ACCOUNT_EMAIL: 'account_email', CALENDAR_ID: 'calendar_id' },
   zoom: { REFRESH_TOKEN: 'refresh_token', ACCOUNT_EMAIL: 'account_email' },
 } as const
 
 export type Provider = keyof typeof SECRET_KEYS
+
+/**
+ * Ключі, які тенант не бачить і не редагує сам (докс/33 D-050, docs/09 §9.7.1 п. 3): «Ігнорувати
+ * помилки TLS» — небезпечний прапорець самопідписаного сертифіката, у Lola доступний лише
+ * оператору платформи (`PUT /platform/tenants/:id/smtp-tls`, платформенний журнал), на відміну
+ * від еталона, де він показаний тенанту, — рішення `09-integrations.md` §9.7.1.
+ */
+export const PLATFORM_ONLY_KEYS: Partial<Record<Provider, readonly string[]>> = {
+  smtp: [SECRET_KEYS.smtp.IGNORE_TLS_ERRORS],
+}
 
 export async function setSecret(ctx: Ctx, provider: Provider, key: string, value: string, accountLabel?: string) {
   const { ciphertext, nonce } = encrypt(value)
@@ -52,13 +68,14 @@ export async function getSecret(tenantId: string, provider: Provider, key: strin
   })
 }
 
-/** Состояние интеграции для интерфейса (docs/09 §9.3): без значений. */
+/** Состояние интеграции для интерфейса (docs/09 §9.3): без значений; ключи оператора платформы (`PLATFORM_ONLY_KEYS`) тенанту не показываем вовсе. */
 export async function integrationStatus(ctx: Ctx, provider: Provider) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select({ key: tenantSecrets.key, accountLabel: tenantSecrets.accountLabel, status: tenantSecrets.status, lastOkAt: tenantSecrets.lastOkAt, lastError: tenantSecrets.lastError, updatedAt: tenantSecrets.updatedAt })
       .from(tenantSecrets).where(and(eq(tenantSecrets.provider, provider), sql`${tenantSecrets.status} <> 'revoked'`))
-    const keys = Object.values(SECRET_KEYS[provider]) as string[]
-    const present = new Set(rows.map(r => r.key))
+    const hidden = new Set(PLATFORM_ONLY_KEYS[provider] ?? [])
+    const keys = (Object.values(SECRET_KEYS[provider]) as string[]).filter(k => !hidden.has(k))
+    const present = new Set(rows.map(r => r.key).filter(k => !hidden.has(k)))
     const configured = keys.filter(k => present.has(k))
     const failing = rows.find(r => r.status === 'failing')
     // «Повний склад» різний за провайдером (docs/09 §9.3): необовʼязкові поля (зовнішній бот, reply-to…)

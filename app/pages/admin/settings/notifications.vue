@@ -6,6 +6,9 @@ const { hasScope } = useAuth()
 interface Tpl { id: string, code: string, channel: string, locale: string, subject: string | null, body: string, bodyMjml: string | null, imageKey: string | null, telegramImageKey: string | null, isEnabled: boolean, buttons: { text: string, action: string }[], isMandatory: boolean, throttle: { maxPerDay?: number } | null, escalateAfterHours: number | null, ignoreQuietHours: boolean, version: number, updatedAt: string }
 const tab = ref<'templates' | 'broadcast' | 'report' | 'schedule'>('templates')
 const defaults = ref<Record<string, string>>({})
+// docs/23 §13.1 (докс/31 залишок «NotificationTemplates»): дефолтний стан тумблерів Email/Telegram,
+// поки тенант не перевизначив канал своїм рядком
+const defaultChannels = ref<Record<string, { telegram: boolean, email: boolean, inapp: boolean }>>({})
 const custom = ref<Tpl[]>([])
 const error = ref('')
 const notice = ref('')
@@ -31,7 +34,38 @@ const people = ref<{ id: string, fullName: string }[]>([])
 const previewUser = ref('')
 
 async function load() {
-  try { const r = await api<{ defaults: Record<string, string>, custom: Tpl[] }>('/settings/notifications'); defaults.value = r.defaults; custom.value = r.custom }
+  try {
+    const r = await api<{ defaults: Record<string, string>, defaultChannels: typeof defaultChannels.value, custom: Tpl[] }>('/settings/notifications')
+    defaults.value = r.defaults; defaultChannels.value = r.defaultChannels ?? {}; custom.value = r.custom
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+// Стан пілюлі Email/Telegram: кастомний оверрайд каналу, якщо є, інакше — дефолт коду (докс/31 залишок)
+const channelPill = (code: string, channel: 'email' | 'telegram') => {
+  const c = channelOf(code, channel)
+  return { on: c ? c.isEnabled : (defaultChannels.value[code]?.[channel] ?? false), isDefault: !c }
+}
+/** Клік по пілюлі: перемикає канал — без кастому створює перевизначення з тексту за замовчуванням (мокап: тумблери клікабельні). */
+async function toggleChannel(code: string, channel: 'email' | 'telegram') {
+  error.value = ''
+  const c = channelOf(code, channel)
+  const nextEnabled = c ? !c.isEnabled : !(defaultChannels.value[code]?.[channel] ?? false)
+  const body = c?.body ?? defaults.value[code]
+  if (!body) return
+  try {
+    await api('/settings/notifications', {
+      method: 'PUT',
+      body: {
+        code, channel, locale: 'uk', subject: c?.subject || undefined, body,
+        bodyMjml: channel === 'email' ? (c?.bodyMjml || undefined) : undefined,
+        imageKey: c?.imageKey ?? null, telegramImageKey: c?.telegramImageKey ?? null,
+        isEnabled: nextEnabled, isMandatory: c?.isMandatory ?? false,
+        throttle: c?.throttle ?? null, escalateAfterHours: c?.escalateAfterHours ?? null,
+        ignoreQuietHours: c?.ignoreQuietHours ?? false, buttons: c?.buttons ?? [],
+      },
+    })
+    await load()
+  }
   catch (err) { error.value = apiErrorOf(err).message }
 }
 onMounted(async () => { load(); try { people.value = (await apiRaw<{ data: { id: string, fullName: string }[] }>('/people?limit=50')).data } catch { /* пусто */ } })
@@ -144,12 +178,14 @@ watch(tab, (v) => { if (v === 'schedule') loadSchedule() })
             <tr v-for="c in codes" :key="c" :class="{ on: editing === c }">
               <td><code>{{ c }}</code><div v-if="customOf(c)" class="sub">v{{ customOf(c)!.version }}<span v-if="!customOf(c)!.isEnabled"> · {{ t('common.deactivate') }}</span><span v-if="customOf(c)!.isMandatory"> · 🔒</span></div></td>
               <td>
-                <span v-if="channelOf(c, 'email')" :class="['pill', channelOf(c, 'email')!.isEnabled ? 'on' : 'off']">{{ channelOf(c, 'email')!.isEnabled ? t('ntpl.enabled') : t('ntpl.disabled') }}</span>
-                <span v-else class="muted">—</span>
+                <button type="button" class="pill-btn" :title="t('ntpl.toggleChannel')" @click="toggleChannel(c, 'email')">
+                  <span :class="['pill', channelPill(c, 'email').on ? 'on' : 'off', { default: channelPill(c, 'email').isDefault }]">{{ channelPill(c, 'email').on ? t('ntpl.enabled') : t('ntpl.disabled') }}</span>
+                </button>
               </td>
               <td>
-                <span v-if="channelOf(c, 'telegram')" :class="['pill', channelOf(c, 'telegram')!.isEnabled ? 'on' : 'off']">{{ channelOf(c, 'telegram')!.isEnabled ? t('ntpl.enabled') : t('ntpl.disabled') }}</span>
-                <span v-else class="muted">—</span>
+                <button type="button" class="pill-btn" :title="t('ntpl.toggleChannel')" @click="toggleChannel(c, 'telegram')">
+                  <span :class="['pill', channelPill(c, 'telegram').on ? 'on' : 'off', { default: channelPill(c, 'telegram').isDefault }]">{{ channelPill(c, 'telegram').on ? t('ntpl.enabled') : t('ntpl.disabled') }}</span>
+                </button>
               </td>
               <td><span :class="['badge', scopeOf(c)]">{{ t(`ntpl.scope.${scopeOf(c)}`) }}</span></td>
               <td class="muted">{{ lastChanged(c) ? fmtDate(lastChanged(c)!) : '—' }}</td>
@@ -295,9 +331,11 @@ tr.on td { background: var(--color-bg); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .chip.small { padding: 0 var(--space-2); font-family: ui-monospace, monospace; }
 .chip.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
-.pill { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.pill-btn { font: inherit; border: none; background: transparent; padding: 0; cursor: pointer; }
+.pill { display: inline-block; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
 .pill.on { background: var(--color-teal); color: var(--color-teal-deep); }
 .pill.off { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
+.pill.default { opacity: 0.6; border: 1px dashed var(--color-bg-line); }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .primary:disabled { opacity: 0.5; }
 .preview { background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); }

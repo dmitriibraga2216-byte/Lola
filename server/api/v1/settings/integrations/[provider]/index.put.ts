@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { requireScope } from '../../../../../services/access'
-import { setSecret, SECRET_KEYS, type Provider } from '../../../../../services/secrets'
+import { setSecret, SECRET_KEYS, PLATFORM_ONLY_KEYS, type Provider } from '../../../../../services/secrets'
 import { apiData, apiError } from '../../../../../utils/apiResponse'
 const schema = z.object({ values: z.record(z.string().min(1).max(2000)), accountLabel: z.string().max(200).optional() })
 export default defineEventHandler(async (event) => {
@@ -9,7 +9,9 @@ export default defineEventHandler(async (event) => {
   if (!(provider in SECRET_KEYS)) return apiError(event, 404, 'not_found', 'Невідома інтеграція')
   const p = schema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Перевірте значення')
-  const allowed = new Set(Object.values(SECRET_KEYS[provider]) as string[])
+  // docs/09 §9.7.1 п. 3 (докс/33 D-050): «Ігнорувати помилки TLS» тенант сам не редагує — лише оператор платформи
+  const hidden = new Set(PLATFORM_ONLY_KEYS[provider] ?? [])
+  const allowed = new Set((Object.values(SECRET_KEYS[provider]) as string[]).filter(k => !hidden.has(k)))
   for (const [key, value] of Object.entries(p.data.values)) {
     if (!allowed.has(key)) return apiError(event, 400, 'validation_failed', `Невідомий ключ ${key}`)
     await setSecret({ tenantId: a.tenantId, actorId: a.userId }, provider, key, value, p.data.accountLabel)

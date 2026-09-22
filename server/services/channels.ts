@@ -72,29 +72,61 @@ export async function sendSms(tenantId: string, phone: string, text: string): Pr
 /**
  * Транспорт SMTP тенанта (docs/09 §9.7.1): свій host/port/login/password, иначе — старый
  * единый `url` (совместимость) или платформенный `SMTP_URL` (fallback, docs/28 «Spec 23»).
+ * Докс/33 D-050 — расширенные поля: SSL (независимо от порта), «Режим відлагодження» (логи
+ * nodemailer), «Час затримки повідомлення в черзі» и «Максимальний розмір вкладення» отдаём
+ * отдельно от транспорта (их применяет `sendEmail`, а не сам nodemailer); «Ігнорувати помилки
+ * TLS» — не тут: ключ платформенный (`PLATFORM_ONLY_KEYS`), читается отдельно ниже.
  */
-export async function smtpTransportConfig(tenantId: string): Promise<{ transport: string | Record<string, unknown>, from: string } | null> {
+export interface SmtpConfig {
+  transport: string | Record<string, unknown>
+  from: string
+  queueDelayMs: number
+  maxAttachmentMb: number | null
+}
+export async function smtpTransportConfig(tenantId: string): Promise<SmtpConfig | null> {
   const host = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.HOST)
   const from = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM_EMAIL)) ?? (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM)) ?? process.env.SMTP_FROM ?? 'lola@localhost'
   const fromName = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.FROM_NAME)
   const fromHeader = fromName ? `"${fromName.replace(/"/g, '')}" <${from}>` : from
+  const queueDelayMs = Number(await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.QUEUE_DELAY_MS)) || 0
+  const maxAttachmentMbRaw = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.MAX_ATTACHMENT_MB)
+  const maxAttachmentMb = maxAttachmentMbRaw ? Number(maxAttachmentMbRaw) : null
+  const ssl = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.SSL)) === 'true'
+  const debugMode = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.DEBUG_MODE)) === 'true'
+  // docs/09 §9.7.1 п. 3: значення ставить лише оператор платформи (`PLATFORM_ONLY_KEYS`), але сам
+  // рядок лежить у тій самій `tenant_secrets` — читаємо звичайним `getSecret`, без BYPASSRLS
+  const ignoreTlsErrors = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.IGNORE_TLS_ERRORS)) === 'true'
   if (host) {
     const port = Number(await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.PORT)) || 587
     const login = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.LOGIN)
     const password = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.PASSWORD)
     return {
-      transport: { host, port, secure: port === 465, auth: login ? { user: login, pass: password ?? '' } : undefined },
+      transport: {
+        host, port, secure: ssl || port === 465, auth: login ? { user: login, pass: password ?? '' } : undefined,
+        ...(ignoreTlsErrors ? { tls: { rejectUnauthorized: false } } : {}),
+        ...(debugMode ? { logger: true, debug: true } : {}),
+      },
       from: fromHeader,
+      queueDelayMs,
+      maxAttachmentMb,
     }
   }
   const url = (await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.URL)) ?? process.env.SMTP_URL
   if (!url) return null
-  return { transport: url, from: fromHeader }
+  return { transport: url, from: fromHeader, queueDelayMs, maxAttachmentMb }
 }
 
-export async function sendEmail(tenantId: string, to: string, subject: string, text: string, html?: string): Promise<ChannelResult> {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+export async function sendEmail(tenantId: string, to: string, subject: string, text: string, html?: string, attachmentBytes?: number): Promise<ChannelResult> {
   const cfg = await smtpTransportConfig(tenantId)
   if (!cfg) return { ok: false, skipped: true, error: 'smtp not configured' }
+  // «Максимальний розмір вкладення» (docs/09 §9.7.1) — відсічка на боці відправника, до спроби з'єднання
+  if (attachmentBytes != null && cfg.maxAttachmentMb != null && attachmentBytes > cfg.maxAttachmentMb * 1024 * 1024) {
+    return { ok: false, skipped: true, error: `attachment too large: limit ${cfg.maxAttachmentMb} MB` }
+  }
+  // «Час затримки повідомлення в черзі» (docs/09 §9.7.1) — щоб провайдер не прийняв розсилку за спам
+  if (cfg.queueDelayMs > 0) await sleep(cfg.queueDelayMs)
   const replyTo = await getSecret(tenantId, 'smtp', SECRET_KEYS.smtp.REPLY_TO)
   try {
     const nodemailer = await import('nodemailer')

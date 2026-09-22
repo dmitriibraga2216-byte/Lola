@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * Карточка назначения по мокапу TaskCard (docs/15 §14.2): шапка с метками, компетенциями
- * и автором; четыре блока — Контент · Налаштування · Призначення · Результати.
+ * и автором, кнопка «Зберегти» (+ «Відхилити зміни», коли є незбережений вибір компетенцій);
+ * четыре блока — Контент · Налаштування · Призначення · Результати.
  * Люди и снятие живут на экране аудитории; здесь — состояние, сводка и действия над назначением.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
@@ -39,6 +40,7 @@ async function load() {
     const [card, comps] = await Promise.all([api<A>(`/tasks/${id}`), api<Competency[]>(`/tasks/${id}/competencies`)])
     a.value = card
     competencies.value = comps
+    picked.value = comps.map(c => c.id)
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -46,13 +48,30 @@ async function load() {
 }
 onMounted(load)
 
+/**
+ * Заголовок картки за мокапом TaskCard і docs/15 §14.2 завжди має «Зберегти» (сонячна дія)
+ * і, за потреби, «Відхилити зміни» — так само, як у `params.vue`. На цьому екрані єдине
+ * редаговане в шапці — вибір компетенцій, тож «незбережене» = вибір відрізняється від
+ * збереженого набору.
+ */
+const dirty = computed(() => {
+  if (!a.value) return false
+  const saved = competencies.value.map(c => c.id).slice().sort()
+  const next = picked.value.slice().sort()
+  return saved.length !== next.length || saved.some((v, i) => v !== next[i])
+})
+
 async function openPick() {
   try {
-    allCompetencies.value = await api<Competency[]>('/competencies')
-    picked.value = competencies.value.map(c => c.id)
+    if (allCompetencies.value.length === 0) allCompetencies.value = await api<Competency[]>('/competencies')
     pickOpen.value = true
   }
   catch (err) { error.value = apiErrorOf(err).message }
+}
+/** Скасовує невибрані/вибрані компетенції назад до збереженого набору (кнопка «Відхилити зміни» та закриття без збереження). */
+function discardCompetencies() {
+  picked.value = competencies.value.map(c => c.id)
+  pickOpen.value = false
 }
 async function saveCompetencies() {
   try {
@@ -128,6 +147,8 @@ const createNewUrl = computed(() => a.value ? (CONTENT_CREATE_ROUTES[a.value.sub
   <div>
     <PageHeader v-if="a" :title="a.title" :crumbs="[{ label: t('admin.section.learning') }, { label: t('admin.nav.assignments'), to: '/admin/assignments' }]">
       <template #actions>
+        <button v-if="dirty" class="btn ghost small" @click="discardCompetencies">{{ t('assign.card.discard') }}</button>
+        <button class="btn primary small" :disabled="!dirty" @click="saveCompetencies">{{ t('common.save') }}</button>
         <button v-if="a.status === 'active'" class="btn ghost small" @click="setStatus('paused')">{{ t('assign.pause') }}</button>
         <button v-if="a.status === 'paused' || a.status === 'draft'" class="btn ghost small" @click="setStatus('active')">{{ t('assign.resume') }}</button>
         <button v-if="a.status !== 'archived'" class="btn ghost small" @click="remind">{{ t('assign.remindAll') }}</button>
@@ -178,14 +199,14 @@ const createNewUrl = computed(() => a.value ? (CONTENT_CREATE_ROUTES[a.value.sub
         </section>
       </div>
 
-      <div v-if="pickOpen" class="modal-back" role="dialog" aria-modal="true" @keydown.esc="pickOpen = false">
+      <div v-if="pickOpen" class="modal-back" role="dialog" aria-modal="true" @keydown.esc="discardCompetencies">
         <div class="modal card">
           <h2 class="panel-title">{{ t('assign.card.pickCompetencies') }}</h2>
           <p v-if="allCompetencies.length === 0" class="muted">{{ t('assign.card.noCompetencies') }}</p>
           <label v-for="c in allCompetencies" :key="c.id" class="check"><input v-model="picked" type="checkbox" :value="c.id"> {{ c.name }}</label>
           <div class="modal-actions">
-            <button class="btn ghost small" @click="pickOpen = false">{{ t('common.cancel') }}</button>
-            <button class="btn primary small" @click="saveCompetencies">{{ t('common.save') }}</button>
+            <button class="btn ghost small" @click="discardCompetencies">{{ t('common.cancel') }}</button>
+            <button class="btn primary small" :disabled="!dirty" @click="saveCompetencies">{{ t('common.save') }}</button>
           </div>
         </div>
       </div>

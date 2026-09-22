@@ -88,7 +88,7 @@ function setGroupComment(id: string, v: string) { groupComments[id] = v; if (tim
   <div v-if="data">
     <NuxtLink to="/learn/assessment" class="back">← {{ t('assess.title') }}</NuxtLink>
     <h1>{{ t('assess.rateTitle') }}</h1>
-    <p class="who">{{ t('assess.youRate', { name: data.subject.fullName, role: t(`assess.kindAs.${data.task.raterKind}`) }) }}<template v-if="data.isAnonymous"> {{ t('assess.anonNote', { n: data.minRatersToShow }) }}</template></p>
+    <div class="who">{{ t('assess.youRate', { name: data.subject.fullName, role: t(`assess.kindAs.${data.task.raterKind}`) }) }}<template v-if="data.isAnonymous"> {{ t('assess.anonNote', { n: data.minRatersToShow }) }}</template></div>
     <p class="sub">{{ data.cycle.title }}<template v-if="data.byProfile"> · {{ t('assess.byProfile') }}</template></p>
     <p v-if="error" class="error">{{ error }}</p>
     <div class="sticky">
@@ -139,7 +139,7 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .crit { display: grid; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--color-bg-line-soft); }
 .crit.flag { outline: 2px solid var(--color-coral); border-radius: var(--radius-m); padding: var(--space-2); }
 .crit-text { font-weight: 700; }
-.who { margin: var(--space-2) 0 0; font-weight: 700; line-height: 1.4; }
+.who { margin: var(--space-3) 0 0; font-weight: 700; line-height: 1.4; font-size: var(--font-size-body-s); background: var(--color-sun-soft); border: 2px solid var(--color-sun); border-radius: var(--radius-m); padding: var(--space-3); }
 .gname { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .gcomment { margin-top: var(--space-2); }
 .hint { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }

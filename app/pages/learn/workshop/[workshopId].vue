@@ -24,6 +24,17 @@ const uploading = ref(false)
 const busy = ref(false)
 const error = ref('')
 const comment = ref('')
+// Мокап Workshop: приєднані фото — квадратні плитки-мініатюри, не рядок з іменем файлу.
+const mediaUrls = ref<Record<string, { urls: Record<string, string> }>>({})
+async function loadThumb(mediaId: string) {
+  if (mediaUrls.value[mediaId]) return
+  try { mediaUrls.value[mediaId] = await api(`/media/${mediaId}`) }
+  catch { /* мініатюра лишиться заглушкою */ }
+}
+function thumbSrc(mediaId: string): string | undefined {
+  const m = mediaUrls.value[mediaId]
+  return m?.urls['768'] || m?.urls.original
+}
 
 async function load() {
   try {
@@ -32,6 +43,7 @@ async function load() {
       text.value = w.value.current.body.text ?? ''
       files.value = w.value.current.files
     }
+    await Promise.all(files.value.filter(f => f.kind === 'photo').map(f => loadThumb(f.mediaId)))
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -63,6 +75,7 @@ async function addFile(e: Event) {
     await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     await api(`/media/${mediaId}/complete`, { method: 'POST' })
     files.value.push({ mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: file.size })
+    await loadThumb(mediaId)
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -156,16 +169,22 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
 
       <!-- Форма сдачи -->
       <section v-if="editable" class="block form">
-        <textarea v-if="w.submissionKinds.includes('text')" v-model="text" rows="6" :placeholder="t('workshop.textHint')" @blur="saveDraft" />
+        <template v-if="w.submissionKinds.includes('text')">
+          <label for="wtext" class="field-label">{{ t('workshop.commentLabel') }}</label>
+          <textarea id="wtext" v-model="text" rows="6" :placeholder="t('workshop.textHint')" @blur="saveDraft" />
+        </template>
         <p v-if="hint" class="hint">{{ hint }}</p>
         <div v-if="w.submissionKinds.some(k => k !== 'text')" class="files">
-          <div v-for="(f, i) in files" :key="f.mediaId" class="file">
-            <span>{{ f.kind === 'photo' ? '🖼' : f.kind === 'video' ? '🎬' : '📎' }} {{ f.name }}</span>
-            <button class="mini" @click="files.splice(i, 1)">✕</button>
+          <div v-for="(f, i) in files" :key="f.mediaId" class="tile" :class="{ photo: f.kind === 'photo' }">
+            <img v-if="f.kind === 'photo' && thumbSrc(f.mediaId)" :src="thumbSrc(f.mediaId)" :alt="f.name">
+            <span v-else class="tile-icon">{{ f.kind === 'photo' ? '🖼' : f.kind === 'video' ? '🎬' : '📎' }}</span>
+            <span v-if="f.kind !== 'photo'" class="tile-name">{{ f.name }}</span>
+            <button class="remove" :aria-label="t('common.delete')" @click="files.splice(i, 1)">✕</button>
           </div>
-          <label class="add-file">
+          <label class="add-file tile">
             <input type="file" :accept="w.submissionKinds.includes('photo') ? 'image/*' : '*'" :capture="w.allowCameraOnly ? 'environment' : undefined" hidden @change="addFile">
-            {{ uploading ? t('blocks.uploading') : files.length ? t('workshop.morePhoto') : w.allowCameraOnly ? t('workshop.takePhoto') : t('workshop.addFile') }}
+            <span class="tile-icon" aria-hidden="true">📷</span>
+            <span class="tile-name">{{ uploading ? t('blocks.uploading') : files.length ? t('workshop.morePhoto') : w.allowCameraOnly ? t('workshop.takePhoto') : t('workshop.addFile') }}</span>
           </label>
         </div>
       </section>
@@ -214,12 +233,21 @@ h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-body-s); color: var(
 .status.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .crit-results { margin: 0; padding-left: var(--space-4); font-size: var(--font-size-body-s); }
 .criteria { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); }
+.criteria.numbered { list-style: none; padding-left: 0; counter-reset: crit; }
+.criteria.numbered li { display: flex; gap: var(--space-2); counter-increment: crit; }
+.criteria.numbered li::before { content: counter(crit); color: var(--color-teal-ink); font-weight: 900; flex: none; }
 .crit { color: var(--color-coral-ink); font-size: var(--font-size-body-s); font-weight: 700; }
 textarea, input { font: inherit; border: 2px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-3); background: var(--color-bg-soft); color: var(--color-ink); width: 100%; box-sizing: border-box; }
 .hint { margin: 0; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
-.files { display: grid; gap: var(--space-2); }
-.file { display: flex; justify-content: space-between; align-items: center; background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
-.add-file { display: block; text-align: center; border: 2px dashed var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-4); cursor: pointer; font-weight: 700; color: var(--color-ink-muted); }
+.field-label { font-size: var(--font-size-body-s); font-weight: 800; }
+.files { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.tile { position: relative; width: 104px; height: 104px; border-radius: var(--radius-l); flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); overflow: hidden; }
+.tile.photo { background: var(--color-teal); }
+.tile.photo img { width: 100%; height: 100%; object-fit: cover; }
+.tile .tile-icon { font-size: 26px; }
+.tile .tile-name { font-size: var(--font-size-body-s); font-weight: 800; text-align: center; padding: 0 var(--space-1); word-break: break-word; }
+.tile .remove { position: absolute; top: 4px; right: 4px; font: inherit; border: none; background: var(--color-bg-soft); color: var(--color-ink); border-radius: var(--radius-pill); width: 28px; height: 28px; cursor: pointer; }
+.add-file { border: 2px dashed var(--color-bg-line); background: var(--color-bg-soft); cursor: pointer; color: var(--color-ink-muted); }
 .mini { font: inherit; border: 1px solid var(--color-bg-line); background: var(--color-bg); border-radius: var(--radius-pill); width: 32px; height: 32px; cursor: pointer; flex: none; }
 .comment { background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
 .comment p { margin: var(--space-1) 0 0; }
@@ -236,6 +264,4 @@ summary { cursor: pointer; font-weight: 700; }
 .rate { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-2); }
 .stars { display: flex; gap: 2px; }
 .star { font: inherit; font-size: var(--font-size-title-l); border: none; background: transparent; cursor: pointer; color: var(--color-sun-ink); line-height: 1; min-width: 44px; min-height: 44px; }
-.criteria.numbered { padding-left: var(--space-5); }
-.criteria.numbered li { padding-left: var(--space-1); }
 </style>

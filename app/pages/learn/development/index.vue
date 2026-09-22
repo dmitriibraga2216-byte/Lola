@@ -62,6 +62,9 @@ async function createRequest() {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().slice(0, 10)
+// Мокап DevelopmentPlanMobile: дати людяно — «30 вересня» (ціль), «15.08.2026 — 15.02.2027» (період плану).
+const fmtDue = (d: string) => new Date(d).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })
+const fmtPeriod = (d: string) => new Date(d).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
 function levelText(c: GapItem, displayAs: 'label' | 'value', level: number) {
   return displayAs === 'label' && level === c.currentLevel && c.currentLevelLabel ? c.currentLevelLabel : String(level)
 }
@@ -106,10 +109,11 @@ function levelText(c: GapItem, displayAs: 'label' | 'value', level: number) {
         <p class="sub">{{ t('dev.noPlan') }}</p>
         <button class="primary" @click="createPlan">{{ t('dev.createPlan') }}</button>
       </div>
-      <div v-else class="card">
-        <p v-if="data.plan.summary" class="sub">{{ t('dev.planGoal') }}: <b>{{ data.plan.summary }}</b></p>
-        <div class="row">
-          <span class="card-title">{{ t('dev.plan') }} {{ data.plan.periodFrom }} — {{ data.plan.periodTo }}</span>
+      <div v-else class="goal-card">
+        <div class="goal-label">{{ t('dev.planGoal') }}</div>
+        <div class="goal-value">{{ data.plan.summary || t('dev.plan') }}</div>
+        <div class="sub">{{ fmtPeriod(data.plan.periodFrom) }} — {{ fmtPeriod(data.plan.periodTo) }}</div>
+        <div class="row status-row">
           <span class="badge muted">{{ t(`dev.planStatus.${data.plan.status}`) }}</span>
         </div>
         <div class="actions">
@@ -129,8 +133,8 @@ function levelText(c: GapItem, displayAs: 'label' | 'value', level: number) {
             <span v-else-if="!g.approvedAt" class="badge">{{ t('dev.awaitingApproval') }}</span>
           </div>
           <span v-if="g.returnComment && !g.approvedAt" class="sub">{{ g.returnComment }}</span>
+          <span :class="['sub', { overdue: isOverdue(g) }]">{{ t(`dev.kind.${g.kind}`) }} · {{ t('dev.due') }} {{ fmtDue(g.dueAt) }}{{ isOverdue(g) ? ` · ${t('dev.overdue')}` : '' }}</span>
           <div class="progress"><span :style="{ width: `${g.progressPct}%` }" /></div>
-          <span :class="['sub', { overdue: isOverdue(g) }]">{{ t(`dev.kind.${g.kind}`) }} · {{ t('dev.due') }} {{ g.dueAt }}{{ isOverdue(g) ? ` · ${t('dev.overdue')}` : '' }}</span>
         </NuxtLink>
       </div>
       <button v-if="!showGoalForm" class="chip" data-testid="goal-add" @click="showGoalForm = true">+ {{ t('dev.addGoal') }}</button>
@@ -184,6 +188,10 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .tab.on { background: var(--color-ink); color: var(--color-bg); border-color: var(--color-ink); }
 .list { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); color: inherit; text-decoration: none; }
+.goal-card { background: var(--color-bg-soft); border: 2px solid var(--color-bg-line); border-radius: var(--radius-l); padding: var(--space-4); margin-bottom: var(--space-3); }
+.goal-label { color: var(--color-ink-muted); font-size: var(--font-size-body-s); font-weight: 700; }
+.goal-value { font-size: var(--font-size-title-l); font-weight: 900; margin-top: 2px; }
+.status-row { margin-top: var(--space-2); }
 .card.link:hover { outline: 2px solid var(--color-sun); }
 .row { display: flex; justify-content: space-between; gap: var(--space-2); align-items: center; }
 .card-title { font-weight: 800; }

@@ -20,6 +20,12 @@ async function managerOf(tx: TenantTx, userId: string) {
   return r[0]?.manager_id ?? null
 }
 
+// Мокап ExternalRequests: під імʼям людини — «Посада · Точка» з основного розміщення (docs/16, user_placements).
+async function placementOf(tx: TenantTx, userId: string) {
+  const r = await tx.execute(sql`select p.name as position, l.name as location from user_placements up join positions p on p.id = up.position_id join locations l on l.id = up.location_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { position: string | null, location: string | null }[]
+  return r[0] ? { position: r[0].position, location: r[0].location } : { position: null, location: null }
+}
+
 export async function createExternalRequest(ctx: Ctx, input: { title: string, provider?: string, format: 'online' | 'offline', startsAt?: string, cost?: number, currency?: string, justification?: string, expectedResult?: string }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [r] = await tx.insert(externalTrainingRequests).values({
@@ -81,20 +87,20 @@ export async function requestsTable(ctx: Ctx, filter: { kind?: 'external' | 'car
       const last = approvals.length ? approvals[approvals.length - 1] as { by: string } : null
       return last ? (nameOf.get(last.by) ?? null) : await managerOf(tx, userId).then(id => id ? nameOf.get(id) ?? null : null)
     }
-    let external: (typeof externalTrainingRequests.$inferSelect & { fullName: string, responsible: string | null, kind: 'external' })[] = []
+    let external: (typeof externalTrainingRequests.$inferSelect & { fullName: string, responsible: string | null, kind: 'external', position: string | null, location: string | null })[] = []
     if (filter.kind !== 'career') {
       const rows = await tx.select({ r: externalTrainingRequests, fullName: users.fullName }).from(externalTrainingRequests).innerJoin(users, eq(users.id, externalTrainingRequests.userId))
         .where(and(filter.status ? eq(externalTrainingRequests.status, filter.status) : sql`true`, byRange(externalTrainingRequests.createdAt)))
         .orderBy(desc(externalTrainingRequests.createdAt))
-      external = await Promise.all(rows.map(async x => ({ ...x.r, fullName: x.fullName, kind: 'external' as const, responsible: await withResponsible(x.r.userId, x.r.approvals as unknown[]) })))
+      external = await Promise.all(rows.map(async (x) => { const pl = await placementOf(tx, x.r.userId); return { ...x.r, fullName: x.fullName, kind: 'external' as const, responsible: await withResponsible(x.r.userId, x.r.approvals as unknown[]), position: pl.position, location: pl.location } }))
     }
-    let career: (typeof careerRequests.$inferSelect & { fullName: string, targetPosition: string, responsible: string | null, kind: 'career' })[] = []
+    let career: (typeof careerRequests.$inferSelect & { fullName: string, targetPosition: string, responsible: string | null, kind: 'career', position: string | null, location: string | null })[] = []
     if (filter.kind !== 'external') {
       const rows = await tx.select({ r: careerRequests, fullName: users.fullName, targetPosition: positions.name }).from(careerRequests)
         .innerJoin(users, eq(users.id, careerRequests.userId)).innerJoin(positions, eq(positions.id, careerRequests.targetPositionId))
         .where(and(filter.status ? eq(careerRequests.status, filter.status) : sql`true`, byRange(careerRequests.createdAt)))
         .orderBy(desc(careerRequests.createdAt))
-      career = await Promise.all(rows.map(async x => ({ ...x.r, fullName: x.fullName, targetPosition: x.targetPosition, kind: 'career' as const, responsible: await withResponsible(x.r.userId, x.r.approvals as unknown[]) })))
+      career = await Promise.all(rows.map(async (x) => { const pl = await placementOf(tx, x.r.userId); return { ...x.r, fullName: x.fullName, targetPosition: x.targetPosition, kind: 'career' as const, responsible: await withResponsible(x.r.userId, x.r.approvals as unknown[]), position: pl.position, location: pl.location } }))
     }
     return { external, career }
   })

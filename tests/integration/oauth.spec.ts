@@ -5,6 +5,7 @@ const oauth = await import('../../server/services/oauth')
 const secrets = await import('../../server/services/secrets')
 const apps = await import('../../server/services/googleApps')
 const mt = await import('../../server/services/meetups')
+const ms = await import('../../server/services/meetupSessions')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 let tenantId: string
@@ -169,5 +170,40 @@ describe('этап 11: OAuth-подключение (docs/09 §9.2, приёмк
     // Посещаемость из Zoom-отчёта по e-mail
     const att = await apps.fetchZoomAttendance(tenantId, zw.id)
     expect(att).toEqual([{ userId: expect.any(String), minutes: 45 }])
+  })
+
+  it('docs/33 D-029: Calendar/Zoom-синк сесії (не картки) — свій event/meeting на кожну сесію, автоматично при створенні', async () => {
+    const g = await oauth.authUrl(ctx(), 'google'); if ('error' in g) throw new Error('x')
+    await oauth.handleCallback('google', { code: 'good', state: stateOf(g.url) })
+    const z = await oauth.authUrl(ctx(), 'zoom'); if ('error' in z) throw new Error('x')
+    await oauth.handleCallback('zoom', { code: 'good', state: stateOf(z.url) })
+
+    const m = await mt.createMeetup(ctx(), { title: 'OAuth-заняття (сесія)', announcement: [{ id: 'a', type: 'text', html: '<p>Анонс</p>' }], startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString(), trainerIds: [adminId] })
+    // Створення картки НЕ синкає календар для kind=meetup — синк переїхав на сесію
+    calls.length = 0
+    const r = await ms.createSession(ctx(), m.id, { startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString(), trainerIds: [adminId], room: 'Клас 1' })
+    if (!r.ok) throw new Error('no session')
+    // Синк іде у фоні (setImmediate) — почекаємо тік
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const [row] = await admin`select external_event_id from meetup_sessions where id = ${r.session.id}`
+    expect(row!.external_event_id).toBe('evt-42')
+    const created = calls.find(c => c.url.includes('/calendar/v3/') && c.method === 'POST')
+    expect(created!.body).toContain('OAuth-заняття (сесія)')
+
+    // Ручний виклик тих самих сесійних функцій — той самий контракт, що й картковий
+    expect(await apps.removeSessionFromCalendar(tenantId, r.session.id)).toBe(true)
+
+    const zw = await mt.createMeetup(ctx(), { kind: 'webinar', title: 'OAuth-zoom (сесія)', announcement: [{ id: 'a', type: 'text', html: '<p>Анонс</p>' }], startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString(), trainerIds: [adminId], webinar: { provider: 'zoom' } })
+    const rz = await ms.createSession(ctx(), zw.id, { startsAt: new Date(Date.now() + 86_400_000).toISOString(), endsAt: new Date(Date.now() + 90_000_000).toISOString(), trainerIds: [adminId], provider: 'zoom' })
+    if (!rz.ok) throw new Error('no session')
+    expect(await apps.createZoomMeetingForSession(tenantId, rz.session.id)).toMatchObject({ ok: true, joinUrl: 'https://zoom.us/j/987654' })
+    const [wsess] = await admin`select join_url, external_meeting_id from meetup_sessions where id = ${rz.session.id}`
+    expect(wsess).toMatchObject({ join_url: 'https://zoom.us/j/987654', external_meeting_id: '987654' })
+    const attSession = await apps.fetchZoomAttendanceForSession(tenantId, rz.session.id)
+    expect(attSession).toEqual([{ userId: expect.any(String), minutes: 45 }])
+
+    // Картка-джерело лишається без свого зовнішнього event/meeting — це вела сесія
+    const [cardRow] = await admin`select external_event_id from meetups where id = ${m.id}`
+    expect(cardRow!.external_event_id).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 {
-  "id": "5f6d06e1-f76a-4bd2-89e2-2fbb143d3300",
+  "id": "e0410c40-e6ca-40f2-87f5-028cede45666",
   "prevId": "a757dd64-e995-401a-9322-f9ba195c31d6",
   "version": "7",
   "dialect": "postgresql",
@@ -11888,7 +11888,7 @@
           "name": "due_at",
           "type": "date",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "status_code": {
           "name": "status_code",
@@ -11956,19 +11956,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_strategic": {
-          "name": "is_strategic",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         }
       },
       "indexes": {
@@ -12010,33 +11997,6 @@
             },
             {
               "expression": "due_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "development_goals_tenant_id_is_strategic_parent_id_index": {
-          "name": "development_goals_tenant_id_is_strategic_parent_id_index",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "is_strategic",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "parent_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -12138,19 +12098,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "development_goals_parent_id_development_goals_id_fk": {
-          "name": "development_goals_parent_id_development_goals_id_fk",
-          "tableFrom": "development_goals",
-          "tableTo": "development_goals",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -16065,6 +16012,18 @@
         },
         "cancel_reason": {
           "name": "cancel_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "external_event_id": {
+          "name": "external_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "external_meeting_id": {
+          "name": "external_meeting_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false

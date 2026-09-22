@@ -6,26 +6,39 @@ const video = ref<HTMLVideoElement | null>(null)
 const status = ref<'idle' | 'scanning' | 'done' | 'error' | 'nocamera'>('idle')
 const message = ref('')
 const manual = ref('')
-const notRegistered = ref<{ meetupId: string, seatsLeft: number | null } | null>(null)
+const notRegistered = ref<{ kind: 'card' | 'session', id: string, seatsLeft: number | null } | null>(null)
 let stream: MediaStream | null = null
 let raf = 0
 
+/**
+ * docs/33 D-029: QR картки й сесії мають однаковий формат токена (id.вікно.hmac), але різні
+ * таблиці — спершу пробуємо картку (kind=event, немігровані), і тільки як «чужий» токен —
+ * сесію (meetup|webinar), куди тепер веде відмітка присутності.
+ */
 async function send(token: string) {
   status.value = 'idle'; notRegistered.value = null
   try {
-    const r = await api<{ checkedInAt: string, title: string }>('/meetups/checkin', { method: 'POST', body: { token: token.trim() } })
+    const r = await tryCheckin(token.trim())
     status.value = 'done'
     message.value = t('mt.checkedIn', { time: new Date(r.checkedInAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }), title: r.title })
     stop()
   } catch (err) {
     const e = apiErrorOf(err)
     status.value = 'error'; message.value = e.message
-    if (e.code === 'not_registered') notRegistered.value = { meetupId: String(e.details?.meetupId), seatsLeft: (e.details?.seatsLeft as number | null) ?? null }
+    if (e.code === 'not_registered') notRegistered.value = { kind: e.details?.sessionId ? 'session' : 'card', id: String(e.details?.sessionId ?? e.details?.meetupId), seatsLeft: (e.details?.seatsLeft as number | null) ?? null }
+  }
+}
+async function tryCheckin(token: string) {
+  try { return await api<{ checkedInAt: string, title: string }>('/meetups/checkin', { method: 'POST', body: { token } }) }
+  catch (err) {
+    if (apiErrorOf(err).code !== 'bad_token') throw err
+    return await api<{ checkedInAt: string, title: string }>('/meetup-sessions/checkin', { method: 'POST', body: { token } })
   }
 }
 async function registerNow() {
   if (!notRegistered.value) return
-  try { await api(`/meetups/${notRegistered.value.meetupId}/register`, { method: 'POST' }); message.value = t('mt.registeredOk'); notRegistered.value = null; start() } catch (err) { message.value = apiErrorOf(err).message }
+  const path = notRegistered.value.kind === 'session' ? `/meetup-sessions/${notRegistered.value.id}/register` : `/meetups/${notRegistered.value.id}/register`
+  try { await api(path, { method: 'POST' }); message.value = t('mt.registeredOk'); notRegistered.value = null; start() } catch (err) { message.value = apiErrorOf(err).message }
 }
 async function start() {
   const w = window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect: (v: HTMLVideoElement) => Promise<{ rawValue: string }[]> } }

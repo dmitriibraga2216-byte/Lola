@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve as resolvePath } from 'node:path'
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -227,5 +229,90 @@ describe('spec-18: сесії на призначенні (docs/18 §14.1)', () 
     if (!r.ok) throw new Error('no session')
     const foreign = await ms.getSession({ tenantId: otherTenant!.id as string, actorId: adminId }, r.session.id)
     expect(foreign).toBeNull()
+  })
+
+  describe('docs/33 D-029: щойно з\'явилась сесія, картка більше не бере участь', () => {
+    it('запис/QR/відмітка/статус-скан/звіт картки повертають has_sessions або мовчки пропускають картку', async () => {
+      const meetupId = await makeMeetupContent('meetup', 'D-029: картка з сесією')
+      const p1 = await makePerson('D-029 Учасник')
+      const r = await ms.createSession(ctx(), meetupId, { startsAt: hours(2), endsAt: hours(4), trainerIds: [adminId], capacity: 5, attendanceMode: 'qr' })
+      if (!r.ok) throw new Error('no session')
+
+      // Запис/відписка через картку — заборонено, як тільки з'явилась сесія
+      expect(await mt.register(ctx(p1), meetupId, p1)).toMatchObject({ ok: false, code: 'has_sessions' })
+      expect(await mt.unregister(ctx(p1), meetupId, p1)).toMatchObject({ ok: false, code: 'has_sessions' })
+      // QR картки не видається
+      expect(await mt.currentQr(ctx(), meetupId)).toBeNull()
+      // Відмітка через картку — 404 (null)
+      expect(await mt.setAttendance(ctx(), meetupId, { userId: p1, status: 'attended' })).toBeNull()
+
+      // Картка більше не фігурує в картковому розкладі/статус-скані/звіті — усе на сесії
+      await admin`update meetups set starts_at = now() - interval '1 hour', ends_at = now() + interval '1 hour', status = 'planned' where id = ${meetupId}`
+      const scan = await mt.statusScan(tenantId)
+      const [after] = await admin`select status from meetups where id = ${meetupId}`
+      expect(after!.status).toBe('planned') // картковий скан її не чіпав
+      void scan
+      const sched = await mt.schedule(ctx(), { mine: false })
+      expect(sched.find(x => x.id === meetupId)).toBeUndefined()
+      await admin`update meetups set status = 'finished' where id = ${meetupId}`
+      const rep = await mt.attendanceReport(ctx())
+      expect(rep.meetups.find(x => x.id === meetupId)).toBeUndefined()
+    })
+  })
+
+  describe('docs/33 D-029: перенос одноразової картки в сесію (міграція 0053)', () => {
+    /** Виконує саме той SQL-бекфіл, що і в міграції 0053 (третій стейтмент після ALTER TABLE) — не дублюючи логіку вручну. */
+    async function runBackfill() {
+      const file = readFileSync(resolvePath(__dirname, '../../server/db/migrations/0053_debts_final_meetup_session_sync.sql'), 'utf8')
+      const backfill = file.split('--> statement-breakpoint')[2]!
+      await admin.unsafe(backfill)
+    }
+
+    it('стара картка meetup без сесії → одна сесія з тими самими датою/місцем/реєстраціями', async () => {
+      const p1 = await makePerson('Перенос Прийшов')
+      const p2 = await makePerson('Перенос Пропустив')
+      const [m] = await admin`
+        insert into meetups (tenant_id, kind, title, announcement, starts_at, ends_at, location_id, room, trainer_ids, capacity, attendance_mode, qr_secret, status, external_event_id, created_by)
+        values (${tenantId}, 'meetup', 'Легасі: перенос', '[{"id":"a"}]'::jsonb, now() - interval '2 days', now() - interval '2 days' + interval '1 hour', ${lazarevaId}, 'Клас 3', ${[adminId]}, 8, 'both', 'legacy-secret', 'finished', 'evt-legacy-1', ${adminId})
+        returning id`
+      meetupIds.push(m!.id as string)
+      await admin`insert into meetup_registrations (tenant_id, meetup_id, user_id, status, registered_at, checked_in_at, check_in_method) values (${tenantId}, ${m!.id}, ${p1}, 'attended', now() - interval '3 days', now() - interval '2 days', 'manual')`
+      await admin`insert into meetup_registrations (tenant_id, meetup_id, user_id, status, registered_at) values (${tenantId}, ${m!.id}, ${p2}, 'missed', now() - interval '3 days')`
+
+      await runBackfill()
+
+      const newSessions = await admin`select * from meetup_sessions where meetup_id = ${m!.id}`
+      expect(newSessions.length).toBe(1)
+      const s = newSessions[0]!
+      expect(s).toMatchObject({ location_id: lazarevaId, room: 'Клас 3', capacity: 8, attendance_mode: 'both', qr_secret: 'legacy-secret', status: 'finished', external_event_id: 'evt-legacy-1' })
+      expect((s.trainer_ids as string[])).toEqual([adminId])
+
+      const regs = await admin`select user_id, status, check_in_method from meetup_session_registrations where session_id = ${s.id} order by status`
+      expect(regs).toMatchObject([{ user_id: p1, status: 'attended', check_in_method: 'manual' }, { user_id: p2, status: 'missed' }])
+
+      // Ідемпотентність: повторний прогін бекфілу не створює другу сесію (NOT EXISTS-охорона)
+      await runBackfill()
+      expect((await admin`select count(*)::int as c from meetup_sessions where meetup_id = ${m!.id}`)[0]!.c).toBe(1)
+    })
+
+    it('стара картка webinar → сесія переймає посилання/провайдера, участь → seconds_watched/watch_pct', async () => {
+      const p1 = await makePerson('Перенос Вебінар')
+      const [m] = await admin`
+        insert into meetups (tenant_id, kind, title, announcement, starts_at, ends_at, trainer_ids, attendance_mode, qr_secret, status, created_by)
+        values (${tenantId}, 'webinar', 'Легасі: вебінар', '[{"id":"a"}]'::jsonb, now() - interval '1 day', now() - interval '1 day' + interval '1 hour', ${[adminId]}, 'manual', 'legacy-secret-2', 'finished', ${adminId})
+        returning id`
+      meetupIds.push(m!.id as string)
+      const [w] = await admin`insert into webinars (tenant_id, meetup_id, provider, join_url, external_meeting_id) values (${tenantId}, ${m!.id}, 'zoom', 'https://zoom.us/j/legacy', 'zoom-legacy-1') returning id`
+      await admin`insert into meetup_registrations (tenant_id, meetup_id, user_id, status, registered_at) values (${tenantId}, ${m!.id}, ${p1}, 'attended', now() - interval '2 days')`
+      await admin`insert into webinar_participations (tenant_id, webinar_id, user_id, minutes, attended, source) values (${tenantId}, ${w!.id}, ${p1}, 45, true, 'provider')`
+
+      await runBackfill()
+
+      const [s] = await admin`select * from meetup_sessions where meetup_id = ${m!.id}`
+      expect(s).toMatchObject({ provider: 'zoom', join_url: 'https://zoom.us/j/legacy', external_meeting_id: 'zoom-legacy-1' })
+      const [reg] = await admin`select seconds_watched, watch_pct from meetup_session_registrations where session_id = ${s!.id} and user_id = ${p1}`
+      expect(reg!.seconds_watched).toBe(45 * 60)
+      expect(Number(reg!.watch_pct)).toBeGreaterThan(0)
+    })
   })
 })

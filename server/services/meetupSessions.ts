@@ -59,8 +59,19 @@ export async function createSession(ctx: Ctx, meetupId: string, input: SessionCr
       createdBy: ctx.actorId,
     }).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup_session.create', entity: 'meetup_session', entityId: session!.id, after: { meetupId, startsAt: input.startsAt } })
-    return { ok: true as const, session: session! }
+    return { ok: true as const, session: session!, meetupKind: m.kind, webinarProvider: input.provider }
+  }).then(async (r) => {
+    // docs/33 D-029: Calendar/Zoom-синк — на сесію, а не на картку (docs/09 §9.1, docs/18 §3.3)
+    if (r.ok) setImmediate(() => syncExternal(ctx.tenantId, r.session.id, r.meetupKind === 'webinar' ? (r.webinarProvider ?? undefined) : undefined).catch(() => {}))
+    return r
   })
+}
+
+async function syncExternal(tenantId: string, sessionId: string, webinarProvider?: string) {
+  const { createZoomMeetingForSession, syncSessionToCalendar } = await import('./googleApps')
+  const { getSecret, SECRET_KEYS } = await import('./secrets')
+  if (webinarProvider === 'zoom' && await getSecret(tenantId, 'zoom', SECRET_KEYS.zoom.REFRESH_TOKEN)) await createZoomMeetingForSession(tenantId, sessionId)
+  if (await getSecret(tenantId, 'google', SECRET_KEYS.google.REFRESH_TOKEN)) await syncSessionToCalendar(tenantId, sessionId)
 }
 
 export async function updateSession(ctx: Ctx, id: string, input: Partial<SessionCreateInput>) {
@@ -82,7 +93,11 @@ export async function updateSession(ctx: Ctx, id: string, input: Partial<Session
       for (const r of regs) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: r.userId, code: 'meetup_changed', payload: { title: m?.title ?? '', starts: after!.startsAt.toISOString() }, dedupKey: `ms_changed:${id}:${r.userId}:${after!.updatedAt.getTime()}` })
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup_session.update', entity: 'meetup_session', entityId: id, before: { startsAt: before.startsAt, locationId: before.locationId }, after: { startsAt: after!.startsAt, locationId: after!.locationId } })
-    return after!
+    return { after: after!, moved }
+  }).then((r) => {
+    // docs/33 D-029: дата/місце змінились — пересинхронізувати подію в календарі на сесії
+    if (r && r.moved) setImmediate(() => syncExternal(ctx.tenantId, id).catch(() => {}))
+    return r ? r.after : null
   })
 }
 
@@ -101,6 +116,10 @@ export async function cancelSession(ctx: Ctx, id: string, input: { reason: strin
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup_session.cancel', entity: 'meetup_session', entityId: id, after: { reason: input.reason, registrations: regs.length } })
     return { cancelled: regs.length }
+  }).then((r) => {
+    // docs/33 D-029: прибрати подію з календаря — тепер на сесії, а не на картці
+    if (r) setImmediate(() => import('./googleApps').then(g => g.removeSessionFromCalendar(ctx.tenantId, id)).catch(() => {}))
+    return r
   })
 }
 
@@ -122,6 +141,42 @@ export async function listSessions(ctx: Ctx, meetupId: string, filter: { taskId?
     const trainers = trainerIds.length ? await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(inArray(users.id, trainerIds)) : []
     const tn = new Map(trainers.map(t => [t.id, t.fullName]))
     return rows.map(r => ({ ...r, id: String(r.id), trainers: (r.trainer_ids as string[]).map(id => tn.get(id) ?? '?'), seatsLeft: r.capacity != null ? Math.max(0, Number(r.capacity) - Number(r.registered)) : null, enrollOpen: enrollOpen({ startsAt: new Date(r.starts_at as string), enrollDeadlineHours: Number(r.enroll_deadline_hours), status: r.status as string }) }))
+  })
+}
+
+/**
+ * Розклад по всіх сесіях тенанту (docs/18 §5.1, docs/33 D-029) — той самий вигляд рядка, що й
+ * `meetups.ts#schedule`, для об'єднання в один список на екрані «Розклад» (`GET /meetups`):
+ * події (`kind=event`) і немігровані картки без сесій йдуть з картки, а meetup|webinar із
+ * сесіями — по рядку на кожну сесію (`meetupId` — для переходу на картку).
+ */
+export async function scheduleSessions(ctx: Ctx, filter: { from?: string, to?: string, mine?: boolean, kind?: string, locationId?: string } = {}) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const from = filter.from ? new Date(filter.from) : new Date(Date.now() - 7 * 86_400_000)
+    const to = filter.to ? new Date(filter.to) : new Date(Date.now() + 60 * 86_400_000)
+    const rows = await tx.execute(sql`
+      select s.id, s.meetup_id, m.kind, m.title, s.starts_at, s.ends_at, s.timezone, s.status, s.capacity, s.room, s.address, s.trainer_ids, s.enroll_deadline_hours, s.attendance_mode,
+             l.name as location,
+             (select count(*)::int from meetup_session_registrations r where r.session_id = s.id and r.status in ('registered','attended')) as registered,
+             (select count(*)::int from meetup_session_registrations r where r.session_id = s.id and r.status = 'waitlist') as waitlist,
+             (select r.status from meetup_session_registrations r where r.session_id = s.id and r.user_id = ${ctx.actorId}::uuid) as my_status,
+             (select r.waitlist_position from meetup_session_registrations r where r.session_id = s.id and r.user_id = ${ctx.actorId}::uuid) as my_waitlist_position
+      from meetup_sessions s join meetups m on m.id = s.meetup_id left join locations l on l.id = s.location_id
+      where s.starts_at >= ${from.toISOString()}::timestamptz and s.starts_at <= ${to.toISOString()}::timestamptz
+        ${filter.kind ? sql`and m.kind = ${filter.kind}` : sql``}
+        ${filter.locationId ? sql`and s.location_id = ${filter.locationId}::uuid` : sql``}
+        ${filter.mine ? sql`and exists (select 1 from meetup_session_registrations r where r.session_id = s.id and r.user_id = ${ctx.actorId}::uuid and r.status in ('registered','waitlist','attended'))` : sql``}
+      order by s.starts_at
+    `) as unknown as Record<string, unknown>[]
+    const trainerIds = [...new Set(rows.flatMap(r => r.trainer_ids as string[]))]
+    const trainers = trainerIds.length ? await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(inArray(users.id, trainerIds)) : []
+    const tn = new Map(trainers.map(t => [t.id, t.fullName]))
+    return rows.map(r => ({
+      ...r, id: String(r.id), meetupId: String(r.meetup_id),
+      trainers: (r.trainer_ids as string[]).map(id => tn.get(id) ?? '?'),
+      seatsLeft: r.capacity != null ? Math.max(0, Number(r.capacity) - Number(r.registered)) : null,
+      enrollOpen: enrollOpen({ startsAt: new Date(r.starts_at as string), enrollDeadlineHours: Number(r.enroll_deadline_hours), status: r.status as string }),
+    }))
   })
 }
 

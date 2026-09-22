@@ -35,6 +35,10 @@ const register = () => act(() => api(`/meetups/${route.params.id}/register`, { m
 const unregister = () => act(() => api(`/meetups/${route.params.id}/register`, { method: 'DELETE' }), t('mt.unregisteredOk'))
 const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' })
 const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendance') || hasScope('meetup.manage'))
+// docs/33 D-029: щойно з'явилась хоч одна сесія, картка більше не приймає прямий запис/QR/ics —
+// усе це веде відповідна сесія нижче (легасі-блок картки лишається тільки для kind=event і старих
+// карток без жодної сесії — сервер сам падає назад на нього, hasSessions=false).
+const hasSessions = computed(() => sessions.value.length > 0)
 </script>
 <template>
   <div>
@@ -43,31 +47,36 @@ const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendan
     <p v-if="notice" class="notice">{{ notice }}</p>
     <template v-if="m">
       <h1>{{ m.kind === 'webinar' ? '🎥 ' : '' }}{{ m.title }}</h1>
-      <p class="sub">{{ fmt(m.startsAt) }} — {{ new Date(m.endsAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) }} · {{ m.trainers.map(x => x.fullName).join(', ') }}</p>
-      <p v-if="m.location || m.address" class="sub">📍 {{ m.location?.name }}{{ m.room ? `, ${m.room}` : '' }}{{ m.address ? ` · ${m.address}` : '' }}{{ m.location?.address ? ` · ${m.location.address}` : '' }}</p>
-      <p v-if="countdown && m.status === 'planned'" class="count">{{ t('mt.startsIn') }} {{ countdown }}</p>
-      <span v-if="m.status === 'cancelled'" class="badge coral">{{ t('mt.cancelled') }}</span>
+      <template v-if="!hasSessions">
+        <p class="sub">{{ fmt(m.startsAt) }} — {{ new Date(m.endsAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) }} · {{ m.trainers.map(x => x.fullName).join(', ') }}</p>
+        <p v-if="m.location || m.address" class="sub">📍 {{ m.location?.name }}{{ m.room ? `, ${m.room}` : '' }}{{ m.address ? ` · ${m.address}` : '' }}{{ m.location?.address ? ` · ${m.location.address}` : '' }}</p>
+        <p v-if="countdown && m.status === 'planned'" class="count">{{ t('mt.startsIn') }} {{ countdown }}</p>
+        <span v-if="m.status === 'cancelled'" class="badge coral">{{ t('mt.cancelled') }}</span>
 
-      <section class="card">
-        <div class="row">
-          <span v-if="m.mine?.status === 'registered'" class="badge teal">{{ t('mt.registered') }}</span>
-          <span v-else-if="m.mine?.status === 'attended'" class="badge teal">{{ t('mt.attended') }}</span>
-          <span v-else-if="m.mine?.status === 'waitlist'" class="badge sun">{{ t('mt.inQueue', { n: m.mine.waitlistPosition }) }}</span>
-          <span v-else-if="m.seatsLeft != null" class="sub">{{ m.seatsLeft > 0 ? t('mt.seatsLeft', { n: m.seatsLeft }) : t('mt.full') }}</span>
-        </div>
-        <div v-if="m.capacity" class="capacity">
-          <span class="cap-n">{{ t('mt.registeredOf', { n: m.registered, total: m.capacity }) }}</span>
-          <div class="bar"><i :style="{ width: `${Math.min(100, (m.registered / m.capacity) * 100)}%` }" /></div>
-        </div>
-        <div class="actions">
-          <button v-if="!m.mine || ['cancelled', 'missed'].includes(m.mine.status)" class="primary" :disabled="!m.enrollOpen" data-testid="mt-register" @click="register">{{ m.enrollOpen ? (m.seatsLeft === 0 ? t('mt.joinQueue') : t('mt.register')) : t('mt.closed') }}</button>
-          <a v-if="m.mine && ['registered', 'waitlist'].includes(m.mine.status)" :href="`/api/v1/meetups/${m.id}/ics`" class="chip">📅 {{ t('mt.addToCalendar') }}</a>
-          <a v-if="m.webinar?.joinUrl" :href="m.webinar.joinUrl" target="_blank" class="primary" rel="noopener">{{ t('mt.join') }}</a>
-          <a v-if="m.webinar?.recordUrl && m.status === 'finished'" :href="m.webinar.recordUrl" target="_blank" class="chip" rel="noopener">▶ {{ t('mt.record') }}</a>
-          <NuxtLink v-if="m.attendanceMode !== 'manual' && m.mine?.status === 'registered'" to="/learn/meetups/checkin" class="chip">📷 {{ t('mt.scan') }}</NuxtLink>
-          <NuxtLink v-if="canManage" :to="`/admin/meetups/${m.id}`" class="chip">⚙ {{ t('mt.manage') }}</NuxtLink>
-        </div>
-      </section>
+        <section class="card">
+          <div class="row">
+            <span v-if="m.mine?.status === 'registered'" class="badge teal">{{ t('mt.registered') }}</span>
+            <span v-else-if="m.mine?.status === 'attended'" class="badge teal">{{ t('mt.attended') }}</span>
+            <span v-else-if="m.mine?.status === 'waitlist'" class="badge sun">{{ t('mt.inQueue', { n: m.mine.waitlistPosition }) }}</span>
+            <span v-else-if="m.seatsLeft != null" class="sub">{{ m.seatsLeft > 0 ? t('mt.seatsLeft', { n: m.seatsLeft }) : t('mt.full') }}</span>
+          </div>
+          <div v-if="m.capacity" class="capacity">
+            <span class="cap-n">{{ t('mt.registeredOf', { n: m.registered, total: m.capacity }) }}</span>
+            <div class="bar"><i :style="{ width: `${Math.min(100, (m.registered / m.capacity) * 100)}%` }" /></div>
+          </div>
+          <div class="actions">
+            <button v-if="!m.mine || ['cancelled', 'missed'].includes(m.mine.status)" class="primary" :disabled="!m.enrollOpen" data-testid="mt-register" @click="register">{{ m.enrollOpen ? (m.seatsLeft === 0 ? t('mt.joinQueue') : t('mt.register')) : t('mt.closed') }}</button>
+            <a v-if="m.mine && ['registered', 'waitlist'].includes(m.mine.status)" :href="`/api/v1/meetups/${m.id}/ics`" class="chip">📅 {{ t('mt.addToCalendar') }}</a>
+            <a v-if="m.webinar?.joinUrl" :href="m.webinar.joinUrl" target="_blank" class="primary" rel="noopener">{{ t('mt.join') }}</a>
+            <a v-if="m.webinar?.recordUrl && m.status === 'finished'" :href="m.webinar.recordUrl" target="_blank" class="chip" rel="noopener">▶ {{ t('mt.record') }}</a>
+            <NuxtLink v-if="m.attendanceMode !== 'manual' && m.mine?.status === 'registered'" to="/learn/meetups/checkin" class="chip">📷 {{ t('mt.scan') }}</NuxtLink>
+            <NuxtLink v-if="canManage" :to="`/admin/meetups/${m.id}`" class="chip">⚙ {{ t('mt.manage') }}</NuxtLink>
+          </div>
+        </section>
+      </template>
+      <div v-else class="row">
+        <NuxtLink v-if="canManage" :to="`/admin/meetups/${m.id}`" class="chip">⚙ {{ t('mt.manage') }}</NuxtLink>
+      </div>
 
       <section v-if="m.announcement?.length" class="card">
         <h2>{{ t('mt.announcement') }}</h2>

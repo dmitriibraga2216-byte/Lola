@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import { lessonProgress, locations, meetupRegistrations, meetups, userPlacements, users, webinarParticipations, webinars } from '../db/schema'
+import { lessonProgress, locations, meetupRegistrations, meetupSessions, meetups, userPlacements, users, webinarParticipations, webinars } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import type { TenantTx } from '../utils/withTenant'
@@ -9,6 +9,17 @@ import { enqueueNotification } from './notifications'
 import { completeLesson } from './learning'
 
 interface Ctx { tenantId: string, actorId: string }
+
+/**
+ * docs/33 D-029: щойно в картки з'являється хоч одна сесія (`meetupSessions`), картка перестає
+ * приймати прямий запис/відмітку/QR — усе це веде відповідна функція в `meetupSessions.ts`.
+ * Для `kind=event` (сесій не буває, Spec 21) і для старих карток без жодної сесії ця функція
+ * завжди повертає false — легасі-двигун нижче лишається чинним без змін.
+ */
+async function hasSessions(tx: TenantTx, meetupId: string): Promise<boolean> {
+  const [row] = await tx.select({ n: sql<number>`count(*)::int` }).from(meetupSessions).where(eq(meetupSessions.meetupId, meetupId))
+  return (row?.n ?? 0) > 0
+}
 
 export interface MeetupInput {
   kind?: 'meetup' | 'webinar' | 'event'
@@ -63,8 +74,10 @@ export async function createMeetup(ctx: Ctx, input: MeetupInput) {
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.create', entity: 'meetup', entityId: m!.id })
     return m!
   }).then(async (m) => {
-    // Интеграции (docs/09 §9.1): событие в Google Calendar, Meet/Zoom-ссылка для вебинара — в фоне, ошибки в last_error провайдера
-    setImmediate(() => syncExternal(ctx.tenantId, m.id, input.kind === 'webinar' ? input.webinar?.provider : undefined).catch(() => {}))
+    // Интеграции (docs/09 §9.1): событие в Google Calendar, Meet/Zoom-ссылка для вебинара — в фоне, ошибки в last_error провайдера.
+    // docs/33 D-029: для kind=meetup|webinar синк переїхав на сесію (meetupSessions.ts#createSession) —
+    // у момент створення картки-контенту дати ще немає сенсу синхронізувати.
+    if ((input.kind ?? 'meetup') === 'event') setImmediate(() => syncExternal(ctx.tenantId, m.id, undefined).catch(() => {}))
     return m
   })
 }
@@ -105,16 +118,19 @@ export async function updateMeetup(ctx: Ctx, id: string, input: Partial<MeetupIn
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.update', entity: 'meetup', entityId: id, before: { startsAt: before.startsAt, locationId: before.locationId }, after: { startsAt: after!.startsAt, locationId: after!.locationId } })
     return { after: after!, moved }
   }).then((r) => {
-    if (r && r.moved) setImmediate(() => syncExternal(ctx.tenantId, id).catch(() => {}))
+    // docs/33 D-029: пересинхронізація картки — тільки kind=event; meetup|webinar ведуть сесії
+    if (r && r.moved && r.after.kind === 'event') setImmediate(() => syncExternal(ctx.tenantId, id).catch(() => {}))
     return r ? r.after : null
   })
 }
 
 /** Отмена (docs/18 §6.2, §7.10): снимает регистрации, уведомляет участников и руководителей, предлагает альтернативу. */
 export async function cancelMeetup(ctx: Ctx, id: string, input: { reason: string, notify?: boolean, alternativeId?: string | null }) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  let kind = ''
+  const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(and(eq(meetups.id, id), inArray(meetups.status, ['draft', 'planned', 'ongoing'])))
     if (!m) return null
+    kind = m.kind
     await tx.update(meetups).set({ status: 'cancelled', cancelReason: input.reason, updatedAt: new Date() }).where(eq(meetups.id, id))
     const regs = await tx.select({ userId: meetupRegistrations.userId, status: meetupRegistrations.status }).from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, id), inArray(meetupRegistrations.status, ['registered', 'waitlist'])))
     await tx.update(meetupRegistrations).set({ status: 'cancelled', cancelReason: 'Заняття скасовано', updatedAt: new Date() }).where(and(eq(meetupRegistrations.meetupId, id), inArray(meetupRegistrations.status, ['registered', 'waitlist'])))
@@ -131,10 +147,10 @@ export async function cancelMeetup(ctx: Ctx, id: string, input: { reason: string
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'meetup.cancel', entity: 'meetup', entityId: id, after: { reason: input.reason, registrations: regs.length } })
     return { cancelled: regs.length }
-  }).then((r) => {
-    if (r) setImmediate(() => import('./googleApps').then(g => g.removeMeetupFromCalendar(ctx.tenantId, id)).catch(() => {}))
-    return r
   })
+  // docs/33 D-029: прибрати з календаря — тільки kind=event; meetup|webinar чистять свої сесії самі
+  if (result && kind === 'event') setImmediate(() => import('./googleApps').then(g => g.removeMeetupFromCalendar(ctx.tenantId, id)).catch(() => {}))
+  return result
 }
 
 // ── Расписание и карточка (docs/18 §5.1–5.2) ───────────────────────────
@@ -151,7 +167,10 @@ export async function schedule(ctx: Ctx, filter: { from?: string, to?: string, m
              (select r.status from meetup_registrations r where r.meetup_id = m.id and r.user_id = ${ctx.actorId}::uuid) as my_status,
              (select r.waitlist_position from meetup_registrations r where r.meetup_id = m.id and r.user_id = ${ctx.actorId}::uuid) as my_waitlist_position
       from meetups m left join locations l on l.id = m.location_id
-      where m.status <> 'draft' and m.starts_at >= ${from.toISOString()}::timestamptz and m.starts_at <= ${to.toISOString()}::timestamptz
+      -- docs/33 D-029: картки meetup|webinar із сесіями показує scheduleSessions (meetupSessions.ts) —
+      -- своя подія розкладу на кожну сесію; тут лишаються kind=event і немігровані картки
+      where m.status <> 'draft' and not exists (select 1 from meetup_sessions ms2 where ms2.meetup_id = m.id)
+        and m.starts_at >= ${from.toISOString()}::timestamptz and m.starts_at <= ${to.toISOString()}::timestamptz
         ${filter.kind ? sql`and m.kind = ${filter.kind}` : sql``}
         ${filter.locationId ? sql`and m.location_id = ${filter.locationId}::uuid` : sql``}
         ${filter.mine ? sql`and exists (select 1 from meetup_registrations r where r.meetup_id = m.id and r.user_id = ${ctx.actorId}::uuid and r.status in ('registered','waitlist','attended'))` : sql``}
@@ -160,7 +179,7 @@ export async function schedule(ctx: Ctx, filter: { from?: string, to?: string, m
     const trainerIds = [...new Set(rows.flatMap(r => r.trainer_ids as string[]))]
     const trainers = trainerIds.length ? await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(inArray(users.id, trainerIds)) : []
     const tn = new Map(trainers.map(t => [t.id, t.fullName]))
-    return rows.map(r => ({ ...(r as Record<string, unknown>), id: String(r.id), trainers: (r.trainer_ids as string[]).map(id => tn.get(id) ?? '?'), seatsLeft: r.capacity != null ? Math.max(0, Number(r.capacity) - Number(r.registered)) : null, enrollOpen: enrollOpen(r as { starts_at: string, enroll_deadline_hours: number, status: string }) }))
+    return rows.map(r => ({ ...(r as Record<string, unknown>), id: String(r.id), meetupId: String(r.id), trainers: (r.trainer_ids as string[]).map(id => tn.get(id) ?? '?'), seatsLeft: r.capacity != null ? Math.max(0, Number(r.capacity) - Number(r.registered)) : null, enrollOpen: enrollOpen(r as { starts_at: string, enroll_deadline_hours: number, status: string }) }))
   })
 }
 
@@ -197,12 +216,14 @@ export async function getMeetup(ctx: Ctx, id: string, opts: { manage?: boolean }
 
 // ── Запись, очередь, отмена (docs/18 §7.1–7.3) ─────────────────────────
 
-export type RegisterResult = { ok: true, status: 'registered' | 'waitlist', waitlistPosition?: number, conflict?: string } | { ok: false, code: 'not_found' | 'closed' | 'full' | 'already' }
+export type RegisterResult = { ok: true, status: 'registered' | 'waitlist', waitlistPosition?: number, conflict?: string } | { ok: false, code: 'not_found' | 'closed' | 'full' | 'already' | 'has_sessions' }
 
 export async function register(ctx: Ctx, meetupId: string, userId: string, opts: { enrollmentId?: string, lessonId?: string, guestsCount?: number } = {}): Promise<RegisterResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(eq(meetups.id, meetupId))
     if (!m) return { ok: false as const, code: 'not_found' as const }
+    // docs/33 D-029: картка з сесіями записує тільки через них — GET /meetups/:id/sessions
+    if (await hasSessions(tx, meetupId)) return { ok: false as const, code: 'has_sessions' as const }
     const byOther = userId !== ctx.actorId
     if (!byOther && !enrollOpen({ starts_at: m.startsAt, enroll_deadline_hours: m.enrollDeadlineHours, status: m.status })) return { ok: false as const, code: 'closed' as const }
     if (byOther && !['planned', 'ongoing'].includes(m.status)) return { ok: false as const, code: 'closed' as const }
@@ -229,11 +250,12 @@ export async function register(ctx: Ctx, meetupId: string, userId: string, opts:
   })
 }
 
-export type UnregisterResult = { ok: true } | { ok: false, code: 'not_found' | 'cancel_deadline_passed' }
+export type UnregisterResult = { ok: true } | { ok: false, code: 'not_found' | 'cancel_deadline_passed' | 'has_sessions' }
 
 export async function unregister(ctx: Ctx, meetupId: string, userId: string, reason?: string): Promise<UnregisterResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(eq(meetups.id, meetupId))
+    if (m && await hasSessions(tx, meetupId)) return { ok: false as const, code: 'has_sessions' as const }
     const [r] = await tx.select().from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, meetupId), eq(meetupRegistrations.userId, userId), inArray(meetupRegistrations.status, ['registered', 'waitlist'])))
     if (!m || !r) return { ok: false as const, code: 'not_found' as const }
     if (userId === ctx.actorId && Date.now() >= m.startsAt.getTime() - m.cancelDeadlineHours * H) return { ok: false as const, code: 'cancel_deadline_passed' as const }
@@ -267,7 +289,7 @@ function qrToken(m: { id: string, qrSecret: string }, windowIdx: number): string
 export async function currentQr(ctx: Ctx, meetupId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select({ id: meetups.id, qrSecret: meetups.qrSecret, attendanceMode: meetups.attendanceMode }).from(meetups).where(eq(meetups.id, meetupId))
-    if (!m || m.attendanceMode === 'manual') return null
+    if (!m || m.attendanceMode === 'manual' || await hasSessions(tx, meetupId)) return null
     const idx = Math.floor(Date.now() / 1000 / QR_WINDOW_SEC)
     return { token: `${meetupId}.${idx}.${qrToken(m, idx)}`, expiresInSec: QR_WINDOW_SEC - (Math.floor(Date.now() / 1000) % QR_WINDOW_SEC) }
   })
@@ -281,7 +303,8 @@ export async function checkin(ctx: Ctx, token: string): Promise<CheckinResult> {
   if (!meetupId || !idxStr || !sig) return { ok: false, code: 'bad_token' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(eq(meetups.id, meetupId))
-    if (!m) return { ok: false as const, code: 'bad_token' as const }
+    // docs/33 D-029: QR картки з сесіями не видається (currentQr), токен на неї — завідомо чужий/застарілий
+    if (!m || await hasSessions(tx, meetupId)) return { ok: false as const, code: 'bad_token' as const }
     const idx = Number(idxStr)
     const expected = qrToken(m, idx)
     const a = Buffer.from(sig), b = Buffer.from(expected)
@@ -332,7 +355,7 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, m: typeof meetups.$inferSe
 export async function setAttendance(ctx: Ctx, meetupId: string, input: { userId: string, status: 'attended' | 'missed' | 'excused', reason?: string }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(eq(meetups.id, meetupId))
-    if (!m) return null
+    if (!m || await hasSessions(tx, meetupId)) return null
     const [r] = await tx.select().from(meetupRegistrations).where(and(eq(meetupRegistrations.meetupId, meetupId), eq(meetupRegistrations.userId, input.userId)))
     if (!r) return null
     await markAttendance(tx, ctx, m, r, input.status, 'manual', input.reason)
@@ -353,7 +376,7 @@ export async function recordParticipation(ctx: Ctx, meetupId: string, rows: { us
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [m] = await tx.select().from(meetups).where(and(eq(meetups.id, meetupId), eq(meetups.kind, 'webinar')))
     const [w] = m ? await tx.select().from(webinars).where(eq(webinars.meetupId, meetupId)) : []
-    if (!m || !w) return null
+    if (!m || !w || await hasSessions(tx, meetupId)) return null
     const durationMin = Math.round((m.endsAt.getTime() - m.startsAt.getTime()) / 60_000)
     const threshold = w.minMinutesForAttendance ?? Math.ceil(durationMin * 0.7)
     let attendedN = 0
@@ -373,12 +396,16 @@ export async function recordParticipation(ctx: Ctx, meetupId: string, rows: { us
 
 // ── Фоновые задачи (docs/18 §11) ────────────────────────────────────────
 
+// docs/33 D-029: щойно в картки з'явилась сесія, її розклад/нагадування/звіт веде meetupSessions.ts —
+// картка-фонові задачі і звіт нижче більше її не займають (щоб не дублювати нагадування і рядки звіту)
+const NO_SESSIONS = sql`not exists (select 1 from meetup_sessions ms2 where ms2.meetup_id = ${meetups.id})`
+
 /** planned → ongoing в starts_at; ongoing → finished через час после ends_at, неявки → missed, руководителю список. */
 export async function statusScan(tenantId: string): Promise<{ started: number, finished: number, missed: number }> {
   return withTenant(tenantId, null, async (tx) => {
     const now = new Date()
-    const started = await tx.update(meetups).set({ status: 'ongoing', updatedAt: now }).where(and(eq(meetups.status, 'planned'), lte(meetups.startsAt, now))).returning({ id: meetups.id })
-    const toFinish = await tx.select().from(meetups).where(and(eq(meetups.status, 'ongoing'), lte(meetups.endsAt, new Date(now.getTime() - H))))
+    const started = await tx.update(meetups).set({ status: 'ongoing', updatedAt: now }).where(and(eq(meetups.status, 'planned'), lte(meetups.startsAt, now), NO_SESSIONS)).returning({ id: meetups.id })
+    const toFinish = await tx.select().from(meetups).where(and(eq(meetups.status, 'ongoing'), lte(meetups.endsAt, new Date(now.getTime() - H)), NO_SESSIONS))
     let missed = 0
     for (const m of toFinish) {
       await tx.update(meetups).set({ status: 'finished', updatedAt: now }).where(eq(meetups.id, m.id))
@@ -405,7 +432,7 @@ export async function statusScan(tenantId: string): Promise<{ started: number, f
 export async function reminderScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
     const now = Date.now()
-    const upcoming = await tx.select().from(meetups).where(and(eq(meetups.status, 'planned'), gte(meetups.startsAt, new Date(now)), lte(meetups.startsAt, new Date(now + 25 * H))))
+    const upcoming = await tx.select().from(meetups).where(and(eq(meetups.status, 'planned'), gte(meetups.startsAt, new Date(now)), lte(meetups.startsAt, new Date(now + 25 * H)), NO_SESSIONS))
     let n = 0
     for (const m of upcoming) {
       const left = m.startsAt.getTime() - now
@@ -433,7 +460,8 @@ export async function attendanceReport(ctx: Ctx, filter: { from?: string, to?: s
     // Область видимости: занятие на точке или без точки (вебинары сети) — по участникам этих точек
     const scope = filter.scope ?? null
     const scoped = scope === null ? sql`` : sql`and (m.location_id in (select x from unnest(array[${sql.join(scope.length ? scope.map(i => sql`${i}::uuid`) : [sql`null::uuid`], sql`, `)}]) x) or (m.location_id is null and exists (select 1 from meetup_registrations rr join user_placements up on up.user_id = rr.user_id and up.is_primary and up.ended_at is null where rr.meetup_id = m.id ${scopeSql(scope, sql`up.location_id`)})))`
-    const where = sql`m.status in ('finished','ongoing','cancelled') ${filter.from ? sql`and m.starts_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and m.starts_at < (${filter.to}::date + 1)` : sql``} ${scoped}`
+    // docs/33 D-029: картки з сесіями звітують через meetupSessions.ts#attendanceReport — тут лишились kind=event і немігровані
+    const where = sql`m.status in ('finished','ongoing','cancelled') and not exists (select 1 from meetup_sessions ms2 where ms2.meetup_id = m.id) ${filter.from ? sql`and m.starts_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and m.starts_at < (${filter.to}::date + 1)` : sql``} ${scoped}`
     const meetupsRows = await tx.execute(sql`
       select m.id, m.kind, m.title, m.starts_at, m.status, m.trainer_ids,
              (select count(*)::int from meetup_registrations r where r.meetup_id = m.id and r.status in ('registered','attended','missed','excused')) as registered,

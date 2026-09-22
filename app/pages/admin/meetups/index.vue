@@ -3,7 +3,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'mee
 const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
-interface M { id: string, kind: string, title: string, starts_at: string, ends_at: string, status: string, location: string | null, trainers: string[], registered: number, waitlist: number, capacity: number | null }
+interface M { id: string, meetupId: string, kind: string, title: string, starts_at: string, ends_at: string, status: string, location: string | null, trainers: string[], registered: number, waitlist: number, capacity: number | null }
 const items = ref<M[]>([])
 const locations = ref<{ id: string, name: string }[]>([])
 const people = ref<{ id: string, fullName: string }[]>([])
@@ -39,7 +39,7 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'sho
       <thead><tr><th>{{ t('assign.col.title') }}</th><th>{{ t('mt.when') }}</th><th>{{ t('mt.trainer') }}</th><th>{{ t('mt.participants') }}</th><th>{{ t('assign.col.status') }}</th></tr></thead>
       <tbody>
         <tr v-for="m in items" :key="m.id">
-          <td><NuxtLink :to="`/admin/meetups/${m.id}`" class="link">{{ m.kind === 'webinar' ? '🎥 ' : '' }}{{ m.title }}</NuxtLink><div class="sub">{{ m.location ?? '' }}</div></td>
+          <td><NuxtLink :to="`/admin/meetups/${m.meetupId}`" class="link">{{ m.kind === 'webinar' ? '🎥 ' : '' }}{{ m.title }}</NuxtLink><div class="sub">{{ m.location ?? '' }}</div></td>
           <td class="sub">{{ fmt(m.starts_at) }}</td><td class="sub">{{ m.trainers.join(', ') }}</td>
           <td>{{ m.registered }}<template v-if="m.capacity"> / {{ m.capacity }}</template><span v-if="m.waitlist" class="sub"> +{{ m.waitlist }} {{ t('mt.queue') }}</span></td>
           <td><span :class="['badge', m.status]">{{ t(`mt.mstatus.${m.status}`) }}</span></td>

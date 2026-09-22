@@ -233,6 +233,25 @@ export const notifications = pgTable('notifications', {
   unique().on(t.tenantId, t.dedupKey),
 ])
 
+/**
+ * Push-подписки браузера, PWA (docs/23 §4, докс/33 D-051): один человек может иметь несколько
+ * подписок (несколько устройств/браузеров) — уникальность по `endpoint`, не по `user_id`.
+ * Ключи (`p256dh`, `auth`) нужны только для шифрования полезной нагрузки; в D-051 полезная
+ * нагрузка не шифруется (пустой push, см. `server/services/push.ts`), ключи хранятся на будущее.
+ */
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: text('user_agent'),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  index().on(t.tenantId, t.userId),
+])
+
 /** Одноразовые токены привязки Telegram и автологина (docs/04 §4.12). */
 export const telegramTokens = pgTable('telegram_tokens', {
   ...baseColumns,

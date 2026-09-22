@@ -14,6 +14,9 @@ export const tenants = pgTable('tenants', {
   ...baseColumns,
   slug: text('slug').notNull().unique(),
   name: text('name').notNull(),
+  // Собственный домен клиента (docs/25 §16.1, докс/33 D-059): резолв `01.host` — сперва по нему, потом по
+  // `<slug>.<TENANT_HOST_BASE>`. Проверка владения (CNAME/сертификат) — вручную оператором, вне кода (докс/27).
+  customDomain: text('custom_domain').unique(),
   locale: text('locale').notNull().default('uk'),
   timezone: text('timezone').notNull().default('Europe/Kyiv'),
   status: text('status').notNull().default('active'), // TENANT_STATUSES

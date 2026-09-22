@@ -12,6 +12,7 @@ import { slugify } from './courses'
 import { canAccessResource } from './resources'
 import { countView, noticeAudience } from './notices'
 import { bookmarkKeys } from './hubExtra'
+import { ratingAggregate } from './contentRatings'
 import type { ContentBlock } from '../../shared/schemas/content'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -90,8 +91,9 @@ export async function getArticle(ctx: Ctx, idOrSlug: string, opts: { countView?:
     const courses = a.relatedCourses.length ? await tx.execute(sql`select id, title from courses where id in ${a.relatedCourses} and status = 'published' and deleted_at is null`) as unknown as { id: string, title: string }[] : []
     const [owner] = a.ownerId ? await tx.execute(sql`select full_name from users where id = ${a.ownerId}::uuid`) as unknown as { full_name: string }[] : []
     const needsReview = !!a.reviewAt && new Date(a.reviewAt) < new Date(Date.now() - 30 * 86_400_000) && (!a.reviewConfirmedAt || a.reviewConfirmedAt < new Date(a.reviewAt))
+    const rating = await ratingAggregate(ctx, 'knowledge_article', a.id) // «Оцінок: N · середня X» (докс/33 D-042)
     const { embedding: _e, searchTsv: _t, ...safe } = a
-    return { ...safe, links, myFeedback: my?.helpful ?? null, related, relatedCourseItems: courses, ownerName: owner?.full_name ?? null, needsReview }
+    return { ...safe, links, myFeedback: my?.helpful ?? null, related, relatedCourseItems: courses, ownerName: owner?.full_name ?? null, needsReview, rating }
   })
 }
 

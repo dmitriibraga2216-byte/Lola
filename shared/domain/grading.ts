@@ -197,6 +197,28 @@ export function gradeAnswer(q: SnapshotQuestion, answer: unknown): GradeResult {
       return { isCorrect: ok, score: ok ? q.points : 0, auto: true }
     }
 
+    case 'cloze': {
+      // Пропуски в тексте (docs/12 §3.3 п. 11, докс/33 D-015): answer.gaps — по варіанту(ах)-еталону
+      // на кожен `{{id}}` у stem; відповідь — values{gapId: text}. Порівняння — те саме, що text_short.
+      const gaps = (q.answer as { gaps: { id: string, accepted: string[], caseSensitive?: boolean, trim?: boolean, normalizeSpaces?: boolean, allowTypos?: number }[] }).gaps
+      const values = (answer as { values?: Record<string, string> }).values ?? {}
+      let right = 0
+      for (const gap of gaps) {
+        const given = normalizeText(String(values[gap.id] ?? ''), gap)
+        const typos = gap.allowTypos ?? 0
+        const ok = gap.accepted.some((acc) => {
+          const norm = normalizeText(acc, gap)
+          return typos > 0 ? levenshtein(norm, given) <= typos : norm === given
+        })
+        if (ok) right++
+      }
+      const exact = gaps.length > 0 && right === gaps.length
+      if (scoringMethodOf(q) === 'all_or_nothing' || gaps.length === 0) {
+        return { isCorrect: exact, score: exact ? q.points : 0, auto: true }
+      }
+      return { isCorrect: exact, score: round2(q.points * right / gaps.length), auto: true }
+    }
+
     case 'text_short': {
       const spec = q.answer as {
         accepted: string[]

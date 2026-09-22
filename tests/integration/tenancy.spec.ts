@@ -15,7 +15,7 @@ process.env.ENCRYPTION_KEY ??= 'test-encryption-key'
 
 const { withTenant } = await import('../../server/utils/withTenant')
 const { db } = await import('../../server/db/client')
-const { createTenant, platformLogin, validatePlatformSession, ensureFirstAdmin, listTenants, checkPlanLimit } = await import('../../server/services/platform')
+const { createTenant, platformLogin, validatePlatformSession, ensureFirstAdmin, listTenants, checkPlanLimit, updateTenant } = await import('../../server/services/platform')
 const { suspendTenant, resumeTenant, schedulePurge, cancelPurge, setTenantLimits, getTenantLimits, runTenantPurge, listPlatformAudit, purgeAtOf } = await import('../../server/services/platformTenants')
 const { roundRobinOrder, runPerTenant, withTenantSlot, activeJobsOf, resetRoundRobin } = await import('../../server/services/tenantQueue')
 const { decideHost, resolveTenantByHost, invalidateTenant, tenantById } = await import('../../server/services/tenantResolve')
@@ -322,6 +322,27 @@ describe('docs/25 §16.1 — резолв тенанта по Host', () => {
     expect((await resolveTenantByHost('localhost', cfg))?.tenant?.slug).toBe('kappi')
     expect(await resolveTenantByHost('localhost', { ...cfg, base: null })).toBeNull()
     expect((await resolveTenantByHost('localhost', { ...cfg, defaultSlug: null }))?.tenant).toBeNull()
+  })
+
+  it('докс/33 D-059: свій домен клієнта резолвиться раніше дефолтного тенанта; конфлікт домену — 409', async () => {
+    const domain = `navchannya-${stamp}.example.com`
+    invalidateTenant()
+    // домен ще не заданий — хост, що не є slug.base, іде у фолбек на дефолтний тенант
+    expect((await resolveTenantByHost(domain, cfg))?.tenant?.slug).toBe('kappi')
+
+    const r1 = await updateTenant(tenantA.id, { customDomain: domain }, opsAuth)
+    expect(r1.ok).toBe(true)
+    invalidateTenant()
+    expect((await resolveTenantByHost(domain, cfg))?.tenant?.id).toBe(tenantA.id)
+    // slug.base для того ж тенанта продовжує працювати (порядок: спочатку slug, потім домен)
+    expect((await resolveTenantByHost(`${tenantA.slug}.${HOST_BASE}`, cfg))?.tenant?.id).toBe(tenantA.id)
+
+    const r2 = await updateTenant(tenantB.id, { customDomain: domain }, opsAuth)
+    expect(r2).toEqual({ ok: false, code: 'domain_taken' })
+
+    await updateTenant(tenantA.id, { customDomain: null }, opsAuth)
+    invalidateTenant()
+    expect((await resolveTenantByHost(domain, cfg))?.tenant?.slug).toBe('kappi')
   })
 })
 

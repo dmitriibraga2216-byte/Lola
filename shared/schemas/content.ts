@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { COURSE_CATALOG_MODES } from './catalog'
+import { CONTENT_RATING_TARGETS } from '../enums'
 
 /** Блоки контента (docs/11-content-lessons.md §3.3). */
 
@@ -116,4 +117,10 @@ export type TickInput = z.infer<typeof tickSchema>
 
 export const enrollSchema = z.object({
   courseId: z.string().uuid(),
+})
+
+/** Оценка материала читателем (docs/21 §14.1 «Оцінок: N», докс/33 D-042): звезда 1–5. */
+export const contentRatingSchema = z.object({
+  contentType: z.enum(CONTENT_RATING_TARGETS),
+  value: z.number().int().min(1).max(5),
 })

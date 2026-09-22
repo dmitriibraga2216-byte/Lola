@@ -26,6 +26,16 @@ export const answerByKindSchema = {
   text_short: z.object({ accepted: z.array(z.string().min(1)).min(1), caseSensitive: z.boolean().optional(), allowTypos: z.number().int().min(0).max(2).optional() }),
   free: z.object({ criteria: z.array(z.string()).optional(), reference: z.string().max(5000).optional(), minLength: z.number().int().min(0).optional(), maxLength: z.number().int().max(5000).optional() }).nullable().optional(),
   file: z.object({ criteria: z.array(z.string()).optional(), formats: z.array(z.string()).optional(), maxFiles: z.number().int().min(1).max(5).optional() }).nullable().optional(),
+  // Пропуски в тексте (docs/12 §3.3 п. 11, `[решение, R2]`, докс/33 D-015): `stem` містить `{{id}}`
+  // на кожен пропуск, `gaps[].id` — той самий код; варіанти/еталон — як у `text_short`, по пропуску.
+  cloze: z.object({
+    gaps: z.array(z.object({
+      id: z.string().min(1).max(20),
+      accepted: z.array(z.string().min(1)).min(1),
+      caseSensitive: z.boolean().optional(),
+      allowTypos: z.number().int().min(0).max(2).optional(),
+    })).min(1).max(20),
+  }),
 } as const
 
 /** Конструктор ответа по типу (docs/12 §14.6). */
@@ -113,6 +123,16 @@ export const questionSchema = z.object({
     case 'text_short': {
       const a = answerByKindSchema.text_short.safeParse(q.answer)
       if (!a.success) fail('Вкажіть хоча б одну прийнятну відповідь')
+      break
+    }
+    case 'cloze': {
+      const a = answerByKindSchema.cloze.safeParse(q.answer)
+      if (!a.success) { fail('Задайте варіанти відповіді для кожного пропуску'); break }
+      // У тексті питання має бути плейсхолдер {{id}} на кожен заявлений пропуск (docs/12 §3.3 п. 11)
+      const text = q.stem.filter(b => b.type === 'text').map(b => (b as { html: string }).html).join(' ')
+      const placeholders = new Set([...text.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))
+      const missing = a.data.gaps.find(g => !placeholders.has(g.id))
+      if (missing) fail(`У тексті питання немає пропуску {{${missing.id}}}`)
       break
     }
     case 'free':

@@ -1,0 +1,12 @@
+{
+  "name": "Lola",
+  "short_name": "Lola",
+  "description": "Lola LMS — навчання, тести, траєкторії",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f0e7d7",
+  "theme_color": "#f0e7d7",
+  "lang": "uk",
+  "icons": []
+}

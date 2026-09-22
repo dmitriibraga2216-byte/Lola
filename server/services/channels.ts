@@ -12,7 +12,11 @@ import { effectiveLimits } from './tenantLimits'
 
 export type ChannelResult = { ok: true } | { ok: false, skipped: boolean, error: string }
 
-export async function sendViaChannel(tenantId: string, channel: 'sms' | 'email', msg: { userId: string, text: string, subject?: string, html?: string }): Promise<ChannelResult> {
+export async function sendViaChannel(tenantId: string, channel: 'sms' | 'email' | 'push', msg: { userId: string, text: string, subject?: string, html?: string }): Promise<ChannelResult> {
+  if (channel === 'push') {
+    const { sendPushToUser } = await import('./push')
+    return sendPushToUser(tenantId, msg.userId)
+  }
   const [u] = await withTenant(tenantId, null, tx => tx.select({ phone: users.phone, email: users.email }).from(users).where(eq(users.id, msg.userId)))
   if (channel === 'sms') {
     if (!u?.phone) return { ok: false, skipped: true, error: 'no phone' }

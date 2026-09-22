@@ -33,7 +33,7 @@ export const questions = pgTable('questions', {
   questionGroupId: uuid('question_group_id').references((): AnyPgColumn => questionGroups.id, { onDelete: 'set null' }),
   kind: text('kind').notNull().default('single'),
   // Коды docs/02 (эталон): single | multi | free | ordering | classification | comparison | answer_by_map
-  // Lola сверх эталона: number | text_short | file
+  // Lola сверх эталона: number | text_short | file | cloze (докс/33 D-015, CHECK — миграция 0053)
   stem: jsonb('stem').notNull(), // блоки: text, image
   options: jsonb('options'),
   answer: jsonb('answer'), // null для ручных типов

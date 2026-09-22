@@ -32,10 +32,13 @@ export type TrajectoryNodeKind = typeof TRAJECTORY_NODE_KINDS[number]
 export const NOTICE_KINDS = ['acknowledge', 'event', 'notification'] as const
 export type NoticeKind = typeof NOTICE_KINDS[number]
 
-/** Типы вопросов: семь эталона (docs/12 §14.3) + три Lola (number, text_short, file). Коды — из docs/02. */
+/**
+ * Типы вопросов: семь эталона (docs/12 §14.3) + три Lola (number, text_short, file)
+ * + `cloze` — пропуски в тексте (docs/12 §3.3 п. 11, `[решение, R2]`, docs/33 D-015). Коды — из docs/02.
+ */
 export const QUESTION_KINDS = [
   'single', 'multi', 'free', 'ordering', 'classification', 'comparison', 'answer_by_map',
-  'number', 'text_short', 'file',
+  'number', 'text_short', 'file', 'cloze',
 ] as const
 export type QuestionKind = typeof QUESTION_KINDS[number]
 
@@ -91,6 +94,13 @@ export const DISPLAY_AS = ['label', 'value'] as const
 export type DisplayAs = typeof DISPLAY_AS[number]
 
 /**
+ * Материал, который можно оценить читателем (docs/21 §14.1 «Оцінок: N», докс/33 D-042):
+ * ресурс базы знаний и статья вики — наше перечисление, `[решение]`, не путать с `content_type`.
+ */
+export const CONTENT_RATING_TARGETS = ['resource', 'knowledge_article'] as const
+export type ContentRatingTarget = typeof CONTENT_RATING_TARGETS[number]
+
+/**
  * Роли оценщиков (docs/02 `assessment_raters.rater_kind`, docs/20 Г-20.1; docs/33 D-036). Не в `ENUMS`: в разделе
  * «Перечисления, снятые с эталона» docs/02 этого списка нет — он наш `[решение]`. Вес и анонимность —
  * свойство роли (Г-20.2): `manager` и `self` всегда именные, `self` показывается, но не считается.
@@ -126,4 +136,5 @@ export const ENUMS: Record<string, readonly string[]> = {
   poll_question_kind: POLL_QUESTION_KINDS,
   competency_source: COMPETENCY_SOURCES,
   display_as: DISPLAY_AS,
+  content_rating_target: CONTENT_RATING_TARGETS,
 }

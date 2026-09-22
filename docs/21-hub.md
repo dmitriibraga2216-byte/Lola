@@ -321,6 +321,18 @@
 **«Оцінок: N»**. Значит у ресурса есть счётчик просмотров и оценка читателями —
 в `11` §3.1 добавляем `views_count` и агрегат рейтинга.
 
+**Сделано (докс/33 D-042).** Отдельная таблица `content_ratings` (docs/02 §2.8 — рядом с
+`knowledge_articles`; `content_rating_target`: `resource` | `knowledge_article`, своё
+перечисление, не путать с `content_type` назначений) — звезда 1–5, один голос на человека
+(`unique(tenant_id, content_type, content_id, user_id)`), повторная оценка правит свою же
+(upsert). Сервис `server/services/contentRatings.ts` (`rateContent`/`unrateContent`/
+`ratingAggregate`), `PUT`/`DELETE /content-ratings/:contentId`. На карточке ресурса
+(`/learn/knowledge/lesson/:id`) и статьи (`/learn/knowledge/:id`) — компонент
+`ContentRating.vue` с агрегатом «Оцінок: N · середня X», встроенным в ответ
+`GET /knowledge/resource/:id` и `GET /knowledge/:id`. В карточках результатов поиска
+(`/learn/knowledge/search`) агрегат по-прежнему не подтягивается — это отдельная доработка
+`searchKnowledge`, вне охвата D-042.
+
 Левая колонка **«КАТЕГОРІЇ»**: первым пунктом **«Мої закладки»**, дальше пронумерованное
 дерево («1.Інформація про компанію», «2.Торгові точки», «3.Кухня», «4.Офіс»,
 «5.Меню», «6.Бланки контролю», «7.Бібліотека», «8.Робота з колаборатором»).

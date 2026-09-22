@@ -7,6 +7,7 @@ const { createCourse, addModule, addLesson, updateLesson, publishChecks, publish
 const { selfEnroll, enrollmentTree, openLesson, tickLesson, completeLesson, myLearning, catalog }
   = await import('../../server/services/learning')
 const { sanitizeUserHtml } = await import('../../server/services/sanitize')
+const { createQuiz, createBank, createQuestion, setQuizQuestions } = await import('../../server/services/questions')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 
@@ -14,6 +15,8 @@ let tenantId: string
 let authorId: string
 let learnerId: string
 const created: string[] = []
+const quizIds: string[] = []
+const bankIds: string[] = []
 
 beforeAll(async () => {
   const [t] = await admin`select id from tenants where slug = 'kappi'`
@@ -31,6 +34,8 @@ afterAll(async () => {
     await admin`delete from resources where id in (select l.item_id from lessons l join modules m on m.id = l.module_id join course_versions v on v.id = m.course_version_id where l.item_type = 'resource' and v.course_id in ${admin(created)})`
     await admin`delete from courses where id in ${admin(created)}`
   }
+  if (quizIds.length) await admin`delete from quizzes where id in ${admin(quizIds)}`
+  if (bankIds.length) await admin`delete from question_banks where id in ${admin(bankIds)}`
   await admin.end()
 })
 
@@ -40,6 +45,8 @@ const author = () => ({ tenantId, actorId: authorId })
 const learner = () => ({ tenantId, actorId: learnerId })
 
 const textBlock = (id: string, html = '<p>Текст уроку</p>') => ({ id, type: 'text' as const, html })
+const stem = (text: string) => [{ id: 'b1', type: 'text' as const, html: `<p>${text}</p>` }]
+const opts = (...ids: string[]) => ids.map(id => ({ id, text: `Варіант ${id}` }))
 
 describe('санитизация HTML', () => {
   it('вырезает script и обработчики, оставляет allowlist', () => {
@@ -226,5 +233,41 @@ describe('курс: создание → публикация → прохожд
       select count(*)::int as count from course_versions where course_id = ${courseId} and status = 'published'
     `
     expect(count).toBe(1)
+  })
+})
+
+describe('«Мої завдання»: тип завдання для картки MyTasks (docs/31 рядок MyTasks)', () => {
+  it('курс-обгортка з єдиним обов\'язковим уроком-тестом позначається kind=test, звичайний курс — kind=course', async () => {
+    const quiz = await createQuiz(author(), { title: `Тест-обгортка ${suffix}`, kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
+    quizIds.push(quiz.id)
+    const bank = await createBank(author(), { name: `Банк-обгортка ${suffix}` })
+    bankIds.push(bank.id)
+    const question = await createQuestion(author(), {
+      bankId: bank.id, kind: 'single', stem: stem('Питання-заглушка?'), options: opts('a', 'b'),
+      answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
+    })
+    await setQuizQuestions(author(), quiz.id, [{ questionId: question.id, sort: 0 }])
+
+    const testCourse = await createCourse(author(), { title: `Тест «Касова дисципліна» ${suffix}`, language: 'uk', strictOrder: true, isCatalogVisible: true, tags: [] })
+    created.push(testCourse.id)
+    const testMod = await addModule(author(), testCourse.id, 'Розділ 1')
+    const testLesson = await addLesson(author(), { moduleId: testMod!.id, title: 'Тест', itemType: 'quiz', quizId: quiz.id, isRequired: true, videoThresholdPct: 90, passScorePct: 60 })
+    if (!testLesson.ok) throw new Error(testLesson.code)
+    expect((await publishCourse(author(), testCourse.id, 'Публікація')).ok).toBe(true)
+
+    const plainCourse = await createCourse(author(), { title: `Звичайний курс ${suffix}`, language: 'uk', strictOrder: true, isCatalogVisible: true, tags: [] })
+    created.push(plainCourse.id)
+    const plainMod = await addModule(author(), plainCourse.id, 'Розділ 1')
+    await addLesson(author(), { moduleId: plainMod!.id, title: 'Урок', itemType: 'resource', resource: { body: [textBlock('p1')] }, isRequired: true, videoThresholdPct: 90 })
+    expect((await publishCourse(author(), plainCourse.id, 'Публікація')).ok).toBe(true)
+
+    const testEnroll = await selfEnroll(learner(), testCourse.id)
+    expect(testEnroll.ok).toBe(true)
+    const plainEnroll = await selfEnroll(learner(), plainCourse.id)
+    expect(plainEnroll.ok).toBe(true)
+
+    const mine = await myLearning(learner(), 'new')
+    if (testEnroll.ok) expect(mine.find(e => e.id === testEnroll.enrollmentId)?.kind).toBe('test')
+    if (plainEnroll.ok) expect(mine.find(e => e.id === plainEnroll.enrollmentId)?.kind).toBe('course')
   })
 })

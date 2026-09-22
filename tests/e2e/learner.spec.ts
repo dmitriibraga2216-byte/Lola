@@ -40,7 +40,8 @@ test('2. Прохождение урока с телефона: закрыть �
 
   await loginViaUi(page, EMPLOYEE_PHONE)
   await page.goto('/learn/catalog')
-  await page.getByRole('button', { name: /Записатися/ }).first().click()
+  await page.getByRole('button', { name: /Детальніше/ }).first().click()
+  await page.getByRole('dialog').getByRole('button', { name: /Записатися/ }).click()
   await expect(page).toHaveURL(/\/learn\/[0-9a-f-]+$/)
   await expect(page.getByText(/Пройдено 0 з 3/)).toBeVisible()
 
@@ -81,7 +82,8 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
 
   await loginViaUi(page, EMPLOYEE_PHONE)
   await page.goto('/learn/catalog')
-  await page.getByText(`${PREFIX}Курс з тестом`).locator('..').getByRole('button', { name: /Записатися/ }).click()
+  await page.locator('.card', { hasText: `${PREFIX}Курс з тестом` }).getByRole('button', { name: /Детальніше/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /Записатися/ }).click()
   await page.getByRole('link', { name: /Почати/ }).click()
   await expect(page.getByRole('heading', { name: `${PREFIX}тест` })).toBeVisible()
   await page.getByRole('button', { name: /^Почати$/ }).click()
@@ -132,7 +134,8 @@ test('4. Каталог: записанный курс показан один �
   await loginViaUi(page, EMPLOYEE_PHONE)
   await page.goto('/learn/catalog')
   const card = page.locator('.card', { hasText: `${PREFIX}Каталог` })
-  await card.getByRole('button', { name: /Записатися/ }).click()
+  await card.getByRole('button', { name: /Детальніше/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /Записатися/ }).click()
   await page.goto('/learn/catalog')
   await expect(card).toHaveCount(1)
   await expect(card.getByRole('link', { name: /Вже призначено/ })).toBeVisible()

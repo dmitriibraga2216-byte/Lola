@@ -153,66 +153,86 @@ const source = ref<Source>('csv')
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <template v-if="stats">
-      <section class="card">
-        <h2>{{ t('import.step2') }}</h2>
-        <p v-if="presetUsed" class="sub">{{ t('import.presetUsed') }}</p>
-        <p v-if="stats.unmapped?.length" class="error">{{ t('import.unmapped', { cols: stats.unmapped.join(', ') }) }}</p>
-        <div class="mapping">
-          <label v-for="h in headers" :key="h">
-            <span class="file-col">{{ h }}</span>
-            <select v-model="mapping[h]" :aria-label="`${t('import.fileColumn')} ${h}`">
-              <option value="">{{ t('import.skipColumn') }}</option>
-              <option v-for="c in COLUMNS" :key="c" :value="c">{{ c }}</option>
-            </select>
-          </label>
+    <div class="import-layout">
+      <div class="import-main">
+        <section class="card">
+          <h2>{{ t('import.step2') }}</h2>
+          <p v-if="presetUsed" class="sub">{{ t('import.presetUsed') }}</p>
+          <p v-if="stats.unmapped?.length" class="error">{{ t('import.unmapped', { cols: stats.unmapped.join(', ') }) }}</p>
+          <div class="mapping">
+            <label v-for="h in headers" :key="h">
+              <span class="file-col">{{ h }}</span>
+              <select v-model="mapping[h]" :aria-label="`${t('import.fileColumn')} ${h}`">
+                <option value="">{{ t('import.skipColumn') }}</option>
+                <option v-for="c in COLUMNS" :key="c" :value="c">{{ c }}</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>{{ t('import.step4') }}</h2>
+          <label class="check"><input v-model="options.createRefs" type="checkbox"> {{ t('import.createRefs') }}</label>
+          <label class="check"><input v-model="options.archiveMissing" type="checkbox"> {{ t('import.archiveMissing') }}</label>
+          <label class="check"><input v-model="options.sendInvites" type="checkbox"> {{ t('import.sendInvites') }}</label>
+          <p class="keep">
+            <template v-if="keepFields.length">{{ t('import.keepFields') }}: <b>{{ keepFields.map(f => t(`settings.users.fields.${f}`)).join(', ') }}</b></template>
+            <template v-else>{{ t('import.keepFieldsNone') }}</template>
+            <NuxtLink to="/admin/settings/policies" class="link">{{ t('import.keepFieldsSettings') }}</NuxtLink>
+          </p>
+          <button v-if="!applied" class="primary" :disabled="busy" @click="remap">{{ t('import.remap') }}</button>
+        </section>
+
+        <div class="controls">
+          <label class="check"><input v-model="showOnlyErrors" type="checkbox"> {{ t('import.onlyErrors') }}</label>
+          <span v-if="progress" class="sub" role="status">{{ t('import.progress', { done: progress.done, total: progress.total }) }}</span>
+          <a v-if="applied" class="report" :href="`/api/v1/people/import/${jobId}/report`" download>{{ t('import.downloadReport') }}</a>
         </div>
-      </section>
 
-      <section class="card">
-        <h2>{{ t('import.step4') }}</h2>
-        <label class="check"><input v-model="options.createRefs" type="checkbox"> {{ t('import.createRefs') }}</label>
-        <label class="check"><input v-model="options.archiveMissing" type="checkbox"> {{ t('import.archiveMissing') }}</label>
-        <label class="check"><input v-model="options.sendInvites" type="checkbox"> {{ t('import.sendInvites') }}</label>
-        <p class="keep">
-          <template v-if="keepFields.length">{{ t('import.keepFields') }}: <b>{{ keepFields.map(f => t(`settings.users.fields.${f}`)).join(', ') }}</b></template>
-          <template v-else>{{ t('import.keepFieldsNone') }}</template>
-          <NuxtLink to="/admin/settings/policies" class="link">{{ t('import.keepFieldsSettings') }}</NuxtLink>
-        </p>
-        <button v-if="!applied" class="primary" :disabled="busy" @click="remap">{{ t('import.remap') }}</button>
-      </section>
+        <p v-if="applied" class="notice" role="status">{{ t('import.appliedResult', { created: applied.created ?? 0, updated: applied.updated ?? 0 }) }}<template v-if="applied.archived"> · {{ t('import.status.archived') }}: {{ applied.archived }}</template></p>
 
-      <div class="stats">
-        <div class="stat"><b>{{ stats.total }}</b><span>{{ t('import.total') }}</span></div>
-        <div class="stat teal"><b>{{ stats.create }}</b><span>{{ t('import.toCreate') }}</span></div>
-        <div class="stat sun"><b>{{ stats.update }}</b><span>{{ t('import.toUpdate') }}</span></div>
-        <div class="stat coral"><b>{{ stats.skip }}</b><span>{{ t('import.toSkip') }}</span></div>
-        <div v-if="stats.warnings" class="stat"><b>{{ stats.warnings }}</b><span>{{ t('import.warnings') }}</span></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>#</th><th>{{ t('people.col.name') }}</th><th>{{ t('person.phone') }}</th><th>{{ t('import.action') }}</th><th>{{ t('import.errors') }}</th></tr></thead>
+            <tbody>
+              <tr v-for="row in visibleRows" :key="row.line" :class="{ bad: row.errors.length > 0, create: row.action === 'create', update: row.action === 'update' }">
+                <td class="sub">{{ row.line }}</td>
+                <td>{{ row.fullName }}</td>
+                <td>{{ row.phone }}</td>
+                <td>{{ t(`import.actions.${row.action}`) }}</td>
+                <td class="errors-cell">{{ row.errors.join('; ') }}<span v-if="row.warnings?.length" class="warn"> {{ row.warnings.join('; ') }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="rows.length > 200" class="sub">{{ t('import.truncated', { shown: 200, total: rows.length }) }}</p>
       </div>
 
-      <div class="controls">
-        <label class="check"><input v-model="showOnlyErrors" type="checkbox"> {{ t('import.onlyErrors') }}</label>
-        <button v-if="!applied" class="primary" :disabled="busy || stats.create + stats.update === 0" @click="apply">{{ t('import.apply', { n: stats.create + stats.update }) }}</button>
-        <span v-if="progress" class="sub" role="status">{{ t('import.progress', { done: progress.done, total: progress.total }) }}</span>
-        <a v-if="applied" class="report" :href="`/api/v1/people/import/${jobId}/report`" download>{{ t('import.downloadReport') }}</a>
-      </div>
-
-      <p v-if="applied" class="notice" role="status">{{ t('import.appliedResult', { created: applied.created ?? 0, updated: applied.updated ?? 0 }) }}<template v-if="applied.archived"> · {{ t('import.status.archived') }}: {{ applied.archived }}</template></p>
-
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>#</th><th>{{ t('people.col.name') }}</th><th>{{ t('person.phone') }}</th><th>{{ t('import.action') }}</th><th>{{ t('import.errors') }}</th></tr></thead>
-          <tbody>
-            <tr v-for="row in visibleRows" :key="row.line" :class="{ bad: row.errors.length > 0, create: row.action === 'create', update: row.action === 'update' }">
-              <td class="sub">{{ row.line }}</td>
-              <td>{{ row.fullName }}</td>
-              <td>{{ row.phone }}</td>
-              <td>{{ t(`import.actions.${row.action}`) }}</td>
-              <td class="errors-cell">{{ row.errors.join('; ') }}<span v-if="row.warnings?.length" class="warn"> {{ row.warnings.join('; ') }}</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-if="rows.length > 200" class="sub">{{ t('import.truncated', { shown: 200, total: rows.length }) }}</p>
+      <!-- Мокап Import: права колонка — «Що буде зроблено» (підсумок + «Застосувати») і «Помилки в рядках» -->
+      <aside class="import-side">
+        <section class="card side-card">
+          <h2>{{ t('import.willDo') }}</h2>
+          <p class="sub">{{ t('import.willDoHint') }}</p>
+          <dl class="side-stats">
+            <div><dt>{{ t('import.total') }}</dt><dd>{{ stats.total }}</dd></div>
+            <div><dt>{{ t('import.toCreate') }}</dt><dd class="teal">{{ stats.create }}</dd></div>
+            <div><dt>{{ t('import.toUpdate') }}</dt><dd class="sun">{{ stats.update }}</dd></div>
+            <div><dt>{{ t('import.toSkip') }}</dt><dd>{{ stats.skip }}</dd></div>
+            <div><dt>{{ t('import.errorsCount') }}</dt><dd class="coral">{{ stats.errors }}</dd></div>
+            <div v-if="stats.warnings"><dt>{{ t('import.warnings') }}</dt><dd>{{ stats.warnings }}</dd></div>
+          </dl>
+          <button v-if="!applied" class="primary wide" :disabled="busy || stats.create + stats.update === 0" @click="apply">{{ t('import.apply', { n: stats.create + stats.update }) }}</button>
+        </section>
+        <section v-if="stats.errors > 0" class="card side-card errors-card">
+          <h2>{{ t('import.rowErrors') }}</h2>
+          <div class="side-errors">
+            <p v-for="row in rows.filter(r => r.errors.length > 0).slice(0, 5)" :key="row.line">
+              <strong>{{ t('import.rowN', { n: row.line }) }}</strong> · {{ row.errors.join('; ') }}
+            </p>
+          </div>
+        </section>
+      </aside>
+    </div>
     </template>
     </template>
 
@@ -377,5 +397,27 @@ select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: v
 
 .error {
   color: var(--color-coral-ink);
+}
+
+.import-layout { display: grid; grid-template-columns: 1fr 330px; gap: var(--space-4); align-items: start; }
+.import-main { min-width: 0; }
+.import-side { display: grid; gap: var(--space-3); position: sticky; top: var(--space-4); }
+.side-card h2 { margin: 0; font-size: var(--font-size-body); font-weight: 900; }
+.side-card .sub { margin: 2px 0 0; }
+.side-stats { display: grid; gap: var(--space-2); margin: var(--space-3) 0 0; }
+.side-stats div { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--font-size-body-s); }
+.side-stats dt { color: var(--color-ink-muted); }
+.side-stats dd { margin: 0; font-weight: 800; font-family: ui-monospace, monospace; }
+.side-stats dd.teal { color: var(--color-teal-ink); }
+.side-stats dd.sun { color: var(--color-sun-ink); }
+.side-stats dd.coral { color: var(--color-coral-ink); }
+.primary.wide { width: 100%; margin-top: var(--space-3); }
+.errors-card { border: 2px solid var(--color-coral); }
+.side-errors { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+.side-errors p { margin: 0; font-size: var(--font-size-body-s); line-height: 1.4; color: var(--color-coral-ink); }
+
+@media (max-width: 900px) {
+  .import-layout { grid-template-columns: 1fr; }
+  .import-side { position: static; }
 }
 </style>

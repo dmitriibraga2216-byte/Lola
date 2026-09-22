@@ -28,6 +28,7 @@ interface Card {
   estimatedMinutes: number | null
   requiredTotal: number
   requiredDone: number
+  kind: 'test' | 'course'
 }
 
 const tab = ref<Tab>((['active', 'overdue', 'done'] as const).includes(route.query.tab as Tab) ? route.query.tab as Tab : 'active')
@@ -93,10 +94,9 @@ function action(card: Card): string {
   if (card.status === 'done') return t('learner.action.review')
   if (card.status === 'failed') return t('learner.action.retry')
   if (card.status === 'in_progress') return t('learner.action.continue')
-  // Мокап MyTasks: не розпочатий курс/ознайомлення відкривають («Відкрити»), окремого типу
-  // «тест» (кнопка «Пройти») цей список поки не розрізняє — /learning/my віддає лише курси
-  // (docs/31 рядок MyTasks); тип предмета в відповіді сервера — окремий борг, не вигадуємо.
-  return t('learner.action.open')
+  // Мокап MyTasks: не розпочатий курс/ознайомлення/практикум відкривають («Відкрити»),
+  // не розпочатий тест (курс-обгортка з єдиним уроком-тестом, `kind` рахує сервер) — «Пройти».
+  return card.kind === 'test' ? t('learner.action.take') : t('learner.action.open')
 }
 function stateLine(card: Card): string {
   if (card.status === 'done') return t('learner.state.progress', { pct: 100 })

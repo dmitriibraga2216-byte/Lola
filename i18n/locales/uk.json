@@ -359,6 +359,7 @@
     "assigned": "Призначено",
     "doneCount": "Виконано",
     "overdueCount": "Прострочено",
+    "rating": "Рейтинг",
     "daysInCompany": "в компанії {n} дн.",
     "password": "Пароль",
     "passwordNone": "не задано",
@@ -374,6 +375,11 @@
     "mustChangeAfterLogin": "Змінити пароль після першого входу"
   },
   "import": {
+    "willDo": "Що буде зроблено",
+    "willDoHint": "Файл застосовується цілком або ніяк",
+    "errorsCount": "Помилок",
+    "rowErrors": "Помилки в рядках",
+    "rowN": "Рядок {n}",
     "hint": "Файл xlsx або csv за шаблоном.",
     "template": "Завантажити шаблон",
     "validate": "Перевірити",
@@ -647,6 +653,7 @@
     "action": {
       "start": "Почати",
       "open": "Відкрити",
+      "take": "Пройти",
       "continue": "Продовжити",
       "review": "Переглянути",
       "retry": "Пройти ще раз"
@@ -673,6 +680,7 @@
     "catalogAllCategories": "Усі",
     "catalogFreeMode": "Вільний доступ",
     "catalogRequestMode": "За заявкою",
+    "catalogDetails": "Детальніше",
     "catalogRequestButton": "Подати заявку",
     "catalogRequested": "Заявку подано",
     "catalogRequestSent": "Заявку надіслано",
@@ -719,7 +727,10 @@
     "readToEnd": "Прочитай сторінку до кінця",
     "scrollDoc": "Перегорни документ до кінця або завантаж його",
     "ackLink": "Підтверди: «Я ознайомився»",
-    "videoOf": "Відео"
+    "videoOf": "Відео",
+    "videoPlay": "Відтворити",
+    "videoPause": "Пауза",
+    "videoSeek": "Перемотати відео"
   },
   "course": {
     "newTitle": "Назва нового курсу",

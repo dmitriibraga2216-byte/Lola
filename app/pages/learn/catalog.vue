@@ -79,10 +79,15 @@ watch(categoryId, load)
 watch(tab, load)
 onMounted(load)
 
+// Мокап Catalog: картка веде на попередній перегляд («Детальніше»), а не одразу на запис —
+// сама дія (запис / заявка / відкриття ресурсу) — кнопка всередині панелі перегляду.
+const previewCard = ref<TaskCard | null>(null)
+
 const requestModal = ref<TaskCard | null>(null)
 const requestComment = ref('')
 
 async function enrollTask(card: TaskCard) {
+  previewCard.value = null
   // Ресурс бази знань відкривається напряму — самозапису/заявки для ресурсу не заведено (docs/33 D-060)
   if (card.type === 'resource') { await navigateTo(`/learn/knowledge/${card.id}`); return }
   if (card.assignMode === 'catalog_request') { requestModal.value = card; requestComment.value = ''; return }
@@ -172,9 +177,7 @@ async function enrollTraj(card: TrajCard) {
               <span class="badge muted">{{ card.assignMode === 'catalog_request' ? t('learner.catalogRequestMode') : t('learner.catalogFreeMode') }}</span>
               <NuxtLink v-if="card.enrollmentId" :to="`/learn/${card.enrollmentId}`" class="btn ghost small">{{ t('learner.alreadyEnrolled') }}</NuxtLink>
               <span v-else-if="card.requested" class="badge sun">{{ t('learner.catalogRequested') }}</span>
-              <button v-else class="btn primary small" :disabled="busyId === card.id" @click="enrollTask(card)">
-                {{ card.type === 'resource' ? t('learner.catalogOpenResource') : (card.assignMode === 'catalog_request' ? t('learner.catalogRequestButton') : t('learner.enroll')) }}
-              </button>
+              <button v-else type="button" class="btn ghost small" @click="previewCard = card">{{ t('learner.catalogDetails') }}</button>
             </div>
           </div>
         </div>
@@ -198,6 +201,23 @@ async function enrollTraj(card: TrajCard) {
         </div>
       </div>
     </template>
+
+    <div v-if="previewCard" class="modal-backdrop" role="dialog" aria-modal="true" :aria-label="previewCard.title" @click.self="previewCard = null">
+      <div class="modal">
+        <h2>{{ previewCard.title }}</h2>
+        <p v-if="previewCard.summary" class="sub">{{ previewCard.summary }}</p>
+        <div class="meta preview-meta">
+          <span v-if="previewCard.estimatedMinutes">{{ t('learner.minutes', { n: previewCard.estimatedMinutes }) }}</span>
+          <span class="badge muted">{{ previewCard.assignMode === 'catalog_request' ? t('learner.catalogRequestMode') : t('learner.catalogFreeMode') }}</span>
+        </div>
+        <div class="actions">
+          <button class="btn primary" :disabled="busyId === previewCard.id" @click="enrollTask(previewCard)">
+            {{ previewCard.type === 'resource' ? t('learner.catalogOpenResource') : (previewCard.assignMode === 'catalog_request' ? t('learner.catalogRequestButton') : t('learner.enroll')) }}
+          </button>
+          <button class="btn ghost" @click="previewCard = null">{{ t('common.cancel') }}</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="requestModal" class="modal-backdrop" role="dialog" aria-modal="true" :aria-label="t('learner.catalogRequestTitle')">
       <div class="modal">
@@ -254,6 +274,7 @@ async function enrollTraj(card: TrajCard) {
 .modal-backdrop { position: fixed; inset: 0; background: rgba(12, 15, 20, 0.5); display: flex; align-items: center; justify-content: center; padding: var(--space-4); z-index: 50; }
 .modal { background: var(--color-bg); border-radius: var(--radius-l); padding: var(--space-5); max-width: 420px; width: 100%; display: grid; gap: var(--space-2); }
 .modal .sub { color: var(--color-ink-muted); margin: 0 0 var(--space-2); }
+.preview-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .label { font-weight: 700; font-size: var(--font-size-body-s); }
 .field { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); background: var(--color-bg-soft); color: var(--color-ink); }
 .actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }

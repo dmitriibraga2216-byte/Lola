@@ -15,6 +15,7 @@ import { hashToken } from './session'
 import { applyPositionRoles } from './positionRoleMap'
 import { levelLabel } from './development'
 import type { CompetencyLevel } from './development'
+import { studyHistory } from './reportsExtra'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
 
@@ -689,6 +690,11 @@ export async function inactiveReport(ctx: Ctx, days = 30, scope: string[] | null
 // ── Карточка: вкладки «Навчання», «Атестації», «Активність» (docs/16 §5.2) ──
 
 export async function personLearning(ctx: Ctx, userId: string) {
+  // «Рейтинг» у зведенні «Навчання» (докс/31 рядок PersonCard) — той самий розрахунок, що й
+  // «Поточний рейтинг» у «Мій розвиток» (`/me/study-history`, docs/33 D-069): кількість
+  // завершених курсів/програм/тестів. Окрема транзакція (studyHistory сам відкриває withTenant),
+  // не вкладаємо в транзакцію нижче.
+  const { currentRating } = await studyHistory(ctx, userId)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [enrollmentsRows, attemptsRows, certs, assessments] = await Promise.all([
       tx.execute(sql`
@@ -713,7 +719,7 @@ export async function personLearning(ctx: Ctx, userId: string) {
     const { developmentSettings } = await import('./developmentExtra')
     const { competencyDisplayAs: displayAs } = await developmentSettings(tx, ctx.tenantId)
     const assessmentsOut = assessments.map(({ competency_levels, ...a }) => ({ ...a, levelLabel: levelLabel(competency_levels ?? [], a.level) }))
-    return { enrollments: enrollmentsRows, attempts: attemptsRows, certificates: certs, assessments: assessmentsOut, displayAs }
+    return { enrollments: enrollmentsRows, attempts: attemptsRows, certificates: certs, assessments: assessmentsOut, displayAs, currentRating }
   })
 }
 

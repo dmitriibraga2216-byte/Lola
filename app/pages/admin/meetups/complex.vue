@@ -1,13 +1,11 @@
 <script setup lang="ts">
 /**
  * Комплексні тести за мокапом ContentComplexTests (docs/31): шапка «Комплексні тести» з
- * «Додати», таблиця НАЗВА · СКЛАД · ТЕМИ · АВТОР · ДАТА ЗМІНИ · ОПУБЛІКОВАНО. «Імпортувати»
+ * «Додати», таблиця НАЗВА · СКЛАД · АВТОР · ДАТА ЗМІНИ · ОПУБЛІКОВАНО. «Імпортувати»
  * не додаємо — те саме рішення заказчика Q-03 (docs/34): формат файлу не описаний.
  * «Автор» (screens-7): `listComplexTests` тепер приєднує users по `created_by` і віддає `authorName`.
- * Залишок:
- *  - «Теми»: у складі комплексного теста немає поняття «тема» — лише частини-тести
- *    (`parts`, docs/12 §14.2); чи це мітки складових тестів, чи окреме поле — не визначено
- *    в ТЗ, тому не вигадуємо і лишаємо «—» до рішення замовника.
+ * Колонка «Теми» знята рішенням замовника 23.09.2026 (docs/33 D-075, docs/28): у складі
+ * комплексного теста немає поняття «тема» (лише частини-тести `parts`, docs/12 §14.2) і не буде.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'complextest.manage' })
 const { t } = useI18n()
@@ -48,7 +46,7 @@ async function save() {
       <table class="table">
         <thead>
           <tr>
-            <th>{{ t('cx.col.title') }}</th><th>{{ t('cx.col.composition') }}</th><th>{{ t('cx.col.topics') }}</th>
+            <th>{{ t('cx.col.title') }}</th><th>{{ t('cx.col.composition') }}</th>
             <th>{{ t('cx.col.author') }}</th><th>{{ t('cx.col.updated') }}</th><th>{{ t('cx.col.published') }}</th>
           </tr>
         </thead>
@@ -59,12 +57,11 @@ async function save() {
               <span class="sub">{{ c.sequential ? t('cx.sequential') : '' }}</span>
             </td>
             <td>{{ t('cx.col.compositionN', { n: c.parts.length }) }}</td>
-            <td class="muted">—</td>
             <td class="muted">{{ c.authorName ?? '—' }}</td>
             <td class="muted">{{ new Date(c.updatedAt).toLocaleDateString('uk') }}</td>
             <td><span :class="['badge upper', c.isActive ? 'published' : 'draft']">{{ c.isActive ? t('course.status.published') : t('course.status.draft') }}</span></td>
           </tr>
-          <tr v-if="items.length === 0"><td colspan="6" class="empty">{{ t('cx.empty') }}</td></tr>
+          <tr v-if="items.length === 0"><td colspan="5" class="empty">{{ t('cx.empty') }}</td></tr>
         </tbody>
       </table>
     </div>

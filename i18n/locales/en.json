@@ -1745,7 +1745,6 @@
       "author": "Author",
       "kinds": "Format",
       "criteria": "Criteria",
-      "tags": "Tags",
       "updated": "Updated",
       "published": "Published",
       "pending": "Pending",
@@ -2712,7 +2711,6 @@
       "title": "Title",
       "composition": "Composition",
       "compositionN": "{n} tests",
-      "topics": "Topics",
       "author": "Author",
       "updated": "Updated",
       "published": "Published"

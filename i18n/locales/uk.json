@@ -1745,7 +1745,6 @@
       "author": "Автор",
       "kinds": "Формат",
       "criteria": "Критеріїв",
-      "tags": "Мітки",
       "updated": "Дата зміни",
       "published": "Опубліковано",
       "pending": "На перевірці",
@@ -2712,7 +2711,6 @@
       "title": "Назва",
       "composition": "Склад",
       "compositionN": "{n} тестів",
-      "topics": "Теми",
       "author": "Автор",
       "updated": "Дата зміни",
       "published": "Опубліковано"

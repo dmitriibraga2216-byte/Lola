@@ -61,7 +61,6 @@ const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendan
         </div>
         <div class="actions">
           <button v-if="!m.mine || ['cancelled', 'missed'].includes(m.mine.status)" class="primary" :disabled="!m.enrollOpen" data-testid="mt-register" @click="register">{{ m.enrollOpen ? (m.seatsLeft === 0 ? t('mt.joinQueue') : t('mt.register')) : t('mt.closed') }}</button>
-          <button v-else-if="['registered', 'waitlist'].includes(m.mine.status)" class="chip" :disabled="!m.canCancel" data-testid="mt-unregister" @click="unregister">{{ m.canCancel ? t('mt.unregister') : t('mt.cannotCancel') }}</button>
           <a v-if="m.mine && ['registered', 'waitlist'].includes(m.mine.status)" :href="`/api/v1/meetups/${m.id}/ics`" class="chip">📅 {{ t('mt.addToCalendar') }}</a>
           <a v-if="m.webinar?.joinUrl" :href="m.webinar.joinUrl" target="_blank" class="primary" rel="noopener">{{ t('mt.join') }}</a>
           <a v-if="m.webinar?.recordUrl && m.status === 'finished'" :href="m.webinar.recordUrl" target="_blank" class="chip" rel="noopener">▶ {{ t('mt.record') }}</a>
@@ -101,6 +100,13 @@ const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendan
         <h2>{{ t('mt.participants') }} ({{ m.registered }}<template v-if="m.capacity"> / {{ m.capacity }}</template>)</h2>
         <ul class="list"><li v-for="p in m.participants.filter(x => x.status !== 'cancelled')" :key="p.id">{{ p.fullName }} <span :class="['badge', p.status]">{{ t(`mt.status.${p.status}`) }}<template v-if="p.waitlistPosition"> {{ p.waitlistPosition }}</template></span></li></ul>
       </section>
+
+      <!-- Мокап Meetup: «Скасувати запис» — липка кнопка на всю ширину, а не чіп серед інших дій -->
+      <div v-if="m.mine && ['registered', 'waitlist'].includes(m.mine.status)" class="sticky-bottom mt-sticky">
+        <button type="button" class="btn ghost" :disabled="!m.canCancel" data-testid="mt-unregister" @click="unregister">
+          {{ m.canCancel ? t('mt.unregister') : t('mt.cannotCancel') }}
+        </button>
+      </div>
     </template>
   </div>
 </template>
@@ -132,4 +138,6 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .link { color: var(--color-ink); font-weight: 700; }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 .notice { background: var(--color-teal); color: var(--color-teal-deep); padding: var(--space-3); border-radius: var(--radius-m); }
+/* Каркас 'learner' має власну нижню панель вкладок (72px) — липка кнопка «в'яжеться» над нею, а не під. */
+.mt-sticky { bottom: calc(72px + env(safe-area-inset-bottom)); margin-top: var(--space-4); border-radius: var(--radius-m); }
 </style>

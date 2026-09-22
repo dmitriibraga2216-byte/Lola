@@ -198,9 +198,38 @@ function onVideo(pct: number) {
   videoPct.value = Math.max(videoPct.value, pct)
 }
 
+// Плеєр по мокапу Lesson: власні кнопки поверх нативного `<video>` (без `controls`, без бібліотек) —
+// плей/пауза, перемотка, час. Прогрес засчитує сервер по фактам тика (onVideo), кнопки лише керують плеєром.
+const videoEl = ref<HTMLVideoElement | null>(null)
+const playing = ref(false)
+const currentTime = ref(0)
+
 function onVideoTime(e: Event) {
   const v = e.target as HTMLVideoElement
+  currentTime.value = v.currentTime
   if (v.duration) onVideo(Math.floor(v.currentTime / v.duration * 100))
+}
+
+function togglePlay() {
+  const v = videoEl.value
+  if (!v) return
+  if (v.paused) v.play()
+  else v.pause()
+}
+
+function onSeek(e: Event) {
+  const v = videoEl.value
+  if (!v) return
+  v.currentTime = Number((e.target as HTMLInputElement).value)
+  currentTime.value = v.currentTime
+}
+
+function onVideoKey(e: KeyboardEvent) {
+  const v = videoEl.value
+  if (!v) return
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); togglePlay() }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); v.currentTime = Math.min(v.duration || 0, v.currentTime + 5) }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 5) }
 }
 
 // Мокап Lesson: плашка «Відео · 1:40» на плитці відео — тривалість беремо з метаданих файлу.
@@ -292,9 +321,32 @@ async function next() {
         <h1>{{ data.lesson.title }}</h1>
 
         <template v-if="data.lesson.kind === 'video'">
-          <div v-if="media?.status === 'ready' && media.urls.original" class="video-wrap">
-            <video controls playsinline preload="metadata" :poster="media.urls.poster" :src="media.urls.original" @timeupdate="onVideoTime" @loadedmetadata="onVideoMeta" />
+          <div
+            v-if="media?.status === 'ready' && media.urls.original"
+            class="video-wrap"
+            role="group"
+            tabindex="0"
+            :aria-label="data.lesson.title"
+            @keydown="onVideoKey"
+          >
+            <video
+              ref="videoEl" playsinline preload="metadata" :poster="media.urls.poster" :src="media.urls.original"
+              @timeupdate="onVideoTime" @loadedmetadata="onVideoMeta" @click="togglePlay"
+              @play="playing = true" @pause="playing = false" @ended="playing = false"
+            />
+            <button v-if="!playing" type="button" class="video-play" :aria-label="t('learner.videoPlay')" @click="togglePlay">▶</button>
             <span v-if="videoDuration != null" class="video-pill">{{ t('learner.videoOf') }} · {{ formatDuration(videoDuration) }}</span>
+            <div class="video-controls">
+              <button type="button" class="video-btn" :aria-label="playing ? t('learner.videoPause') : t('learner.videoPlay')" @click="togglePlay">
+                {{ playing ? '⏸' : '▶' }}
+              </button>
+              <input
+                type="range" class="video-seek" min="0" step="0.1"
+                :max="videoDuration || 0" :value="currentTime" :aria-label="t('learner.videoSeek')"
+                @input="onSeek"
+              >
+              <span class="video-time">{{ formatDuration(currentTime) }} / {{ formatDuration(videoDuration || 0) }}</span>
+            </div>
             <span class="sub">{{ t('learner.videoOf') }} · {{ videoPct }}%</span>
           </div>
           <p v-else class="note sun">{{ t('resource.videoNotReady') }}</p>
@@ -353,13 +405,27 @@ async function next() {
 .section-label { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; color: var(--color-ink-muted); margin-bottom: var(--space-1); }
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 .video-wrap { position: relative; display: grid; gap: var(--space-1); margin-bottom: var(--space-4); }
-.video-wrap video { width: 100%; border-radius: var(--radius-m); background: var(--color-teal); }
+.video-wrap video { width: 100%; border-radius: var(--radius-m); background: var(--color-teal); display: block; cursor: pointer; }
 .video-pill {
   position: absolute; left: var(--space-4); top: var(--space-4);
   background: var(--color-bg-soft); border-radius: var(--radius-pill);
   padding: var(--space-1) var(--space-3); font-size: var(--font-size-body-s); font-weight: 800;
   pointer-events: none;
 }
+.video-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 56px; height: 56px; border-radius: var(--radius-pill); border: none;
+  background: var(--color-bg-soft); color: var(--color-ink); font-size: 20px;
+  display: grid; place-items: center; cursor: pointer;
+}
+.video-controls {
+  position: absolute; left: var(--space-3); right: var(--space-3); bottom: var(--space-3);
+  display: flex; align-items: center; gap: var(--space-2);
+  background: rgba(12, 15, 20, 0.55); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3);
+}
+.video-btn { flex: none; border: none; background: transparent; color: var(--color-bg); font-size: 16px; cursor: pointer; padding: var(--space-1); }
+.video-seek { flex: 1; accent-color: var(--color-teal); }
+.video-time { flex: none; color: var(--color-bg); font-size: 12px; font-weight: 700; white-space: nowrap; }
 .file-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
 .doc { width: 100%; height: 70vh; border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-m); background: var(--color-bg-soft); }
 .skeleton { height: 240px; background: var(--color-bg-soft); border-radius: var(--radius-m); opacity: 0.6; }

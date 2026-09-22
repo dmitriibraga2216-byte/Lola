@@ -42,7 +42,7 @@ function editRole(r: Person['roles'][number]) {
   Object.assign(roleForm, { roleCode: r.code, scopeType: r.scopeType, scopeId: r.scopeId ?? '', validUntil: r.validUntil ? r.validUntil.slice(0, 10) : '', reason: r.reason ?? '' })
 }
 
-const learning = ref<{ enrollments: Record<string, unknown>[], attempts: Record<string, unknown>[], certificates: Record<string, unknown>[], assessments: Record<string, unknown>[], displayAs: 'label' | 'value' } | null>(null)
+const learning = ref<{ enrollments: Record<string, unknown>[], attempts: Record<string, unknown>[], certificates: Record<string, unknown>[], assessments: Record<string, unknown>[], displayAs: 'label' | 'value', currentRating: number } | null>(null)
 const activity = ref<Record<string, unknown>[]>([])
 const notes = ref<{ id: string, body: string, created_at: string, author: string | null }[]>([])
 const chiefs = ref<Record<string, unknown>[]>([])
@@ -223,6 +223,7 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
             <div><dt>{{ t('person.doneCount') }}</dt><dd class="teal">{{ learningSummary.done }}</dd></div>
             <div><dt>{{ t('person.overdueCount') }}</dt><dd :class="{ coral: learningSummary.overdue > 0 }">{{ learningSummary.overdue }}</dd></div>
             <div><dt>{{ t('person.certificates') }}</dt><dd>{{ learning?.certificates.length ?? 0 }}</dd></div>
+            <div><dt>{{ t('person.rating') }}</dt><dd>{{ learning?.currentRating ?? 0 }}</dd></div>
           </dl>
         </div>
 

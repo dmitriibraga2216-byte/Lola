@@ -17,6 +17,9 @@ const flagged = ref<string[]>([])
 const saving = ref(false)
 const savedAt = ref('')
 const summary = ref(false)
+// Мокап Assessment360: один критерій-група на екран, прогресбар зверху, «Далі» веде до наступної групи
+// (на останній — до підсумку). Готовність рахує сервер відповідями, крок — лише навігація клієнта.
+const step = ref(0)
 let timer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(async () => {
@@ -29,7 +32,22 @@ onMounted(async () => {
 })
 const all = computed(() => data.value?.structure.groups.flatMap(g => g.criteria) ?? [])
 const done = computed(() => all.value.filter(c => answers[c.id]?.value != null || answers[c.id]?.isNa).length)
+const progressPct = computed(() => all.value.length ? Math.round(done.value / all.value.length * 100) : 0)
 const readOnly = computed(() => data.value?.task.status === 'submitted' || data.value?.task.status === 'expired')
+const groups = computed(() => data.value?.structure.groups ?? [])
+const currentGroup = computed(() => groups.value[step.value] ?? null)
+const isLastStep = computed(() => step.value >= groups.value.length - 1)
+function groupDone(g: Group): boolean {
+  return g.criteria.every(c => answers[c.id]?.value != null || answers[c.id]?.isNa)
+}
+function nextStep() {
+  if (!currentGroup.value || !groupDone(currentGroup.value)) return
+  if (isLastStep.value) summary.value = true
+  else step.value++
+}
+function prevStep() {
+  if (step.value > 0) step.value--
+}
 
 function set(id: string, patch: Partial<{ value: number | null, comment: string, isNa: boolean }>) {
   if (readOnly.value) return
@@ -95,12 +113,16 @@ function setGroupComment(id: string, v: string) { groupComments[id] = v; if (tim
       <span>{{ t('assess.progress', { n: done, total: all.length }) }}</span>
       <span class="sub">{{ saving ? t('assess.saving') : savedAt ? t('assess.savedAt', { time: savedAt }) : '' }}</span>
     </div>
+    <div v-if="!summary && !readOnly" class="progress-bar" role="progressbar" :aria-valuenow="progressPct" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-fill" :style="{ width: `${progressPct}%` }" />
+    </div>
 
-    <template v-if="!summary">
-      <section v-for="g in data.structure.groups" :key="g.id" class="group">
-        <h2 class="gname">{{ g.name }}</h2>
-        <p v-if="g.description" class="sub">{{ g.description }}</p>
-        <div v-for="c in g.criteria" :key="c.id" :class="['crit', { flag: flagged.includes(c.id) }]" :data-testid="`crit-${c.id}`">
+    <!-- Крок-по-кроку: одна група критеріїв на екран (мокап Assessment360), «Далі» — до наступної -->
+    <template v-if="!summary && !readOnly && currentGroup">
+      <section :key="currentGroup.id" class="group">
+        <h2 class="gname">{{ currentGroup.name }}</h2>
+        <p v-if="currentGroup.description" class="sub">{{ currentGroup.description }}</p>
+        <div v-for="c in currentGroup.criteria" :key="c.id" :class="['crit', { flag: flagged.includes(c.id) }]" :data-testid="`crit-${c.id}`">
           <div class="crit-text">{{ c.text }}</div>
           <div v-if="c.description" class="hint">{{ c.description }}</div>
           <div class="scale" role="radiogroup" :aria-label="c.text">
@@ -109,12 +131,33 @@ function setGroupComment(id: string, v: string) { groupComments[id] = v; if (tim
           </div>
           <textarea v-if="(!readOnly && showComment(c)) || answers[c.id]?.comment" :value="answers[c.id]?.comment" :class="{ req: needsComment(c) }" :readonly="readOnly" rows="1" :placeholder="needsComment(c) ? t('assess.commentBelowNorm') : t('assess.comment')" :aria-label="t('assess.comment')" @input="set(c.id, { comment: ($event.target as HTMLTextAreaElement).value })" />
         </div>
-        <textarea v-if="data.structure.form.allowCommentGroups && (!readOnly || groupComments[g.id])" :value="groupComments[g.id] ?? ''" :class="['gcomment', { req: data.structure.form.commentGroupsRequired && !(groupComments[g.id] ?? '').trim() }]" :readonly="readOnly" rows="2" :placeholder="data.structure.form.commentGroupsRequired ? t('assess.groupCommentRequired') : t('assess.groupComment')" :aria-label="t('assess.groupComment')" @input="setGroupComment(g.id, ($event.target as HTMLTextAreaElement).value)" />
+        <textarea v-if="data.structure.form.allowCommentGroups && (!readOnly || groupComments[currentGroup.id])" :value="groupComments[currentGroup.id] ?? ''" :class="['gcomment', { req: data.structure.form.commentGroupsRequired && !(groupComments[currentGroup.id] ?? '').trim() }]" :readonly="readOnly" rows="2" :placeholder="data.structure.form.commentGroupsRequired ? t('assess.groupCommentRequired') : t('assess.groupComment')" :aria-label="t('assess.groupComment')" @input="setGroupComment(currentGroup.id, ($event.target as HTMLTextAreaElement).value)" />
       </section>
-      <div v-if="!readOnly" class="actions">
-        <button v-if="data.task.raterKind === 'peer'" class="chip" @click="decline">{{ t('assess.decline') }}</button>
-        <button class="primary" :disabled="done < all.length" data-testid="to-summary" @click="summary = true">{{ t('assess.review') }}</button>
+      <div class="actions">
+        <button v-if="data.task.raterKind === 'peer' && step === 0" class="chip" @click="decline">{{ t('assess.decline') }}</button>
+        <button v-if="step > 0" type="button" class="chip" @click="prevStep">{{ t('common.back') }}</button>
+        <button class="primary" :disabled="!groupDone(currentGroup)" data-testid="to-summary" @click="nextStep">
+          {{ isLastStep ? t('assess.review') : t('common.next') }}
+        </button>
       </div>
+    </template>
+
+    <!-- Подана/протермінована оцінка — перегляд усіх груп одразу, без кроків -->
+    <template v-else-if="!summary && readOnly">
+      <section v-for="g in data.structure.groups" :key="g.id" class="group">
+        <h2 class="gname">{{ g.name }}</h2>
+        <p v-if="g.description" class="sub">{{ g.description }}</p>
+        <div v-for="c in g.criteria" :key="c.id" class="crit" :data-testid="`crit-${c.id}`">
+          <div class="crit-text">{{ c.text }}</div>
+          <div v-if="c.description" class="hint">{{ c.description }}</div>
+          <div class="scale" role="radiogroup" :aria-label="c.text">
+            <button v-for="o in data.structure.scale.options" :key="o.value" type="button" role="radio" :aria-checked="answers[c.id]?.value === o.value" :class="['opt', { on: answers[c.id]?.value === o.value }]" disabled :title="o.label">{{ o.value }}<small v-if="o.label !== String(o.value)">{{ o.label }}</small></button>
+            <button type="button" :class="['opt', 'na', { on: answers[c.id]?.isNa }]" disabled>{{ t('assess.na') }}</button>
+          </div>
+          <textarea v-if="answers[c.id]?.comment" :value="answers[c.id]?.comment" readonly rows="1" :aria-label="t('assess.comment')" />
+        </div>
+        <textarea v-if="groupComments[g.id]" :value="groupComments[g.id]" class="gcomment" readonly rows="2" :aria-label="t('assess.groupComment')" />
+      </section>
     </template>
     <section v-else class="group">
       <h2>{{ t('assess.summary') }}</h2>
@@ -135,6 +178,8 @@ h1 { margin: var(--space-2) 0 0; font-weight: 900; }
 h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: var(--space-1) 0; }
 .sticky { position: sticky; top: 0; background: var(--color-bg); padding: var(--space-2) 0; display: flex; justify-content: space-between; font-weight: 700; z-index: 2; }
+.progress-bar { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; }
+.progress-fill { height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); }
 .group { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-3); margin-top: var(--space-3); }
 .crit { display: grid; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--color-bg-line-soft); }
 .crit.flag { outline: 2px solid var(--color-coral); border-radius: var(--radius-m); padding: var(--space-2); }

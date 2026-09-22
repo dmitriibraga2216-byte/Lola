@@ -359,6 +359,7 @@
     "assigned": "Assigned",
     "doneCount": "Completed",
     "overdueCount": "Overdue",
+    "rating": "Rating",
     "daysInCompany": "{n} days with the company",
     "password": "Password",
     "passwordNone": "not set",
@@ -374,6 +375,11 @@
     "mustChangeAfterLogin": "Change password after first sign-in"
   },
   "import": {
+    "willDo": "What will happen",
+    "willDoHint": "The file is applied fully or not at all",
+    "errorsCount": "Errors",
+    "rowErrors": "Row errors",
+    "rowN": "Row {n}",
     "hint": "An xlsx or csv file following the template.",
     "template": "Download template",
     "validate": "Validate",
@@ -647,6 +653,7 @@
     "action": {
       "start": "Start",
       "open": "Open",
+      "take": "Take",
       "continue": "Continue",
       "review": "Review",
       "retry": "Retry"
@@ -673,6 +680,7 @@
     "catalogAllCategories": "All",
     "catalogFreeMode": "Open access",
     "catalogRequestMode": "By request",
+    "catalogDetails": "Details",
     "catalogRequestButton": "Send request",
     "catalogRequested": "Request sent",
     "catalogRequestSent": "Request sent",
@@ -719,7 +727,10 @@
     "readToEnd": "Read the page to the end",
     "scrollDoc": "Scroll the document to the end or download it",
     "ackLink": "Confirm: “I have read this”",
-    "videoOf": "Video"
+    "videoOf": "Video",
+    "videoPlay": "Play",
+    "videoPause": "Pause",
+    "videoSeek": "Seek video"
   },
   "course": {
     "newTitle": "New course title",

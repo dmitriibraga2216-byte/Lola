@@ -76,6 +76,7 @@ async function addFile(e: Event) {
     await api(`/media/${mediaId}/complete`, { method: 'POST' })
     files.value.push({ mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: file.size })
     await loadThumb(mediaId)
+    await saveDraft() // без окремої кнопки «Зберегти чернетку» (мокап Workshop) — чернетка зберігається автоматично
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -83,6 +84,11 @@ async function addFile(e: Event) {
   finally {
     uploading.value = false
   }
+}
+
+async function removeFile(i: number) {
+  files.value.splice(i, 1)
+  await saveDraft()
 }
 
 async function rateMentor(n: number) { if (!w.value?.current) return; try { await api(`/learning/workshops/${w.value.current.id}/rate-mentor`, { method: 'POST', body: { rating: n } }); w.value.current.mentorRating = n } catch (err) { error.value = apiErrorOf(err).message } }
@@ -179,7 +185,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
             <img v-if="f.kind === 'photo' && thumbSrc(f.mediaId)" :src="thumbSrc(f.mediaId)" :alt="f.name">
             <span v-else class="tile-icon">{{ f.kind === 'photo' ? '🖼' : f.kind === 'video' ? '🎬' : '📎' }}</span>
             <span v-if="f.kind !== 'photo'" class="tile-name">{{ f.name }}</span>
-            <button class="remove" :aria-label="t('common.delete')" @click="files.splice(i, 1)">✕</button>
+            <button class="remove" :aria-label="t('common.delete')" @click="removeFile(i)">✕</button>
           </div>
           <label class="add-file tile">
             <input type="file" :accept="w.submissionKinds.includes('photo') ? 'image/*' : '*'" :capture="w.allowCameraOnly ? 'environment' : undefined" hidden @change="addFile">
@@ -212,7 +218,6 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
     </main>
 
     <footer v-if="w && editable" class="bottom">
-      <button class="ghost" :disabled="busy" @click="saveDraft">{{ t('workshop.saveDraft') }}</button>
       <button class="primary" :disabled="!canSubmit || busy || uploading" @click="submit">{{ t('workshop.submit') }}</button>
     </footer>
   </div>

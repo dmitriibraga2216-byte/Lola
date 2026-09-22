@@ -47,12 +47,29 @@ export async function myLearning(ctx: Ctx, group: TaskGroup) {
       requiredTotal: enrollments.requiredTotal,
       requiredDone: enrollments.requiredDone,
       createdAt: enrollments.createdAt,
+      versionId: enrollments.versionId,
     })
       .from(enrollments)
       .innerJoin(courses, eq(courses.id, enrollments.subjectId))
       .where(and(eq(enrollments.userId, ctx.actorId), taskGroupWhere(group)))
 
-    const derived = rows.map(r => ({ ...r, ...deriveTaskState(r) }))
+    // «Тест» на картці мокапу MyTasks — це курс-обгортка з єдиним обов'язковим уроком-тестом
+    // (свого «тесту без курсу» модель не веде, docs/04 §4.4: правила прохождения — у призначенні,
+    // не в контенті). Кладемо `kind` в відповідь, клієнт лише показує окремий підпис «Пройти».
+    const versionIds = [...new Set(rows.map(r => r.versionId))]
+    const lessonRows = versionIds.length
+      ? await tx.select({ versionId: modules.courseVersionId, itemType: lessons.itemType, isRequired: lessons.isRequired })
+          .from(lessons)
+          .innerJoin(modules, eq(modules.id, lessons.moduleId))
+          .where(inArray(modules.courseVersionId, versionIds))
+      : []
+    const kindByVersion = new Map<string, 'test' | 'course'>()
+    for (const versionId of versionIds) {
+      const required = lessonRows.filter(l => l.versionId === versionId && l.isRequired)
+      kindByVersion.set(versionId, required.length === 1 && required[0]!.itemType === 'quiz' ? 'test' : 'course')
+    }
+
+    const derived = rows.map(r => ({ ...r, kind: kindByVersion.get(r.versionId) ?? 'course', ...deriveTaskState(r) }))
     // Сортировка docs/10 §5.1: просроченные → ближайший дедлайн → начатые → новые
     const weight = (r: typeof derived[number]) =>
       r.overdue ? 0 : r.dueAt ? 1 : r.status === 'in_progress' ? 2 : 3

@@ -107,7 +107,10 @@ async function skip() {
         <span class="grow">
           <b>{{ i.fullName }}</b>
           <span class="sub">{{ i.locationName ? `${i.locationName} · ` : '' }}{{ t('workshop.cardTitle', { title: i.workshopTitle }) }}<template v-if="i.attemptNo > 1"> · {{ t('workshop.attemptN', { n: i.attemptNo }) }}</template></span>
-          <span :class="['sla', { late: (i.hoursLeft ?? 0) < 0 }]">{{ i.hoursLeft === null ? '' : i.hoursLeft < 0 ? t('workshop.overdueH', { n: -i.hoursLeft }) : t('workshop.leftH', { n: i.hoursLeft }) }}</span>
+        </span>
+        <span v-if="i.hoursLeft !== null" class="time">
+          <span :class="['sla', { late: (i.hoursLeft ?? 0) < 0 }]">{{ i.hoursLeft < 0 ? t('workshop.overdueH', { n: -i.hoursLeft }) : t('workshop.leftH', { n: i.hoursLeft }) }}</span>
+          <span class="caption">{{ t('workshop.inQueue') }}</span>
         </span>
         <button class="btn primary small" @click="open(i)">{{ t('workshop.claim') }}</button>
       </article>
@@ -166,8 +169,10 @@ h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--font-size-body-s)
 .row.late { border-color: var(--color-coral); }
 .grow { flex: 1; min-width: 0; }
 .grow .sub { display: block; }
-.sla { display: block; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
-.sla.late { color: var(--color-coral-ink); font-weight: 700; }
+.time { flex: none; text-align: right; }
+.sla { display: block; font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); }
+.sla.late { color: var(--color-coral-ink); }
+.caption { display: block; font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 .pane { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); align-content: start; }

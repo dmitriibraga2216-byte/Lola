@@ -12,13 +12,20 @@ const notice = ref('')
 const search = ref('')
 const onlyChanged = ref(false)
 const editing = ref<string | null>(null) // code
+const editorTab = ref<'global' | 'custom'>('custom')
 const form = reactive({ code: '', channel: 'telegram' as 'telegram' | 'sms' | 'email', locale: 'uk' as 'uk' | 'en', subject: '', body: '', bodyMjml: '', imageKey: '', telegramImageKey: '', isEnabled: true, isMandatory: false, maxPerDay: 0, escalateAfterHours: 0, ignoreQuietHours: false, buttons: [] as { text: string, action: string }[] })
 const preview = ref('')
 const previewHtml = ref<string | null>(null)
 const variables = ref<string[]>([])
 // scope (docs/23 §13.1): «Глобальний» — код без рядка в БД, «Кастомний» — тенант перевизначив
-const scopeOf = (code: string) => customOf(code) ? 'custom' : 'global'
+// хоча б один канал (мокап NotificationTemplates: чипи Глобальні/Кастомні, колонки E-mail/Telegram)
+const overridesOf = (code: string) => custom.value.filter(x => x.code === code && x.locale === 'uk')
+const channelOf = (code: string, channel: string) => overridesOf(code).find(x => x.channel === channel)
+const scopeOf = (code: string) => overridesOf(code).length ? 'custom' : 'global'
+const lastChanged = (code: string) => overridesOf(code).map(x => x.updatedAt).sort().at(-1) ?? null
+const fmtDate = (d: string) => new Date(d).toLocaleDateString('uk-UA')
 const scopeCounts = computed(() => ({ global: Object.keys(defaults.value).filter(c => scopeOf(c) === 'global').length, custom: Object.keys(defaults.value).filter(c => scopeOf(c) === 'custom').length }))
+const scopeFilter = ref<'all' | 'global' | 'custom'>('all')
 const versions = ref<{ version: number, body: string, createdAt: string, author: string | null }[]>([])
 const people = ref<{ id: string, fullName: string }[]>([])
 const previewUser = ref('')
@@ -28,10 +35,11 @@ async function load() {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 onMounted(async () => { load(); try { people.value = (await apiRaw<{ data: { id: string, fullName: string }[] }>('/people?limit=50')).data } catch { /* пусто */ } })
-const codes = computed(() => Object.keys(defaults.value).filter(c => (!search.value || c.includes(search.value) || (defaults.value[c] ?? '').toLowerCase().includes(search.value.toLowerCase())) && (!onlyChanged.value || custom.value.some(x => x.code === c))))
+const codes = computed(() => Object.keys(defaults.value).filter(c => (!search.value || c.includes(search.value) || (defaults.value[c] ?? '').toLowerCase().includes(search.value.toLowerCase())) && (!onlyChanged.value || custom.value.some(x => x.code === c)) && (scopeFilter.value === 'all' || scopeOf(c) === scopeFilter.value)))
 const customOf = (code: string) => custom.value.find(x => x.code === code && x.channel === 'telegram' && x.locale === 'uk')
 async function edit(code: string) {
   editing.value = code
+  editorTab.value = 'custom'
   const c = customOf(code)
   Object.assign(form, { code, channel: 'telegram', locale: 'uk', subject: c?.subject ?? '', body: c?.body ?? defaults.value[code] ?? '', bodyMjml: c?.bodyMjml ?? '', imageKey: c?.imageKey ?? '', telegramImageKey: c?.telegramImageKey ?? '', isEnabled: c?.isEnabled ?? true, isMandatory: c?.isMandatory ?? false, maxPerDay: c?.throttle?.maxPerDay ?? 0, escalateAfterHours: c?.escalateAfterHours ?? 0, ignoreQuietHours: c?.ignoreQuietHours ?? false, buttons: c?.buttons ? [...c.buttons] : [] })
   preview.value = ''
@@ -124,56 +132,83 @@ watch(tab, (v) => { if (v === 'schedule') loadSchedule() })
     <div v-if="tab === 'templates'" class="split">
       <section class="card">
         <p class="sub">{{ t('ntpl.scopeHint') }}</p>
-        <div class="row"><span class="badge global">{{ t('ntpl.scope.global') }} · {{ scopeCounts.global }}</span><span class="badge custom">{{ t('ntpl.scope.custom') }} · {{ scopeCounts.custom }}</span></div>
+        <div class="chips" role="group">
+          <button type="button" :class="['chip', { on: scopeFilter === 'all' }]" @click="scopeFilter = 'all'">{{ t('ntpl.scopePlural.all') }}</button>
+          <button type="button" :class="['chip', { on: scopeFilter === 'global' }]" @click="scopeFilter = 'global'">{{ t('ntpl.scopePlural.global') }} · {{ scopeCounts.global }}</button>
+          <button type="button" :class="['chip', { on: scopeFilter === 'custom' }]" @click="scopeFilter = 'custom'">{{ t('ntpl.scopePlural.custom') }} · {{ scopeCounts.custom }}</button>
+        </div>
         <div class="row"><input v-model="search" class="field grow" :placeholder="t('ntpl.search')"><label class="check"><input v-model="onlyChanged" type="checkbox"> {{ t('ntpl.onlyChanged') }}</label></div>
         <table class="table">
-          <thead><tr><th>{{ t('ntpl.code') }}</th><th>{{ t('ntpl.scopeCol') }}</th><th>{{ t('ntpl.text') }}</th><th /></tr></thead>
+          <thead><tr><th>{{ t('ntpl.code') }}</th><th>{{ t('ntpl.col.email') }}</th><th>{{ t('ntpl.col.telegram') }}</th><th>{{ t('ntpl.scopeCol') }}</th><th>{{ t('ntpl.col.updated') }}</th><th /></tr></thead>
           <tbody>
             <tr v-for="c in codes" :key="c" :class="{ on: editing === c }">
               <td><code>{{ c }}</code><div v-if="customOf(c)" class="sub">v{{ customOf(c)!.version }}<span v-if="!customOf(c)!.isEnabled"> · {{ t('common.deactivate') }}</span><span v-if="customOf(c)!.isMandatory"> · 🔒</span></div></td>
+              <td>
+                <span v-if="channelOf(c, 'email')" :class="['pill', channelOf(c, 'email')!.isEnabled ? 'on' : 'off']">{{ channelOf(c, 'email')!.isEnabled ? t('ntpl.enabled') : t('ntpl.disabled') }}</span>
+                <span v-else class="muted">—</span>
+              </td>
+              <td>
+                <span v-if="channelOf(c, 'telegram')" :class="['pill', channelOf(c, 'telegram')!.isEnabled ? 'on' : 'off']">{{ channelOf(c, 'telegram')!.isEnabled ? t('ntpl.enabled') : t('ntpl.disabled') }}</span>
+                <span v-else class="muted">—</span>
+              </td>
               <td><span :class="['badge', scopeOf(c)]">{{ t(`ntpl.scope.${scopeOf(c)}`) }}</span></td>
-              <td class="sub tpl">{{ customOf(c)?.body ?? defaults[c] }}</td>
+              <td class="muted">{{ lastChanged(c) ? fmtDate(lastChanged(c)!) : '—' }}</td>
               <td><button class="chip" @click="edit(c)">{{ t('common.edit') }}</button></td>
             </tr>
           </tbody>
         </table>
       </section>
       <aside v-if="editing" class="card editor">
-        <h2><code>{{ form.code }}</code> <span :class="['badge', scopeOf(form.code)]">{{ t(`ntpl.scope.${scopeOf(form.code)}`) }}</span></h2>
-        <div class="row">
-          <select v-model="form.channel" class="field"><option value="telegram">Telegram</option><option value="sms">SMS</option><option value="email">E-mail</option></select>
-          <select v-model="form.locale" class="field"><option value="uk">uk</option><option value="en">en</option></select>
+        <h2><code>{{ form.code }}</code></h2>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" :aria-selected="editorTab === 'global'" :class="['tab', { on: editorTab === 'global' }]" @click="editorTab = 'global'">{{ t('ntpl.scope.global') }}</button>
+          <button type="button" role="tab" :aria-selected="editorTab === 'custom'" :class="['tab', { on: editorTab === 'custom' }]" @click="editorTab = 'custom'">{{ t('ntpl.scope.custom') }}</button>
         </div>
-        <input v-if="form.channel === 'email'" v-model="form.subject" class="field" :placeholder="t('ntpl.subject')">
-        <span class="sub">{{ t('ntpl.bodyHint') }}</span>
-        <textarea v-model="form.body" class="field" rows="5" maxlength="2000" @input="doPreview" />
-        <template v-if="form.channel === 'email'">
-          <span class="sub">{{ t('ntpl.mjml') }}</span>
-          <textarea v-model="form.bodyMjml" class="field mono" rows="6" maxlength="20000" placeholder="<mj-text>{{user.first_name}}, …</mj-text>" @input="doPreview" />
-          <div class="row"><input v-model="form.imageKey" class="field grow" :placeholder="t('ntpl.imageKey')"><input v-model="form.telegramImageKey" class="field grow" :placeholder="t('ntpl.telegramImageKey')"></div>
+
+        <template v-if="editorTab === 'global'">
+          <span class="sub">{{ t('ntpl.bodyHint') }}</span>
+          <p class="preview tpl-readonly">{{ defaults[form.code] }}</p>
         </template>
-        <div class="vars"><button v-for="v in variables" :key="v" class="chip small" @click="insertVar(v)">{{ v }}</button></div>
-        <div class="row"><select v-model="previewUser" class="field" @change="doPreview"><option value="">{{ t('ntpl.previewMe') }}</option><option v-for="p in people" :key="p.id" :value="p.id">{{ p.fullName }}</option></select></div>
-        <div class="preview"><span class="sub">{{ t('ntpl.preview') }}</span><p>{{ preview }}</p></div>
-        <div v-if="previewHtml" class="preview"><span class="sub">{{ t('ntpl.previewHtml') }}</span><iframe class="html-preview" :srcdoc="previewHtml" /></div>
-        <label class="check"><input v-model="form.isEnabled" type="checkbox"> {{ t('ntpl.enabled') }}</label>
-        <label class="check"><input v-model="form.isMandatory" type="checkbox"> {{ t('ntpl.mandatory') }}</label>
-        <label class="check"><input v-model="form.ignoreQuietHours" type="checkbox"> {{ t('ntpl.ignoreQuiet') }}</label>
-        <div class="row">
-          <label class="sub">{{ t('ntpl.maxPerDay') }} <input v-model.number="form.maxPerDay" class="field short" type="number" min="0" max="50"></label>
-          <label class="sub">{{ t('ntpl.escalate') }} <input v-model.number="form.escalateAfterHours" class="field short" type="number" min="0" max="720"></label>
-        </div>
-        <div class="sub">{{ t('ntpl.buttons') }}</div>
-        <div v-for="(b, i) in form.buttons" :key="i" class="row"><input v-model="b.text" class="field" :placeholder="t('ntpl.btnText')" maxlength="40"><input v-model="b.action" class="field grow" :placeholder="t('ntpl.btnAction')"><button class="chip" @click="form.buttons.splice(i, 1)">×</button></div>
-        <button v-if="form.buttons.length < 2" class="chip" @click="form.buttons.push({ text: '', action: '' })">+ {{ t('ntpl.button') }}</button>
-        <div class="row">
-          <button class="primary" :disabled="!form.body.trim()" @click="save">{{ t('common.save') }}</button>
-          <button class="chip" @click="sendMe">{{ t('ntpl.sendMe') }}</button>
-          <button v-if="customOf(form.code)" class="chip" @click="resetDefault">{{ t('ntpl.reset') }}</button>
-        </div>
-        <details v-if="versions.length" class="revs"><summary>{{ t('ntpl.versions', { n: versions.length }) }}</summary>
-          <ul><li v-for="v in versions" :key="v.version"><b>v{{ v.version }}</b> · {{ new Date(v.createdAt).toLocaleString('uk') }} · {{ v.author ?? '—' }}<div class="sub tpl">{{ v.body }}</div></li></ul>
-        </details>
+        <template v-else>
+          <div class="sub label">{{ t('ntpl.channels') }}</div>
+          <div class="row">
+            <select v-model="form.channel" class="field"><option value="telegram">Telegram</option><option value="sms">SMS</option><option value="email">E-mail</option></select>
+            <select v-model="form.locale" class="field"><option value="uk">uk</option><option value="en">en</option></select>
+          </div>
+          <input v-if="form.channel === 'email'" v-model="form.subject" class="field" :placeholder="t('ntpl.subject')">
+          <span class="sub">{{ t('ntpl.bodyHint') }}</span>
+          <textarea v-model="form.body" class="field" rows="5" maxlength="2000" @input="doPreview" />
+          <template v-if="form.channel === 'email'">
+            <span class="sub">{{ t('ntpl.mjml') }}</span>
+            <textarea v-model="form.bodyMjml" class="field mono" rows="6" maxlength="20000" placeholder="<mj-text>{{user.first_name}}, …</mj-text>" @input="doPreview" />
+            <div class="row"><input v-model="form.imageKey" class="field grow" :placeholder="t('ntpl.imageKey')"><input v-model="form.telegramImageKey" class="field grow" :placeholder="t('ntpl.telegramImageKey')"></div>
+          </template>
+          <div class="sub label">{{ t('ntpl.variables') }}</div>
+          <p class="sub hint">{{ t('ntpl.variablesHint') }}</p>
+          <div class="vars"><button v-for="v in variables" :key="v" class="chip small" @click="insertVar(v)">{{ v }}</button></div>
+          <div class="row"><select v-model="previewUser" class="field" @change="doPreview"><option value="">{{ t('ntpl.previewMe') }}</option><option v-for="p in people" :key="p.id" :value="p.id">{{ p.fullName }}</option></select></div>
+          <div class="preview"><span class="sub">{{ t('ntpl.preview') }}</span><p>{{ preview }}</p></div>
+          <div v-if="previewHtml" class="preview"><span class="sub">{{ t('ntpl.previewHtml') }}</span><iframe class="html-preview" :srcdoc="previewHtml" /></div>
+          <label class="check"><input v-model="form.isEnabled" type="checkbox"> {{ t('ntpl.enabled') }}</label>
+          <label class="check"><input v-model="form.isMandatory" type="checkbox"> {{ t('ntpl.mandatory') }}</label>
+          <div class="sub label">{{ t('ntpl.whenToSend') }}</div>
+          <label class="check"><input v-model="form.ignoreQuietHours" type="checkbox"> {{ t('ntpl.ignoreQuiet') }}</label>
+          <div class="row">
+            <label class="sub">{{ t('ntpl.maxPerDay') }} <input v-model.number="form.maxPerDay" class="field short" type="number" min="0" max="50"></label>
+            <label class="sub">{{ t('ntpl.escalate') }} <input v-model.number="form.escalateAfterHours" class="field short" type="number" min="0" max="720"></label>
+          </div>
+          <div class="sub">{{ t('ntpl.buttons') }}</div>
+          <div v-for="(b, i) in form.buttons" :key="i" class="row"><input v-model="b.text" class="field" :placeholder="t('ntpl.btnText')" maxlength="40"><input v-model="b.action" class="field grow" :placeholder="t('ntpl.btnAction')"><button class="chip" @click="form.buttons.splice(i, 1)">×</button></div>
+          <button v-if="form.buttons.length < 2" class="chip" @click="form.buttons.push({ text: '', action: '' })">+ {{ t('ntpl.button') }}</button>
+          <div class="row">
+            <button class="primary" :disabled="!form.body.trim()" @click="save">{{ t('common.save') }}</button>
+            <button class="chip" @click="sendMe">{{ t('ntpl.sendMe') }}</button>
+            <button v-if="customOf(form.code)" class="chip" @click="resetDefault">{{ t('ntpl.reset') }}</button>
+          </div>
+          <details v-if="versions.length" class="revs"><summary>{{ t('ntpl.versions', { n: versions.length }) }}</summary>
+            <ul><li v-for="v in versions" :key="v.version"><b>v{{ v.version }}</b> · {{ new Date(v.createdAt).toLocaleString('uk') }} · {{ v.author ?? '—' }}<div class="sub tpl">{{ v.body }}</div></li></ul>
+          </details>
+        </template>
       </aside>
     </div>
 
@@ -256,12 +291,20 @@ tr.on td { background: var(--color-bg); }
 .tpl { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .table-wrap { overflow-x: auto; }
 .vars { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-2); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .chip.small { padding: 0 var(--space-2); font-family: ui-monospace, monospace; }
+.chip.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
+.pill { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.pill.on { background: var(--color-teal); color: var(--color-teal-deep); }
+.pill.off { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .primary:disabled { opacity: 0.5; }
 .preview { background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); }
 .preview p { margin: 0; white-space: pre-wrap; }
+.tpl-readonly { margin: 0; white-space: pre-wrap; }
+.label { font-weight: 800; margin-top: var(--space-2); }
+.hint { margin: 0; }
 .mono { font-family: ui-monospace, monospace; }
 .html-preview { width: 100%; height: 240px; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); background: #fff; }
 .badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }

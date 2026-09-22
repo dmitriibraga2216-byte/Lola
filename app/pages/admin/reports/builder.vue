@@ -3,7 +3,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'rep
 const { t } = useI18n()
 const { api } = useApi()
 const route = useRoute()
-interface Saved { id: string, name: string, entity: string, fields: string[], filters: Record<string, unknown>, groupBy: string | null, schedule: { every: string, hour: number, weekday?: number, channel: string, recipients: string[] } | null, lastRunAt: string | null, author: string | null }
+interface Saved { id: string, name: string, entity: string, fields: string[], filters: Record<string, unknown>, groupBy: string | null, schedule: { every: string, hour: number, weekday?: number, channel: string, recipients: string[] } | null, lastRunAt: string | null, createdAt: string, author: string | null }
 const meta = ref<{ entities: Record<string, { fields: string[], filters: string[] }>, saved: Saved[] } | null>(null)
 const rows = ref<Record<string, unknown>[]>([])
 const people = ref<{ id: string, fullName: string }[]>([])
@@ -11,6 +11,7 @@ const locations = ref<{ id: string, name: string }[]>([])
 const error = ref('')
 const notice = ref('')
 const editingId = ref<string | null>(null)
+const showBuilder = ref(false)
 const spec = reactive({ entity: 'people', fields: ['full_name', 'location', 'position'] as string[], filters: {} as Record<string, string>, groupBy: '' })
 const save = reactive({ name: '', scheduled: false, every: 'daily', hour: 9, weekday: 1, channel: 'telegram', recipients: [] as string[] })
 async function load() {
@@ -19,7 +20,9 @@ async function load() {
   if (id) { const s = meta.value?.saved.find(x => x.id === id); if (s) pick(s) }
 }
 onMounted(load)
-function pick(s: Saved) { editingId.value = s.id; Object.assign(spec, { entity: s.entity, fields: [...s.fields], filters: Object.fromEntries(Object.entries(s.filters).map(([k, v]) => [k, String(v ?? '')])), groupBy: s.groupBy ?? '' }); Object.assign(save, { name: s.name, scheduled: !!s.schedule, every: s.schedule?.every ?? 'daily', hour: s.schedule?.hour ?? 9, weekday: s.schedule?.weekday ?? 1, channel: s.schedule?.channel ?? 'telegram', recipients: s.schedule?.recipients ?? [] }); run() }
+function pick(s: Saved) { editingId.value = s.id; showBuilder.value = true; Object.assign(spec, { entity: s.entity, fields: [...s.fields], filters: Object.fromEntries(Object.entries(s.filters).map(([k, v]) => [k, String(v ?? '')])), groupBy: s.groupBy ?? '' }); Object.assign(save, { name: s.name, scheduled: !!s.schedule, every: s.schedule?.every ?? 'daily', hour: s.schedule?.hour ?? 9, weekday: s.schedule?.weekday ?? 1, channel: s.schedule?.channel ?? 'telegram', recipients: s.schedule?.recipients ?? [] }); run() }
+function startNew() { editingId.value = null; showBuilder.value = true; save.name = ''; save.scheduled = false; spec.entity = 'people'; spec.fields = ['full_name', 'location', 'position']; spec.filters = {}; spec.groupBy = ''; rows.value = [] }
+function origin(s: Saved) { return s.schedule ? `${t('rb.origin')} · ${t('rb.scheduled')}` : t('rb.origin') }
 watch(() => spec.entity, () => { spec.fields = meta.value?.entities[spec.entity]?.fields.slice(0, 3) ?? []; spec.filters = {}; spec.groupBy = '' })
 const cleanFilters = () => Object.fromEntries(Object.entries(spec.filters).filter(([, v]) => v !== ''))
 async function run() {
@@ -39,19 +42,34 @@ const fmt = (v: unknown) => v == null ? '—' : typeof v === 'boolean' ? (v ? '�
 </script>
 <template>
   <div>
-    <h1>{{ t('admin.nav.reportBuilder') }}</h1>
+    <PageHeader :title="t('rb.title')" :subtitle="t('rb.hint')" :crumbs="[{ label: t('admin.section.reports') }, { label: t('rb.title') }]">
+      <template #actions>
+        <button class="btn primary" data-testid="rb-create" @click="startNew">{{ t('rb.create') }}</button>
+      </template>
+    </PageHeader>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="notice" class="notice">{{ notice }}</p>
-    <div class="layout">
-      <aside class="card">
-        <h2>{{ t('rb.saved') }}</h2>
-        <button v-for="s in meta?.saved ?? []" :key="s.id" :class="['item', { on: editingId === s.id }]" @click="pick(s)">
-          <b>{{ s.name }}</b><span class="sub">{{ t(`rb.entity.${s.entity}`) }} · {{ t('rb.origin') }}<template v-if="s.schedule"> · {{ t('rb.scheduled') }} {{ s.schedule.every === 'daily' ? t('rb.daily') : t('rb.weekly') }} {{ s.schedule.hour }}:00</template></span>
-          <span class="acts"><a :href="`/api/v1/reports/builder/${s.id}/xlsx`" class="mini" @click.stop>xlsx</a><button class="mini" @click.stop="remove(s)">✕</button></span>
-        </button>
-        <p v-if="!meta?.saved.length" class="sub">{{ t('rb.noSaved') }}</p>
-        <button class="chip" @click="editingId = null; save.name = ''">+ {{ t('rb.new') }}</button>
-      </aside>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>{{ t('rb.col.name') }}</th><th>{{ t('rb.col.origin') }}</th><th>{{ t('rb.col.created') }}</th><th /></tr></thead>
+        <tbody>
+          <tr v-for="s in meta?.saved ?? []" :key="s.id" :class="['row-link', { on: editingId === s.id }]">
+            <td><b>{{ s.name }}</b><span class="sub">{{ t(`rb.entity.${s.entity}`) }}</span></td>
+            <td class="muted">{{ origin(s) }}</td>
+            <td class="muted">{{ fmt(s.createdAt) }}</td>
+            <td class="acts">
+              <button class="btn small" @click="pick(s)">{{ t('rb.run') }}</button>
+              <a :href="`/api/v1/reports/builder/${s.id}/xlsx`" class="mini" @click.stop>xlsx</a>
+              <button class="mini" @click.stop="remove(s)">✕</button>
+            </td>
+          </tr>
+          <tr v-if="!meta?.saved.length"><td colspan="4" class="empty">{{ t('rb.noSaved') }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div v-if="showBuilder" class="layout">
       <section class="card main">
         <div class="row">
           <select v-model="spec.entity" class="field"><option v-for="(_, e) in meta?.entities ?? {}" :key="e" :value="e">{{ t(`rb.entity.${e}`) }}</option></select>
@@ -93,12 +111,11 @@ const fmt = (v: unknown) => v == null ? '—' : typeof v === 'boolean' ? (v ? '�
 <style scoped>
 h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 h2 { margin: 0; font-weight: 800; }
-.layout { display: grid; grid-template-columns: 260px 1fr; gap: var(--space-3); }
-@media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+.layout { display: grid; grid-template-columns: 1fr; gap: var(--space-3); margin-top: var(--space-4); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); align-content: start; }
-.item { font: inherit; text-align: left; border: 1px solid var(--color-bg-line); background: var(--color-bg); border-radius: var(--radius-m); padding: var(--space-2); cursor: pointer; display: grid; gap: 2px; color: inherit; }
-.item.on { border-color: var(--color-ink); }
-.acts { display: flex; gap: var(--space-1); }
+.row-link.on td { background: var(--color-bg-line-soft); }
+.acts { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.empty { color: var(--color-ink-faint); text-align: center; padding: var(--space-6); }
 .mini { font: inherit; font-size: 11px; border: 1px solid var(--color-bg-line); background: transparent; border-radius: var(--radius-pill); padding: 0 6px; cursor: pointer; color: var(--color-ink-muted); text-decoration: none; }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .field, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }

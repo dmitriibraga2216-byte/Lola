@@ -3,11 +3,11 @@ import type { ContentBlock } from '../../../../shared/schemas/content'
 
 /**
  * Практикуми за мокапом ContentWorkshops (docs/31): шапка «Практикуми» з «Додати», таблиця
- * НАЗВА · АВТОР · КРИТЕРІЇВ · МІТКИ · ДАТА ЗМІНИ · ОПУБЛІКОВАНО. «Імпортувати» на цьому екрані
+ * НАЗВА · АВТОР · КРИТЕРІЇВ · ДАТА ЗМІНИ · ОПУБЛІКОВАНО. «Імпортувати» на цьому екрані
  * не додаємо — те саме рішення заказчика Q-03 (docs/34): формат файлу не описаний.
  * «Автор» (screens-7) — `listWorkshops` тепер віддає `authorNames` (join на users).
- * Залишок: «Мітки» лишаються «—» — у `workshops` немає стовпця tags і жодного відповідного
- * scope у TAG_SCOPES (shared/enums.ts), вигадувати новий scope мовчки не можна (CLAUDE.md п.13).
+ * Колонка «Мітки» знята рішенням замовника 23.09.2026 (docs/33 D-074, docs/28): tag_scope
+ * під практикуми не заводимо, у `workshops` немає стовпця tags і не буде.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'course.view' })
 const { t } = useI18n()
@@ -47,7 +47,7 @@ async function create() {
         <thead>
           <tr>
             <th>{{ t('workshop.col.title') }}</th><th>{{ t('workshop.col.author') }}</th><th>{{ t('workshop.col.criteria') }}</th>
-            <th>{{ t('workshop.col.tags') }}</th><th>{{ t('workshop.col.updated') }}</th><th>{{ t('workshop.col.published') }}</th>
+            <th>{{ t('workshop.col.updated') }}</th><th>{{ t('workshop.col.published') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -58,11 +58,10 @@ async function create() {
             </td>
             <td class="muted">{{ w.authorNames.length ? w.authorNames.join(', ') : '—' }}</td>
             <td>{{ w.criteriaCount }}</td>
-            <td class="muted">—</td>
             <td class="muted">{{ new Date(w.updatedAt).toLocaleDateString('uk') }}</td>
             <td><span :class="['badge upper', w.status]">{{ t(`course.status.${w.status}`) }}</span></td>
           </tr>
-          <tr v-if="items.length === 0"><td colspan="6" class="empty">{{ t('workshop.empty') }}</td></tr>
+          <tr v-if="items.length === 0"><td colspan="5" class="empty">{{ t('workshop.empty') }}</td></tr>
         </tbody>
       </table>
     </div>

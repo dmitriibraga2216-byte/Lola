@@ -11,6 +11,7 @@ interface Tenant {
   id: string, slug: string, name: string, status: 'active' | 'suspended' | 'archived', plan: string, trial_ends_at: string | null, created_at: string, archived_at: string | null
   users_limit: number | null, storage_gb_limit: number | null, sms_limit: number | null, active_jobs_limit: number | null, has_overrides: boolean
   active_users: number, total_users: number, wau: number, media_bytes: string, completed_30d: number
+  custom_domain: string | null
 }
 interface Plan { code: string, name: string, maxUsers: number | null, priceUah: number | null }
 interface Limits {
@@ -40,6 +41,21 @@ const actionForm = reactive({ reason: '', confirmSlug: '' })
 const limitsFor = ref<Tenant | null>(null)
 const limits = ref<Limits | null>(null)
 const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: '', smsPerMonth: '', apiPerMinute: '', webhooks: '', activeJobs: '' })
+/** Собственный домен клиента (докс/33 D-059): CNAME на платформу, сертификат — вручную, docs/27. */
+const domainFor = ref<Tenant | null>(null)
+const domainForm = reactive({ value: '' })
+function openDomain(tn: Tenant) { domainFor.value = tn; domainForm.value = tn.custom_domain ?? ''; error.value = '' }
+async function saveDomain() {
+  if (!domainFor.value) return
+  error.value = ''
+  try {
+    await ops(`/tenants/${domainFor.value.id}`, { method: 'PATCH', body: { customDomain: domainForm.value.trim() || null } })
+    notice.value = t('ops.done.domain', { name: domainFor.value.name })
+    domainFor.value = null
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 
 // Нетипизированный вызов: типизированные роуты Nitro при сотнях эндпоинтов дают TS2589
 const rawFetch = $fetch as unknown as <T>(url: string, opts?: unknown) => Promise<T>
@@ -141,7 +157,7 @@ async function impersonate() {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 
-const hostOf = (tn: Tenant) => me.value?.hostBase ? `${tn.slug}.${me.value.hostBase}` : tn.slug
+const hostOf = (tn: Tenant) => tn.custom_domain || (me.value?.hostBase ? `${tn.slug}.${me.value.hostBase}` : tn.slug)
 const gb = (b: string | number) => (Number(b) / 1024 / 1024 / 1024).toFixed(1)
 const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '—'
 const purgeAt = (tn: Tenant) => tn.archived_at ? fmt(new Date(new Date(tn.archived_at).getTime() + PURGE_DAYS * 86_400_000).toISOString()) : '—'
@@ -219,6 +235,7 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
                 <button v-if="tn.status === 'suspended'" type="button" class="chip warn" @click="openAction('purge', tn)">{{ t('ops.purge') }}</button>
                 <button v-if="tn.status === 'archived'" type="button" class="chip" @click="openAction('cancelPurge', tn)">{{ t('ops.cancelPurge') }}</button>
                 <button type="button" class="chip" @click="openLimits(tn)">{{ t('ops.limits.title') }}</button>
+                <button type="button" class="chip" @click="openDomain(tn)">{{ t('ops.domain.title') }}</button>
                 <button v-if="tn.status === 'active'" type="button" class="chip warn" @click="openImpersonate(tn)">{{ t('ops.impersonate') }}</button>
               </td>
             </tr>
@@ -251,6 +268,16 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
           </label>
         </div>
         <div class="actions"><button type="button" class="chip" @click="limitsFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" @click="saveLimits">{{ t('common.save') }}</button></div>
+      </div>
+    </div>
+
+    <div v-if="domainFor" class="modal-backdrop" @click.self="domainFor = null" @keydown.esc="domainFor = null">
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="t('ops.domain.title')">
+        <h2>{{ t('ops.domain.title') }}: {{ domainFor.name }}</h2>
+        <p class="sub">{{ t('ops.domain.hint') }}</p>
+        <label class="field"><span>{{ t('ops.domain.value') }}</span><input v-model="domainForm.value" placeholder="navchannya.kappi.ua" autocomplete="off"></label>
+        <p v-if="error" class="error">{{ error }}</p>
+        <div class="actions"><button type="button" class="chip" @click="domainFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" @click="saveDomain">{{ t('common.save') }}</button></div>
       </div>
     </div>
 

@@ -885,7 +885,8 @@
       "answer_by_map": "Pick an area on the image",
       "number": "Enter a number",
       "text_short": "Short answer",
-      "file": "Photo or file"
+      "file": "Photo or file",
+      "cloze": "Fill in the blanks"
     },
     "pointsN": "{n} points",
     "attachFile": "Attach file",
@@ -1474,6 +1475,12 @@
     "inactive30": "No activity 30+ days",
     "byHour": "When people learn: by hour (30 days)"
   },
+  "rating": {
+    "rate": "Rate this material",
+    "stars": "{n} of 5",
+    "summary": "Ratings: {n} · average {avg}",
+    "none": "No ratings yet"
+  },
   "kb": {
     "title": "Knowledge base",
     "short": "Guide",
@@ -1821,7 +1828,13 @@
       "resume": "Workspace “{name}” resumed",
       "purge": "Deletion of “{name}” scheduled. It can be cancelled before the date",
       "cancelPurge": "Deletion of “{name}” cancelled, workspace stays suspended",
-      "limits": "Limits for “{name}” saved"
+      "limits": "Limits for “{name}” saved",
+      "domain": "Domain for “{name}” saved"
+    },
+    "domain": {
+      "title": "Domain",
+      "hint": "Client's own domain (docs/33 D-059): CNAME to the platform, Let's Encrypt certificate — set up manually by the operator (docs/27). Empty field — default subdomain only.",
+      "value": "Domain without protocol"
     },
     "confirm": {
       "reason": "Reason (for the platform log)",
@@ -3158,6 +3171,13 @@
     "defaultChannel": "Default channel",
     "test": "Send test",
     "testSent": "Test message sent",
+    "push": {
+      "title": "Push notifications",
+      "hint": "Notifications from Lola straight to the browser, even with the tab closed. Clicking opens the notification list",
+      "enable": "Enable in this browser",
+      "disable": "Disable in this browser",
+      "enabled": "Enabled"
+    },
     "group": {
       "learning": "Learning",
       "assessment": "Assessment and development",
@@ -3379,7 +3399,8 @@
       "answer_by_map": "Pick on image",
       "number": "Number with tolerance",
       "text_short": "Short text",
-      "file": "File or photo"
+      "file": "File or photo",
+      "cloze": "Fill in the blanks"
     },
     "placeholders": {
       "single": "Enter a question with one correct answer…",
@@ -3391,7 +3412,8 @@
       "answer_by_map": "Pick the right area on the image…",
       "number": "Enter a question with a numeric answer…",
       "text_short": "Enter a question with a short answer…",
-      "file": "Enter a question answered with a photo or file…"
+      "file": "Enter a question answered with a photo or file…",
+      "cloze": "Text with blanks, e.g.: Rain {'{{'}1{'}}'} falls on {'{{'}2{'}}'}…"
     },
     "text": "Question text",
     "options": "Answer options",
@@ -3433,7 +3455,9 @@
     "difficulty": "Difficulty",
     "shape": "Area shape",
     "shapeRect": "Rectangle",
-    "shapeCircle": "Circle"
+    "shapeCircle": "Circle",
+    "clozeHint": "Mark blanks in the text above as {'{{'}1{'}}'}, {'{{'}2{'}}'} etc. — set accepted answers for each below (one per line)",
+    "clozeNone": "The question text has no blanks yet — add {'{{'}1{'}}'}"
   },
   "attemptRequests": {
     "title": "Test attempt requests",

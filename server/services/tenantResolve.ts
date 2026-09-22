@@ -26,25 +26,27 @@ export class TenantClosedError extends Error {
 const TTL_MS = 10_000
 const bySlug = new Map<string, { at: number, t: ResolvedTenant | null }>()
 const byId = new Map<string, { at: number, t: ResolvedTenant | null }>()
+const byDomain = new Map<string, { at: number, t: ResolvedTenant | null }>()
 
 const fresh = <T>(hit: { at: number, t: T } | undefined): hit is { at: number, t: T } => !!hit && Date.now() - hit.at < TTL_MS
 
-function remember(t: ResolvedTenant | null, slug?: string, id?: string) {
+function remember(t: ResolvedTenant | null, slug?: string, id?: string, domain?: string) {
   const at = Date.now()
-  if (t) { bySlug.set(t.slug, { at, t }); byId.set(t.id, { at, t }) }
+  if (t) { bySlug.set(t.slug, { at, t }); byId.set(t.id, { at, t }); if (domain) byDomain.set(domain, { at, t }) }
   else {
     if (slug) bySlug.set(slug, { at, t: null })
     if (id) byId.set(id, { at, t: null })
+    if (domain) byDomain.set(domain, { at, t: null })
   }
   return t
 }
 
 /** Сбрасывается панелью оператора после suspend/resume/purge — статус виден приложению без ожидания TTL. */
 export function invalidateTenant(id?: string): void {
-  if (!id) { bySlug.clear(); byId.clear(); return }
+  if (!id) { bySlug.clear(); byId.clear(); byDomain.clear(); return }
   const hit = byId.get(id)
   byId.delete(id)
-  if (hit?.t) bySlug.delete(hit.t.slug)
+  if (hit?.t) { bySlug.delete(hit.t.slug); byDomain.clear() } // домен не индексирован по id — проще сбросить весь кеш
 }
 
 export async function tenantBySlug(slug: string): Promise<ResolvedTenant | null> {
@@ -59,6 +61,14 @@ export async function tenantById(id: string): Promise<ResolvedTenant | null> {
   if (fresh(hit)) return hit.t
   const [row] = await db.select({ id: tenants.id, slug: tenants.slug, status: tenants.status, name: tenants.name }).from(tenants).where(eq(tenants.id, id))
   return remember(row ? { ...row, status: row.status as TenantStatus } : null, undefined, id)
+}
+
+/** Тенант по собственному домену клиента (docs/25 §16.1, докс/33 D-059). */
+export async function tenantByCustomDomain(domain: string): Promise<ResolvedTenant | null> {
+  const hit = byDomain.get(domain)
+  if (fresh(hit)) return hit.t
+  const [row] = await db.select({ id: tenants.id, slug: tenants.slug, status: tenants.status, name: tenants.name }).from(tenants).where(eq(tenants.customDomain, domain))
+  return remember(row ? { ...row, status: row.status as TenantStatus } : null, undefined, undefined, domain)
 }
 
 /** Тенант работает: вход, API и фоновые задачи разрешены (docs/25 §8 «Работа»). */
@@ -99,11 +109,21 @@ export function decideHost(host: string | undefined, cfg: HostConfig): HostDecis
 /**
  * Тенант по Host: `null` — резолв выключен (тенант из сессии); `{tenant: null}` — 404 (неизвестный поддомен
  * или тенант по умолчанию не найден). Запись в `event.context` делает middleware `01.host`.
+ *
+ * Собственный домен клиента (docs/25 §16.1, докс/33 D-059): сначала `<slug>.<base>` (через
+ * `decideHost`), затем — для любого хоста, который под эту схему не подпадает (localhost, IP,
+ * докер-имя, базовый домен, `TENANT_HOST_DEFAULT`, реальный внешний домен) — точное совпадение
+ * с `tenants.custom_domain`; не найден — обычный фолбек на тенант по умолчанию.
  */
 export async function resolveTenantByHost(host: string | undefined, cfg: HostConfig = hostConfig()): Promise<{ tenant: ResolvedTenant | null } | null> {
   const d = decideHost(host, cfg)
   if (d.kind === 'off') return null
-  if (d.kind === 'default') return { tenant: cfg.defaultSlug ? await tenantBySlug(cfg.defaultSlug) : null }
+  if (d.kind === 'default') {
+    const h = (host ?? '').split(':')[0]!.toLowerCase().replace(/\.$/, '')
+    const byCustomDomain = h ? await tenantByCustomDomain(h) : null
+    if (byCustomDomain) return { tenant: byCustomDomain }
+    return { tenant: cfg.defaultSlug ? await tenantBySlug(cfg.defaultSlug) : null }
+  }
   if (!/^[a-z0-9-]{3,40}$/.test(d.slug)) return { tenant: null }
   return { tenant: await tenantBySlug(d.slug) }
 }

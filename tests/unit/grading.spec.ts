@@ -103,6 +103,24 @@ describe('gradeAnswer', () => {
     expect(gradeAnswer(strict, { text: 'так' }).isCorrect).toBe(false)
   })
 
+  it('cloze: частковий бал по пропусках, опечатки і регістр — як text_short (докс/33 D-015)', () => {
+    const q = base({
+      kind: 'cloze',
+      points: 4,
+      answer: { gaps: [{ id: '1', accepted: ['дощ'] }, { id: '2', accepted: ['землю', 'грунт'], allowTypos: 1 }] },
+    })
+    expect(gradeAnswer(q, { values: { 1: 'Дощ', 2: 'землю' } })).toMatchObject({ isCorrect: true, score: 4 })
+    // один з двох вірний → частковий бал за формулою
+    expect(gradeAnswer(q, { values: { 1: 'дощ', 2: 'сонце' } })).toMatchObject({ isCorrect: false, score: 2 })
+    // опечатка в межах допуску
+    expect(gradeAnswer(q, { values: { 1: 'дощ', 2: 'грунт' } })).toMatchObject({ isCorrect: true, score: 4 })
+    // all_or_nothing: один невірний — увесь пропуск втрачено
+    const strict = { ...q, scoringMethod: 'all_or_nothing' as const }
+    expect(gradeAnswer(strict, { values: { 1: 'дощ', 2: 'сонце' } }).score).toBe(0)
+    // пусто
+    expect(gradeAnswer(q, {})).toMatchObject({ isCorrect: false, score: 0 })
+  })
+
   it('free и file — ручная проверка', () => {
     expect(gradeAnswer(base({ kind: 'free' }), { text: 'довга відповідь' })).toMatchObject({ isCorrect: null, auto: false })
     expect(gradeAnswer(base({ kind: 'file' }), { mediaIds: ['x'] })).toMatchObject({ isCorrect: null, auto: false })

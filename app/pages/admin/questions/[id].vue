@@ -29,7 +29,9 @@ interface Bank { id: string, name: string }
 
 const ETALON_KINDS: QuestionKind[] = ['single', 'multi', 'free', 'ordering', 'classification', 'comparison', 'answer_by_map']
 const EXTRA_KINDS: QuestionKind[] = QUESTION_KINDS.filter(k => !ETALON_KINDS.includes(k))
-const SCORED_KINDS: QuestionKind[] = ['multi', 'ordering', 'classification', 'comparison', 'answer_by_map']
+const SCORED_KINDS: QuestionKind[] = ['multi', 'ordering', 'classification', 'comparison', 'answer_by_map', 'cloze']
+/** Пропуски в тексті — усі `{{id}}` у порядку появи, без повторів (докс/33 D-015). */
+const CLOZE_RE = /\{\{(\w+)\}\}/g
 
 const quiz = ref<QuizEditor | null>(null)
 const banks = ref<Bank[]>([])
@@ -59,6 +61,10 @@ const f = reactive({
   accepted: '',
   allowTypos: 0,
   caseSensitive: false,
+  // cloze (докс/33 D-015): по кожному `{{id}}` з тексту — свій набір прийнятних варіантів
+  clozeAccepted: {} as Record<string, string>,
+  clozeAllowTypos: {} as Record<string, number>,
+  clozeCaseSensitive: {} as Record<string, boolean>,
   criteria: '',
   reference: '',
   graderHint: '',
@@ -154,6 +160,15 @@ function fill(q: Record<string, unknown> & { kind: QuestionKind, stem: ContentBl
     }
     case 'number': f.number = { value: Number(a.value ?? 0), tolerance: Number(a.tolerance ?? 0), toleranceType: (a.toleranceType as 'abs' | 'pct') ?? 'abs', unit: (a.unit as string) ?? '' }; break
     case 'text_short': f.accepted = ((a.accepted as string[]) ?? []).join('\n'); f.allowTypos = (a.allowTypos as number) ?? 0; f.caseSensitive = !!a.caseSensitive; break
+    case 'cloze': {
+      const gaps = (a.gaps as { id: string, accepted: string[], allowTypos?: number, caseSensitive?: boolean }[]) ?? []
+      for (const g of gaps) {
+        f.clozeAccepted[g.id] = g.accepted.join('\n')
+        f.clozeAllowTypos[g.id] = g.allowTypos ?? 0
+        f.clozeCaseSensitive[g.id] = !!g.caseSensitive
+      }
+      break
+    }
     case 'free':
     case 'file': f.criteria = ((a.criteria as string[]) ?? []).join('\n'); f.reference = (a.reference as string) ?? ''; break
   }
@@ -261,6 +276,12 @@ const addTag = () => {
   f.tagInput = ''
 }
 
+const clozeGapIds = computed(() => {
+  const seen: string[] = []
+  for (const m of f.text.matchAll(CLOZE_RE)) if (!seen.includes(m[1]!)) seen.push(m[1]!)
+  return seen
+})
+
 const maxSelect = computed(() => f.correct.length)
 const showScoring = computed(() => SCORED_KINDS.includes(f.kind))
 const letter = (i: number) => String.fromCharCode(65 + i)
@@ -294,6 +315,16 @@ function build() {
       break
     case 'number': answer = { value: f.number.value, tolerance: f.number.tolerance, toleranceType: f.number.toleranceType, ...(f.number.unit ? { unit: f.number.unit } : {}) }; break
     case 'text_short': answer = { accepted: f.accepted.split('\n').map(s => s.trim()).filter(Boolean), allowTypos: f.allowTypos, caseSensitive: f.caseSensitive }; break
+    case 'cloze':
+      answer = {
+        gaps: clozeGapIds.value.map(id => ({
+          id,
+          accepted: (f.clozeAccepted[id] ?? '').split('\n').map(s => s.trim()).filter(Boolean),
+          allowTypos: f.clozeAllowTypos[id] ?? 0,
+          caseSensitive: !!f.clozeCaseSensitive[id],
+        })),
+      }
+      break
     case 'free':
     case 'file': answer = { criteria: f.criteria.split('\n').map(s => s.trim()).filter(Boolean), ...(f.reference.trim() ? { reference: f.reference.trim() } : {}) }; break
   }
@@ -534,6 +565,22 @@ const title = computed(() => quiz.value
           <textarea id="q-criteria-file" v-model="f.criteria" class="field" rows="2" />
         </template>
 
+        <!-- cloze: пропуски в тексте, {{1}} {{2}}… — свій набір варіантів на кожен -->
+        <template v-else-if="f.kind === 'cloze'">
+          <p class="help">{{ t('questionEditor.clozeHint') }}</p>
+          <p v-if="clozeGapIds.length === 0" class="help sun">{{ t('questionEditor.clozeNone') }}</p>
+          <div v-for="id in clozeGapIds" :key="id" class="opt-card cloze-gap">
+            <span class="n">{{ id }}</span>
+            <div class="grow">
+              <textarea v-model="f.clozeAccepted[id]" class="field" rows="2" :placeholder="t('quizAdmin.accepted')" />
+              <div class="cloze-row">
+                <label>{{ t('questionEditor.allowTypos') }} <input v-model.number="f.clozeAllowTypos[id]" type="number" min="0" max="2" class="field num"></label>
+                <label class="toggle"><input v-model="f.clozeCaseSensitive[id]" type="checkbox"><span>{{ t('questionEditor.caseSensitive') }}</span></label>
+              </div>
+            </div>
+          </div>
+        </template>
+
         <label class="label" for="q-expl">{{ t('questionEditor.explanation') }}</label>
         <textarea id="q-expl" v-model="f.explanation" class="field" rows="2" />
       </section>
@@ -599,6 +646,9 @@ const title = computed(() => quiz.value
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 @media (max-width: 600px) { .cols { grid-template-columns: 1fr; } }
 .num { width: 72px; }
+.cloze-gap { align-items: flex-start; }
+.cloze-gap .grow { flex: 1; min-width: 0; display: grid; gap: var(--space-2); }
+.cloze-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; font-size: var(--font-size-body-s); font-weight: 700; }
 .area-row label { display: flex; align-items: center; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .map { position: relative; aspect-ratio: 16 / 9; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }
 .map img { width: 100%; height: 100%; object-fit: contain; display: block; }

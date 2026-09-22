@@ -5,6 +5,8 @@ const props = defineProps<{
   options: unknown
   modelValue: unknown
   disabled?: boolean
+  /** Потрібен лише для `cloze`: текст із плейсхолдерами `{{id}}` (докс/33 D-015). */
+  stem?: unknown
 }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: unknown): void }>()
 const { api } = useApi()
@@ -50,6 +52,28 @@ const val = computed({
   get: () => (props.modelValue ?? {}) as Record<string, unknown>,
   set: v => emit('update:modelValue', v),
 })
+
+// cloze (докс/33 D-015): stem — блоки text/…; беремо текст без тегів і ріжемо по {{id}}
+type ClozePart = { type: 'text', value: string } | { type: 'gap', id: string }
+const clozeParts = computed<ClozePart[]>(() => {
+  const blocks = (Array.isArray(props.stem) ? props.stem : []) as { type: string, html?: string }[]
+  const text = blocks.filter(b => b.type === 'text').map(b => (b.html ?? '').replace(/<[^>]+>/g, '')).join(' ')
+  const parts: ClozePart[] = []
+  let last = 0
+  for (const m of text.matchAll(/\{\{(\w+)\}\}/g)) {
+    if (m.index! > last) parts.push({ type: 'text', value: text.slice(last, m.index) })
+    parts.push({ type: 'gap', id: m[1]! })
+    last = m.index! + m[0].length
+  }
+  if (last < text.length) parts.push({ type: 'text', value: text.slice(last) })
+  return parts
+})
+function clozeValue(id: string): string {
+  return String(((val.value.values as Record<string, string> | undefined) ?? {})[id] ?? '')
+}
+function setCloze(id: string, text: string) {
+  val.value = { values: { ...((val.value.values as Record<string, string> | undefined) ?? {}), [id]: text } }
+}
 
 function pickSingle(id: string) {
   val.value = { optionId: id }
@@ -181,6 +205,21 @@ function pairFor(leftId: string) {
       @input="val = { text: ($event.target as HTMLTextAreaElement).value }"
     />
 
+    <p v-else-if="kind === 'cloze'" class="cloze">
+      <template v-for="(part, i) in clozeParts" :key="i">
+        <span v-if="part.type === 'text'">{{ part.value }}</span>
+        <input
+          v-else
+          class="field cloze-gap"
+          type="text"
+          :aria-label="part.id"
+          :value="clozeValue(part.id)"
+          :disabled="disabled"
+          @input="setCloze(part.id, ($event.target as HTMLInputElement).value)"
+        >
+      </template>
+    </p>
+
     <p v-else class="muted">{{ kind }}</p>
   </div>
 </template>
@@ -304,5 +343,18 @@ select {
 
 .area:focus-visible {
   outline: 3px solid var(--color-sun);
+}
+
+.cloze {
+  line-height: 2.4;
+  margin: 0;
+}
+
+.cloze-gap {
+  display: inline-block;
+  width: auto;
+  min-width: 96px;
+  padding: var(--space-1) var(--space-2);
+  margin: 0 var(--space-1);
 }
 </style>

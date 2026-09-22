@@ -14,6 +14,7 @@ export default defineNuxtConfig({
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         // Бренд-бук: Nunito, заголовки 900
         { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap' },
+        { rel: 'manifest', href: '/manifest.webmanifest' }, // PWA (докс/33 D-051)
       ],
     },
   },
@@ -46,6 +47,7 @@ export default defineNuxtConfig({
     public: {
       defaultTenant: 'kappi', // NUXT_PUBLIC_DEFAULT_TENANT — простір для входу через Google без ?tenant=
       supportContact: '', // NUXT_PUBLIC_SUPPORT_CONTACT — e-mail поддержки в подвале входа (до настроек тенанта, docs/24 §3.1)
+      vapidPublicKey: '', // NUXT_PUBLIC_VAPID_PUBLIC_KEY — публічний VAPID-ключ для PushManager.subscribe() (докс/33 D-051)
     },
   },
 

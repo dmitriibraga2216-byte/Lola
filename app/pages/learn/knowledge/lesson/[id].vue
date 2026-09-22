@@ -5,12 +5,13 @@ import type { ContentBlock } from '../../../../../shared/schemas/content'
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
+interface Rating { count: number, average: number | null, myValue: number | null }
 const id = useRoute().params.id as string
-const res = ref<{ title: string, body: ContentBlock[] } | null>(null)
+const res = ref<{ id: string, title: string, body: ContentBlock[], rating: Rating } | null>(null)
 const error = ref('')
 onMounted(async () => {
   try {
-    res.value = await api<{ title: string, body: ContentBlock[] }>(`/knowledge/resource/${id}`)
+    res.value = await api<{ id: string, title: string, body: ContentBlock[], rating: Rating }>(`/knowledge/resource/${id}`)
   }
   catch (err) { error.value = apiErrorOf(err).message }
 })
@@ -22,6 +23,7 @@ onMounted(async () => {
     <span class="kind">{{ t('kb.kind.lesson') }}</span>
     <h1>{{ res.title }}</h1>
     <LessonBlocks :blocks="res.body" :blocks-state="{}" readonly />
+    <ContentRating content-type="resource" :content-id="res.id" :initial="res.rating" />
   </div>
   <p v-else-if="error" class="error">{{ error }}</p>
 </template>

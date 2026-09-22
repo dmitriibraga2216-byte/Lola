@@ -14,6 +14,7 @@
 create table tenants (
   id uuid primary key default gen_random_uuid(),
   slug text not null unique,                 -- kappi
+  custom_domain text unique,                 -- navchannya.kappi.ua; докс/33 D-059, `25` §16.1
   name text not null,                        -- Каппі
   locale text not null default 'uk',         -- uk | en
   timezone text not null default 'Europe/Kyiv',
@@ -652,6 +653,19 @@ create table knowledge_articles (
 create index on knowledge_articles using gin (search_tsv);
 create index on knowledge_articles using ivfflat (embedding vector_cosine_ops);
 
+-- «Оцінок: N» на картці ресурсу і статті (`21` §14.1, докс/33 D-042). Один голос на людину —
+-- повторна оцінка виправляє свою (upsert). С RLS.
+create table content_ratings (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  content_type text not null,                 -- content_rating_target: resource | knowledge_article
+  content_id uuid not null,
+  user_id uuid not null references users(id) on delete cascade,
+  value int not null,                         -- 1..5
+  unique (tenant_id, content_type, content_id, user_id)
+);
+-- value: CHECK between 1 and 5; content_type: CHECK IN ('resource', 'knowledge_article')
+
 -- Spec 20 (`20` §14.5, §14.7): режим, конфиденциальность, четыре типа вопроса, заморозка
 create table surveys (
   id uuid primary key default gen_random_uuid(),
@@ -726,6 +740,19 @@ create table notifications (
   sent_at timestamptz
 );
 create index on notifications (tenant_id, status, scheduled_for);
+
+-- Push-подписки браузера, PWA (`23` §4, докс/33 D-051). Один человек — несколько подписок
+-- (несколько устройств), уникальность по endpoint. С RLS.
+create table push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  user_id uuid not null references users(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  last_seen_at timestamptz not null default now()
+);
 
 create table media_assets (
   id uuid primary key default gen_random_uuid(),
@@ -1322,8 +1349,9 @@ notice_kind: acknowledge | event | notification
 security_severity: info | warning | critical
 
 -- Типы вопросов: семь эталона (`12` §14.3) + три Lola (number, text_short, file)
+-- + cloze — пропуски в тексте (`12` §3.3 п. 11, R2, докс/33 D-015)
 question_kind: single | multi | free | ordering | classification | comparison | answer_by_map
-            | number | text_short | file
+            | number | text_short | file | cloze
 
 -- «Метод підрахунку балів» (`12` §14.6): «За формулою» | «Все або нічого»
 scoring_method: formula | all_or_nothing
@@ -1358,6 +1386,9 @@ competency_source: assessment | task | manual
 
 -- Спосіб відображення рівня компетенції (`19` §14.1 «Шкала компетенцій»): назва рівня чи число; Spec 19
 display_as: label | value
+
+-- Матеріал, який можна оцінити читачем («Оцінок: N», `21` §14.1); докс/33 D-042, своє
+content_rating_target: resource | knowledge_article
 ```
 
 ## Что проверяет тест схемы

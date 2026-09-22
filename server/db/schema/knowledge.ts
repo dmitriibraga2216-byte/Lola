@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  boolean, customType, date, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
+  boolean, check, customType, date, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
@@ -59,6 +59,26 @@ export const knowledgeFeedback = pgTable('knowledge_feedback', {
   comment: text('comment'),
 }, t => [
   unique().on(t.tenantId, t.articleId, t.userId),
+])
+
+/**
+ * Оценка материала читателем (docs/21 §14.1 «Оцінок: N», докс/33 D-042): звезда 1–5,
+ * один голос на человека, повторная — правит свой же (upsert). `contentType` — своё
+ * перечисление `content_rating_target` (docs/02), не путать с `content_type` назначений:
+ * оценка не влияет на прохождение, поэтому охватывает и статьи базы знаний.
+ */
+export const contentRatings = pgTable('content_ratings', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  contentType: text('content_type').notNull(), // resource | knowledge_article
+  contentId: uuid('content_id').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  value: integer('value').notNull(),
+}, t => [
+  index().on(t.tenantId, t.contentType, t.contentId),
+  unique().on(t.tenantId, t.contentType, t.contentId, t.userId),
+  check('content_ratings_value_check', sql`${t.value} between 1 and 5`),
+  check('content_ratings_content_type_check', sql`${t.contentType} in ('resource', 'knowledge_article')`),
 ])
 
 /** Журнал поисковых запросов (docs/21 §9, §13.6): запросы без результата — заявки на новые статьи. */

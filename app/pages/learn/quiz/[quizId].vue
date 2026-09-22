@@ -178,6 +178,7 @@ function answerLabel(q: ResultQ, a: unknown): string {
     case 'number': return String(o.value ?? '')
     case 'text_short': return String(o.text ?? ((o.accepted as string[] | undefined) ?? [])[0] ?? '')
     case 'free': return String(o.text ?? '')
+    case 'cloze': return Object.values((o.values as Record<string, string> | undefined) ?? {}).join(', ')
     default: return a == null ? '' : t('quiz.answerGiven')
   }
 }
@@ -294,12 +295,14 @@ function retry() {
       <!-- Вопрос -->
       <template v-else-if="phase === 'question' && current">
         <span v-if="current.isCritical" class="critical">{{ t('quiz.critical') }}</span>
-        <LessonBlocks :blocks="current.stem" :blocks-state="{}" readonly />
+        <!-- cloze (докс/33 D-015): текст із пропусками показує сам QuestionInput -->
+        <LessonBlocks v-if="current.kind !== 'cloze'" :blocks="current.stem" :blocks-state="{}" readonly />
         <p class="kind-line">{{ t(`quiz.kindHint.${current.kind}`) }} · {{ t('quiz.pointsN', { n: current.points }) }}</p>
         <QuestionInput
           v-model="answers[current.id]"
           :kind="current.kind"
           :options="current.options"
+          :stem="current.stem"
         />
         <div v-if="current.kind === 'file' || (current.kind === 'free' && current.attachFiles)" class="attach">
           <label class="ghost attach-btn">

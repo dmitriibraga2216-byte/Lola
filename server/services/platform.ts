@@ -65,7 +65,7 @@ export async function validatePlatformSession(token: string): Promise<PlatformAu
 export async function listTenants() {
   const db = platformDb()
   return db.execute(sql`
-    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at,
+    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at, t.custom_domain,
            coalesce(tl.users, p.max_users) as users_limit,
            coalesce(tl.storage_gb, p.max_storage_gb) as storage_gb_limit,
            coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
@@ -164,24 +164,39 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
   })
 }
 
-/** Тариф, триал, название, settings. Статус меняется только suspend/resume/purge в `platformTenants` (docs/25 §8). */
-export async function updateTenant(id: string, input: { plan?: string, trialEndsAt?: string | null, name?: string, settings?: Record<string, unknown> }, actor: PlatformAuth) {
+export type TenantUpdateResult = { ok: true, tenant: typeof tenants.$inferSelect } | { ok: false, code: 'not_found' | 'domain_taken' }
+
+/**
+ * Тариф, триал, название, settings, собственный домен (докс/33 D-059). Статус меняется только
+ * suspend/resume/purge в `platformTenants` (docs/25 §8). Проверка владения доменом (CNAME,
+ * сертификат) — вручную оператором вне кода, см. `27` — код только хранит и резолвит значение.
+ */
+export async function updateTenant(id: string, input: { plan?: string, trialEndsAt?: string | null, name?: string, settings?: Record<string, unknown>, customDomain?: string | null }, actor: PlatformAuth): Promise<TenantUpdateResult> {
   const db = platformDb()
   const [before] = await db.select().from(tenants).where(eq(tenants.id, id))
-  if (!before) return null
+  if (!before) return { ok: false, code: 'not_found' }
+  if (input.customDomain) {
+    const [taken] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.customDomain, input.customDomain))
+    if (taken && taken.id !== id) return { ok: false, code: 'domain_taken' }
+  }
   const [after] = await db.update(tenants).set({
     ...(input.plan !== undefined ? { plan: input.plan } : {}),
     ...(input.trialEndsAt !== undefined ? { trialEndsAt: input.trialEndsAt ? new Date(input.trialEndsAt) : null } : {}),
     ...(input.name !== undefined ? { name: input.name } : {}),
     ...(input.settings !== undefined ? { settings: { ...(before.settings as object), ...input.settings } } : {}),
+    ...(input.customDomain !== undefined ? { customDomain: input.customDomain } : {}),
     updatedAt: new Date(),
   }).where(eq(tenants.id, id)).returning()
   await db.insert(schema.auditLog).values({ tenantId: id, actorId: null, action: 'tenant.update', entity: 'tenant', entityId: id, before: { status: before.status, plan: before.plan }, after: { ...input, by: actor.email } })
   const { recordPlatformAudit } = await import('./platformTenants')
-  await recordPlatformAudit(actor, { action: 'tenant.update', tenantId: id, entity: 'tenant', entityId: id, before: { plan: before.plan, name: before.name, trialEndsAt: before.trialEndsAt }, after: input })
+  await recordPlatformAudit(actor, { action: 'tenant.update', tenantId: id, entity: 'tenant', entityId: id, before: { plan: before.plan, name: before.name, trialEndsAt: before.trialEndsAt, customDomain: before.customDomain }, after: input })
   const { invalidateLimits } = await import('./tenantLimits')
   invalidateLimits(id)
-  return after!
+  if (input.customDomain !== undefined) {
+    const { invalidateTenant } = await import('./tenantResolve')
+    invalidateTenant(id) // сбрасывает и кеш резолва по домену (докс/33 D-059)
+  }
+  return { ok: true, tenant: after! }
 }
 
 export async function listPlans() {

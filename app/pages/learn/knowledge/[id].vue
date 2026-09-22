@@ -6,7 +6,8 @@ const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 const id = useRoute().params.id as string
-interface A { id: string, title: string, summary: string | null, body: ContentBlock[], tags: string[], updatedAt: string, helpfulCount: number, notHelpfulCount: number, myFeedback: boolean | null, related: { id: string, title: string, slug: string }[], relatedCourseItems: { id: string, title: string }[], attachments: { mediaId: string, name: string }[], ownerName: string | null, reviewAt: string | null, reviewConfirmedAt: string | null, needsReview: boolean }
+interface Rating { count: number, average: number | null, myValue: number | null }
+interface A { id: string, title: string, summary: string | null, body: ContentBlock[], tags: string[], updatedAt: string, helpfulCount: number, notHelpfulCount: number, myFeedback: boolean | null, related: { id: string, title: string, slug: string }[], relatedCourseItems: { id: string, title: string }[], attachments: { mediaId: string, name: string }[], ownerName: string | null, reviewAt: string | null, reviewConfirmedAt: string | null, needsReview: boolean, rating: Rating }
 const article = ref<A | null>(null)
 const error = ref('')
 const notice = ref('')
@@ -43,6 +44,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '�
       <li v-for="a in article.attachments" :key="a.mediaId"><a :href="`/api/v1/media/${a.mediaId}?redirect=1`" target="_blank" rel="noopener" class="link">📎 {{ a.name }}</a></li>
     </ul>
     <p class="sub">{{ article.tags.join(' · ') }}</p>
+    <ContentRating content-type="knowledge_article" :content-id="article.id" :initial="article.rating" />
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 

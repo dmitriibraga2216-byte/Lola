@@ -2,14 +2,38 @@
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
+const push = usePush()
 interface Pref { code: string, enabled: boolean, channel: string | null, isMandatory: boolean, group: 'learning' | 'assessment' | 'reminders' | 'hub' | 'other' }
 const prefs = ref<Pref[]>([])
 const error = ref('')
 const notice = ref('')
-const defaultChannel = ref<'telegram' | 'sms' | 'email'>('telegram')
+const defaultChannel = ref<'telegram' | 'sms' | 'email' | 'push'>('telegram')
 const GROUPS = ['learning', 'assessment', 'reminders', 'hub', 'other'] as const
 async function load() { try { prefs.value = await api('/notifications/prefs') } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)
+
+// Push (докс/33 D-051): підписка цього браузера — окремо від переліку кодів вище
+const pushSupported = push.isSupported()
+const pushSubscribed = ref(false)
+const pushBusy = ref(false)
+onMounted(async () => {
+  if (!pushSupported) return
+  pushSubscribed.value = !!(await push.currentSubscription())
+})
+async function togglePush() {
+  error.value = ''
+  pushBusy.value = true
+  try {
+    if (pushSubscribed.value) { await push.unsubscribe(); pushSubscribed.value = false }
+    else {
+      const r = await push.subscribe()
+      if (!r.ok) { error.value = r.error; return }
+      pushSubscribed.value = true
+    }
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { pushBusy.value = false }
+}
 async function toggle(p: Pref) {
   error.value = ''
   try { await api('/notifications/prefs', { method: 'PATCH', body: { code: p.code, enabled: !p.enabled } }); p.enabled = !p.enabled }
@@ -41,9 +65,17 @@ const byGroup = (g: string) => prefs.value.filter(p => p.group === g)
     <section class="card">
       <h2>{{ t('notif.defaultChannel') }}</h2>
       <div class="row">
-        <select v-model="defaultChannel" class="field"><option value="telegram">Telegram</option><option value="sms">SMS</option><option value="email">E-mail</option></select>
+        <select v-model="defaultChannel" class="field"><option value="telegram">Telegram</option><option value="sms">SMS</option><option value="email">E-mail</option><option value="push">{{ t('notif.push.title') }}</option></select>
         <button class="chip" @click="setChannelAll">{{ t('common.save') }}</button>
         <button class="chip" @click="test">{{ t('notif.test') }}</button>
+      </div>
+    </section>
+    <section v-if="pushSupported" class="card">
+      <h2>{{ t('notif.push.title') }}</h2>
+      <p class="sub">{{ t('notif.push.hint') }}</p>
+      <div class="row">
+        <button class="chip" :disabled="pushBusy" @click="togglePush">{{ pushSubscribed ? t('notif.push.disable') : t('notif.push.enable') }}</button>
+        <span v-if="pushSubscribed" class="sub">✓ {{ t('notif.push.enabled') }}</span>
       </div>
     </section>
   </div>

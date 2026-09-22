@@ -248,6 +248,7 @@
 | GET | `/knowledge/categories/:id/resources` | ресурсы категории (клик по дереву) — те же правила доступа, что и в поиске, без текста запроса |
 | CRUD | `/access-groups` | группы доступа к ресурсам (`?appliesTo=knowledge`); `GET/PATCH /settings/knowledge` — тумблер «Використовувати обмеження доступу» |
 | POST | `/knowledge/:id/bookmark` | закладка-переключатель, тело `{contentType: resource\|article\|news\|notice}`; `GET /knowledge/bookmarks` — «Мої закладки» |
+| PUT/DELETE | `/content-ratings/:contentId` | оцінка читача 1–5 (докс/33 D-042): `PUT {contentType, value}` — upsert; `DELETE ?contentType=` — забрати свою; агрегат `{count, average, myValue}` вбудований у `GET /knowledge/:id` і `GET /knowledge/resource/:id` |
 | CRUD | `/news`, `/notices`, `/simple-notices` | лента и объявления; `GET/POST /news/categories`; `GET /notices/pending` — что показать при входе, `GET /notices/mine`; `POST /simple-notices/:id/view` |
 | POST | `/notices/:id/acknowledge` | «Ознайомлений» — подтверждение (`21` §14.5); объявление назначается через `POST /tasks {subjectType: notice}` |
 | GET | `/notices/:id/coverage` | кто подтвердил, кто нет, по точкам; `POST /notices/:id/remind` — «Нагадати тим, хто не підтвердив» |
@@ -324,6 +325,9 @@
 | POST | `/auth/impersonation/stop` | выход из режима «от имени» с плашки → `impersonation.ended` |
 | GET | `/audit` | журнал изменений |
 | GET | `/health`, `/ready`, `/metrics` | служебное — намеренно вне `/api/v1` (health-чек не должен зависеть от версии API), `server/routes/{health,ready,metrics}.get.ts`, docs/28 «Spec 04» |
+| POST | `/push/subscribe` | підписка браузера на push (докс/33 D-051, `23` §13.7): `{endpoint, keys:{p256dh,auth}}` |
+| POST | `/push/unsubscribe` | зняти підписку цього браузера: `{endpoint}` |
+| GET | `/push/status` | чи є в людини хоч одна активна підписка — `{subscribed}` |
 
 ## 4.17 Панель оператора платформы
 
@@ -333,7 +337,7 @@
 | Метод | Путь | Описание |
 | --- | --- | --- |
 | GET/POST | `/platform/tenants` | список и создание |
-| GET/PATCH | `/platform/tenants/:id` | карточка, тариф (`plan`), триал, название, settings; статус — только suspend/resume/purge |
+| GET/PATCH | `/platform/tenants/:id` | карточка, тариф (`plan`), триал, название, settings, `customDomain` (докс/33 D-059, `25` §16.1: собственный домен клиента, 409 `domain_taken` — занят другим тенантом); статус — только suspend/resume/purge |
 | POST | `/platform/tenants/:id/impersonate` | вход «от имени»: обязательна причина, 60 минут, запись в журнал безопасности тенанта |
 | GET | `/platform/metrics` | метрики платформы |
 | POST | `/platform/tenants/:id/anonymized-dump` | обезличенный слепок (`25` §16.3) |

@@ -234,7 +234,7 @@ export interface EnqueueInput {
   code: string
   payload: Record<string, unknown>
   dedupKey?: string
-  channel?: 'telegram' | 'sms' | 'email'
+  channel?: 'telegram' | 'sms' | 'email' | 'push'
   urgent?: boolean // OTP и подобное — минуя тихие часы
   refType?: string
   refId?: string
@@ -438,7 +438,7 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
               layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr) : '' },
             })
           : undefined
-        const res = await sendViaChannel(tenantId, channel as 'sms' | 'email', { userId: n.userId, text, subject, html })
+        const res = await sendViaChannel(tenantId, channel as 'sms' | 'email' | 'push', { userId: n.userId, text, subject, html })
         if (res.ok) await sent(n.id, text, channel, tpl.version)
         else if (res.skipped) await skip(n.id, res.error?.includes('limit') ? 'blocked' : 'no_channel', text)
         else await failed(n, text, res.error ?? 'channel error')
@@ -494,7 +494,7 @@ export function groupOf(code: string): 'learning' | 'assessment' | 'reminders' |
   return 'other'
 }
 
-export async function setPref(ctx: { tenantId: string, actorId: string }, input: { code: string, enabled?: boolean, channel?: 'telegram' | 'sms' | 'email' | null }): Promise<{ ok: true } | { ok: false, code: 'mandatory' | 'unknown' }> {
+export async function setPref(ctx: { tenantId: string, actorId: string }, input: { code: string, enabled?: boolean, channel?: 'telegram' | 'sms' | 'email' | 'push' | null }): Promise<{ ok: true } | { ok: false, code: 'mandatory' | 'unknown' }> {
   if (!(input.code in DEFAULT_TEMPLATES)) return { ok: false, code: 'unknown' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [t] = await tx.select({ isMandatory: notificationTemplates.isMandatory }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, 'telegram')))
@@ -519,7 +519,7 @@ export async function resend(ctx: { tenantId: string, actorId: string }, id: str
 }
 
 /** Ручная рассылка (docs/23 §5.4): аудитория из конструктора, код manual, автор в payload. */
-export async function broadcast(ctx: { tenantId: string, actorId: string }, input: { audience: unknown, text: string, channel?: 'telegram' | 'sms' | 'email' }): Promise<{ recipients: number, queued: number }> {
+export async function broadcast(ctx: { tenantId: string, actorId: string }, input: { audience: unknown, text: string, channel?: 'telegram' | 'sms' | 'email' | 'push' }): Promise<{ recipients: number, queued: number }> {
   const { resolveAudience } = await import('./audience')
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const ids = [...await resolveAudience(tx, input.audience as never)]

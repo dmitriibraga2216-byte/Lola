@@ -13,6 +13,7 @@ const rows = ref<Record<string, unknown>[]>([])
 const newName = ref('')
 const error = ref('')
 const loading = ref(false)
+const adding = ref(false)
 
 async function load() {
   loading.value = true
@@ -28,7 +29,7 @@ async function load() {
   }
 }
 
-watch(kind, load)
+watch(kind, () => { adding.value = false; load() })
 onMounted(load)
 
 async function add() {
@@ -42,6 +43,7 @@ async function add() {
     }
     await api(`/refs/${kind.value}`, { method: 'POST', body })
     newName.value = ''
+    adding.value = false
     await load()
   }
   catch (err) {
@@ -81,50 +83,61 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
       </button>
       <NuxtLink to="/admin/tags" class="tab">{{ t('refs.tags') }} →</NuxtLink>
     </div>
-    <p class="sub count">{{ t('refs.count', { n: rows.length }) }}</p>
-
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div v-if="hasScope('settings.tenant')" class="add-row">
-      <input v-model="newName" :placeholder="t('refs.newName')" @keyup.enter="add">
-      <button class="primary" :disabled="!newName.trim()" @click="add">+</button>
-    </div>
+    <!-- Мокап Dictionaries: картка довідника — назва, кількість записів, список із «Використань», «Додати» -->
+    <section class="card">
+      <h2>{{ t(`refs.${kind}`) }}</h2>
+      <p class="sub count">{{ t('refs.count', { n: rows.length }) }}</p>
 
-    <div v-if="mergeFrom" class="add-row">
-      <span>{{ t('refs.mergeInto', { from: String(mergeFrom.name) }) }}</span>
-      <select v-model="mergeInto" :aria-label="t('refs.merge')"><option value="" disabled>—</option><option v-for="r in rows.filter(x => x.id !== mergeFrom!.id)" :key="String(r.id)" :value="String(r.id)">{{ r.name }}</option></select>
-      <button class="primary" :disabled="!mergeInto" @click="merge">{{ t('refs.merge') }}</button>
-      <button class="ghost" @click="mergeFrom = null">{{ t('common.cancel') }}</button>
-    </div>
+      <div v-if="mergeFrom" class="add-row">
+        <span>{{ t('refs.mergeInto', { from: String(mergeFrom.name) }) }}</span>
+        <select v-model="mergeInto" :aria-label="t('refs.merge')"><option value="" disabled>—</option><option v-for="r in rows.filter(x => x.id !== mergeFrom!.id)" :key="String(r.id)" :value="String(r.id)">{{ r.name }}</option></select>
+        <button class="primary" :disabled="!mergeInto" @click="merge">{{ t('refs.merge') }}</button>
+        <button class="ghost" @click="mergeFrom = null">{{ t('common.cancel') }}</button>
+      </div>
 
-    <ul class="list">
-      <li v-for="row in rows" :key="String(row.id)" :class="{ off: row.isActive === false }">
-        <template v-if="editId === row.id">
-          <input v-model="editName" :aria-label="t('refs.edit')" @keyup.enter="rename(String(row.id))" @keyup.esc="editId = null">
-          <button class="primary small" @click="rename(String(row.id))">{{ t('common.save') }}</button>
-          <button class="ghost small" @click="editId = null">{{ t('common.cancel') }}</button>
-        </template>
-        <template v-else>
-          {{ row.name }}
-          <span v-if="row.isActive === false" class="sub">· {{ t('refs.inactive') }}</span>
-          <span v-if="row.levelName" class="sub">· {{ row.levelName }}</span>
-          <span v-if="row.address" class="sub">· {{ row.address }}</span>
-          <span v-if="row.peopleCount !== undefined" class="sub">· {{ t('refs.people', { n: row.peopleCount }) }}</span>
-          <span v-if="hasScope('settings.tenant')" class="row-actions">
-            <button class="ghost small" @click="editId = String(row.id); editName = String(row.name)">{{ t('refs.edit') }}</button>
-            <button v-if="hasActive" class="ghost small" @click="toggleActive(row)">{{ row.isActive === false ? t('common.activate') : t('common.deactivate') }}</button>
-            <button v-if="kind !== 'org-units'" class="ghost small" @click="mergeFrom = row; mergeInto = ''">{{ t('refs.merge') }}</button>
-            <button class="ghost small danger" @click="remove(row)">×</button>
-          </span>
-        </template>
-      </li>
-      <li v-if="!loading && rows.length === 0" class="sub">—</li>
-    </ul>
+      <ul class="list">
+        <li v-for="row in rows" :key="String(row.id)" :class="{ off: row.isActive === false }">
+          <template v-if="editId === row.id">
+            <input v-model="editName" :aria-label="t('refs.edit')" @keyup.enter="rename(String(row.id))" @keyup.esc="editId = null">
+            <button class="primary small" @click="rename(String(row.id))">{{ t('common.save') }}</button>
+            <button class="ghost small" @click="editId = null">{{ t('common.cancel') }}</button>
+          </template>
+          <template v-else>
+            <span class="name">{{ row.name }}</span>
+            <span v-if="row.isActive === false" class="sub">· {{ t('refs.inactive') }}</span>
+            <span v-if="row.levelName" class="sub">· {{ row.levelName }}</span>
+            <span v-if="row.address" class="sub">· {{ row.address }}</span>
+            <span v-if="row.peopleCount !== undefined" class="count-num">{{ row.peopleCount }}</span>
+            <span v-if="hasScope('settings.tenant')" class="row-actions">
+              <button class="ghost small" @click="editId = String(row.id); editName = String(row.name)">{{ t('refs.edit') }}</button>
+              <button v-if="hasActive" class="ghost small" @click="toggleActive(row)">{{ row.isActive === false ? t('common.activate') : t('common.deactivate') }}</button>
+              <button v-if="kind !== 'org-units'" class="ghost small" @click="mergeFrom = row; mergeInto = ''">{{ t('refs.merge') }}</button>
+              <button class="ghost small danger" @click="remove(row)">×</button>
+            </span>
+          </template>
+        </li>
+        <li v-if="!loading && rows.length === 0" class="sub">—</li>
+      </ul>
+
+      <form v-if="hasScope('settings.tenant') && adding" class="add-row" @submit.prevent="add">
+        <input v-model="newName" :placeholder="t('refs.newName')" autofocus @keyup.enter="add">
+        <button type="submit" class="primary small" :disabled="!newName.trim()">{{ t('common.save') }}</button>
+        <button type="button" class="ghost small" @click="adding = false; newName = ''">{{ t('common.cancel') }}</button>
+      </form>
+      <button v-else-if="hasScope('settings.tenant')" class="ghost add-btn" @click="adding = true">{{ t('common.add') }}</button>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.count { margin: 0 0 var(--space-2); }
+.card { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-4); max-width: 480px; }
+.card h2 { margin: 0; font-size: var(--font-size-body); font-weight: 800; }
+.count { margin: 0 0 var(--space-3); }
+.name { font-weight: 700; }
+.count-num { color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
+.add-btn { margin-top: var(--space-2); }
 a.tab { text-decoration: none; }
 h1 {
   margin: 0 0 var(--space-4);

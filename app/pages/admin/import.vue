@@ -108,6 +108,11 @@ async function openJob(id: string) {
 }
 onMounted(() => { loadHistory(); const job = useRoute().query.job; if (typeof job === 'string') openJob(job) })
 const fmt = (d: string) => new Date(d).toLocaleString('uk')
+
+// Мокап Import (docs/16 §5.4): п'ять джерел вкладками — на R1 готові CSV і API, решта R2
+const SOURCES = ['csv', 'api', 'ad', 'azureAd', 'hrm'] as const
+type Source = typeof SOURCES[number]
+const source = ref<Source>('csv')
 </script>
 
 <template>
@@ -118,6 +123,20 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk')
       <a href="/api/v1/people/import/template" download>{{ t('import.template') }}</a>
     </p>
 
+    <div class="chips source-tabs" role="tablist">
+      <button v-for="s in SOURCES" :key="s" role="tab" :aria-selected="source === s" :class="['chip', { on: source === s }]" @click="source = s">{{ t(`import.source.${s}`) }}</button>
+    </div>
+
+    <section v-if="source === 'api'" class="card">
+      <h2>{{ t('import.source.api') }}</h2>
+      <p class="sub">{{ t('import.apiHint') }}</p>
+      <NuxtLink to="/admin/settings/integrations" class="link">{{ t('admin.nav.integrations') }} →</NuxtLink>
+    </section>
+    <section v-else-if="source !== 'csv'" class="card">
+      <p class="sub">{{ t('import.sourceR2') }}</p>
+    </section>
+
+    <template v-if="source === 'csv'">
     <ol class="steps" aria-label="steps">
       <li :class="{ on: step >= 1 }">{{ t('import.step1') }}</li>
       <li :class="{ on: step >= 3 }">{{ t('import.step2') }}</li>
@@ -195,6 +214,7 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk')
       </div>
       <p v-if="rows.length > 200" class="sub">{{ t('import.truncated', { shown: 200, total: rows.length }) }}</p>
     </template>
+    </template>
 
     <section v-if="history.length" class="card history">
       <h2>{{ t('import.history') }}</h2>
@@ -217,6 +237,10 @@ const fmt = (d: string) => new Date(d).toLocaleString('uk')
 <style scoped>
 .keep { font-size: var(--font-size-body-s); color: var(--color-ink-muted); margin: var(--space-2) 0; }
 .keep .link { margin-left: var(--space-2); color: var(--color-teal-ink); }
+.source-tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
+.chip.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
+.link { color: var(--color-teal-ink); font-weight: 700; text-decoration: none; }
 h1 {
   margin: 0 0 var(--space-2);
   font-weight: 900;

@@ -224,14 +224,26 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
             <div><dt>{{ t('person.overdueCount') }}</dt><dd :class="{ coral: learningSummary.overdue > 0 }">{{ learningSummary.overdue }}</dd></div>
             <div><dt>{{ t('person.certificates') }}</dt><dd>{{ learning?.certificates.length ?? 0 }}</dd></div>
           </dl>
-          <h2 class="mt">{{ t('person.tabs.security') }}</h2>
+        </div>
+
+        <!-- Мокап PersonCard: зведення «Ролі» — підпис про автопризначення, чипи ролей, «Змінити ролі» -->
+        <div class="card summary">
+          <h2>{{ t('person.tabs.roles') }}</h2>
+          <p v-if="person.roles.some(r => r.isOrgDerived)" class="sub">{{ t('person.roleDerived') }}</p>
+          <p v-if="person.roles.length" class="tags"><span v-for="r in person.roles" :key="r.id" class="tagchip">{{ r.name }}</span></p>
+          <p v-else class="sub">—</p>
+          <button class="btn small" @click="tab = 'roles'">{{ t('person.changeRoles') }}</button>
+        </div>
+
+        <div class="card summary">
+          <h2>{{ t('person.tabs.security') }}</h2>
           <dl>
             <dt>{{ t('person.lastLogin') }}</dt><dd>{{ fmtT(person.lastSeenAt) }}</dd>
             <dt>{{ t('person.activeSessions') }}</dt><dd>{{ activeSessions }}</dd>
             <dt>Telegram</dt><dd>{{ person.telegramChatId ? t('person.telegramLinked') : '—' }}</dd>
             <dt>{{ t('person.password') }}</dt><dd>{{ person.hasPassword ? (person.mustChangePassword ? t('person.passwordMustChange') : t('person.passwordSetShort')) : t('person.passwordNone') }}</dd>
           </dl>
-          <button class="btn small" @click="tab = 'security'">{{ t('person.tabs.security') }} →</button>
+          <button class="btn small" @click="tab = 'security'">{{ t('person.resetPassword') }}</button>
         </div>
 
         <div v-if="hasScope('people.deactivate')" class="card">

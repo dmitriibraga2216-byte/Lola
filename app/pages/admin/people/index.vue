@@ -10,6 +10,7 @@ interface PersonRow {
   id: string
   fullName: string
   phone: string | null
+  email: string | null
   status: string
   tags: string[]
   cityName: string | null
@@ -38,7 +39,8 @@ const refs = reactive<{ positions: Ref[], levels: Ref[], cities: Ref[], location
 // Колонки (docs/16 §5.1): выбор сохраняется в браузере
 const ALL_COLUMNS = ['position', 'level', 'city', 'orgUnit', 'location', 'roles', 'tags', 'phone', 'status', 'registered', 'lastSeen', 'externalId'] as const
 type Col = typeof ALL_COLUMNS[number]
-const columns = ref<Col[]>(['position', 'location', 'roles', 'status', 'lastSeen'])
+// Мокап People, docs/31: Посада · Рівень · Підрозділ · Ролі · Прийнято · Активність
+const columns = ref<Col[]>(['position', 'level', 'orgUnit', 'roles', 'registered', 'lastSeen'])
 const showColumns = ref(false)
 try { const saved = localStorage.getItem('lola.people.columns'); if (saved) columns.value = JSON.parse(saved) } catch { /* без сохранения */ }
 watch(columns, (c) => { try { localStorage.setItem('lola.people.columns', JSON.stringify(c)) } catch { /* без сохранения */ } }, { deep: true })
@@ -91,6 +93,7 @@ let searchTimer: ReturnType<typeof setTimeout>
 watch(q, () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(), 300) })
 onMounted(() => {
   if (route.query.orgUnitId) filter.orgUnitId = String(route.query.orgUnitId)
+  if (route.query.locationId) filter.locationId = String(route.query.locationId)
   load()
   loadRefs()
 })
@@ -220,7 +223,8 @@ const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') :
               <NuxtLink :to="`/admin/people/${person.id}`" class="name">{{ person.fullName }}</NuxtLink>
               <span v-if="person.isHidden" class="mini">{{ t('people.hiddenBadge') }}</span>
               <span v-if="person.isBlocked" class="mini coral">{{ t('people.blockedBadge') }}</span>
-              <div v-if="!columns.includes('phone')" class="sub">{{ person.phone }}</div>
+              <!-- Мокап People: ПІБ+e-mail в одній колонці -->
+              <div class="sub">{{ person.email || person.phone || '—' }}</div>
             </td>
             <template v-for="c in columns" :key="c">
               <td v-if="c === 'position'">{{ primary(person)?.positionName || '—' }}</td>

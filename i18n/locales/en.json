@@ -1682,6 +1682,7 @@
     "attemptN": "attempt {n}",
     "overdueH": "{n}h overdue",
     "leftH": "{n}h",
+    "inQueue": "in queue",
     "history": "Submission history ({n})",
     "onReview": "Under review",
     "reviewBy": "A mentor will review by {at}",
@@ -1748,7 +1749,7 @@
   "ops": {
     "title": "Operator panel",
     "password": "Password",
-    "newTenant": "New space",
+    "newTenant": "Create tenant",
     "create": "Create",
     "created": "Space “{slug}” created. The admin signs in by phone",
     "createHint": "Creates: system roles, one location, one position, an admin. Login code arrives via SMS/Telegram once configured.",
@@ -1765,7 +1766,7 @@
     "impWarn": "Logged in the tenant's security log. A permanent banner is shown in the UI.",
     "enter": "Enter",
     "col": {
-      "tenant": "Space",
+      "tenant": "Tenant",
       "plan": "Plan",
       "trial": "Trial until",
       "users": "Active / total",
@@ -1910,7 +1911,27 @@
     "popupBlocked": "The browser blocked the sign-in window — allow pop-ups and try again",
     "err401": "Access revoked — connect the account again",
     "err403": "No API access yet (request pending or permission not enabled)",
-    "err429": "Quota exhausted — will retry next time"
+    "err429": "Quota exhausted — will retry next time",
+    "field": {
+      "host": "SMTP server domain or IP",
+      "port": "Port",
+      "login": "SMTP server login",
+      "password": "Password",
+      "from_name": "Send as",
+      "from_email": "Sender e-mail",
+      "reply_to": "Reply To",
+      "url": "URL",
+      "from": "From",
+      "bot_token": "Bot token",
+      "bot_username": "Bot username",
+      "external_bot_token": "External bot token",
+      "api_key": "API key",
+      "sender": "Sender",
+      "provider": "Provider"
+    },
+    "hint": {
+      "reply_to": "So the mail provider doesn't mark the mailing as spam"
+    }
   },
   "dev": {
     "title": "My development",
@@ -2659,6 +2680,14 @@
     "manager": "Manager"
   },
   "rb": {
+    "title": "Custom reports",
+    "hint": "In the reference LMS such reports are written by the vendor on request — the builder is ours",
+    "create": "Create report",
+    "col": {
+      "name": "Name",
+      "origin": "Origin",
+      "created": "Created"
+    },
     "saved": "Saved reports",
     "noSaved": "None yet",
     "new": "new",
@@ -3183,6 +3212,21 @@
       "global": "Global",
       "custom": "Custom"
     },
+    "scopePlural": {
+      "all": "All",
+      "global": "Global",
+      "custom": "Custom"
+    },
+    "col": {
+      "email": "E-mail",
+      "telegram": "Telegram",
+      "updated": "Updated"
+    },
+    "disabled": "Disabled",
+    "channels": "Channels",
+    "variables": "Template variables",
+    "variablesHint": "Click to insert into the text",
+    "whenToSend": "When to send",
     "bodyHint": "Text template · Telegram and SMS",
     "mjml": "MJML template (email)",
     "imageKey": "Template image",
@@ -3952,7 +3996,7 @@
     "format": "Format",
     "issued": "Issued",
     "validity": "Validity",
-    "lastIssued": "Last issued",
+    "lastIssued": "Updated",
     "published": "Published",
     "template": "template",
     "revoked": "revoked {n}",

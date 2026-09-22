@@ -137,9 +137,12 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
           <p v-if="statuses[p]!.state === 'failing'" class="fail">{{ statuses[p]!.lastError }}</p>
           <p v-else-if="statuses[p]!.state === 'connected'" class="sub">{{ statuses[p]!.accountLabel || '' }} · {{ t('integrations.lastOk', { at: fmt(statuses[p]!.lastOkAt) }) }}</p>
           <p v-else class="sub">{{ t('integrations.notConfiguredHint') }}</p>
-          <div v-for="k in statuses[p]!.keys" :key="k.key" class="row">
-            <label>{{ k.key }} <span v-if="k.set" class="teal">✓</span></label>
-            <input v-model="forms[p]![k.key]" :type="k.key.includes('key') || k.key.includes('token') || k.key.includes('url') ? 'password' : 'text'" :placeholder="k.set ? '••••••••' : ''" autocomplete="off">
+          <div v-for="k in statuses[p]!.keys" :key="k.key" class="field-row">
+            <div class="row">
+              <label>{{ t(`integrations.field.${k.key}`, k.key) }} <span v-if="k.set" class="teal">✓</span></label>
+              <input v-model="forms[p]![k.key]" :type="k.key.includes('key') || k.key.includes('token') || k.key.includes('url') ? 'password' : 'text'" :placeholder="k.set ? '••••••••' : ''" autocomplete="off">
+            </div>
+            <p v-if="k.key === 'reply_to'" class="sub hint">{{ t('integrations.hint.reply_to') }}</p>
           </div>
           <div class="actions">
             <button class="primary" @click="saveProvider(p)">{{ t('integrations.connect') }}</button>
@@ -259,6 +262,8 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .row { display: flex; gap: var(--space-2); align-items: center; }
 .row label { min-width: 110px; font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-family: monospace; }
+.field-row { display: grid; gap: var(--space-1); }
+.field-row .hint { margin: 0 0 0 118px; }
 .row.wrap { flex-wrap: wrap; }
 .scopes { max-height: 160px; overflow: auto; }
 .grow { flex: 1; }

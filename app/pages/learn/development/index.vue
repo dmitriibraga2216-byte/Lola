@@ -5,7 +5,7 @@ const { api } = useApi()
 
 interface GapItem { competencyId: string, name: string, requiredLevel: number, currentLevel: number, currentLevelLabel: string | null, maxLevel: number, gap: number, isCritical: boolean, source: string | null, validUntil: string | null, expiringSoon: boolean, whatToLearn: { id: string, title: string }[] }
 interface Goal { id: string, title: string, kind: string, dueAt: string, statusCode: string, statusName: string, statusColor: string, isFinal: boolean, progressPct: number, approvedAt: string | null, returnComment: string | null }
-interface Plan { id: string, periodFrom: string, periodTo: string, status: string, summary: string | null }
+interface Plan { id: string, periodFrom: string, periodTo: string, status: string, summary: string | null, mentorId: string | null, mentorName: string | null }
 interface Me {
   gap: { position: { positionName: string } | null, profile: { id: string } | null, items: GapItem[], displayAs: 'label' | 'value' }
   plan: Plan | null, goals: Goal[]
@@ -112,7 +112,7 @@ function levelText(c: GapItem, displayAs: 'label' | 'value', level: number) {
       <div v-else class="goal-card">
         <div class="goal-label">{{ t('dev.planGoal') }}</div>
         <div class="goal-value">{{ data.plan.summary || t('dev.plan') }}</div>
-        <div class="sub">{{ fmtPeriod(data.plan.periodFrom) }} — {{ fmtPeriod(data.plan.periodTo) }}</div>
+        <div class="sub">{{ fmtPeriod(data.plan.periodFrom) }} — {{ fmtPeriod(data.plan.periodTo) }}<template v-if="data.plan.mentorName"> · {{ t('dev.planMentor', { name: data.plan.mentorName }) }}</template></div>
         <div class="row status-row">
           <span class="badge muted">{{ t(`dev.planStatus.${data.plan.status}`) }}</span>
         </div>

@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
-import { attempts, complexTestAttempts, complexTests, quizzes } from '../db/schema'
+import { attempts, complexTestAttempts, complexTests, quizzes, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { startAttempt } from './attempts'
@@ -11,9 +11,14 @@ interface Ctx { tenantId: string, actorId: string }
 export interface Part { quizId: string, weight: number, isRequired?: boolean, minScore?: number | null }
 export interface PartState { quizId: string, attemptId: string | null, score: number | null, status: 'pending' | 'in_progress' | 'passed' | 'failed' | 'review' }
 
+/** Список комплексних тестів (docs/31 `ContentComplexTests`): «Автор» — join на users по created_by (screens-7). */
 export async function listComplexTests(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const rows = await tx.select().from(complexTests).orderBy(desc(complexTests.createdAt))
+    const rows = await tx.select({
+      id: complexTests.id, createdAt: complexTests.createdAt, updatedAt: complexTests.updatedAt, tenantId: complexTests.tenantId,
+      title: complexTests.title, parts: complexTests.parts, sequential: complexTests.sequential, showPartsResult: complexTests.showPartsResult,
+      isActive: complexTests.isActive, createdBy: complexTests.createdBy, authorName: users.fullName,
+    }).from(complexTests).leftJoin(users, eq(users.id, complexTests.createdBy)).orderBy(desc(complexTests.createdAt))
     const quizIds = [...new Set(rows.flatMap(r => (r.parts as Part[]).map(p => p.quizId)))]
     const qs = quizIds.length ? await tx.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(inArray(quizzes.id, quizIds)) : []
     const qn = new Map(qs.map(q => [q.id, q.title]))

@@ -82,6 +82,24 @@ describe('этап 7: компетенции, профиль должности,
     expect(await dev.transitionPlan(asBarista(), plan.id, 'submit')).toMatchObject({ ok: false })
     expect((await dev.transitionPlan(asAdmin(), plan.id, 'approve')).ok).toBe(true)
     expect((await dev.myPlan(asBarista(), baristaId)).plan?.status).toBe('active')
+
+    // screens-7 (docs/19 §3.4 [рішення], docs/31 `DevelopmentPlanMobile`): наставник плану — окремо від owner_id
+    expect((await dev.myPlan(asBarista(), baristaId)).plan?.mentorName).toBeNull()
+    expect(await dev.setPlanMentor(asAdmin(), plan.id, adminId)).toMatchObject({ mentorId: adminId })
+    const withMentor = await dev.myPlan(asBarista(), baristaId)
+    expect(withMentor.plan?.mentorId).toBe(adminId)
+    expect(withMentor.plan?.mentorName).toBeTruthy()
+    expect(await dev.setPlanMentor(asAdmin(), plan.id, null)).toMatchObject({ mentorId: null })
+    expect(await dev.setPlanMentor(asAdmin(), '00000000-0000-0000-0000-000000000000', adminId)).toBeNull()
+  })
+
+  it('screens-7 (docs/31 `Competencies`): /competencies (listCompetencies) віддає createdAt', async () => {
+    const before = new Date(Date.now() - 1000)
+    const c = await dev.createCompetency(asAdmin(), { name: `Створено ${Date.now()}`, kind: 'hard', levels })
+    compIds.push(c.id)
+    const row = (await dev.listCompetencies(asAdmin())).find(x => x.id === c.id)
+    expect(row?.createdAt).toBeInstanceOf(Date)
+    expect((row!.createdAt as Date).getTime()).toBeGreaterThan(before.getTime())
   })
 
   it('руководитель согласует цель и видит протокол; достигнутая цель поднимает уровень компетенции', async () => {
@@ -353,6 +371,14 @@ describe('docs/19 часть 2: матрица, курс → компетенц�
       expect(e).toBeDefined()
       const cov = await profileCoverage(asAdmin(), profile!.id as string)
       expect(cov!.people).toBeGreaterThanOrEqual(1)
+      // screens-7 (docs/31 `PositionProfile`): «Відповідність профілю N% — ПІБ» по кожній людині
+      const own = cov!.perPerson.find(p => p.userId === baristaId)
+      expect(own).toBeDefined()
+      expect(own!.fullName).toBe('Бариста Тестовий')
+      expect(own!.percent).toBeGreaterThanOrEqual(0)
+      expect(own!.percent).toBeLessThanOrEqual(100)
+      expect(own!.fit).toBe(cov!.fitUserIds.includes(baristaId))
+      expect(cov!.perPerson).toEqual([...cov!.perPerson].sort((a, b) => b.percent - a.percent))
     }
     finally {
       await admin`delete from enrollments where subject_id = ${course!.id}`

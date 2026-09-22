@@ -373,4 +373,13 @@ describe('практикум: сдача → захват → доработка
     expect(row!.reviewer_id).toBeNull()
     await admin`update locations set manager_id = null where id = ${loc!.id}`
   })
+
+  it('screens-7 (docs/31 `ContentWorkshops`): listWorkshops віддає authorNames через join на users', async () => {
+    const w = await createWorkshop(ctx(), { title: `Автор ${Date.now()}`, description: text('<p>x</p>'), submissionKinds: ['text'], criteria: [{ text: 'к' }], reviewerRule: 'any_mentor', status: 'published' })
+    workshopIds.push(w.id)
+    const { listWorkshops } = await import('../../server/services/workshops')
+    const [adminName] = await admin`select full_name from users where id = ${adminId}`
+    const row = (await listWorkshops(ctx())).find(x => x.id === w.id)
+    expect(row?.authorNames).toEqual([adminName!.full_name])
+  })
 })

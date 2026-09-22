@@ -64,6 +64,8 @@ export async function listCompetencies(ctx: Ctx) {
     return tx.select({
       id: competencies.id, name: competencies.name, kind: competencies.kind, categoryId: competencies.categoryId, description: competencies.description,
       levels: competencies.levels, linkedCourses: competencies.linkedCourses, isActive: competencies.isActive,
+      // Колонка «Створено» (docs/31 `Competencies`, screens-7)
+      createdAt: competencies.createdAt,
       usedIn: sql<number>`(select count(*)::int from ${positionProfiles} p where p.competency_requirements @> jsonb_build_array(jsonb_build_object('competencyId', ${competencies.id}::text)))`,
     }).from(competencies).orderBy(asc(competencies.name))
   })
@@ -236,7 +238,16 @@ async function managerOf(tx: TenantTx, userId: string): Promise<string | null> {
 
 export async function myPlan(ctx: Ctx, userId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [plan] = await tx.select().from(developmentPlans).where(and(eq(developmentPlans.userId, userId), sql`${developmentPlans.status} <> 'closed'`)).orderBy(desc(developmentPlans.createdAt)).limit(1)
+    // «наставник» плану (docs/19 §3.4, screens-7) — поруч з періодом на картці «Ціль плану»
+    const [plan] = await tx.select({
+      id: developmentPlans.id, tenantId: developmentPlans.tenantId, userId: developmentPlans.userId,
+      periodFrom: developmentPlans.periodFrom, periodTo: developmentPlans.periodTo, ownerId: developmentPlans.ownerId,
+      mentorId: developmentPlans.mentorId, mentorName: users.fullName,
+      status: developmentPlans.status, summary: developmentPlans.summary, createdBy: developmentPlans.createdBy,
+      approvedBy: developmentPlans.approvedBy, approvedAt: developmentPlans.approvedAt, closedAt: developmentPlans.closedAt,
+      resultComment: developmentPlans.resultComment, createdAt: developmentPlans.createdAt, updatedAt: developmentPlans.updatedAt,
+    }).from(developmentPlans).leftJoin(users, eq(users.id, developmentPlans.mentorId))
+      .where(and(eq(developmentPlans.userId, userId), sql`${developmentPlans.status} <> 'closed'`)).orderBy(desc(developmentPlans.createdAt)).limit(1)
     const goals = await tx.select({
       id: developmentGoals.id, title: developmentGoals.title, kind: developmentGoals.kind, dueAt: developmentGoals.dueAt, statusCode: developmentGoals.statusCode,
       progressPct: developmentGoals.progressPct, competencyId: developmentGoals.competencyId, targetLevel: developmentGoals.targetLevel, planId: developmentGoals.planId, approvedAt: developmentGoals.approvedAt, returnComment: developmentGoals.returnComment,
@@ -248,10 +259,21 @@ export async function myPlan(ctx: Ctx, userId: string) {
   })
 }
 
-export async function createPlan(ctx: Ctx, input: { userId: string, periodFrom: string, periodTo: string, summary?: string }) {
+export async function createPlan(ctx: Ctx, input: { userId: string, periodFrom: string, periodTo: string, summary?: string, mentorId?: string | null }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const ownerId = await managerOf(tx, input.userId)
-    const [p] = await tx.insert(developmentPlans).values({ tenantId: ctx.tenantId, userId: input.userId, periodFrom: input.periodFrom, periodTo: input.periodTo, ownerId, summary: input.summary ?? null, createdBy: ctx.actorId }).returning()
+    const [p] = await tx.insert(developmentPlans).values({ tenantId: ctx.tenantId, userId: input.userId, periodFrom: input.periodFrom, periodTo: input.periodTo, ownerId, mentorId: input.mentorId ?? null, summary: input.summary ?? null, createdBy: ctx.actorId }).returning()
+    return p!
+  })
+}
+
+/** Наставник плану (docs/19 §3.4, screens-7) — призначає керівник, окремо від затвердження плану. */
+export async function setPlanMentor(ctx: Ctx, planId: string, mentorId: string | null) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [before] = await tx.select({ mentorId: developmentPlans.mentorId }).from(developmentPlans).where(eq(developmentPlans.id, planId))
+    if (!before) return null
+    const [p] = await tx.update(developmentPlans).set({ mentorId, updatedAt: new Date() }).where(eq(developmentPlans.id, planId)).returning()
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'development_plan.mentor', entity: 'development_plan', entityId: planId, before: { mentorId: before.mentorId }, after: { mentorId } })
     return p!
   })
 }

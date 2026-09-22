@@ -2,15 +2,16 @@
 /**
  * Компетенції за мокапом Competencies: зліва фільтр «Група» (по категоріях), справа таблиця
  * «Бібліотека компетенцій» — НАЗВА (категорія) · ІНДИКАТОРИ (компетенції в ній) · ГРУПА (тип) ·
- * ІНДИКАТОРІВ. Фільтр «Мітки» і колонка «СТВОРЕНО» у мокапі лишаються 🟡 — тегів у компетенцій
- * і поля дати створення в `/competencies` немає (docs/31, screens-5); нижче — керування
- * окремими компетенціями (додати/редагувати/деактивувати), яке в мокапі не показане.
+ * ІНДИКАТОРІВ · СТВОРЕНО (screens-7: `/competencies` тепер віддає `createdAt`, у групі — дата
+ * останньої доданої компетенції). Фільтр «Мітки» лишається 🟡 — тегів у компетенцій немає
+ * (не вигадуємо новий scope, CLAUDE.md п.13); нижче — керування окремими компетенціями
+ * (додати/редагувати/деактивувати), яке в мокапі не показане.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'competency.manage' })
 const { t } = useI18n()
 const { api } = useApi()
 interface Level { level: number, title: string, behavior: string }
-interface C { id: string, name: string, kind: string, description: string | null, levels: Level[], linkedCourses: string[], isActive: boolean, categoryId: string | null }
+interface C { id: string, name: string, kind: string, description: string | null, levels: Level[], linkedCourses: string[], isActive: boolean, categoryId: string | null, createdAt: string }
 interface Cat { id: string, name: string, sort: number }
 const items = ref<C[]>([])
 const courses = ref<{ id: string, title: string }[]>([])
@@ -32,18 +33,21 @@ function edit(c: C) { editing.value = c.id; Object.assign(form, { name: c.name, 
 function startNew() { reset(); formSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 const visible = computed(() => catFilter.value ? items.value.filter(i => i.categoryId === catFilter.value) : items.value)
 const catName = (id: string | null) => categories.value.find(c => c.id === id)?.name ?? ''
+// «Створено» для групи (мокап Competencies) — дата останньої доданої до неї компетенції
+const lastCreated = (members: C[]) => members.reduce((max, m) => m.createdAt > max ? m.createdAt : max, members[0]?.createdAt ?? '')
+const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('uk') : '—'
 /** Библиотека для мокапа: одна строка на групу (категорію) — назва, вкладені компетенції, тип, кількість. */
 const groupRows = computed(() => {
   const groups = catFilter.value ? categories.value.filter(c => c.id === catFilter.value) : categories.value
   const rows = groups.map((cat) => {
     const members = items.value.filter(i => i.categoryId === cat.id)
     const kinds = new Set(members.map(m => m.kind))
-    return { id: cat.id, name: cat.name, indicators: members.map(m => m.name).join(', '), kind: kinds.size === 1 ? [...kinds][0] : null, count: members.length }
+    return { id: cat.id, name: cat.name, indicators: members.map(m => m.name).join(', '), kind: kinds.size === 1 ? [...kinds][0] : null, count: members.length, createdAt: lastCreated(members) }
   })
   const loose = items.value.filter(i => !i.categoryId)
   if (loose.length && !catFilter.value) {
     const kinds = new Set(loose.map(m => m.kind))
-    rows.push({ id: '', name: t('dev.noCategory'), indicators: loose.map(m => m.name).join(', '), kind: kinds.size === 1 ? [...kinds][0] : null, count: loose.length })
+    rows.push({ id: '', name: t('dev.noCategory'), indicators: loose.map(m => m.name).join(', '), kind: kinds.size === 1 ? [...kinds][0] : null, count: loose.length, createdAt: lastCreated(loose) })
   }
   return rows.filter(r => r.count > 0)
 })
@@ -75,15 +79,16 @@ async function toggle(c: C) { await api(`/competencies/${c.id}`, { method: 'PATC
       </label>
     </div>
     <table class="table lib">
-      <thead><tr><th>{{ t('dev.colName') }}</th><th>{{ t('dev.colIndicators') }}</th><th>{{ t('dev.colGroup') }}</th><th class="num">{{ t('dev.colIndicatorsCount') }}</th></tr></thead>
+      <thead><tr><th>{{ t('dev.colName') }}</th><th>{{ t('dev.colIndicators') }}</th><th>{{ t('dev.colGroup') }}</th><th class="num">{{ t('dev.colIndicatorsCount') }}</th><th>{{ t('dev.colCreated') }}</th></tr></thead>
       <tbody>
         <tr v-for="g in groupRows" :key="g.id || 'none'">
           <td><b>{{ g.name }}</b></td>
           <td class="sub">{{ g.indicators || t('assess.noCriteria') }}</td>
           <td class="sub">{{ g.kind ? t(`dev.ckind.${g.kind}`) : '—' }}</td>
           <td class="num">{{ g.count }}</td>
+          <td class="sub">{{ fmtDate(g.createdAt) }}</td>
         </tr>
-        <tr v-if="!groupRows.length"><td colspan="4" class="sub">{{ t('dev.noCompetencies') }}</td></tr>
+        <tr v-if="!groupRows.length"><td colspan="5" class="sub">{{ t('dev.noCompetencies') }}</td></tr>
       </tbody>
     </table>
 

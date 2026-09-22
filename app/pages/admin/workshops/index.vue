@@ -5,16 +5,15 @@ import type { ContentBlock } from '../../../../shared/schemas/content'
  * Практикуми за мокапом ContentWorkshops (docs/31): шапка «Практикуми» з «Додати», таблиця
  * НАЗВА · АВТОР · КРИТЕРІЇВ · МІТКИ · ДАТА ЗМІНИ · ОПУБЛІКОВАНО. «Імпортувати» на цьому екрані
  * не додаємо — те саме рішення заказчика Q-03 (docs/34): формат файлу не описаний.
- * Залишок (verstka-only, не хватає даних): «Автор» і «Мітки» показані як «—» — сервіс
- * `listWorkshops` (server/services/workshops.ts) віддає лише `authorIds` (без імені), а колонки
- * `tags` у таблиці `workshops` немає зовсім (server/db/schema/knowledge.ts) — потрібні join на
- * users і міграція зі стовпцем tags, це серверна робота, не зроблена в цьому PR.
+ * «Автор» (screens-7) — `listWorkshops` тепер віддає `authorNames` (join на users).
+ * Залишок: «Мітки» лишаються «—» — у `workshops` немає стовпця tags і жодного відповідного
+ * scope у TAG_SCOPES (shared/enums.ts), вигадувати новий scope мовчки не можна (CLAUDE.md п.13).
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'course.view' })
 const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
-interface W { id: string, title: string, status: string, submissionKinds: string[], criteriaCount: number, slaHours: number, pending: number, firstPassPct: number | null, updatedAt: string }
+interface W { id: string, title: string, status: string, submissionKinds: string[], criteriaCount: number, slaHours: number, pending: number, firstPassPct: number | null, updatedAt: string, authorNames: string[] }
 const items = ref<W[]>([])
 const error = ref('')
 const notice = ref('')
@@ -57,7 +56,7 @@ async function create() {
               <b>{{ w.title }}</b>
               <span class="sub">{{ w.submissionKinds.join(', ') }} · {{ t('workshop.col.pending') }}: {{ w.pending }}<template v-if="w.firstPassPct !== null"> · {{ t('workshop.col.firstPass') }} {{ w.firstPassPct }}%</template></span>
             </td>
-            <td class="muted">—</td>
+            <td class="muted">{{ w.authorNames.length ? w.authorNames.join(', ') : '—' }}</td>
             <td>{{ w.criteriaCount }}</td>
             <td class="muted">—</td>
             <td class="muted">{{ new Date(w.updatedAt).toLocaleDateString('uk') }}</td>

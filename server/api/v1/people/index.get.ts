@@ -13,5 +13,5 @@ export default defineEventHandler(async (event) => {
     { tenantId: access.tenantId, actorId: access.userId },
     parsed.data,
   )
-  return { data: result.items, meta: { cursor: result.cursor, limit: parsed.data.limit } }
+  return { data: result.items, meta: { cursor: result.cursor, limit: parsed.data.limit, counts: result.counts } }
 })

@@ -365,6 +365,13 @@
       "when": 1790019923875,
       "tag": "0051_debts6_pass_events_profile_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1790120023875,
+      "tag": "0052_screens7_development_mentor",
+      "breakpoints": true
     }
   ]
 }

@@ -204,4 +204,12 @@ describe('этап 9: комплексные тесты (docs/18 §13.6)', () =>
     expect(fin!.status).toBe('failed')
     expect((await ct.complexIntro(learner, c!.id))!.attemptsUsed).toBe(1)
   })
+
+  it('screens-7 (docs/31 `ContentComplexTests`): listComplexTests віддає authorName через join на users по created_by', async () => {
+    const c = await ct.upsertComplexTest(ctx(), { title: `Автор-комплекс ${Date.now()}`, parts: [] })
+    complexIds.push(c!.id)
+    const [adminName] = await admin`select full_name from users where id = ${adminId}`
+    const row = (await ct.listComplexTests(ctx())).find(x => x.id === c!.id)
+    expect(row?.authorName).toBe(adminName!.full_name)
+  })
 })

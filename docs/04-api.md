@@ -232,7 +232,7 @@
 | CRUD | `/competencies`, `/competencies/:id/indicators`, `/competency-profiles` | словарь и профили должностей |
 | GET | `/people/:id/competencies` | уровни с источником и датой (`19` Г-19.2) |
 | POST | `/people/:id/competencies/:cid` | ручная установка с причиной |
-| CRUD | `/development-plans` | планы развития; заведены только создание и переход по статусу (старый путь: `/development/plans`, до конца R1) — списка, карточки и удаления нет вовсе, долг (docs/28 «Spec 04») |
+| CRUD | `/development-plans` | планы развития; заведены создание, переход по статусу и назначение наставника плана (`POST /:id/mentor`, `mentor_id`, docs/19 §3.4, screens-7) (старый путь: `/development/plans`, до конца R1) — списка, карточки и удаления нет вовсе, долг (docs/28 «Spec 04») |
 | CRUD | `/goals`, `/goal-statuses` | цели и справочник их статусов |
 | CRUD | `/requests` | заявки: `kind=external_learning\|career`, маршрут согласования (`19` Г-19.1) |
 | POST | `/assessments/:id/cycles` | цикл оценки: состав оценщиков по ролям; в коде `POST /assessment/cycles` — `raterKinds[]` из шести ролей `02` и `raterRoles[{kind, weight 0–9.99, isAnonymous}]` поверх умолчаний Г-20.1 (docs/33 D-036) |

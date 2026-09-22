@@ -16,37 +16,44 @@ async function decide(kind: 'external' | 'career', id: string, decision: 'approv
 }
 
 // docs/33 D-033, мокап ExternalRequests: повна таблиця всіх заявок (не тільки «на розгляд») з фільтрами
-interface TExt { id: string, title: string, cost: string | null, currency: string, status: string, fullName: string, createdAt: string, responsible: string | null, kind: 'external' }
-interface TCar { id: string, targetPosition: string, status: string, fullName: string, createdAt: string, responsible: string | null, kind: 'career' }
+interface TExt { id: string, title: string, cost: string | null, currency: string, status: string, fullName: string, createdAt: string, responsible: string | null, kind: 'external', position: string | null, location: string | null }
+interface TCar { id: string, targetPosition: string, status: string, fullName: string, createdAt: string, responsible: string | null, kind: 'career', position: string | null, location: string | null }
 const view = ref<'queue' | 'table'>('queue')
 const table = ref<{ external: TExt[], career: TCar[] } | null>(null)
 const tableError = ref('')
+// Мокап ExternalRequests: чипи «Зовнішнє навчання · N» / «Кар'єрний розвиток · N» з лічильниками —
+// кількість рахуємо з обох масивів одразу, тому «kind» тепер фільтр на клієнті, а не запит до сервера.
 const filters = reactive({ kind: '' as '' | 'external' | 'career', status: '', from: '', to: '' })
 async function loadTable() {
   tableError.value = ''
   try {
     table.value = await api('/development/requests', {
-      query: { ...(filters.kind ? { kind: filters.kind } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.from ? { from: filters.from } : {}), ...(filters.to ? { to: filters.to } : {}) },
+      query: { ...(filters.status ? { status: filters.status } : {}), ...(filters.from ? { from: filters.from } : {}), ...(filters.to ? { to: filters.to } : {}) },
     })
   }
   catch (err) { tableError.value = apiErrorOf(err).message }
 }
 watch(view, v => { if (v === 'table' && !table.value) loadTable() })
-watch(filters, () => { if (view.value === 'table') loadTable() }, { deep: true })
+watch(() => [filters.status, filters.from, filters.to], () => { if (view.value === 'table') loadTable() })
 const STATUSES = ['new', 'manager_approved', 'hr_approved', 'approved', 'rejected', 'completed'] as const
-interface Row { id: string, kind: 'external' | 'career', title: string, fullName: string, cost: string | null, currency: string, responsible: string | null, status: string, createdAt: string }
-const rows = computed<Row[]>(() => {
+interface Row { id: string, kind: 'external' | 'career', title: string, fullName: string, cost: string | null, currency: string, responsible: string | null, status: string, createdAt: string, position: string | null, location: string | null }
+const allRows = computed<Row[]>(() => {
   if (!table.value) return []
-  const ext = table.value.external.map(r => ({ id: r.id, kind: 'external' as const, title: r.title, fullName: r.fullName, cost: r.cost, currency: r.currency, responsible: r.responsible, status: r.status, createdAt: r.createdAt }))
-  const car = table.value.career.map(r => ({ id: r.id, kind: 'career' as const, title: r.targetPosition, fullName: r.fullName, cost: null, currency: '', responsible: r.responsible, status: r.status, createdAt: r.createdAt }))
+  const ext = table.value.external.map(r => ({ id: r.id, kind: 'external' as const, title: r.title, fullName: r.fullName, cost: r.cost, currency: r.currency, responsible: r.responsible, status: r.status, createdAt: r.createdAt, position: r.position, location: r.location }))
+  const car = table.value.career.map(r => ({ id: r.id, kind: 'career' as const, title: r.targetPosition, fullName: r.fullName, cost: null, currency: '', responsible: r.responsible, status: r.status, createdAt: r.createdAt, position: r.position, location: r.location }))
   return [...ext, ...car].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
 })
+const rows = computed<Row[]>(() => filters.kind ? allRows.value.filter(r => r.kind === filters.kind) : allRows.value)
 const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
+const kindCount = (k: 'external' | 'career') => allRows.value.filter(r => r.kind === k).length
 </script>
 <template>
   <div>
     <div class="head">
-      <h1>{{ t('admin.nav.requests') }}</h1>
+      <div>
+        <div class="eyebrow">{{ t('dev.short') }}</div>
+        <h1>{{ t('admin.nav.requests') }}</h1>
+      </div>
       <div class="tabs">
         <button type="button" :class="['tab', { on: view === 'queue' }]" @click="view = 'queue'">{{ t('dev.reqViewQueue') }}</button>
         <button type="button" :class="['tab', { on: view === 'table' }]" @click="view = 'table'">{{ t('dev.reqViewTable') }}</button>
@@ -76,12 +83,12 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
 
     <template v-else>
       <p v-if="tableError" class="error">{{ tableError }}</p>
+      <p class="route-hint">{{ t('dev.reqRouteHint') }}</p>
+      <div class="chips">
+        <button type="button" :class="['kind-chip', { on: filters.kind === 'external' }]" @click="filters.kind = filters.kind === 'external' ? '' : 'external'">{{ t('dev.external') }} · {{ kindCount('external') }}</button>
+        <button type="button" :class="['kind-chip', { on: filters.kind === 'career' }]" @click="filters.kind = filters.kind === 'career' ? '' : 'career'">{{ t('dev.career') }} · {{ kindCount('career') }}</button>
+      </div>
       <div class="filters">
-        <select v-model="filters.kind" class="field" :aria-label="t('dev.reqAllKinds')">
-          <option value="">{{ t('dev.reqAllKinds') }}</option>
-          <option value="external">{{ t('dev.external') }}</option>
-          <option value="career">{{ t('dev.career') }}</option>
-        </select>
         <select v-model="filters.status" class="field" :aria-label="t('dev.reqCol.status')">
           <option value="">{{ t('dev.allStatuses') }}</option>
           <option v-for="s in STATUSES" :key="s" :value="s">{{ t(`dev.reqStatus.${s}`) }}</option>
@@ -95,7 +102,7 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
           <tbody>
             <tr v-for="r in rows" :key="`${r.kind}:${r.id}`">
               <td><b>{{ r.title }}</b><div class="sub">{{ t(`dev.${r.kind}`) }}</div></td>
-              <td>{{ r.fullName }}</td>
+              <td><b>{{ r.fullName }}</b><div v-if="r.position || r.location" class="sub">{{ [r.position, r.location].filter(Boolean).join(' · ') }}</div></td>
               <td>{{ r.cost ? `${r.cost} ${r.currency}` : '—' }}</td>
               <td>{{ r.responsible ?? '—' }}</td>
               <td class="muted">{{ fmt(r.createdAt) }}</td>
@@ -109,18 +116,23 @@ const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
   </div>
 </template>
 <style scoped>
-.head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-4); }
+.head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-4); }
+.eyebrow { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); margin-bottom: 3px; }
 h1 { margin: 0; font-weight: 900; }
+.route-hint { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); margin: 0 0 var(--space-3); }
 .tabs { display: flex; gap: var(--space-1); }
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: var(--color-bg); color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-sun); color: var(--color-ink); border-color: transparent; }
+.chips { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+.kind-chip { font: inherit; font-weight: 700; font-size: var(--font-size-body-s); border: none; background: var(--color-bg-soft); color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
+.kind-chip.on { background: var(--color-ink); color: var(--color-bg); font-weight: 800; }
 .list { display: grid; gap: var(--space-2); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); }
 .row { display: flex; gap: var(--space-2); align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.approved, .badge.completed { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.rejected { background: var(--color-coral); color: var(--color-coral-deep); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin: 0; }

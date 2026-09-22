@@ -1727,7 +1727,8 @@
     "claim": "Take it",
     "cardTitle": "Workshop \"{title}\"",
     "criteriaLearner": "What the mentor checks",
-    "morePhoto": "More photos"
+    "morePhoto": "More photos",
+    "commentLabel": "Comment for the mentor"
   },
   "ops": {
     "title": "Operator panel",
@@ -2008,6 +2009,7 @@
     "reqViewQueue": "Pending",
     "reqViewTable": "All requests",
     "reqAllKinds": "All",
+    "reqRouteHint": "Route: the site manager confirms the need, HR or budget approves the payment",
     "reqCol": {
       "title": "Training topic",
       "person": "Person",
@@ -2412,6 +2414,7 @@
     "closed": "Enrolment closed",
     "full": "Full",
     "seatsLeft": "{n} seats left",
+    "registeredOf": "{n} of {total} registered",
     "startsIn": "Starts in",
     "inDays": "{n} days",
     "cancelled": "Cancelled",

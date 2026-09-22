@@ -55,6 +55,10 @@ const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendan
           <span v-else-if="m.mine?.status === 'waitlist'" class="badge sun">{{ t('mt.inQueue', { n: m.mine.waitlistPosition }) }}</span>
           <span v-else-if="m.seatsLeft != null" class="sub">{{ m.seatsLeft > 0 ? t('mt.seatsLeft', { n: m.seatsLeft }) : t('mt.full') }}</span>
         </div>
+        <div v-if="m.capacity" class="capacity">
+          <span class="cap-n">{{ t('mt.registeredOf', { n: m.registered, total: m.capacity }) }}</span>
+          <div class="bar"><i :style="{ width: `${Math.min(100, (m.registered / m.capacity) * 100)}%` }" /></div>
+        </div>
         <div class="actions">
           <button v-if="!m.mine || ['cancelled', 'missed'].includes(m.mine.status)" class="primary" :disabled="!m.enrollOpen" data-testid="mt-register" @click="register">{{ m.enrollOpen ? (m.seatsLeft === 0 ? t('mt.joinQueue') : t('mt.register')) : t('mt.closed') }}</button>
           <button v-else-if="['registered', 'waitlist'].includes(m.mine.status)" class="chip" :disabled="!m.canCancel" data-testid="mt-unregister" @click="unregister">{{ m.canCancel ? t('mt.unregister') : t('mt.cannotCancel') }}</button>
@@ -108,6 +112,10 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .count { font-weight: 800; color: var(--color-teal-deep); margin: var(--space-2) 0; font-variant-numeric: tabular-nums; }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); margin-top: var(--space-3); }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.capacity { display: flex; align-items: center; gap: var(--space-2); }
+.cap-n { font-size: var(--font-size-body-s); font-weight: 800; white-space: nowrap; }
+.capacity .bar { flex-grow: 1; height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; }
+.capacity .bar i { display: block; height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .chip, .primary { font: inherit; font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-2) var(--space-3); cursor: pointer; text-decoration: none; display: inline-block; }
 .chip { border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink); }

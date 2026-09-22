@@ -25,6 +25,20 @@ const form = reactive({ name: '', parentId: '', orgUnitId: '', address: '', city
 const newUnit = reactive({ name: '', parentId: '' })
 const newLoc = reactive({ name: '', orgUnitId: '' })
 
+// Мокап OrgStructure: справа — співробітники обраного підрозділу/точки, картками
+interface Employee { id: string, fullName: string, positionName: string | null }
+const employees = ref<Employee[]>([])
+async function loadEmployees(kind: 'unit' | 'location', id: string) {
+  employees.value = []
+  try {
+    const res = await apiRaw<{ data: { id: string, fullName: string, placements: { positionName: string }[] }[] }>('/people', {
+      query: { tab: 'active', limit: 50, ...(kind === 'location' ? { locationId: id } : { orgUnitId: id }) },
+    })
+    employees.value = res.data.map(p => ({ id: p.id, fullName: p.fullName, positionName: p.placements[0]?.positionName ?? null }))
+  }
+  catch { /* список співробітників лишиться пустим */ }
+}
+
 async function load() {
   try {
     const [u, l, tree, c] = await Promise.all([api<Unit[]>('/refs/org-units'), api<Loc[]>('/refs/locations'), api<{ units: TreeUnit[] }>('/org/tree'), api<Ref[]>('/refs/cities')])
@@ -58,6 +72,7 @@ function select(kind: 'unit' | 'location', id: string) {
     const l = locs.value.find(x => x.id === id)!
     Object.assign(form, { name: l.name, parentId: '', orgUnitId: l.orgUnitId, address: l.address ?? '', cityId: l.cityId ?? '', managerId: l.managerId ?? '', managerName: l.managerId ? managerName.value[l.managerId] ?? '' : '', isActive: l.isActive })
   }
+  loadEmployees(kind, id)
 }
 
 async function run(fn: () => Promise<unknown>, done = t('common.saved')) {
@@ -163,7 +178,16 @@ const removeChief = (id: string) => run(async () => { await api(`/functional-chi
       <aside class="card side">
         <p v-if="!selected" class="sub">{{ t('orgAdmin.select') }}</p>
         <form v-else class="form" @submit.prevent="save">
-          <h2>{{ selected.kind === 'unit' ? t('orgAdmin.unit') : t('orgAdmin.location') }} · {{ t('orgAdmin.peopleCount', { n: counts[selected.id] ?? 0 }) }}</h2>
+          <h2>{{ form.name }} <span class="sub">· {{ t('orgAdmin.peopleCount', { n: counts[selected.id] ?? 0 }) }}</span></h2>
+
+          <!-- Мокап OrgStructure: співробітники обраного підрозділу/точки, картками -->
+          <ul v-if="employees.length" class="employees">
+            <li v-for="p in employees" :key="p.id" class="emp-card">
+              <NuxtLink :to="`/admin/people/${p.id}`" class="emp-name">{{ p.fullName }}</NuxtLink>
+              <span class="sub">{{ p.positionName || '—' }}</span>
+            </li>
+          </ul>
+
           <label>{{ t('orgAdmin.rename') }}<input v-model="form.name" required maxlength="120" :disabled="!canEdit"></label>
           <label v-if="selected.kind === 'unit'">{{ t('orgAdmin.parent') }}<select v-model="form.parentId" :disabled="!canEdit"><option value="">{{ t('orgAdmin.root') }}</option><option v-for="u in units.filter(x => x.id !== selected!.id)" :key="u.id" :value="u.id">{{ u.name }}</option></select></label>
           <template v-else>
@@ -176,6 +200,7 @@ const removeChief = (id: string) => run(async () => { await api(`/functional-chi
             <label class="check"><input v-model="form.isActive" type="checkbox" :disabled="!canEdit"> {{ t('groups.active') }}</label>
           </template>
           <NuxtLink v-if="selected.kind === 'unit'" :to="{ path: '/admin/people', query: { orgUnitId: selected.id } }" class="link">{{ t('admin.nav.people') }} →</NuxtLink>
+          <NuxtLink v-else :to="{ path: '/admin/people', query: { locationId: selected.id } }" class="link">{{ t('admin.nav.people') }} →</NuxtLink>
           <div v-if="canEdit" class="actions">
             <button type="button" class="btn danger" :disabled="busy" @click="remove">{{ t('orgAdmin.delete') }}</button>
             <button type="submit" class="btn primary" :disabled="busy">{{ t('common.save') }}</button>
@@ -222,6 +247,9 @@ h2 { margin: 0; font-size: var(--font-size-body); font-weight: 800; }
 .new { display: grid; gap: var(--space-2); margin-top: var(--space-3); border-top: 1px solid var(--color-bg-line); padding-top: var(--space-3); }
 .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .form { display: grid; gap: var(--space-2); }
+.employees { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+.emp-card { background: var(--color-bg); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: 2px; }
+.emp-name { color: var(--color-ink); font-weight: 700; text-decoration: none; }
 .form label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .check { display: flex !important; align-items: center; gap: var(--space-2); color: var(--color-ink) !important; }
 input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; box-sizing: border-box; }

@@ -309,6 +309,7 @@
     "roleManual": "Granted manually",
     "roleSince": "since {date}",
     "editRole": "Change expiry or reason",
+    "changeRoles": "Change roles",
     "confirmRevoke": "Remove role",
     "enrollments": "Enrollments",
     "attempts": "Quiz attempts",
@@ -420,7 +421,16 @@
     "archiveMissingWarn": "Careful: every active person missing from the file will be archived.",
     "keepFields": "Do not overwrite on import",
     "keepFieldsNone": "Import overwrites all file fields — \"Do not overwrite\" is not configured",
-    "keepFieldsSettings": "Configure"
+    "keepFieldsSettings": "Configure",
+    "source": {
+      "csv": "CSV",
+      "api": "API",
+      "ad": "Active Directory",
+      "azureAd": "Azure AD",
+      "hrm": "HRM"
+    },
+    "apiHint": "Sync via the tenant's inbound API (docs/09 §9.6): POST /api/v1/sync/people with a token. Issue the token under \"Settings → Integrations\".",
+    "sourceR2": "This source is planned for stage R2 and is not available yet."
   },
   "refs": {
     "cities": "Cities",
@@ -516,7 +526,7 @@
       "sessions": "User sessions log",
       "telegram": "Telegram connections",
       "security": "Security log",
-      "import": "Import log",
+      "import": "User import log",
       "automation": "Automation log",
       "integrations": "Integrations log",
       "task-status": "Task status change log",

@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * Компетенції за мокапом Competencies: зліва фільтр «Група» (по категоріях), справа таблиця
+ * «Бібліотека компетенцій» — НАЗВА (категорія) · ІНДИКАТОРИ (компетенції в ній) · ГРУПА (тип) ·
+ * ІНДИКАТОРІВ. Фільтр «Мітки» і колонка «СТВОРЕНО» у мокапі лишаються 🟡 — тегів у компетенцій
+ * і поля дати створення в `/competencies` немає (docs/31, screens-5); нижче — керування
+ * окремими компетенціями (додати/редагувати/деактивувати), яке в мокапі не показане.
+ */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'competency.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -12,6 +19,7 @@ const newCategory = ref('')
 const catFilter = ref('')
 const error = ref('')
 const editing = ref<string | null>(null)
+const formSection = ref<HTMLElement | null>(null)
 const blank = () => ({ name: '', kind: 'hard', description: '', categoryId: '', levels: [1, 2, 3].map(n => ({ level: n, title: '', behavior: '' })) as Level[], linkedCourses: [] as string[] })
 const form = reactive(blank())
 
@@ -21,8 +29,24 @@ async function load() {
 }
 onMounted(load)
 function edit(c: C) { editing.value = c.id; Object.assign(form, { name: c.name, kind: c.kind, description: c.description ?? '', categoryId: c.categoryId ?? '', levels: c.levels.map(l => ({ ...l })), linkedCourses: [...c.linkedCourses] }) }
+function startNew() { reset(); formSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 const visible = computed(() => catFilter.value ? items.value.filter(i => i.categoryId === catFilter.value) : items.value)
 const catName = (id: string | null) => categories.value.find(c => c.id === id)?.name ?? ''
+/** Библиотека для мокапа: одна строка на групу (категорію) — назва, вкладені компетенції, тип, кількість. */
+const groupRows = computed(() => {
+  const groups = catFilter.value ? categories.value.filter(c => c.id === catFilter.value) : categories.value
+  const rows = groups.map((cat) => {
+    const members = items.value.filter(i => i.categoryId === cat.id)
+    const kinds = new Set(members.map(m => m.kind))
+    return { id: cat.id, name: cat.name, indicators: members.map(m => m.name).join(', '), kind: kinds.size === 1 ? [...kinds][0] : null, count: members.length }
+  })
+  const loose = items.value.filter(i => !i.categoryId)
+  if (loose.length && !catFilter.value) {
+    const kinds = new Set(loose.map(m => m.kind))
+    rows.push({ id: '', name: t('dev.noCategory'), indicators: loose.map(m => m.name).join(', '), kind: kinds.size === 1 ? [...kinds][0] : null, count: loose.length })
+  }
+  return rows.filter(r => r.count > 0)
+})
 async function addCategory() { if (!newCategory.value.trim()) return; try { await api('/competency-categories', { method: 'PUT', body: { name: newCategory.value.trim(), sort: categories.value.length } }); newCategory.value = ''; await load() } catch (err) { error.value = apiErrorOf(err).message } }
 async function removeCategory(c: Cat) { if (!confirm(t('dev.deleteCategory', { name: c.name }))) return; try { await api(`/competency-categories/${c.id}`, { method: 'DELETE' }); await load() } catch (err) { error.value = apiErrorOf(err).message } }
 function reset() { editing.value = null; Object.assign(form, blank()) }
@@ -39,11 +63,33 @@ async function toggle(c: C) { await api(`/competencies/${c.id}`, { method: 'PATC
 </script>
 <template>
   <div>
-    <h1>{{ t('admin.nav.competencies') }}</h1>
+    <PageHeader :title="t('admin.nav.competencies')" :crumbs="[{ label: t('dev.short') }]">
+      <template #actions><button class="btn primary" @click="startNew">{{ t('dev.addCompetency') }}</button></template>
+    </PageHeader>
     <p v-if="error" class="error">{{ error }}</p>
+
+    <h2 class="panel-title">{{ t('dev.compLibrary') }}</h2>
+    <div class="filters">
+      <label class="pill"><span>{{ t('dev.groupFilter') }}</span>
+        <select v-model="catFilter" :aria-label="t('dev.groupFilter')"><option value="">{{ t('dev.allCategories') }}</option><option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+      </label>
+    </div>
+    <table class="table lib">
+      <thead><tr><th>{{ t('dev.colName') }}</th><th>{{ t('dev.colIndicators') }}</th><th>{{ t('dev.colGroup') }}</th><th class="num">{{ t('dev.colIndicatorsCount') }}</th></tr></thead>
+      <tbody>
+        <tr v-for="g in groupRows" :key="g.id || 'none'">
+          <td><b>{{ g.name }}</b></td>
+          <td class="sub">{{ g.indicators || t('assess.noCriteria') }}</td>
+          <td class="sub">{{ g.kind ? t(`dev.ckind.${g.kind}`) : '—' }}</td>
+          <td class="num">{{ g.count }}</td>
+        </tr>
+        <tr v-if="!groupRows.length"><td colspan="4" class="sub">{{ t('dev.noCompetencies') }}</td></tr>
+      </tbody>
+    </table>
+
     <section class="cats">
-      <button :class="['chip', { on: !catFilter }]" @click="catFilter = ''">{{ t('dev.allCategories') }}</button>
-      <span v-for="c in categories" :key="c.id" class="cat"><button :class="['chip', { on: catFilter === c.id }]" @click="catFilter = c.id">{{ c.name }}</button><button class="chip x" :aria-label="t('groups.delete')" @click="removeCategory(c)">×</button></span>
+      <span class="sub">{{ t('dev.category') }}:</span>
+      <span v-for="c in categories" :key="c.id" class="cat"><button :class="['chip', { on: catFilter === c.id }]" @click="catFilter = catFilter === c.id ? '' : c.id">{{ c.name }}</button><button class="chip x" :aria-label="t('groups.delete')" @click="removeCategory(c)">×</button></span>
       <input v-model="newCategory" class="field" :placeholder="t('dev.newCategory')" @keyup.enter="addCategory">
       <button class="chip" :disabled="!newCategory.trim()" @click="addCategory">+</button>
     </section>
@@ -58,7 +104,7 @@ async function toggle(c: C) { await api(`/competencies/${c.id}`, { method: 'PATC
         </tr>
       </tbody>
     </table>
-    <section class="card">
+    <section ref="formSection" class="card">
       <h2>{{ editing ? t('common.edit') : t('dev.newCompetency') }}</h2>
       <div class="row">
         <input v-model="form.name" class="field grow" :placeholder="t('dev.competencyName')" data-testid="comp-name">
@@ -89,6 +135,12 @@ async function toggle(c: C) { await api(`/competencies/${c.id}`, { method: 'PATC
 <style scoped>
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 h2 { margin: 0; font-weight: 800; }
+.panel-title { margin: 0 0 var(--space-2); font-weight: 900; }
+.filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.pill { display: inline-flex; align-items: center; gap: var(--space-1); background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); font-size: var(--font-size-body-s); font-weight: 700; }
+.pill select { font: inherit; font-weight: 700; border: none; background: transparent; color: var(--color-ink); }
+.table.lib { margin-bottom: var(--space-4); }
+.num { text-align: right; }
 .table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; margin-bottom: var(--space-4); }
 th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); }
 td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft); vertical-align: top; }

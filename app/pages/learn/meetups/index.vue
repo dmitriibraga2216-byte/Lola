@@ -2,7 +2,7 @@
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
-interface M { id: string, kind: string, title: string, starts_at: string, ends_at: string, status: string, location: string | null, room: string | null, trainers: string[], seatsLeft: number | null, my_status: string | null, my_waitlist_position: number | null, enrollOpen: boolean, registered: number }
+interface M { id: string, meetupId: string, kind: string, title: string, starts_at: string, ends_at: string, status: string, location: string | null, room: string | null, trainers: string[], seatsLeft: number | null, my_status: string | null, my_waitlist_position: number | null, enrollOpen: boolean, registered: number }
 const items = ref<M[]>([])
 const error = ref('')
 const view = ref<'week' | 'month' | 'mine'>('week')
@@ -48,7 +48,7 @@ const badge = (m: M) => m.my_status === 'registered' || m.my_status === 'attende
     <p v-if="items.length === 0" class="empty">{{ t('mt.empty') }}</p>
     <section v-for="[d, list] in days" :key="d" class="day">
       <h2>{{ fmtD(list[0]!.starts_at) }}</h2>
-      <NuxtLink v-for="m in list" :key="m.id" :to="`/learn/meetups/${m.id}`" class="card" :data-testid="`mt-${m.id}`">
+      <NuxtLink v-for="m in list" :key="m.id" :to="`/learn/meetups/${m.meetupId}`" class="card" :data-testid="`mt-${m.id}`">
         <div class="row between"><span class="card-title">{{ m.kind === 'webinar' ? '🎥 ' : m.kind === 'event' ? '🎉 ' : '' }}{{ m.title }}</span><span :class="['badge', m.my_status ?? '']">{{ badge(m) }}</span></div>
         <span class="sub">{{ fmtT(m.starts_at) }}–{{ fmtT(m.ends_at) }}<template v-if="m.location"> · {{ m.location }}</template><template v-if="m.room">, {{ m.room }}</template> · {{ m.trainers.join(', ') }}</span>
       </NuxtLink>

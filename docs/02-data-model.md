@@ -945,7 +945,11 @@ webinars(title, description jsonb, attachments jsonb, tags text[], status)
 -- Spec 18: в коде таблица называется `meetup_sessions`/`meetup_session_registrations` —
 -- имя `sessions` занято автентифікацією (`sessions.active_role_id`, parity-4-active-role).
 -- Старые поля даты/места/вместимости на `meetups`/`webinars` для kind=meetup|webinar не убраны
--- (используются старыми записями и kind=event, Spec 21) — долг «полное разведение», `28` «Spec 18».
+-- (используются kind=event, Spec 21, и старыми записями без сессии) — но полностью «спят», как
+-- только у карточки появляется хоть одна сессия: запись/QR/отметка/отчёт/напоминания/
+-- Calendar-Zoom-синк переходят на `meetup_sessions` целиком (`33` D-029, миграция 0053 переносит
+-- одноразовые старые карточки в одну сессию каждая). `meetup_sessions.external_event_id`/
+-- `external_meeting_id` — Google Calendar/Zoom на конкретную сессию (было только на карточке).
 -- sessions (аутентификация).login_method text — чем подтверждена личность (docs/33 D-021, миграция 0050):
 -- otp | otp_sms | otp_telegram | otp_email | password | password_otp | google | invite | impersonation (CHECK);
 -- по нему решается, можно ли задать новый пароль без текущего («Відновлення пароля», `24` §3.4.1).

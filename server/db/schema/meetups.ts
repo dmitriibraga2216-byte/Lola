@@ -15,6 +15,17 @@ import { assignments } from './assignments'
  * запись и посещаемость общие, онлайн-поля — отдельно.
  */
 
+/**
+ * docs/33 D-029 («Повне розведення картки і розкладу»): поля розкладу нижче
+ * (`startsAt … qrSecret`, `externalEventId`) лишаються в схемі і повністю чинні для
+ * `kind='event'` (корпоративна подія Spec 21 — свій потік, сесій не має і не матиме) і для
+ * старих карток `meetup|webinar` без жодної сесії (одноразовий сценарій — сервіс сам падає
+ * назад на ці поля, поки на картці немає жодного рядка `meetupSessions`). Щойно в картки
+ * `meetup|webinar` з'являється перша сесія — розклад, запис, QR, відвідуваність, звіти,
+ * нагадування і Calendar/Zoom-синк для неї повністю переїжджають на `meetupSessions`
+ * (`server/services/meetupSessions.ts`, `googleApps.ts` сесійні функції); ці поля картки
+ * стають архівом останнього одноразового стану і далі не оновлюються.
+ */
 export const meetups = pgTable('meetups', {
   ...baseColumns,
   tenantId: tenantId(),
@@ -29,6 +40,7 @@ export const meetups = pgTable('meetups', {
   announcement: jsonb('announcement').notNull().default('[]'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   courseId: uuid('course_id').references(() => courses.id),
+  // Розклад — чинний для kind=event і для meetup|webinar без сесій (див. коментар над таблицею)
   startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
   endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
   timezone: text('timezone').notNull().default('Europe/Kyiv'),
@@ -47,7 +59,7 @@ export const meetups = pgTable('meetups', {
   materials: uuid('materials').array().notNull().default(sql`'{}'::uuid[]`),
   status: text('status').notNull().default('planned'), // draft | planned | ongoing | finished | cancelled
   cancelReason: text('cancel_reason'),
-  externalEventId: text('external_event_id'), // событие в Google Calendar тенанта (docs/09 §9.1)
+  externalEventId: text('external_event_id'), // событие в Google Calendar тенанта (docs/09 §9.1) — kind=event/без сесій
   createdBy: uuid('created_by').references(() => users.id),
 }, t => [
   index().on(t.tenantId, t.startsAt),
@@ -140,6 +152,9 @@ export const meetupSessions = pgTable('meetup_sessions', {
   qrSecret: text('qr_secret').notNull(),
   status: text('status').notNull().default('planned'), // planned | ongoing | finished | cancelled
   cancelReason: text('cancel_reason'),
+  // docs/33 D-029: Calendar/Zoom-синк перенесено з картки на сесію — власний event/meeting на кожну сесію
+  externalEventId: text('external_event_id'), // подія в Google Calendar тенанта на цю сесію
+  externalMeetingId: text('external_meeting_id'), // id зустрічі в провайдера (Zoom/Meet) для цієї сесії
   createdBy: uuid('created_by').references(() => users.id),
 }, t => [
   index().on(t.tenantId, t.startsAt),

@@ -103,9 +103,11 @@ export default defineNitroPlugin(async () => {
         if (tr.opened || tr.fired) console.log(`[trajectory.scan] ${tenantId}:`, tr)
       })
     })
-    // Занятия (docs/18 §11): статусы planned→ongoing→finished, неявки, напоминания за сутки/час
+    // Занятия (docs/18 §11): статусы planned→ongoing→finished, неявки, напоминания за сутки/час.
+    // docs/33 D-029: картки без сесій (kind=event, немігровані) веде meetups.ts; картки з сесіями — meetupSessions.ts
     await work('meetup.scan', async () => {
       const { reminderScan, statusScan } = await import('../services/meetups')
+      const { reminderScan: sessionReminderScan, statusScan: sessionStatusScan } = await import('../services/meetupSessions')
       const { publishScan } = await import('../services/news')
       await runPerTenant('meetup.scan', async (tenantId) => {
         const p = await publishScan(tenantId) // docs/21 §11
@@ -113,6 +115,9 @@ export default defineNitroPlugin(async () => {
         const s = await statusScan(tenantId)
         const r = await reminderScan(tenantId)
         if (s.started || s.finished || r) console.log(`[meetup.scan] ${tenantId}:`, { ...s, reminded: r })
+        const ss = await sessionStatusScan(tenantId)
+        const sr = await sessionReminderScan(tenantId)
+        if (ss.started || ss.finished || sr) console.log(`[meetup_session.scan] ${tenantId}:`, { ...ss, reminded: sr })
       })
     })
     await work('workshop.sla_scan', () => runPerTenant('workshop.sla_scan', async (tenantId) => {

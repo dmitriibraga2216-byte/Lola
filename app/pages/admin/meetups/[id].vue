@@ -18,7 +18,17 @@ const people = ref<{ id: string, fullName: string }[]>([])
 const sForm = reactive({ startsAt: '', endsAt: '', locationId: '', room: '', trainerIds: [] as string[], capacity: null as number | null, attendanceMode: 'both' })
 const openSessionId = ref('')
 const sessionParticipants = ref<SessionParticipant[]>([])
-async function loadSessions() { try { sessions.value = await api<Session[]>(`/meetups/${route.params.id}/sessions`) } catch (err) { error.value = apiErrorOf(err).message } }
+// docs/33 D-029: щойно з'явилась сесія, старі вкладки картки (участники/QR/підсумки) відходять —
+// усе це веде «Сесії»; «Матеріали» лишається (контент, не розклад)
+const hasSessions = computed(() => sessions.value.length > 0)
+const tabs = computed(() => hasSessions.value ? ['sessions', 'materials'] : ['participants', 'qr', 'materials', 'summary', 'sessions'])
+async function loadSessions() {
+  try {
+    sessions.value = await api<Session[]>(`/meetups/${route.params.id}/sessions`)
+    if (sessions.value.length && !['sessions', 'materials'].includes(tab.value)) tab.value = 'sessions'
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 async function createSession() {
   error.value = ''; notice.value = ''
   try {
@@ -84,9 +94,9 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleTimeString('uk-UA', { 
       <div class="head"><h1>{{ m.title }}</h1><span :class="['badge', m.status]">{{ t(`mt.mstatus.${m.status}`) }}</span></div>
       <p class="sub">{{ new Date(m.startsAt).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' }) }}<template v-if="m.location"> · {{ m.location.name }}</template><template v-if="m.room">, {{ m.room }}</template> · {{ t('mt.registeredN', { n: m.registered, cap: m.capacity ?? '∞' }) }}<template v-if="m.waitlist"> · {{ t('mt.queue') }}: {{ m.waitlist }}</template></p>
       <div class="tabs">
-        <button v-for="tb in ['participants', 'qr', 'materials', 'summary', 'sessions']" :key="tb" :class="['tab', { on: tab === tb }]" :disabled="tb === 'qr' && m.attendanceMode === 'manual'" @click="tab = tb as never">{{ t(`mt.tab.${tb}`) }}</button>
+        <button v-for="tb in tabs" :key="tb" :class="['tab', { on: tab === tb }]" :disabled="tb === 'qr' && m.attendanceMode === 'manual'" @click="tab = tb as never">{{ t(`mt.tab.${tb}`) }}</button>
         <span class="spacer" />
-        <button v-if="hasScope('meetup.manage') && !['finished', 'cancelled'].includes(m.status)" class="chip danger" @click="cancel.open = true">{{ t('mt.cancelMeetup') }}</button>
+        <button v-if="!hasSessions && hasScope('meetup.manage') && !['finished', 'cancelled'].includes(m.status)" class="chip danger" @click="cancel.open = true">{{ t('mt.cancelMeetup') }}</button>
       </div>
 
       <section v-if="tab === 'sessions'" class="card">
@@ -136,7 +146,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleTimeString('uk-UA', { 
         </div>
       </section>
 
-      <section v-if="tab === 'participants'" class="card">
+      <section v-else-if="tab === 'participants'" class="card">
         <div class="row"><button class="chip" :disabled="!active.some(p => p.status === 'registered')" @click="markAll">{{ t('mt.markAll') }}</button></div>
         <table class="table plain">
           <thead><tr><th>{{ t('people.col.name') }}</th><th>{{ t('assign.col.status') }}</th><th>{{ t('mt.checkin') }}</th><th /></tr></thead>

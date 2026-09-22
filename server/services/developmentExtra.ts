@@ -158,7 +158,7 @@ export async function goalsReport(ctx: Ctx, filter: { from?: string, to?: string
     from development_goals g join goal_statuses s on s.code = g.status_code and s.tenant_id = g.tenant_id
     left join user_placements up on up.user_id = g.user_id and up.is_primary and up.ended_at is null
     left join locations l on l.id = up.location_id
-    where true ${filter.from ? sql`and g.created_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and g.created_at < (${filter.to}::date + 1)` : sql``}
+    where not g.is_strategic ${filter.from ? sql`and g.created_at >= ${filter.from}::date` : sql``} ${filter.to ? sql`and g.created_at < (${filter.to}::date + 1)` : sql``}
       ${scopeSql(filter.scope ?? null, sql`up.location_id`)}
     group by 1 order by 1
   `) as unknown as Promise<Record<string, unknown>[]>)

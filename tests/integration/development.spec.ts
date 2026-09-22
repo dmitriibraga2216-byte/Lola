@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const dev = await import('../../server/services/development')
 const req = await import('../../server/services/requests')
+const acc = await import('../../server/services/access')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 
@@ -423,6 +424,139 @@ describe('docs/22 §13.5, docs/04 `/me/study-history`: історія навча
       await admin`delete from external_training_requests where id = ${r.id}`
       await admin`delete from attempts where id = ${att!.id}`; await admin`delete from quizzes where id = ${quiz!.id}`
       await admin`delete from enrollments where id = ${enr!.id}`; await admin`delete from course_versions where id = ${ver!.id}`; await admin`delete from courses where id = ${course!.id}`
+    }
+  })
+})
+
+describe('spec-development: DevelopmentPlans як адмінська сутність, дерево цілей «Стратегічний план»', () => {
+  it('список планів (докс/31 `DevelopmentPlans`): вкладки, кроки/прогрес, редагування картки', async () => {
+    const plan = await dev.createPlan(asAdmin(), { userId: baristaId, periodFrom: '2027-01-01', periodTo: '2027-06-30', summary: 'Менеджер точки' })
+    const g1 = await dev.createGoal(asAdmin(), { userId: baristaId, planId: plan.id, title: 'Крок 1', kind: 'learning', dueAt: '2027-02-01' })
+    const g2 = await dev.createGoal(asAdmin(), { userId: baristaId, planId: plan.id, title: 'Крок 2', kind: 'learning', dueAt: '2027-03-01' })
+    if (!g1.ok || !g2.ok) throw new Error('goal creation failed')
+    // Один крок доводимо до фінального статусу — «готово 1 з 2» (докс/31 `DevelopmentPlans`, `[рішення]` докс/28)
+    // on_review ставить тільки власник (docs/19 whoCanSet), achieved — тільки керівник
+    await dev.transitionGoal(asBarista(), g1.goal.id, 'in_progress', { scopes: OWN })
+    await dev.transitionGoal(asBarista(), g1.goal.id, 'on_review', { scopes: OWN })
+    await dev.transitionGoal(asAdmin(), g1.goal.id, 'achieved', { scopes: TEAM, evaluation: 'ОК' })
+
+    const all = await dev.listDevelopmentPlans(asAdmin(), { scope: null })
+    const row = all.items.find(p => p.id === plan.id)!
+    expect(row).toMatchObject({ full_name: 'Бариста Тестовий', summary: 'Менеджер точки', steps_total: 2, steps_done: 1, progressPct: 50 })
+
+    // план у статусі draft — вкладка «Неактивні», не «Активні»/«Виконані»
+    const inactive = await dev.listDevelopmentPlans(asAdmin(), { tab: 'inactive', scope: null })
+    expect(inactive.items.some(p => p.id === plan.id)).toBe(true)
+    const active = await dev.listDevelopmentPlans(asAdmin(), { tab: 'active', scope: null })
+    expect(active.items.some(p => p.id === plan.id)).toBe(false)
+
+    // Картка плану + редагування (докс/28 «Spec 19 (продовження)»: раніше PATCH не існував)
+    const card = await dev.getPlanCard(asAdmin(), plan.id)
+    expect(card?.plan.summary).toBe('Менеджер точки')
+    expect(card?.goals.map(g => g.id).sort()).toEqual([g1.goal.id, g2.goal.id].sort())
+    expect(card?.locationId).toBe(lazarevaId)
+    const updated = await dev.updatePlan(asAdmin(), plan.id, { summary: 'Старший бариста' })
+    expect(updated?.summary).toBe('Старший бариста')
+    expect(await dev.updatePlan(asAdmin(), '00000000-0000-0000-0000-000000000000', { summary: 'x' })).toBeNull()
+
+    await admin`delete from development_goals where id in (${g1.goal.id}, ${g2.goal.id})`
+    await admin`delete from development_plans where id = ${plan.id}`
+  })
+
+  it('видимість за скоупом (докс/19 §2): development.manage — уся мережа, development.team — лише свої точки', async () => {
+    const plan = await dev.createPlan(asAdmin(), { userId: baristaId, periodFrom: '2027-01-01', periodTo: '2027-06-30' })
+    try {
+      const [seged] = await admin`select id from locations where tenant_id = ${tenantId} and name = 'Сегедська'`
+      const managerAccess = { userId: adminId, tenantId, grants: [{ scopes: ['development.team'], scopeType: 'location' as const, scopeId: lazarevaId }], activeRole: null, roles: [] }
+      const otherLocationAccess = { userId: adminId, tenantId, grants: [{ scopes: ['development.team'], scopeType: 'location' as const, scopeId: seged!.id as string }], activeRole: null, roles: [] }
+      const tenantWideAccess = { userId: adminId, tenantId, grants: [{ scopes: ['development.manage'], scopeType: 'tenant' as const, scopeId: null }], activeRole: null, roles: [] }
+
+      expect(await acc.developmentPlanScope(tenantWideAccess)).toBeNull()
+      expect(await acc.developmentPlanScope(managerAccess)).toEqual([lazarevaId])
+
+      const seenByManager = await dev.listDevelopmentPlans(asAdmin(), { scope: await acc.developmentPlanScope(managerAccess) })
+      expect(seenByManager.items.some(p => p.id === plan.id)).toBe(true)
+
+      const seenByOther = await dev.listDevelopmentPlans(asAdmin(), { scope: await acc.developmentPlanScope(otherLocationAccess) })
+      expect(seenByOther.items.some(p => p.id === plan.id)).toBe(false)
+
+      const seenTenantWide = await dev.listDevelopmentPlans(asAdmin(), { scope: await acc.developmentPlanScope(tenantWideAccess) })
+      expect(seenTenantWide.items.some(p => p.id === plan.id)).toBe(true)
+    }
+    finally {
+      await admin`delete from development_plans where id = ${plan.id}`
+    }
+  })
+
+  it('чужий тенант: картка плану — not found (404, не 403; CLAUDE.md п. 15)', async () => {
+    const plan = await dev.createPlan(asAdmin(), { userId: baristaId, periodFrom: '2027-01-01', periodTo: '2027-06-30' })
+    const [other] = await admin`insert into tenants (slug, name, status) values (${`spec-dev-other-${Date.now()}`}, 'Інший', 'active') returning id`
+    const otherId = other!.id as string
+    try {
+      expect(await dev.getPlanCard({ tenantId: otherId, actorId: adminId }, plan.id)).toBeNull()
+      expect(await dev.listDevelopmentPlans({ tenantId: otherId, actorId: adminId }, { scope: null })).toMatchObject({ items: [] })
+    }
+    finally {
+      await admin`delete from tenants where id = ${otherId}`
+      await admin`delete from development_plans where id = ${plan.id}`
+    }
+  })
+
+  it('дерево цілей «Стратегічний план» (докс/19 §14.4): вкладеність, статуси й протокол, ізоляція від особистих цілей ІПР', async () => {
+    const rootRes = await dev.createTreeGoal(asAdmin(), { title: `Напрямок ${Date.now()}`, userId: adminId })
+    if (!rootRes.ok) throw new Error(rootRes.code)
+    const root = rootRes.goal
+    expect(root.isStrategic).toBe(true)
+    expect(root.dueAt).toBeNull() // корінь може бути без терміну (мокап Goals)
+
+    const childRes = await dev.createTreeGoal(asAdmin(), { parentId: root.id, title: 'Середній чек 340 грн', userId: baristaId, dueAt: '2027-12-31' })
+    if (!childRes.ok) throw new Error(childRes.code)
+    const child = childRes.goal
+
+    const tree = await dev.listGoalTree(asAdmin())
+    const treeIds = tree.items.map(i => i.id)
+    expect(treeIds).toEqual(expect.arrayContaining([root.id, child.id]))
+    expect(tree.items.find(i => i.id === child.id)?.parentId).toBe(root.id)
+    expect(tree.items.find(i => i.id === root.id)?.parentId).toBeNull()
+
+    // ізоляція: дерево не потрапляє в особисті цілі ІПР ані власника кореня, ані власника підцілі
+    const adminPlan = await dev.myPlan(asAdmin(), adminId)
+    expect(adminPlan.goals.some(g => g.id === root.id)).toBe(false)
+    const baristaTeam = await dev.teamGoals(asAdmin())
+    expect(baristaTeam.some(g => (g as { id: string }).id === child.id)).toBe(false)
+
+    // зміна статусу — той самий transitionGoal/goal_status_log, що й в ІПР (не новий журнал)
+    const [initial] = await dev.listGoalStatuses(asAdmin())
+    expect(root.statusCode).toBe(initial!.code)
+    const inProgress = (await dev.listGoalStatuses(asAdmin())).find(s => s.code === 'in_progress')!
+    expect((await dev.transitionGoal(asAdmin(), root.id, inProgress.code, { scopes: TEAM })).ok).toBe(true)
+    const withLog = await dev.getGoal(asAdmin(), root.id)
+    expect(withLog?.log.map(l => l.toStatus)).toEqual([inProgress.code, initial!.code])
+
+    // редагування вузла
+    const edited = await dev.updateTreeGoal(asAdmin(), child.id, { progressPct: 55 })
+    expect(edited?.progressPct).toBe(55)
+    expect(await dev.updateTreeGoal(asAdmin(), '00000000-0000-0000-0000-000000000000', { progressPct: 1 })).toBeNull()
+
+    // видалення кореня каскадом видаляє й підціль (FK parent_id … on delete cascade)
+    expect(await dev.deleteTreeGoal(asAdmin(), root.id)).toBe(true)
+    const [gone] = await admin`select id from development_goals where id = ${child.id}`
+    expect(gone).toBeUndefined()
+    expect(await dev.deleteTreeGoal(asAdmin(), root.id)).toBe(false)
+  })
+
+  it('дерево цілей: чужий батько і чужа людина — 404-подібні коди, а не витік крізь тенанти', async () => {
+    const [other] = await admin`insert into tenants (slug, name, status) values (${`spec-dev-tree-other-${Date.now()}`}, 'Інший', 'active') returning id`
+    const otherId = other!.id as string
+    try {
+      // Вузол іншого тенанту — прямим SQL (сервіс сам не дав би створити ціль на чужого користувача, docs/15 п.15)
+      const [foreignGoal] = await admin`insert into development_goals (tenant_id, user_id, title, kind, status_code, is_strategic) values (${otherId}, ${adminId}, 'Чужий напрямок', 'result', 'planned', true) returning id`
+      // той самий id «батька», але з іншого тенанту — не знайдений у withTenant(tenantId, ...)
+      expect(await dev.createTreeGoal(asAdmin(), { parentId: foreignGoal!.id as string, title: 'x', userId: adminId })).toMatchObject({ ok: false, code: 'parent_not_found' })
+      expect(await dev.createTreeGoal(asAdmin(), { title: 'x', userId: '00000000-0000-0000-0000-000000000000' })).toMatchObject({ ok: false, code: 'user_not_found' })
+    }
+    finally {
+      await admin`delete from tenants where id = ${otherId}`
     }
   })
 })

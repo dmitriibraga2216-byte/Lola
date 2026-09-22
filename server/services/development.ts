@@ -8,6 +8,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
+import { scopeSql } from './access'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -253,7 +254,8 @@ export async function myPlan(ctx: Ctx, userId: string) {
       progressPct: developmentGoals.progressPct, competencyId: developmentGoals.competencyId, targetLevel: developmentGoals.targetLevel, planId: developmentGoals.planId, approvedAt: developmentGoals.approvedAt, returnComment: developmentGoals.returnComment,
       statusName: goalStatuses.name, statusColor: goalStatuses.color, isFinal: goalStatuses.isFinal,
     }).from(developmentGoals).innerJoin(goalStatuses, eq(goalStatuses.code, developmentGoals.statusCode))
-      .where(eq(developmentGoals.userId, userId)).orderBy(asc(developmentGoals.dueAt))
+      // isStrategic=false — особисті цілі ІПР, не вузли дерева «Стратегічний план» (docs/19 §14.4)
+      .where(and(eq(developmentGoals.userId, userId), eq(developmentGoals.isStrategic, false))).orderBy(asc(developmentGoals.dueAt))
     const statuses = await tx.select().from(goalStatuses).orderBy(asc(goalStatuses.sort))
     return { plan: plan ?? null, goals, statuses }
   })
@@ -308,6 +310,91 @@ export async function transitionPlan(ctx: Ctx, planId: string, action: PlanTrans
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: `plan.${action}`, entity: 'development_plan', entityId: planId, before: { status: p.status }, after: { status: flow.to } })
     return { ok: true as const, status: flow.to }
+  })
+}
+
+/** Вкладки списку планів (докс/31 `DevelopmentPlans`, `[рішення]` докс/28 «Spec 19 (продовження)»):
+ *  «Активні» — план ще відкритий і потребує дій (включно з «На перевірці» після завершення періоду),
+ *  «Неактивні» — ще не стартував (чернетка/на погодженні), «Виконані» — закритий. */
+const PLAN_TAB_STATUSES = { active: ['active', 'review'], inactive: ['draft', 'on_approval'], done: ['closed'] } as const
+export type PlanTab = keyof typeof PLAN_TAB_STATUSES
+
+/**
+ * Список планів розвитку для адмінки (докс/19 §5.3-подібний список, мокап `DevelopmentPlans`):
+ * людина · ціль (`summary`) · період · кроків (готово з усіх) · прогрес · стан. Область видимості —
+ * `developmentPlanScope()` в ендпоінті: `null` — уся мережа, інакше — точки з `development.team`.
+ */
+export async function listDevelopmentPlans(ctx: Ctx, filter: { tab?: PlanTab, scope: string[] | null }) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.execute(sql`
+      select p.id, p.user_id, u.full_name, pos.name as position, l.name as location,
+             p.summary, p.period_from, p.period_to, p.status, p.mentor_id, m.full_name as mentor_name,
+             count(g.id)::int as steps_total,
+             count(g.id) filter (where gs.is_final)::int as steps_done
+      from development_plans p
+      join users u on u.id = p.user_id
+      left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+      left join positions pos on pos.id = up.position_id
+      left join locations l on l.id = up.location_id
+      left join users m on m.id = p.mentor_id
+      left join development_goals g on g.plan_id = p.id and not g.is_strategic
+      left join goal_statuses gs on gs.code = g.status_code and gs.tenant_id = g.tenant_id
+      where true
+        ${filter.tab ? sql`and p.status in ${PLAN_TAB_STATUSES[filter.tab]}` : sql``}
+        ${scopeSql(filter.scope, sql`up.location_id`)}
+      group by p.id, u.full_name, pos.name, l.name, m.full_name
+      order by p.period_to desc, u.full_name
+      limit 500
+    `) as unknown as { id: string, user_id: string, full_name: string, position: string | null, location: string | null, summary: string | null, period_from: string, period_to: string, status: string, mentor_id: string | null, mentor_name: string | null, steps_total: number, steps_done: number }[]
+    const [counts] = await tx.execute(sql`
+      select
+        count(*) filter (where p.status in ${PLAN_TAB_STATUSES.active})::int as active,
+        count(*) filter (where p.status in ${PLAN_TAB_STATUSES.inactive})::int as inactive,
+        count(*) filter (where p.status in ${PLAN_TAB_STATUSES.done})::int as done
+      from development_plans p
+      left join user_placements up on up.user_id = p.user_id and up.is_primary and up.ended_at is null
+      where true ${scopeSql(filter.scope, sql`up.location_id`)}
+    `) as unknown as { active: number, inactive: number, done: number }[]
+    return {
+      items: rows.map(r => ({ ...r, progressPct: r.steps_total ? Math.round((r.steps_done / r.steps_total) * 100) : 0 })),
+      counts: counts ?? { active: 0, inactive: 0, done: 0 },
+    }
+  })
+}
+
+/** Картка плану для адмінки/керівника: план + всі його кроки-цілі (докс/31 `DevelopmentPlans`). */
+export async function getPlanCard(ctx: Ctx, planId: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [plan] = await tx.select({
+      id: developmentPlans.id, userId: developmentPlans.userId, fullName: users.fullName,
+      periodFrom: developmentPlans.periodFrom, periodTo: developmentPlans.periodTo, ownerId: developmentPlans.ownerId,
+      mentorId: developmentPlans.mentorId, mentorName: sql<string | null>`(select full_name from users where id = ${developmentPlans.mentorId})`,
+      status: developmentPlans.status, summary: developmentPlans.summary,
+      approvedBy: developmentPlans.approvedBy, approvedAt: developmentPlans.approvedAt, closedAt: developmentPlans.closedAt,
+      resultComment: developmentPlans.resultComment, createdAt: developmentPlans.createdAt,
+    }).from(developmentPlans).innerJoin(users, eq(users.id, developmentPlans.userId)).where(eq(developmentPlans.id, planId))
+    if (!plan) return null
+    const [placement] = await tx.select({ locationId: userPlacements.locationId })
+      .from(userPlacements).where(and(eq(userPlacements.userId, plan.userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    const goals = await tx.select({
+      id: developmentGoals.id, title: developmentGoals.title, kind: developmentGoals.kind, dueAt: developmentGoals.dueAt,
+      statusCode: developmentGoals.statusCode, statusName: goalStatuses.name, statusColor: goalStatuses.color, isFinal: goalStatuses.isFinal,
+      progressPct: developmentGoals.progressPct,
+    }).from(developmentGoals).innerJoin(goalStatuses, eq(goalStatuses.code, developmentGoals.statusCode))
+      .where(and(eq(developmentGoals.planId, planId), eq(developmentGoals.isStrategic, false))).orderBy(asc(developmentGoals.dueAt))
+    const statuses = await tx.select().from(goalStatuses).orderBy(asc(goalStatuses.sort))
+    return { plan, locationId: placement?.locationId ?? null, goals, statuses }
+  })
+}
+
+/** Редагування плану (докс/28 «Spec 19 (продовження)»: раніше PATCH не існувало зовсім) — період і ціль (`summary`); статус — тільки через `transitionPlan`. */
+export async function updatePlan(ctx: Ctx, planId: string, input: { summary?: string | null, periodFrom?: string, periodTo?: string }) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [before] = await tx.select({ periodFrom: developmentPlans.periodFrom, periodTo: developmentPlans.periodTo, summary: developmentPlans.summary }).from(developmentPlans).where(eq(developmentPlans.id, planId))
+    if (!before) return null
+    const [p] = await tx.update(developmentPlans).set({ ...input, updatedAt: new Date() }).where(eq(developmentPlans.id, planId)).returning()
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'plan.update', entity: 'development_plan', entityId: planId, before, after: input })
+    return p!
   })
 }
 
@@ -448,7 +535,7 @@ export async function teamGoals(ctx: Ctx, filter: { status?: string, overdue?: b
       join users u on u.id = g.user_id
       left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       left join locations l on l.id = up.location_id
-      where true
+      where not g.is_strategic
         ${filter.status ? sql`and g.status_code = ${filter.status}` : sql``}
         ${filter.overdue ? sql`and g.due_at < current_date and not s.is_final` : sql``}
         ${filter.locationId ? sql`and up.location_id = ${filter.locationId}` : sql``}
@@ -473,13 +560,87 @@ export async function upsertGoalStatus(ctx: Ctx, input: { code: string, name: st
   })
 }
 
+// ── Дерево цілей «Стратегічний план» (docs/19 §14.4, §5; [рішення] докс/28 «Spec 19 (продовження)») ─
+//
+// У знятому ТЗ (`19` §3.5) `development_goals` — тільки особисті цілі ІПР. Ре-аудит §14.4 показав,
+// що в еталоні «Стратегічний план» (/mbo) — дерево з `parent_id`, де цілі компанії («Напрямок»)
+// каскадом розкриваються до особистих цілей людей: той самий життєвий цикл статусів і протокол
+// (`goal_status_log`), просто інша вкладеність. Замість нової таблиці/сервісу — та сама
+// `development_goals` + `parentId` (self-FK, docs/33) і `isStrategic` (`true` — вузол дерева,
+// відділяє його від особистих цілей ІПР, які інакше потрапили б у «Мій розвиток»/«Цілі
+// співробітників» тієї самої людини). `kind='result'` — найближче з уже існуючого перечня
+// (`competency|learning|result|project`, CLAUDE.md п. 13 — нового значення не заводимо).
+// Погодження не потрібне (`approvedBy/At` проставляються одразу): «Стратегічний план» веде
+// адміністратор (docs/19 §2), а не сама людина, тож механізм §7.4 тут не застосовується.
+
+export type TreeGoalResult = { ok: true, goal: typeof developmentGoals.$inferSelect } | { ok: false, code: 'parent_not_found' | 'user_not_found' }
+
+/** Дерево цілей компанії — `isStrategic=true`; фронт будує вкладеність із `parentId` сам. */
+export async function listGoalTree(ctx: Ctx) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const items = await tx.select({
+      id: developmentGoals.id, parentId: developmentGoals.parentId, title: developmentGoals.title,
+      userId: developmentGoals.userId, ownerName: users.fullName, dueAt: developmentGoals.dueAt,
+      statusCode: developmentGoals.statusCode, statusName: goalStatuses.name, statusColor: goalStatuses.color,
+      isFinal: goalStatuses.isFinal, isSuccess: goalStatuses.isSuccess, progressPct: developmentGoals.progressPct,
+      createdAt: developmentGoals.createdAt,
+    }).from(developmentGoals)
+      .innerJoin(goalStatuses, eq(goalStatuses.code, developmentGoals.statusCode))
+      .leftJoin(users, eq(users.id, developmentGoals.userId))
+      .where(eq(developmentGoals.isStrategic, true))
+      .orderBy(asc(developmentGoals.createdAt))
+    const statuses = await tx.select().from(goalStatuses).orderBy(asc(goalStatuses.sort))
+    return { items, statuses }
+  })
+}
+
+export async function createTreeGoal(ctx: Ctx, input: { parentId?: string | null, title: string, userId: string, dueAt?: string | null }): Promise<TreeGoalResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    if (input.parentId) {
+      const [p] = await tx.select({ id: developmentGoals.id }).from(developmentGoals).where(and(eq(developmentGoals.id, input.parentId), eq(developmentGoals.isStrategic, true)))
+      if (!p) return { ok: false as const, code: 'parent_not_found' as const }
+    }
+    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, input.userId))
+    if (!u) return { ok: false as const, code: 'user_not_found' as const }
+    const [initial] = await tx.select({ code: goalStatuses.code }).from(goalStatuses).where(eq(goalStatuses.isInitial, true)).limit(1)
+    const [g] = await tx.insert(developmentGoals).values({
+      tenantId: ctx.tenantId, userId: input.userId, parentId: input.parentId ?? null, isStrategic: true,
+      title: input.title, kind: 'result', dueAt: input.dueAt ?? null, statusCode: initial?.code ?? 'planned',
+      approvedBy: ctx.actorId, approvedAt: new Date(), createdBy: ctx.actorId,
+    }).returning()
+    await tx.insert(goalStatusLog).values({ tenantId: ctx.tenantId, goalId: g!.id, fromStatus: null, toStatus: g!.statusCode, actorId: ctx.actorId, requestContext: currentRequestContext() })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'goal_tree.create', entity: 'development_goal', entityId: g!.id, after: { title: input.title, parentId: input.parentId ?? null } })
+    return { ok: true as const, goal: g! }
+  })
+}
+
+export async function updateTreeGoal(ctx: Ctx, id: string, input: { title?: string, userId?: string, dueAt?: string | null, progressPct?: number }) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [before] = await tx.select().from(developmentGoals).where(and(eq(developmentGoals.id, id), eq(developmentGoals.isStrategic, true)))
+    if (!before) return null
+    const [g] = await tx.update(developmentGoals).set({ ...input, updatedAt: new Date() }).where(eq(developmentGoals.id, id)).returning()
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'goal_tree.update', entity: 'development_goal', entityId: id, before: { title: before.title, userId: before.userId, dueAt: before.dueAt }, after: input })
+    return g!
+  })
+}
+
+/** Видалення вузла — каскадом (`parent_id` FK `on delete cascade`) видаляє й усе піддерево. */
+export async function deleteTreeGoal(ctx: Ctx, id: string) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [g] = await tx.delete(developmentGoals).where(and(eq(developmentGoals.id, id), eq(developmentGoals.isStrategic, true))).returning({ id: developmentGoals.id, title: developmentGoals.title })
+    if (!g) return false
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'goal_tree.delete', entity: 'development_goal', entityId: id, before: { title: g.title } })
+    return true
+  })
+}
+
 /** Фоновая: цели с истёкшим сроком — напоминание человеку и наставнику (раз в день). */
 export async function goalDueScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
     const rows = await tx.execute(sql`
       select g.id, g.user_id, g.mentor_id, g.title, g.due_at from development_goals g
       join goal_statuses s on s.code = g.status_code and s.tenant_id = g.tenant_id
-      where not s.is_final and g.due_at in (current_date + 3, current_date, current_date - 1)
+      where not g.is_strategic and not s.is_final and g.due_at in (current_date + 3, current_date, current_date - 1)
     `) as unknown as { id: string, user_id: string, mentor_id: string | null, title: string, due_at: string }[]
     let n = 0
     const day = new Date().toISOString().slice(0, 10)

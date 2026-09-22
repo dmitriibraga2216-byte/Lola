@@ -1717,8 +1717,13 @@
     },
     "maxReworks": "Reworks",
     "col": {
+      "title": "Title",
+      "author": "Author",
       "kinds": "Format",
       "criteria": "Criteria",
+      "tags": "Tags",
+      "updated": "Updated",
+      "published": "Published",
       "pending": "Pending",
       "firstPass": "First-pass"
     },
@@ -2588,7 +2593,17 @@
     "avg": "Avg",
     "failedCol": "Failed",
     "partWord": "part",
-    "rulesInTask": "Pass score, time limit and attempts are set on the task (assignment), not on the test."
+    "rulesInTask": "Pass score, time limit and attempts are set on the task (assignment), not on the test.",
+    "empty": "No complex tests yet",
+    "col": {
+      "title": "Title",
+      "composition": "Composition",
+      "compositionN": "{n} tests",
+      "topics": "Topics",
+      "author": "Author",
+      "updated": "Updated",
+      "published": "Published"
+    }
   },
   "wiki": {
     "title": "Wiki",

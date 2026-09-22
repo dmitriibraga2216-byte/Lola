@@ -260,10 +260,10 @@ describe('spec-18: сесії на призначенні (docs/18 §14.1)', () 
     })
   })
 
-  describe('docs/33 D-029: перенос одноразової картки в сесію (міграція 0053)', () => {
-    /** Виконує саме той SQL-бекфіл, що і в міграції 0053 (третій стейтмент після ALTER TABLE) — не дублюючи логіку вручну. */
+  describe('docs/33 D-029: перенос одноразової картки в сесію (міграція 0054)', () => {
+    /** Виконує саме той SQL-бекфіл, що і в міграції 0054 (третій стейтмент після ALTER TABLE) — не дублюючи логіку вручну. */
     async function runBackfill() {
-      const file = readFileSync(resolvePath(__dirname, '../../server/db/migrations/0053_debts_final_meetup_session_sync.sql'), 'utf8')
+      const file = readFileSync(resolvePath(__dirname, '../../server/db/migrations/0054_debts_final_meetup_session_sync.sql'), 'utf8')
       const backfill = file.split('--> statement-breakpoint')[2]!
       await admin.unsafe(backfill)
     }

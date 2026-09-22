@@ -3413,7 +3413,7 @@
       "number": "Enter a question with a numeric answer…",
       "text_short": "Enter a question with a short answer…",
       "file": "Enter a question answered with a photo or file…",
-      "cloze": "Text with blanks, e.g.: Rain {{1}} falls on {{2}}…"
+      "cloze": "Text with blanks, e.g.: Rain {'{{'}1{'}}'} falls on {'{{'}2{'}}'}…"
     },
     "text": "Question text",
     "options": "Answer options",
@@ -3456,8 +3456,8 @@
     "shape": "Area shape",
     "shapeRect": "Rectangle",
     "shapeCircle": "Circle",
-    "clozeHint": "Mark blanks in the text above as {{1}}, {{2}} etc. — set accepted answers for each below (one per line)",
-    "clozeNone": "The question text has no blanks yet — add {{1}}"
+    "clozeHint": "Mark blanks in the text above as {'{{'}1{'}}'}, {'{{'}2{'}}'} etc. — set accepted answers for each below (one per line)",
+    "clozeNone": "The question text has no blanks yet — add {'{{'}1{'}}'}"
   },
   "attemptRequests": {
     "title": "Test attempt requests",

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.integrations' })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { api } = useApi()
 
 type Provider = 'telegram' | 'sms' | 'smtp'
@@ -140,9 +140,14 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
           <div v-for="k in statuses[p]!.keys" :key="k.key" class="field-row">
             <div class="row">
               <label>{{ t(`integrations.field.${k.key}`, k.key) }} <span v-if="k.set" class="teal">✓</span></label>
-              <input v-model="forms[p]![k.key]" :type="k.key.includes('key') || k.key.includes('token') || k.key.includes('url') ? 'password' : 'text'" :placeholder="k.set ? '••••••••' : ''" autocomplete="off">
+              <select v-if="k.key === 'ssl' || k.key === 'debug_mode'" v-model="forms[p]![k.key]" class="bool">
+                <option value="">{{ k.set ? '••••••••' : '—' }}</option>
+                <option value="true">{{ t('common.yes') }}</option>
+                <option value="false">{{ t('common.no') }}</option>
+              </select>
+              <input v-else v-model="forms[p]![k.key]" :type="k.key.endsWith('_ms') || k.key.endsWith('_mb') ? 'number' : k.key.includes('key') || k.key.includes('token') || k.key.includes('url') ? 'password' : 'text'" :placeholder="k.set ? '••••••••' : ''" autocomplete="off">
             </div>
-            <p v-if="k.key === 'reply_to'" class="sub hint">{{ t('integrations.hint.reply_to') }}</p>
+            <p v-if="te(`integrations.hint.${k.key}`)" class="sub hint">{{ t(`integrations.hint.${k.key}`) }}</p>
           </div>
           <div class="actions">
             <button class="primary" @click="saveProvider(p)">{{ t('integrations.connect') }}</button>
@@ -154,6 +159,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'n
             <span v-if="smtpTestResult === 'ok'" class="teal">{{ t('integrations.smtpTestOk') }}</span>
             <span v-if="smtpTestResult === 'fail'" class="fail">{{ t('integrations.smtpTestFail') }}</span>
           </div>
+          <p v-if="p === 'smtp'" class="sub hint">{{ t('integrations.smtpTlsHint') }}</p>
         </template>
       </section>
     </div>
@@ -267,7 +273,7 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .row.wrap { flex-wrap: wrap; }
 .scopes { max-height: 160px; overflow: auto; }
 .grow { flex: 1; }
-input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); flex: 1; min-width: 0; }
+input, select.bool { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); flex: 1; min-width: 0; }
 .num { width: 70px; flex: none; }
 .check { display: flex; gap: var(--space-1); align-items: center; font-size: var(--font-size-body-s); }
 .check input { flex: none; width: auto; }

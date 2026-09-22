@@ -144,6 +144,36 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
 }
 
 /**
+ * Канал увімкнено за замовчуванням для глобального шаблону, поки тенант не перевизначив свій
+ * рядок каналу в `notification_templates` (docs/23 §13.1 — колонки в еталоні саме Email і
+ * Telegram; §4 — «E-mail: керівникам, дайджестам, вивантаженням», решта — Telegram, він
+ * основний для всіх). У перелік коду потрапляє те, що вже узгоджено з рештою системи:
+ * `security_alert` — єдиний код, який сьогодні реально надсилається каналом email
+ * (`securityLog.ts`), `*_manager` — «керівникам», клас `managerDigest` — «дайджестам»,
+ * `scheduled_report`/`report_export_*` — «вивантаженням». SMS у цю перевірку не потрапляє —
+ * в еталоні його немає (§13.2), а in-app завжди резервний канал без власного рядка шаблону.
+ * `otp_code`/`manual`/`test_message` — виняток: канал там обирає не шаблон, а конкретний
+ * виклик (`otpChannel.ts` завжди шле email, ручна розсилка й «Надіслати собі» — автор/адмін
+ * власноруч), тому тумблер коду їх не повинен вимикати.
+ */
+export function emailDefaultEnabled(code: string): boolean {
+  if (code === 'otp_code' || code === 'manual' || code === 'test_message') return true
+  return code === 'security_alert'
+    || /_manager$/.test(code)
+    || eventClassOf(code) === 'managerDigest'
+    || /^(scheduled_report|report_export_)/.test(code)
+}
+
+/**
+ * Дефолтний стан тумблерів «Email»/«Telegram» на екрані `NotificationTemplates` (докс/31
+ * залишок: «дефолтний стан тумблера на рівні коду не змодельований на сервері») — поки тенант
+ * не створив кастомний рядок каналу, таблиця показує саме це, а не «—».
+ */
+export const DEFAULT_TEMPLATE_CHANNELS: Record<string, { telegram: boolean, email: boolean, inapp: boolean }> = Object.fromEntries(
+  Object.keys(DEFAULT_TEMPLATES).map(code => [code, { telegram: true, email: emailDefaultEnabled(code), inapp: true }]),
+)
+
+/**
  * Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. `{{#_tr}}текст{{/_tr}}`
  * (docs/23 §13.4) — особый блок: содержимое не условие, а фраза для перевода по локали получателя;
  * `tr` — резолвер (по умолчанию тождественный, фраза как есть). Резолвится до общих блоков,

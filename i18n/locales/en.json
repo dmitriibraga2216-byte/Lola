@@ -1938,11 +1938,18 @@
       "external_bot_token": "External bot token",
       "api_key": "API key",
       "sender": "Sender",
-      "provider": "Provider"
+      "provider": "Provider",
+      "ssl": "SSL",
+      "debug_mode": "Debug mode",
+      "queue_delay_ms": "Queue delay per message (ms)",
+      "max_attachment_mb": "Max attachment size (MB)"
     },
     "hint": {
-      "reply_to": "So the mail provider doesn't mark the mailing as spam"
-    }
+      "reply_to": "So the mail provider doesn't mark the mailing as spam",
+      "queue_delay_ms": "Artificial delay between messages so the mail provider doesn't flag the mailing as spam",
+      "max_attachment_mb": "Sender-side cutoff, checked before attempting to connect"
+    },
+    "smtpTlsHint": "\"Ignore TLS errors\" is a dangerous flag for self-signed relay certificates — only a platform operator can set it, and every change is logged"
   },
   "dev": {
     "title": "My development",
@@ -3239,6 +3246,7 @@
       "updated": "Updated"
     },
     "disabled": "Disabled",
+    "toggleChannel": "Click to toggle the channel for this event",
     "channels": "Channels",
     "variables": "Template variables",
     "variablesHint": "Click to insert into the text",

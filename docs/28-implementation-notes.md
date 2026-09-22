@@ -423,6 +423,30 @@
   в `debts-5` (`docs/33` D-033): `GET /development/requests` (усі стани, фільтри) поверх того ж
   сервісу, перемикач «На розгляд · Усі заявки» з колонкою «Відповідальний» на тому ж екрані
   (`admin/development/requests.vue`).
+- **`spec-integrations` (23.09, докс/33 D-050, D-076): розширені поля SMTP і дефолтний стан каналу.**
+  `SECRET_KEYS.smtp` отримав `ssl`/`debug_mode`/`queue_delay_ms`/`max_attachment_mb`/`ignore_tls_errors`
+  (`09` §9.7.1) — усі шифруються й доходять до `channels.ts#smtpTransportConfig`/`sendEmail`
+  (SSL і debug — прапорці транспорту nodemailer, `queue_delay_ms` — реальна затримка перед
+  відправкою, `max_attachment_mb` — відсічка до з'єднання). `ignore_tls_errors` — єдиний виняток
+  з еталона: `09` §9.7.1 п. 3 прямо каже «видно тільки оператору платформи», тому новий
+  `PLATFORM_ONLY_KEYS` у `secrets.ts` ховає ключ від тенантського `GET`/`PUT`
+  `/settings/integrations/smtp`, а вмикає його лише `PUT /platform/tenants/:id/smtp-tls`
+  (`platformTenants.ts#setSmtpIgnoreTlsErrors`, запис у `platform_audit`) — власного екрана
+  панелі оператора для цього чекбокса в Lola ще нема (докс/33 D-050, залишок). Групи
+  `ADFS`/`Entra ID`/`Active Directory`/`HRM`/`Google Analytics`/`AI provider` з того самого
+  мокапу `Integrations` не заводили — у `09` §9.7 вони тільки названі, жодного поля не описано
+  (докс/33 D-076); «Вебінари» — не новий борг, це вже наявний `zoom`.
+  Друге: `notifications.ts#DEFAULT_TEMPLATE_CHANNELS`/`emailDefaultEnabled` — дефолтний
+  (глобальний) стан тумблерів Email/Telegram для коду, поки тенант не перевизначив канал своїм
+  рядком (`23` §13.1: email — керівникам/дайджестам/вивантаженням, `otp_code`/`manual`/
+  `test_message` — системні виклики, канал обирає не шаблон). Свідомо **не** гейтили сам
+  диспетчер (`templateFor`) за цим дефолтом: у коді є легітимні шляхи, де канал 'email' обирає
+  конкретний виклик (наприклад, `dueScan.ts` дозволяє адміну задати `channel: 'email'` для
+  нагадувань про дедлайн через `assignments.reminders`) — жорсткий гейт за кодом зламав би це.
+  Реальне вимкнення каналу лишається тим самим наявним механізмом: кастомний рядок
+  `notification_templates.is_enabled = false` на каналі (вже враховувався диспетчером до цього
+  PR) — новий шар лише зробив дефолтний стан видимим і клікабельним на екрані
+  `NotificationTemplates` замість «—».
 
 ### Spec 25 — задачи по тенантам с round-robin и лимитом, `suspended`/`purge`, `platform_audit`, резолв по `Host`, `tenancy.spec.ts` 1–10 (`25` §5, §7–8, §10, §14, §16.1; `24` §4.4, §7 п. 5; `32` §Б строка 17)
 

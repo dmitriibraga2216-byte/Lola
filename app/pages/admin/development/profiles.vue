@@ -8,7 +8,8 @@ interface P { id: string, positionId: string, positionIds: string[], positionNam
 const items = ref<P[]>([])
 const positions = ref<{ id: string, name: string }[]>([])
 const positionLevels = ref<{ id: string, name: string }[]>([])
-const comps = ref<{ id: string, name: string, levels: { level: number }[] }[]>([])
+const comps = ref<{ id: string, name: string, levels: { level: number }[], categoryId: string | null }[]>([])
+const categories = ref<{ id: string, name: string }[]>([])
 const courses = ref<{ id: string, title: string }[]>([])
 const error = ref('')
 const notice = ref('')
@@ -24,6 +25,7 @@ async function load() {
     positions.value = await api('/refs/positions')
     positionLevels.value = await api('/refs/position-levels')
     comps.value = await api('/competencies')
+    categories.value = await api('/competency-categories')
     courses.value = (await api<{ id: string, title: string, status: string }[]>('/courses')).filter(c => c.status === 'published')
   } catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -49,6 +51,18 @@ async function save() {
   } catch (err) { error.value = apiErrorOf(err).message }
 }
 const compName = (id: string) => comps.value.find(c => c.id === id)?.name ?? '?'
+/** Таблиця «Компетенції та норма» за мокапом PositionProfile: вимоги, згруповані по категорії компетенції. */
+const requirementGroups = computed(() => {
+  const catName = (id: string | null) => id ? (categories.value.find(c => c.id === id)?.name ?? t('dev.noCategory')) : t('dev.noCategory')
+  const order: string[] = []
+  const byCat = new Map<string, number[]>()
+  form.competencyRequirements.forEach((r, i) => {
+    const name = catName(comps.value.find(c => c.id === r.competencyId)?.categoryId ?? null)
+    if (!byCat.has(name)) { byCat.set(name, []); order.push(name) }
+    byCat.get(name)!.push(i)
+  })
+  return order.map(name => ({ name, indices: byCat.get(name)! }))
+})
 const coverage = ref<{ people: number, fit: number } | null>(null)
 const current = computed(() => items.value.find(x => x.positionId === form.positionId))
 /** Посади, які можна додати до профілю: не головна і не зайняті іншим профілем. */
@@ -90,16 +104,19 @@ async function applyToPeople() {
         <BlockEditor v-model="form.responsibilities" />
         <label class="check"><input v-model="form.usePositionLevels" type="checkbox"> {{ t('dev.usePositionLevels') }}</label>
         <p class="sub">{{ t('dev.usePositionLevelsHint') }}</p>
-        <h3>{{ t('dev.requirements') }}</h3>
-        <div v-for="(r, i) in form.competencyRequirements" :key="i" class="row">
-          <select v-model="r.competencyId" class="field grow"><option v-for="c in comps" :key="c.id" :value="c.id">{{ c.name }}</option></select>
-          <select v-model.number="r.requiredLevel" class="field"><option v-for="l in (comps.find(c => c.id === r.competencyId)?.levels ?? [{ level: 1 }, { level: 2 }, { level: 3 }])" :key="l.level" :value="l.level">{{ t('dev.level') }} {{ l.level }}</option></select>
-          <select v-if="form.usePositionLevels" v-model="r.positionLevelId" class="field">
-            <option :value="null">{{ t('dev.anyLevel') }}</option>
-            <option v-for="pl in positionLevels" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
-          </select>
-          <label class="check"><input v-model="r.isCritical" type="checkbox"> {{ t('dev.critical') }}</label>
-          <button class="chip" @click="form.competencyRequirements.splice(i, 1)">✕</button>
+        <h3 class="upper">{{ t('dev.reqTable') }}</h3>
+        <div v-for="g in requirementGroups" :key="g.name" class="reqgroup">
+          <div class="reqgroup-title">{{ g.name }}</div>
+          <div v-for="i in g.indices" :key="i" class="row">
+            <select v-model="form.competencyRequirements[i]!.competencyId" class="field grow"><option v-for="c in comps" :key="c.id" :value="c.id">{{ c.name }}</option></select>
+            <label class="sub">{{ t('dev.level') }} <select v-model.number="form.competencyRequirements[i]!.requiredLevel" class="field"><option v-for="l in (comps.find(c => c.id === form.competencyRequirements[i]!.competencyId)?.levels ?? [{ level: 1 }, { level: 2 }, { level: 3 }])" :key="l.level" :value="l.level">{{ l.level }}</option></select></label>
+            <select v-if="form.usePositionLevels" v-model="form.competencyRequirements[i]!.positionLevelId" class="field">
+              <option :value="null">{{ t('dev.anyLevel') }}</option>
+              <option v-for="pl in positionLevels" :key="pl.id" :value="pl.id">{{ pl.name }}</option>
+            </select>
+            <label class="check"><input v-model="form.competencyRequirements[i]!.isCritical" type="checkbox"> {{ t('dev.critical') }}</label>
+            <button class="chip" @click="form.competencyRequirements.splice(i, 1)">✕</button>
+          </div>
         </div>
         <button class="chip" data-testid="req-add" @click="form.competencyRequirements.push({ competencyId: comps[0]?.id ?? '', requiredLevel: 2, positionLevelId: null })">+ {{ t('dev.competency') }}</button>
         <p class="sub sourcehint">{{ t('dev.sourceHint') }}<br>{{ t('dev.sourceHintExpiry') }}<br>1. {{ t('dev.source.assessment') }} — {{ t('dev.sourceHintAssessment') }}<br>2. {{ t('dev.source.task') }} — {{ t('dev.sourceHintTask') }}<br>3. {{ t('dev.source.manual') }} — {{ t('dev.sourceHintManual') }}</p>
@@ -122,6 +139,9 @@ async function applyToPeople() {
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 h2, h3 { margin: 0; font-weight: 800; }
 h3 { font-size: var(--font-size-body); margin-top: var(--space-2); }
+h3.upper { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.reqgroup { display: grid; gap: var(--space-1); margin-bottom: var(--space-2); }
+.reqgroup-title { font-weight: 800; }
 .grid { display: grid; grid-template-columns: 220px 1fr; gap: var(--space-3); margin-bottom: var(--space-3); }
 @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
 .list { display: grid; gap: var(--space-1); align-content: start; }

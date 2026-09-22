@@ -3,9 +3,8 @@
  * Комплексні тести за мокапом ContentComplexTests (docs/31): шапка «Комплексні тести» з
  * «Додати», таблиця НАЗВА · СКЛАД · ТЕМИ · АВТОР · ДАТА ЗМІНИ · ОПУБЛІКОВАНО. «Імпортувати»
  * не додаємо — те саме рішення заказчика Q-03 (docs/34): формат файлу не описаний.
- * Залишок (verstka-only, не хватає даних):
- *  - «Автор»: `listComplexTests` (server/services/complexTests.ts) віддає лише `createdBy`
- *    (uuid, без join на users) — ім'я показати не можемо без серверної правки.
+ * «Автор» (screens-7): `listComplexTests` тепер приєднує users по `created_by` і віддає `authorName`.
+ * Залишок:
  *  - «Теми»: у складі комплексного теста немає поняття «тема» — лише частини-тести
  *    (`parts`, docs/12 §14.2); чи це мітки складових тестів, чи окреме поле — не визначено
  *    в ТЗ, тому не вигадуємо і лишаємо «—» до рішення замовника.
@@ -13,7 +12,7 @@
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'complextest.manage' })
 const { t } = useI18n()
 const { api } = useApi()
-interface CT { id: string, title: string, parts: { quizId: string, weight: number, minScore: number | null, title: string }[], sequential: boolean, isActive: boolean, updatedAt: string }
+interface CT { id: string, title: string, parts: { quizId: string, weight: number, minScore: number | null, title: string }[], sequential: boolean, isActive: boolean, updatedAt: string, authorName: string | null }
 const items = ref<CT[]>([])
 const quizzes = ref<{ id: string, title: string }[]>([])
 const error = ref('')
@@ -61,7 +60,7 @@ async function save() {
             </td>
             <td>{{ t('cx.col.compositionN', { n: c.parts.length }) }}</td>
             <td class="muted">—</td>
-            <td class="muted">—</td>
+            <td class="muted">{{ c.authorName ?? '—' }}</td>
             <td class="muted">{{ new Date(c.updatedAt).toLocaleDateString('uk') }}</td>
             <td><span :class="['badge upper', c.isActive ? 'published' : 'draft']">{{ c.isActive ? t('course.status.published') : t('course.status.draft') }}</span></td>
           </tr>

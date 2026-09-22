@@ -970,7 +970,7 @@ competencies(name, description, levels jsonb)                    -- уровни
 position_profiles(position_id, competency_id, required_level int)
 position_profile_positions(profile_id, position_id, unique(profile_id, position_id))   -- docs/33 D-031: усі посади профілю, головна — position_profiles.position_id
 position_profile_courses(position_id, course_id, due_days int, is_mandatory boolean)
-development_plans(user_id, period_from date, period_to date, owner_id, status)
+development_plans(user_id, period_from date, period_to date, owner_id, mentor_id, status)   -- mentor_id [рішення] screens-7, docs/19 §3.4
 development_goals(plan_id, title, description, metric text, due_at, status,
           status_changed_at, approved_by)
 goal_status_log(goal_id, from_status, to_status, actor_id, comment)

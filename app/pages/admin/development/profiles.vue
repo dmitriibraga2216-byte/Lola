@@ -63,12 +63,13 @@ const requirementGroups = computed(() => {
   })
   return order.map(name => ({ name, indices: byCat.get(name)! }))
 })
-const coverage = ref<{ people: number, fit: number } | null>(null)
+interface Coverage { people: number, fit: number, perPerson: { userId: string, fullName: string, percent: number, fit: boolean }[] }
+const coverage = ref<Coverage | null>(null)
 const current = computed(() => items.value.find(x => x.positionId === form.positionId))
 /** Посади, які можна додати до профілю: не головна і не зайняті іншим профілем. */
 const freePositions = computed(() => positions.value.filter(p => p.id !== form.positionId && !items.value.some(x => x.positionId !== form.positionId && (x.positionIds ?? [x.positionId]).includes(p.id))))
 function togglePosition(id: string) { form.positionIds = form.positionIds.includes(id) ? form.positionIds.filter(x => x !== id) : [...form.positionIds, id] }
-watch(current, async (p) => { coverage.value = p ? await api<{ people: number, fit: number }>(`/position-profiles/${p.id}/coverage`).catch(() => null) : null }, { immediate: true })
+watch(current, async (p) => { coverage.value = p ? await api<Coverage>(`/position-profiles/${p.id}/coverage`).catch(() => null) : null }, { immediate: true })
 async function applyToPeople() {
   if (!current.value) return
   error.value = ''; notice.value = ''
@@ -90,6 +91,19 @@ async function applyToPeople() {
       <section v-if="form.positionId" class="card">
         <h2>{{ positions.find(p => p.id === form.positionId)?.name }}</h2>
         <p v-if="coverage" class="sub">{{ t('dev.coverage', { fit: coverage.fit, people: coverage.people }) }} <NuxtLink v-if="coverage.people" :to="{ path: '/admin/people', query: { positionId: form.positionId } }" class="link">→</NuxtLink></p>
+        <div v-if="coverage && coverage.people" class="coverage-card">
+          <div class="coverage-title upper">{{ t('dev.coverageTitle') }}</div>
+          <ul class="coverage-list">
+            <li v-for="person in coverage.perPerson" :key="person.userId" class="coverage-row" :data-testid="`coverage-${person.userId}`">
+              <div class="coverage-head">
+                <b class="coverage-pct">{{ t('dev.coveragePercent', { percent: person.percent }) }}</b>
+                <span class="coverage-name">{{ person.fullName }}</span>
+              </div>
+              <div class="bar"><i :class="{ ok: person.fit }" :style="{ width: `${person.percent}%` }" /></div>
+            </li>
+          </ul>
+        </div>
+        <p v-else-if="coverage" class="sub">{{ t('dev.coverageEmpty') }}</p>
         <textarea v-model="form.description" class="field" rows="2" :placeholder="t('dev.profileDesc')" />
         <label class="sub">{{ t('dev.probation') }} <input v-model.number="form.probationDays" class="field short" type="number" min="1" max="365"></label>
         <h3>{{ t('dev.alsoPositions') }}</h3>
@@ -162,4 +176,14 @@ h3.upper { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--f
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }
 .notice { color: var(--color-teal-ink); }
+.coverage-card { background: var(--color-bg); border: 2px solid var(--color-teal); border-radius: var(--radius-l); padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-2); }
+.coverage-title { font-size: var(--font-size-body-s); font-weight: 900; color: var(--color-ink); letter-spacing: 0.06em; }
+.coverage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); max-height: 260px; overflow-y: auto; }
+.coverage-row { display: grid; gap: var(--space-1); }
+.coverage-head { display: flex; align-items: baseline; gap: var(--space-2); }
+.coverage-pct { font-variant-numeric: tabular-nums; font-weight: 900; }
+.coverage-name { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.coverage-row .bar { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; }
+.coverage-row .bar i { display: block; height: 100%; background: var(--color-sun); border-radius: var(--radius-pill); }
+.coverage-row .bar i.ok { background: var(--color-teal); }
 </style>

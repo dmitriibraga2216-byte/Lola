@@ -31,6 +31,8 @@ const filter = reactive({ positionId: '', positionLevelId: '', cityId: '', orgUn
 const showFilters = ref(false)
 const items = ref<PersonRow[]>([])
 const cursor = ref<string | null>(null)
+// Лічильники в чипах (мокап People, docs/31): рахуються по тим самим фільтрам, що й список
+const counts = ref<{ active: number, blocked: number, all: number }>({ active: 0, blocked: 0, all: 0 })
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -53,11 +55,12 @@ async function load(reset = true) {
   loading.value = true
   error.value = ''
   try {
-    const res = await apiRaw<{ data: PersonRow[], meta: { cursor: string | null } }>('/people', {
+    const res = await apiRaw<{ data: PersonRow[], meta: { cursor: string | null, counts: { active: number, blocked: number, all: number } } }>('/people', {
       query: { tab: tab.value, ...(q.value ? { q: q.value } : {}), ...activeFilter.value, ...(!reset && cursor.value ? { cursor: cursor.value } : {}) },
     })
     items.value = reset ? res.data : [...items.value, ...res.data]
     cursor.value = res.meta.cursor
+    counts.value = res.meta.counts
     if (reset) selected.value = new Set()
   }
   catch (err) { error.value = apiErrorOf(err).message }
@@ -179,7 +182,7 @@ const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') :
     </section>
 
     <div class="tabs" role="tablist">
-      <button v-for="option in (['active', 'blocked', 'all'] as const)" :key="option" role="tab" :aria-selected="tab === option" :class="['tab', { on: tab === option }]" @click="tab = option">{{ t(`people.tab.${option}`) }}</button>
+      <button v-for="option in (['active', 'blocked', 'all'] as const)" :key="option" role="tab" :aria-selected="tab === option" :class="['tab', { on: tab === option }]" @click="tab = option">{{ t(`people.tab.${option}`) }}<template v-if="option !== 'all'"> · {{ counts[option] }}</template></button>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>

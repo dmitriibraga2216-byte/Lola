@@ -25,6 +25,10 @@ export async function listWorkshops(ctx: Ctx) {
       criteriaCount: sql<number>`jsonb_array_length(${workshops.criteria})`,
       pending: sql<number>`(select count(*)::int from ${workshopSubmissions} s where s.workshop_id = ${workshops.id} and s.status in ('submitted','in_review'))`,
       firstPassPct: sql<number>`(select round(100.0 * count(*) filter (where s.status = 'accepted' and s.rework_count = 0) / nullif(count(*) filter (where s.status in ('accepted','rejected')), 0))::int from ${workshopSubmissions} s where s.workshop_id = ${workshops.id})`,
+      // Колонка «Автор» (docs/31 `ContentWorkshops`, screens-7): практикум зберігає лише authorIds,
+      // імена — join на users. «Мітки» лишаються 🟡 — у workshops немає стовпця tags і жодного
+      // scope у TAG_SCOPES (shared/enums.ts) під практикуми, вигадувати новий scope мовчки не можна.
+      authorNames: sql<string[]>`(select coalesce(array_agg(u.full_name order by u.full_name), '{}') from ${users} u where u.id = any(${workshops.authorIds}))`,
     }).from(workshops).where(isNull(workshops.deletedAt)).orderBy(desc(workshops.updatedAt))
   })
 }

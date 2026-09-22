@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { requireScope, can } from '../../../../services/access'
 import { createPlan } from '../../../../services/development'
 import { apiData, apiError } from '../../../../utils/apiResponse'
-const schema = z.object({ userId: z.string().uuid().optional(), periodFrom: z.string().date(), periodTo: z.string().date(), summary: z.string().max(2000).optional() })
+const schema = z.object({ userId: z.string().uuid().optional(), periodFrom: z.string().date(), periodTo: z.string().date(), summary: z.string().max(2000).optional(), mentorId: z.string().uuid().nullable().optional() })
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'development.own')
   const p = schema.safeParse(await readBody(event))

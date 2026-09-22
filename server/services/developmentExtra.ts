@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
   assignmentCompetencies, assignments, competencies, competencyAssessments, competencyCategories, courses, developmentGoals, developmentPlans, goalStatuses,
-  positionProfilePositions, positionProfiles, strategicPlans, userPlacements,
+  positionProfilePositions, positionProfiles, strategicPlans, userPlacements, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -241,23 +241,35 @@ export async function applyPositionProfile(ctx: Ctx, profileId: string): Promise
   return { assignments: created.length, enrolled }
 }
 
-/** Сколько людей соответствует профилю (docs/19 §5.5) — для карточки профиля. */
+/**
+ * Сколько людей соответствует профилю (docs/19 §5.5) — для карточки профиля.
+ * `perPerson` (docs/31 `PositionProfile`, screens-7) — «Відповідність профілю N% — ПІБ» по
+ * кожній людині на посаді: відсоток вимог компетенцій, яким людина відповідає (рівень ≥ вимоги),
+ * відсортовано за відсотком за зменшенням.
+ */
 export async function profileCoverage(ctx: Ctx, profileId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [p] = await tx.select().from(positionProfiles).where(eq(positionProfiles.id, profileId))
     if (!p) return null
     const allReqs = p.competencyRequirements as Requirement[]
     const positionIds = await profilePositionIds(tx, p.id, p.positionId)
-    const people = await tx.select({ userId: userPlacements.userId, positionLevelId: userPlacements.positionLevelId }).from(userPlacements).where(and(inArray(userPlacements.positionId, positionIds), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
+    const people = await tx.select({ userId: userPlacements.userId, fullName: users.fullName, positionLevelId: userPlacements.positionLevelId })
+      .from(userPlacements).innerJoin(users, eq(users.id, userPlacements.userId))
+      .where(and(inArray(userPlacements.positionId, positionIds), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
     let fit = 0
     const ids: string[] = []
+    const perPerson: { userId: string, fullName: string, percent: number, fit: boolean }[] = []
     for (const u of people) {
       const reqs = effectiveRequirements(allReqs, p.usePositionLevels, u.positionLevelId)
       const levels = await currentLevels(tx, u.userId)
-      const ok = reqs.every(r => (levels.get(r.competencyId)?.level ?? 0) >= r.requiredLevel)
+      const met = reqs.filter(r => (levels.get(r.competencyId)?.level ?? 0) >= r.requiredLevel).length
+      const ok = met === reqs.length
+      const percent = reqs.length ? Math.round((met / reqs.length) * 100) : 100
+      perPerson.push({ userId: u.userId, fullName: u.fullName, percent, fit: ok })
       if (ok) { fit++; ids.push(u.userId) }
     }
-    return { people: people.length, fit, fitUserIds: ids }
+    perPerson.sort((a, b) => b.percent - a.percent)
+    return { people: people.length, fit, fitUserIds: ids, perPerson }
   })
 }
 

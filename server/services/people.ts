@@ -25,21 +25,16 @@ export type PersonListFilter = z.infer<typeof personListQuerySchema>
 /** Список людей с фильтрами (docs/05-screens.md §5.9), курсорная пагинация по created_at+id. */
 export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const conditions = []
-
-    if (filter.tab === 'active') conditions.push(inArray(users.status, ['invited', 'active']))
-    if (filter.tab === 'blocked') conditions.push(inArray(users.status, ['suspended', 'archived']))
+    // Условия фильтров без вкладки и курсора — общие для страницы и для счётчиков чипов
+    // «Активні · Заблоковані · Усі» (docs/31 `People`): счётчик считает по тем же фильтрам
+    // (пошук, посада, точка …), только статус переключается.
+    const baseConditions = []
     if (filter.q) {
-      conditions.push(or(
+      baseConditions.push(or(
         ilike(users.fullName, `%${filter.q}%`),
         ilike(users.phone, `%${filter.q}%`),
       )!)
     }
-    if (filter.cursor) {
-      const [ts, id] = filter.cursor.split('_')
-      conditions.push(sql`(${users.createdAt}, ${users.id}) < (${new Date(Number(ts))}, ${id}::uuid)`)
-    }
-
     if (filter.locationId || filter.positionId || filter.positionLevelId || filter.orgUnitId) {
       const placementCond = [
         eq(userPlacements.tenantId, ctx.tenantId),
@@ -49,18 +44,32 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
         ...(filter.positionLevelId ? [eq(userPlacements.positionLevelId, filter.positionLevelId)] : []),
         ...(filter.orgUnitId ? [eq(userPlacements.orgUnitId, filter.orgUnitId)] : []),
       ]
-      conditions.push(sql`exists (select 1 from ${userPlacements}
+      baseConditions.push(sql`exists (select 1 from ${userPlacements}
         where ${and(...placementCond, eq(userPlacements.userId, users.id))})`)
     }
-    if (filter.cityId) conditions.push(eq(users.cityId, filter.cityId))
-    if (filter.tag) conditions.push(sql`${filter.tag} = any(${users.tags})`)
-    if (filter.role) conditions.push(sql`exists (select 1 from ${userRoles} ur join ${roles} r on r.id = ur.role_id where ur.user_id = ${users.id} and r.code = ${filter.role})`)
-    if (filter.registeredFrom) conditions.push(sql`${users.createdAt} >= ${filter.registeredFrom}::date`)
-    if (filter.registeredTo) conditions.push(sql`${users.createdAt} < (${filter.registeredTo}::date + 1)`)
-    if (filter.activeFrom) conditions.push(sql`${users.lastSeenAt} >= ${filter.activeFrom}::date`)
-    if (filter.activeTo) conditions.push(sql`${users.lastSeenAt} < (${filter.activeTo}::date + 1)`)
+    if (filter.cityId) baseConditions.push(eq(users.cityId, filter.cityId))
+    if (filter.tag) baseConditions.push(sql`${filter.tag} = any(${users.tags})`)
+    if (filter.role) baseConditions.push(sql`exists (select 1 from ${userRoles} ur join ${roles} r on r.id = ur.role_id where ur.user_id = ${users.id} and r.code = ${filter.role})`)
+    if (filter.registeredFrom) baseConditions.push(sql`${users.createdAt} >= ${filter.registeredFrom}::date`)
+    if (filter.registeredTo) baseConditions.push(sql`${users.createdAt} < (${filter.registeredTo}::date + 1)`)
+    if (filter.activeFrom) baseConditions.push(sql`${users.lastSeenAt} >= ${filter.activeFrom}::date`)
+    if (filter.activeTo) baseConditions.push(sql`${users.lastSeenAt} < (${filter.activeTo}::date + 1)`)
     // Скрытые (docs/16 §7.5) — только администратору, который явно попросил
-    if (!filter.includeHidden) conditions.push(eq(users.isHidden, false))
+    if (!filter.includeHidden) baseConditions.push(eq(users.isHidden, false))
+
+    const conditions = [...baseConditions]
+    if (filter.tab === 'active') conditions.push(inArray(users.status, ['invited', 'active']))
+    if (filter.tab === 'blocked') conditions.push(inArray(users.status, ['suspended', 'archived']))
+    if (filter.cursor) {
+      const [ts, id] = filter.cursor.split('_')
+      conditions.push(sql`(${users.createdAt}, ${users.id}) < (${new Date(Number(ts))}, ${id}::uuid)`)
+    }
+
+    const [counts] = await tx.select({
+      active: sql<number>`count(*) filter (where ${users.status} in ('invited', 'active'))::int`,
+      blocked: sql<number>`count(*) filter (where ${users.status} in ('suspended', 'archived'))::int`,
+      all: sql<number>`count(*)::int`,
+    }).from(users).where(and(...baseConditions))
 
     const rows = await tx.select({
       id: users.id,
@@ -120,6 +129,7 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
         roles: [...new Set(roleRows.filter(x => x.userId === r.id).map(x => x.name))],
       })),
       cursor: hasMore && last ? `${last.createdAt.getTime()}_${last.id}` : null,
+      counts: counts ?? { active: 0, blocked: 0, all: 0 },
     }
   })
 }

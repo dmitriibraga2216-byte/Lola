@@ -73,6 +73,12 @@
 (`draft` \| `on_approval` \| `active` \| `review` \| `closed`), `summary`, `created_by`,
 `approved_by`, `approved_at`, `closed_at`, `result_comment`.
 
+**`mentor_id` `[рішення]` (screens-7, docs/31 `DevelopmentPlanMobile`).** У мокапі поруч з
+періодом плану показаний «наставник» — за аналогією з `mentor_id` цілі (§3.5), тільки на
+рівні всього плану, а не окремої цілі. У знятому ТЗ такого поля нема — додано за прямою
+вказівкою постановника задачі; призначає керівник (`POST /development-plans/:id/mentor`,
+scope `development.team`), в аудит.
+
 ### 3.5 `development_goals` — цели
 
 | Поле | Тип | Обяз. | Комментарий |

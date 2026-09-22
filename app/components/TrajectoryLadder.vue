@@ -4,7 +4,7 @@
  * пройденные бирюзовые с галочкой, текущий солнечный, будущие приглушённые; затримка — «Відкриється {дата}».
  * Только фактический путь человека, без канвы (docs/17 §5.2). Сервер считает, компонент показывает.
  */
-export interface Step { nodeId: string, kind: string, title: string | null, contentTitle: string | null, contentType: string | null, status: string, activatedAt: string | null, finishedAt: string | null, firesAt: string | null, score: string | null, passed: boolean | null, reason: string | null, assignmentId: string | null, courseEnrollmentId: string | null, courseProgress: string | null }
+export interface Step { nodeId: string, kind: string, title: string | null, contentTitle: string | null, contentType: string | null, days: number | null, status: string, activatedAt: string | null, finishedAt: string | null, firesAt: string | null, score: string | null, passed: boolean | null, reason: string | null, assignmentId: string | null, courseEnrollmentId: string | null, courseProgress: string | null }
 export interface Ladder { id: string, title: string, status: string, progressPct: string, mentorId: string | null, total: number, done: number, steps: Step[] }
 
 const props = defineProps<{ ladder: Ladder, mine?: boolean, canConfirm?: boolean }>()
@@ -13,7 +13,14 @@ const { t } = useI18n()
 
 const pct = computed(() => props.ladder.total ? Math.round((props.ladder.done / props.ladder.total) * 100) : Number(props.ladder.progressPct))
 const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' }) : ''
-function stepTitle(s: Step) { return s.title || s.contentTitle || t(`traj.kind.${s.kind}`) }
+// Затримка/закриття доступу (мокап MyTrajectory, docs/31, screens-7): назва завжди
+// «Затримка N днів» — з кількістю днів, яку сервер уже рахує (`days` вузла), а не
+// довільна підпис-назва блоку (та лишається лише в редакторі полотна).
+function stepTitle(s: Step) {
+  if (s.kind === 'delay' && s.days != null) return t('traj.step.delayTitle', { n: s.days })
+  if (s.kind === 'stop_delay' && s.days != null) return t('traj.step.stopDelayTitle', { n: s.days })
+  return s.title || s.contentTitle || t(`traj.kind.${s.kind}`)
+}
 function stepSub(s: Step) {
   if (s.kind === 'task') {
     const type = s.contentType ? t(`contentType.${s.contentType}`) : ''

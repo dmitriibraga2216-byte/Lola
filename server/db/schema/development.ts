@@ -99,6 +99,10 @@ export const developmentPlans = pgTable('development_plans', {
   periodFrom: date('period_from').notNull(),
   periodTo: date('period_to').notNull(),
   ownerId: uuid('owner_id').references(() => users.id), // руководитель
+  // Наставник плана (docs/19 §3.4, screens-7 [рішення]): за аналогією з mentor_id цілі (§3.5) —
+  // хто допомагає людині з планом в цілому, а не з конкретною ціллю; мокап DevelopmentPlanMobile
+  // показує його поруч з періодом на картці «Ціль плану».
+  mentorId: uuid('mentor_id').references(() => users.id),
   status: text('status').notNull().default('draft'), // draft | on_approval | active | review | closed
   summary: text('summary'),
   createdBy: uuid('created_by').references(() => users.id),

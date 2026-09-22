@@ -61,6 +61,19 @@ afterAll(async () => {
 })
 
 describe('люди (docs/16 §13)', () => {
+  it('screens-7 (docs/31 `People`): счётчики чипів Активні · Заблоковані · Усі рахуються по тим самим фільтрам, крім вкладки', async () => {
+    const marker = `Лічильник-${Date.now()}`
+    const activeId = await makePerson(`${marker}-Активний`)
+    const blockedId = await makePerson(`${marker}-Блок`)
+    await admin`update users set status = 'suspended' where id = ${blockedId}`
+    const before = await P.listPeople(ctx(), { q: marker, tab: 'all', limit: 10 })
+    expect(before.counts).toEqual({ active: 1, blocked: 1, all: 2 })
+    // Вкладка не влияет на счётчики — фільтр «пошук» той самий
+    const onActiveTab = await P.listPeople(ctx(), { q: marker, tab: 'active', limit: 10 })
+    expect(onActiveTab.counts).toEqual({ active: 1, blocked: 1, all: 2 })
+    expect(onActiveTab.items.map(i => i.id)).toEqual([activeId])
+  })
+
   it('§13.2: переведённый с точки А на Б в отчёте за прошлый месяц показан на А', async () => {
     const id = await makePerson('Перевід Тест', { locationId: lazarevaId, startedAt: '2026-06-01' })
     await P.addPlacement(ctx(), id, { locationId: segedskaId, positionId: posId, isPrimary: true, startedAt: '2026-09-10' })

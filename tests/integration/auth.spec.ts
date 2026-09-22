@@ -38,11 +38,12 @@ beforeAll(async () => {
     select u.id from users u
     join user_roles ur on ur.user_id = u.id
     join roles r on r.id = ur.role_id
-    where u.tenant_id = ${tenantId} and r.code = 'employee'
+    where u.tenant_id = ${tenantId} and r.code = 'employee' and u.status = 'active'
       and not exists (
         select 1 from user_roles ur2 join roles r2 on r2.id = ur2.role_id
         where ur2.user_id = u.id and r2.code in ('admin', 'author', 'manager', 'mentor')
       )
+    order by u.id
     limit 1
   `
   employeeId = emp!.id as string

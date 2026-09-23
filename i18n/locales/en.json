@@ -142,7 +142,8 @@
       "offboarding": "Offboarding",
       "candidates": "Candidates",
       "funnelReport": "Funnel report",
-      "recruitingSettings": "Recruiting"
+      "recruitingSettings": "Recruiting",
+      "vacancies": "Vacancies"
     },
     "section": {
       "learning": "Learning",
@@ -4921,6 +4922,99 @@
       "bad_question": "Incorrect question",
       "wrong_key": "Wrong correct answer",
       "tech": "Technical problem",
+      "other": "Other"
+    }
+  },
+  "vacancies": {
+    "title": "Vacancies",
+    "hint": "Open positions: selection link, criteria and the assignment parameter template",
+    "cardHint": "Publishing is a separate action: the server checks course, location and recruiter",
+    "new": "New vacancy",
+    "newTitle": "New vacancy",
+    "apply": "Apply",
+    "allStates": "All states",
+    "empty": "No vacancies yet",
+    "linkOn": "Active",
+    "publish": "Publish",
+    "pause": "Pause",
+    "close": "Close",
+    "rotate": "Refresh link",
+    "templateHint": "This is a template for a future assignment, not the vacancy's own rules: an ordinary assignment is created on application.",
+    "criteriaHint": "Criteria frame a human decision: they block nothing and roll up into one recruiter score.",
+    "savedOnlyNew": "Changes affect new applications only. Candidates in progress: {n}",
+    "col": {
+      "title": "Title",
+      "course": "Recruiting course",
+      "recruiter": "Recruiter",
+      "inWork": "Candidates in progress",
+      "link": "Link",
+      "state": "State",
+      "created": "Created"
+    },
+    "tab": {
+      "vacancies": "Vacancies",
+      "templates": "Templates"
+    },
+    "tpl": {
+      "name": "Template name",
+      "used": "Used",
+      "apply": "Create vacancy",
+      "empty": "No templates yet",
+      "save": "Save as template",
+      "saved": "Template saved"
+    },
+    "sec": {
+      "main": "About the vacancy",
+      "template": "Assignment parameters",
+      "criteria": "Candidate criteria"
+    },
+    "f": {
+      "title": "Title",
+      "course": "Recruiting course",
+      "location": "Location",
+      "city": "City",
+      "employment": "Employment type",
+      "notChosen": "Not selected",
+      "link": "Selection link",
+      "dueDays": "Days to complete",
+      "passScore": "Pass score, %"
+    },
+    "c": {
+      "name": "Criterion",
+      "weight": "Weight",
+      "scale": "Scale",
+      "critical": "Critical",
+      "min": "Scale min",
+      "max": "Scale max",
+      "empty": "No criteria yet"
+    }
+  },
+  "vacancy": {
+    "state": {
+      "draft": "Draft",
+      "published": "Published",
+      "paused": "Paused",
+      "closed": "Closed",
+      "archived": "Archived"
+    },
+    "employment": {
+      "full_time": "Full time",
+      "part_time": "Part time",
+      "shift": "Shift",
+      "temporary": "Temporary",
+      "internship": "Internship",
+      "contract": "Contract"
+    },
+    "format": {
+      "on_site": "On site",
+      "hybrid": "Hybrid",
+      "remote": "Remote"
+    },
+    "closeReason": {
+      "filled": "Filled",
+      "no_need": "No longer needed",
+      "budget": "Budget",
+      "postponed": "Postponed",
       "other": "Other"
     }
   }

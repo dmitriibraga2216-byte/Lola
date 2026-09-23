@@ -560,9 +560,20 @@ grep -rn "from(users)\|from users" server/ --include='*.ts' \
 этапа; сводная проверка на 71 таблицу (тест 6) — на этапе 17.
 
 **13. Вакансия не стала носителем правил прохождения** (инвариант 1, П-15).
+
+> [исправлено, PR-15: файл назван по соглашению репозитория, а исключение — по имени колонки]
+> Ранее: «`grep -rn "…" shared/schemas/vacancy*.ts | grep -v "params_template"`».
+> Схемы лежат в `shared/schemas/vacancies.ts` (множественное число — как `candidates.ts` и
+> `assignments.ts`), а колонка называется `assignment_template` (`29` §3.1), не
+> `params_template`. Шаблон расширен до `vacanc*`, исключение — до обоих написаний.
+
 ```bash
-grep -rn "attempts\|pass_score\|due_at\|time_limit" shared/schemas/vacancy*.ts | grep -v "params_template"
+grep -rniE "attempts|pass_score|due_at|time_limit" shared/schemas/vacanc*.ts \
+  | grep -viE "params_template|assignment_template|assignmentTemplate|paramsTemplate"
 ```
+Исполняется проверкой 7 скрипта `scripts/v2-crosschecks.sh` (фикстуры —
+`tests/unit/v2-crosschecks.spec.ts`) и тестом по самому файлу схемы
+(`tests/unit/vacancy-rules.spec.ts`): скрипт легко забыть запустить локально.
 Пусто. Плюс тест: отклик по публичной ссылке создаёт строку в `assignments`, и правка вакансии
 после этого не меняет ни одного поля созданного назначения. С этапа 13.
 

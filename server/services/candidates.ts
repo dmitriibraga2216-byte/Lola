@@ -103,6 +103,8 @@ export interface CandidateRow {
   sourceDetail: string | null
   recruiterId: string | null
   recruiterName: string | null
+  vacancyId: string | null
+  vacancyTitle: string | null
   accessUntil: string | null
   commLanguage: string
   resumeAssetId: string | null
@@ -193,6 +195,7 @@ export const COLUMNS = {
   source: users.source,
   sourceDetail: users.sourceDetail,
   recruiterId: users.recruiterId,
+  vacancyId: users.vacancyId,
   accessUntil: users.accessUntil,
   commLanguage: users.commLanguage,
   resumeAssetId: users.resumeAssetId,
@@ -201,16 +204,27 @@ export const COLUMNS = {
   lastSeenAt: users.lastSeenAt,
   createdAt: users.createdAt,
   updatedAt: users.updatedAt,
-  statusCode: sql<string | null>`(select s.code from candidate_statuses s where s.id = ${users.candidateStatusId})`,
-  statusNameUk: sql<string | null>`(select s.name_uk from candidate_statuses s where s.id = ${users.candidateStatusId})`,
-  statusColor: sql<string | null>`(select s.color from candidate_statuses s where s.id = ${users.candidateStatusId})`,
-  mapsTo: sql<CandidateState | null>`(select s.maps_to from candidate_statuses s where s.id = ${users.candidateStatusId})`,
+  /**
+   * Подзапросы называют внешнюю колонку полным именем таблицы через `sql.raw`, а не
+   * подстановкой объекта колонки: Drizzle рендерит её в `sql` без квалификатора, и внутри
+   * подзапроса выигрывает ближняя область видимости. Пока у внутренней таблицы такой
+   * колонки нет, имя «проваливается» наружу и всё работает; стоит ей появиться — условие
+   * тихо начинает сравнивать строку саму с собой (так и случилось с `recruiterName`:
+   * `u2.id = u2.recruiter_id` не падало, а молча отдавало пустое имя рекрутера —
+   * исправлено в PR-15).
+   */
+  statusCode: sql<string | null>`(select s.code from candidate_statuses s where s.id = ${sql.raw('users.candidate_status_id')})`,
+  statusNameUk: sql<string | null>`(select s.name_uk from candidate_statuses s where s.id = ${sql.raw('users.candidate_status_id')})`,
+  statusColor: sql<string | null>`(select s.color from candidate_statuses s where s.id = ${sql.raw('users.candidate_status_id')})`,
+  mapsTo: sql<CandidateState | null>`(select s.maps_to from candidate_statuses s where s.id = ${sql.raw('users.candidate_status_id')})`,
   /**
    * ФИО рекрутера подзапросом, а не вторым соединением с `users`: соединение ради одного
    * имени запутало бы сканер П-16.1, а выборка по первичному ключу фильтра по виду не
    * требует — рекрутер всегда сотрудник, и это обеспечено при записи, а не при чтении.
    */
-  recruiterName: sql<string | null>`(select u2.full_name from users u2 where u2.id = ${users.recruiterId})`,
+  recruiterName: sql<string | null>`(select u2.full_name from users u2 where u2.id = ${sql.raw('users.recruiter_id')})`,
+  /** Вакансия отклика (`28` §3.2, колонка PR-15): название подзапросом, как и ФИО рекрутера. */
+  vacancyTitle: sql<string | null>`(select v.title from vacancies v where v.id = ${sql.raw('users.vacancy_id')})`,
 }
 
 /**
@@ -243,6 +257,7 @@ export async function listCandidates(v: Viewer, filter: CandidateListFilter): Pr
       filter.state ? eq(users.candidateState, filter.state) : undefined,
       filter.statusId ? eq(users.candidateStatusId, filter.statusId) : undefined,
       filter.recruiterId ? eq(users.recruiterId, filter.recruiterId) : undefined,
+      filter.vacancyId ? eq(users.vacancyId, filter.vacancyId) : undefined,
       filter.source ? eq(users.source, filter.source) : undefined,
       filter.from ? gte(users.createdAt, new Date(`${filter.from}T00:00:00Z`)) : undefined,
       filter.to ? lte(users.createdAt, new Date(`${filter.to}T23:59:59Z`)) : undefined,
@@ -461,6 +476,7 @@ export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Pr
       source: input.source ?? 'manual',
       sourceDetail: input.sourceDetail ?? null,
       recruiterId: input.recruiterId ?? ctx.actorId,
+      vacancyId: input.vacancyId ?? null,
       accessUntil: input.accessUntil ?? null,
       commLanguage: input.commLanguage,
       resumeAssetId: input.resumeAssetId ?? null,
@@ -531,6 +547,7 @@ export async function updateCandidate(v: Viewer, id: string, input: CandidateUpd
       ...(input.source === undefined ? {} : { source: input.source }),
       ...(input.sourceDetail === undefined ? {} : { sourceDetail: input.sourceDetail }),
       ...(input.recruiterId === undefined ? {} : { recruiterId: input.recruiterId }),
+      ...(input.vacancyId === undefined ? {} : { vacancyId: input.vacancyId }),
       ...(input.accessUntil === undefined ? {} : { accessUntil: input.accessUntil }),
       ...(input.commLanguage === undefined ? {} : { commLanguage: input.commLanguage }),
       ...(input.resumeAssetId === undefined ? {} : { resumeAssetId: input.resumeAssetId }),

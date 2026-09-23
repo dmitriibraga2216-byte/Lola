@@ -330,6 +330,111 @@ create table candidate_status_history (       -- лента смен колон�
   created_at timestamptz not null default now()
 );
 
+-- Рекрутинг: вакансия (`v2/29` §3.1–§3.4, миграции 0071_v2_vacancies и 0072_v2_users_vacancy_fk).
+-- Вакансия НЕ носитель правил прохождения (CLAUDE.md п. 11, инвариант 1 `v2/29` §1): она
+-- хранит шаблон параметров назначения, а применяется созданием обычной assignments.
+-- Ни attempts, ни pass_score, ни due_at, ни time_limit колонками здесь не заводятся.
+create table vacancy_templates (              -- самостоятельная сущность, а не вакансия-черновик
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  name text not null,                         -- 3–120, unique (tenant_id, name)
+  description text,
+  payload jsonb not null default '{}'::jsonb,  -- снимок полей вакансии КРОМЕ точки и рекрутера
+  criteria jsonb not null default '[]'::jsonb, -- вложены, чтобы применение шло одной транзакцией
+  languages jsonb not null default '[]'::jsonb,
+  usage_count int not null default 0,
+  is_active boolean not null default true,
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, name)
+);
+
+create table vacancies (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  title text not null,                        -- 3–200
+  state text not null default 'draft',        -- vacancy_state
+  category_id uuid references course_categories(id) on delete set null,
+  recruiter_id uuid references users(id) on delete set null,   -- попадает в users.recruiter_id откликнувшегося
+  course_id uuid references courses(id) on delete set null,    -- «рекрутинговий курс»: что назначается
+  course_version_id uuid references course_versions(id) on delete set null, -- фиксируется при публикации
+  location_id uuid references locations(id) on delete set null,
+  org_unit_id uuid references org_units(id) on delete set null,
+  position_id uuid references positions(id) on delete set null,
+  description_html text, requirements_html text, duties_html text, extra_html text,
+  ai_blocks jsonb not null default '{}'::jsonb, -- маркировка сгенерированного ИИ текста (§3.6)
+  employment_type text,                       -- vacancy_employment_type
+  work_format text,                           -- vacancy_work_format
+  country_code char(2), city text,
+  experience_level text,                      -- vacancy_experience_level
+  education_level text,                       -- vacancy_education_level
+  salary_from numeric(12,2), salary_to numeric(12,2),
+  salary_currency char(3) not null default 'UAH',
+  salary_visible boolean not null default false,
+  assignment_template jsonb not null default '{}'::jsonb, -- ШАБЛОН параметров, не правила (§3.5)
+  public_token text,                          -- 22 знака base62; uq_vacancies_public_token — глобально
+  public_enabled boolean not null default false,
+  public_apply_otp boolean not null default true,
+  apply_daily_cap int not null default 200,   -- 10–5000
+  source_budget numeric(12,2),
+  template_id uuid references vacancy_templates(id) on delete set null,
+  published_at timestamptz, closed_at timestamptz,
+  close_reason text,                          -- vacancy_close_reason
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  -- Правило эталона «без курса и точки ссылка не создаётся» — констрейнтом, а не только формой:
+  -- ссылка без назначаемого курса это отклик, который некуда девать (`v2/29` §7.1)
+  constraint vacancies_public_chk check (not public_enabled or
+    (course_id is not null and location_id is not null and public_token is not null))
+);
+
+create table vacancy_languages (              -- пара «язык + уровень» плюс обязательность
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid not null references vacancies(id) on delete cascade,
+  lang_code text not null,
+  level text not null,                        -- vacancy_language_level (CEFR + native)
+  is_required boolean not null default true,
+  sort int not null default 0,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, vacancy_id, lang_code)
+);
+
+create table vacancy_criteria (               -- рамка решения человека, а не правило прохождения
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid not null references vacancies(id) on delete cascade,
+  name text not null,                         -- 2–120
+  description text,
+  weight numeric(5,2) not null default 1,     -- > 0 и <= 100
+  scale_min numeric(6,2) not null default 0,
+  scale_max numeric(6,2) not null default 5,  -- строго больше scale_min
+  is_critical boolean not null default false, -- предупреждение, а не запрет найма (инвариант 18)
+  origin text not null default 'manual',      -- vacancy_criterion_origin
+  sort int not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+
+create table vacancy_criterion_scores (       -- балл одного автора по одному критерию
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  candidate_id uuid not null references users(id) on delete cascade,
+  criterion_id uuid not null references vacancy_criteria(id) on delete cascade,
+  value_num numeric(6,2) not null,            -- в пределах шкалы своего критерия
+  comment text,
+  author_id uuid not null references users(id),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, candidate_id, criterion_id, author_id)
+);
+-- Свёртка баллов — одна строка candidate_scores с kind='recruiter', source_type='vacancy_criteria':
+-- каждый балл нормируется к 0–10 как (value − min)/(max − min) × 10, итог — Σ(норм × weight)/Σ(weight).
+
+-- Развязка цикла «кандидаты ↔ вакансии» (`v2/44` В-13, миграция 0071): колонка users.vacancy_id
+-- и её ключ users_vacancy_id_fk (on delete set null) заводятся ОТДЕЛЬНОЙ миграцией после
+-- vacancies — порядка создания таблиц, снимающего цикл, не существует. Плюс частичный индекс
+-- idx_users_tenant_vacancy (tenant_id, vacancy_id) where kind = 'candidate'.
+
 create table user_placements (                -- где человек работает
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -1897,6 +2002,32 @@ review_queue_status: waiting | in_review | done
 -- Достоверность измерения времени (`review_queue_items.time_confidence`, `v2/37` §7.15):
 -- partial — биения дошли не все (офлайн-досылка), unreliable — в расчёт нормы не входит
 review_time_confidence: ok | partial | unreliable
+
+-- Состояние вакансии (`vacancies.state`, `v2/29` §4). Переоткрытие закрытой выдаёт новый
+-- токен: старая ссылка расходится по чатам и агрегаторам, и пришедший через полгода
+-- должен видеть «вакансію закрито», а не форму на позицию с другими условиями
+vacancy_state: draft | published | paused | closed | archived
+
+-- Тип занятости и формат работы (`vacancies.employment_type`, `work_format`, `v2/29` §3.1);
+-- оба снимаются с формы эталона и уходят наружу в выгрузке на площадку
+vacancy_employment_type: full_time | part_time | shift | temporary | internship | contract
+vacancy_work_format: on_site | hybrid | remote
+
+-- Требуемые опыт и образование (`vacancies.experience_level`, `education_level`, `v2/29` §3.1)
+vacancy_experience_level: none | under_1y | 1_3y | 3_5y | over_5y
+vacancy_education_level: none | secondary | vocational | incomplete_higher | higher
+
+-- Уровень языка (`vacancy_languages.level`, `v2/29` §3.2): шкала CEFR плюс native
+vacancy_language_level: a1 | a2 | b1 | b2 | c1 | c2 | native
+
+-- Происхождение критерия оценки кандидата (`vacancy_criteria.origin`, `v2/29` §3.3):
+-- рука рекрутера, принятый человеком черновик ИИ (§7.11) или шаблон вакансии (§3.4)
+vacancy_criterion_origin: manual | ai | template
+
+-- Причина закрытия вакансии (`vacancies.close_reason`, `v2/29` §4). Перечня в `29` нет:
+-- выведен из причин отказа кандидату (`v2/28` §6.2) и колонки отчёта §9.2 — свободная
+-- строка в отчёте не группируется (`docs/28-implementation-notes.md` §28.17)
+vacancy_close_reason: filled | no_need | budget | postponed | other
 ```
 
 ## Что проверяет тест схемы

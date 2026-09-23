@@ -130,6 +130,29 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.stdout).toContain('6. очередь проверки не пересоздаётся')
   })
 
+  /**
+   * Сквозная проверка 13 (`docs/v2/42-stages-delta.md` §5, инвариант 1 `29` §1): вакансия
+   * хранит шаблон параметров, а не правила прохождения. Две фикстуры: собственный ключ
+   * правил в схеме вакансии — нарушение; тот же ключ внутри шаблона параметров — нет.
+   */
+  it('7. правило прохождения заведено прямо в схеме вакансии', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'shared/schemas'), { recursive: true })
+    writeFileSync(join(dir, 'shared/schemas/vacancies.ts'), 'export const s = { pass_score: 70 }\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('7. вакансия не носитель правил прохождения')
+  })
+
+  it('7. тот же ключ внутри шаблона параметров нарушением не считается', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'shared/schemas'), { recursive: true })
+    writeFileSync(join(dir, 'shared/schemas/vacancies.ts'), 'export const s = { assignmentTemplate: { pass_score: 70 } }\n')
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   7.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

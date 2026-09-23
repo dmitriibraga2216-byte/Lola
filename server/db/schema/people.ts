@@ -17,14 +17,16 @@ export const users = pgTable('users', {
   /**
    * Колонки кандидата (docs/v2/28 §3.2, миграция 0064_v2_candidates). У сотрудника они пусты:
    * `users_candidate_coherence_chk` требует `candidate_state` ровно у кандидата и запрещает
-   * его у сотрудника — две оси состояния (§4.1) не могут разъехаться. `vacancy_id` появится
-   * миграцией-развязкой PR-15 вместе с `vacancies` (решение docs/v2/44 В-13).
+   * его у сотрудника — две оси состояния (§4.1) не могут разъехаться. `vacancy_id` приехал
+   * миграцией-развязкой 0072_v2_users_vacancy_fk (PR-15, решение docs/v2/44 В-13): цикл
+   * `users → vacancies → users` настоящий, и ключ добавляется после обеих таблиц.
    */
   candidateState: text('candidate_state'), // одно из CANDIDATE_STATES — терминальное состояние воронки
   candidateStatusId: uuid('candidate_status_id'), // колонка канбана, FK candidate_statuses (set null)
   source: text('source'), // одно из CANDIDATE_SOURCES — откуда пришёл
   sourceDetail: text('source_detail'), // название площадки или ФИО рекомендателя, ≤200
   recruiterId: uuid('recruiter_id'), // ответственный рекрутер, самоссылка на users (set null)
+  vacancyId: uuid('vacancy_id'), // вакансия отклика, FK vacancies users_vacancy_id_fk (set null, 0071)
   accessUntil: date('access_until'), // право входа, НЕ дедлайн прохождения (§3.2): дедлайн живёт в назначении
   commLanguage: text('comm_language').notNull().default('uk'), // язык писем и интерфейса кандидата
   resumeAssetId: uuid('resume_asset_id'), // резюме, media_assets с origin='candidate_cv'
@@ -84,6 +86,8 @@ export const users = pgTable('users', {
   index('idx_users_tenant_kind').on(t.tenantId, t.kind),
   index('idx_users_tenant_candidate_status').on(t.tenantId, t.candidateStatusId).where(sql`kind = 'candidate'`),
   index('idx_users_tenant_recruiter').on(t.tenantId, t.recruiterId).where(sql`kind = 'candidate'`),
+  // Развязка 0071 (PR-15): вакансия бывает только у кандидата, поэтому индекс частичный.
+  index('idx_users_tenant_vacancy').on(t.tenantId, t.vacancyId).where(sql`kind = 'candidate'`),
   // Воронка (0068): страница колонки канбана по 50 карточек с курсором (§5.2, критерий §13 к. 12)
   // и два прохода ночных задач — архивация отказанных и стирание по истёкшему согласию (§11).
   index('idx_users_candidate_board').on(t.tenantId, t.candidateStatusId, t.createdAt.desc(), t.id).where(sql`kind = 'candidate'`),

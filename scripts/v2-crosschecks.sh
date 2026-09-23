@@ -295,11 +295,30 @@ check6_review_queue_rebuild() {
   report "6. очередь проверки не пересоздаётся (нет truncate/delete review_queue_items)" "$hits"
 }
 
+# ── Проверка 7. Вакансия не стала носителем правил прохождения ──────────────────────────────
+# docs/v2/42-stages-delta.md §5 проверка 13, docs/v2/39-patches.md П-15, инвариант 1 `29` §1.
+# Вакансия хранит шаблон параметров и применяет его созданием обычной `assignments`. Если
+# в её схемах заводится собственный «проходной балл» или «попытки», правила прохождения
+# получают второго носителя — и расходятся с назначением в первый же день.
+#
+# > [исправлено, PR-15: файл назван по соглашению репозитория]
+# > Ранее в `42` §5: «grep ... shared/schemas/vacancy*.ts».
+# Схемы лежат в `shared/schemas/vacancies.ts` (множественное число — как `candidates.ts`,
+# `assignments.ts`), поэтому шаблон расширен до `vacanc*`: он покрывает оба написания и не
+# зависит от того, разделят ли схему на несколько файлов.
+check7_vacancy_not_rules_carrier() {
+  local hits
+  hits="$(grep -rniE "attempts|pass_score|due_at|time_limit" shared/schemas/vacanc*.ts 2>/dev/null \
+    | grep -viE "params_template|assignment_template|assignmentTemplate|paramsTemplate" || true)"
+  report "7. вакансия не носитель правил прохождения (docs/v2/42 §5 проверка 13)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
 check4_i18n
 check5_tokens
 check6_review_queue_rebuild
+check7_vacancy_not_rules_carrier
 
 exit $overall

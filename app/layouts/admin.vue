@@ -64,6 +64,9 @@ const sections = computed<Section[]>(() => [
     // Воронка кандидатов (docs/v2/28 §5.1, §5.2) — только при включённом рекрутинге:
     // флаг тенанта, а не модуль настроек, поэтому проверка своя (`recruitingOn`).
     { to: '/admin/candidates', label: t('admin.nav.candidates'), show: recruitingOn() && hasScope('candidate.view') },
+    // Реестр вакансий (docs/v2/29 §5.1) — тот же флаг рекрутинга, что и у воронки:
+    // без кандидатов вакансия некуда ведёт.
+    { to: '/admin/vacancies', label: t('admin.nav.vacancies'), show: recruitingOn() && hasScope('vacancy.view') },
     { to: '/admin/people/groups', label: t('admin.nav.groups'), show: hasScope('people.view') },
     { to: '/admin/org', label: t('admin.nav.org'), show: hasScope('people.view') },
     { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },

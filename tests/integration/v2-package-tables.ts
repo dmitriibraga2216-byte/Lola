@@ -44,6 +44,15 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'content_reports',
   'content_issue_events',
   'content_reporter_stats',
+  // 29. Вакансии: схема, критерии, шаблон параметров (PR-15, миграция 0071_v2_vacancies).
+  // Самой вакансии в списке мало: `users.vacancy_id` — колонка кандидата, а не таблица; её
+  // ключ `users_vacancy_id_fk` проверяет девятый контрактный тест `deferred-fk.spec.ts`
+  // (docs/v2/44 В-13), потому что отложенный ключ теряется тише, чем таблица.
+  'vacancy_templates',
+  'vacancies',
+  'vacancy_languages',
+  'vacancy_criteria',
+  'vacancy_criterion_scores',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

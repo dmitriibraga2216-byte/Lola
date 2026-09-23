@@ -104,7 +104,13 @@ describe('миграция 0064: схема рекрутинга', () => {
     }
   })
 
-  it('одиннадцать колонок кандидата в users, vacancy_id среди них нет (он в PR-15)', async () => {
+  /**
+   * > [исправлено, PR-15: развязка `0072_v2_users_vacancy_fk` добавила `users.vacancy_id`]
+   * > Ранее: «одиннадцать колонок кандидата в users, vacancy_id среди них нет (он в PR-15)».
+   * Колонка приехала ровно тем способом, который обещал В-13, — отдельной миграцией после
+   * `vacancies`; её ключ по имени проверяет `v2-contract-09-deferred-fk.spec.ts`.
+   */
+  it('двенадцать колонок кандидата в users, включая vacancy_id (развязка PR-15)', async () => {
     const cols = (await admin`
       select column_name from information_schema.columns
        where table_name = 'users' and column_name in (
@@ -114,6 +120,7 @@ describe('миграция 0064: схема рекрутинга', () => {
     expect(cols.sort()).toEqual([
       'access_until', 'candidate_state', 'candidate_status_id', 'comm_language', 'consent_expires_at',
       'consent_given_at', 'converted_from_candidate_at', 'recruiter_id', 'resume_asset_id', 'source', 'source_detail',
+      'vacancy_id',
     ])
   })
 
@@ -472,8 +479,22 @@ describe('условие выхода PR-13: настоящий кандидат
       expect(page.items.map(p => p.id), `кандидат в списке людей, вкладка ${tab}`).not.toContain(created[0]!)
     }
     expect((await inactiveReport(ctx, 0)).map(r => r.id)).not.toContain(created[0]!)
+
+    /**
+     * > [исправлено, PR-15: `docs/v2/29` §7.20 и `docs/v2/28` §3.1 требуют назначения
+     * > кандидату той же `assignments`] Ранее: правило `user` тоже не выдавало кандидата.
+     *
+     * Инвариант П-16.1 от этого не ослаб, он стал точным: кандидат не должен попадать в
+     * аудиторию **по условию** — «посада», «мітка», «точка», сегмент. Названный поимённо он
+     * в неё попадает, иначе отклик по вакансии не смог бы создать ему назначение, а правила
+     * прохождения получили бы второго носителя (инвариант 1). Курс чужого этапа он всё
+     * равно не получит: `stageForbidsCandidates()` проверяет именно названных поимённо.
+     */
+    await admin`update users set tags = ARRAY['v213-canary']::text[] where id = ${created[0]!}`
+    const byTag = await withTenant(tenantId, adminId, tx => resolveAudience(tx, { match: 'any', rules: [{ type: 'tag', values: ['v213-canary'] }] } as never))
+    expect([...byTag], 'кандидата выдали в адресаты рассылки по условию «мітка»').toEqual([])
     const byId = await withTenant(tenantId, adminId, tx => resolveAudience(tx, { match: 'any', rules: [{ type: 'user', ids: [created[0]!] }] } as never))
-    expect([...byId], 'кандидата выдали в адресаты рассылки по прямому перечню').toEqual([])
+    expect([...byId], 'названный поимённо кандидат обязан попадать в аудиторию (`29` §7.20)').toEqual([created[0]!])
   })
 
   it('оплачиваемый счётчик считает сотрудников, ось кандидатов — кандидатов в состоянии active', async () => {

@@ -10,9 +10,9 @@ const error = ref('')
 async function load() { try { data.value = await api('/birthdays', { query: { tab: tab.value } }) } catch (err) { error.value = apiErrorOf(err).message } }
 watch(tab, load, { immediate: true })
 const initials = (name: string) => name.split(' ').slice(0, 2).map(w => w[0] ?? '').join('').toUpperCase()
-const dayWord = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(locale.value === 'en' ? 'en-GB' : 'uk-UA', { day: 'numeric', month: 'long' })
+const dayWord = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(locale.value === 'en' ? 'en-GB' : locale.value === 'ru' ? 'ru-RU' : 'uk-UA', { day: 'numeric', month: 'long' })
 const monthStart = computed(() => { const d = new Date(`${data.value.from || new Date().toISOString().slice(0, 10)}T00:00:00`); return new Date(d.getFullYear(), d.getMonth(), 1) })
-const monthName = computed(() => monthStart.value.toLocaleDateString(locale.value === 'en' ? 'en-GB' : 'uk-UA', { month: 'long' }))
+const monthName = computed(() => monthStart.value.toLocaleDateString(locale.value === 'en' ? 'en-GB' : locale.value === 'ru' ? 'ru-RU' : 'uk-UA', { month: 'long' }))
 const days = computed(() => { const n = new Date(monthStart.value.getFullYear(), monthStart.value.getMonth() + 1, 0).getDate(); return Array.from({ length: n }, (_, i) => i + 1) })
 const marked = computed(() => new Set(data.value.items.filter(i => i.date.slice(0, 7) === `${monthStart.value.getFullYear()}-${String(monthStart.value.getMonth() + 1).padStart(2, '0')}`).map(i => Number(i.date.slice(8, 10)))))
 </script>

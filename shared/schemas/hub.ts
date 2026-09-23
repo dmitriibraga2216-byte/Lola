@@ -98,3 +98,6 @@ export const contactsQuerySchema = z.object({
 })
 
 export const birthdayConsentSchema = z.object({ birthdayConsent: z.boolean() })
+
+/** PATCH /me/locale — своя мова інтерфейсу людини (докс/24 §3.6, «Профіль»); `null` — успадкувати мову тенанта. */
+export const meLocaleSchema = z.object({ locale: z.enum(['uk', 'en', 'ru']).nullable() })

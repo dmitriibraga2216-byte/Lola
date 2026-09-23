@@ -100,7 +100,7 @@ function submit() {
       </div>
       <label>{{ t('person.tags') }}<input v-model="form.tags" list="pf-tags" :placeholder="t('person.tagsHint')"></label>
       <datalist id="pf-tags"><option v-for="r in refs.tags" :key="r.id" :value="r.name" /></datalist>
-      <label>{{ t('person.locale') }}<select v-model="form.locale"><option value="">—</option><option value="uk">Українська</option><option value="en">English</option></select></label>
+      <label>{{ t('person.locale') }}<select v-model="form.locale"><option value="">—</option><option value="uk">Українська</option><option value="en">English</option><option value="ru">Русский</option></select></label>
     </fieldset>
 
     <fieldset>

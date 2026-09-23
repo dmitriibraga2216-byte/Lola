@@ -3188,6 +3188,8 @@
     "weekActivity": "Activity this week",
     "birthdayConsent": "Show my birthday",
     "birthdayConsentHint": "Colleagues will see the date in “Birthdays”; turn off and you will not be listed",
+    "language": "Interface language",
+    "languageHint": "If not set, the tenant's default language is used",
     "changePassword": "Change password",
     "setPassword": "Set password",
     "currentPassword": "Current password",

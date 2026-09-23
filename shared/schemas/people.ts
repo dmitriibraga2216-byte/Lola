@@ -35,7 +35,7 @@ export const personCreateSchema = z.object({
   comment: z.string().max(2000).nullable().optional(),
   isBlocked: z.boolean().optional(),
   isHidden: z.boolean().optional(),
-  locale: z.enum(['uk', 'en']).nullable().optional(),
+  locale: z.enum(['uk', 'en', 'ru']).nullable().optional(),
   placement: z.object({
     locationId: z.string().uuid(),
     positionId: z.string().uuid(),

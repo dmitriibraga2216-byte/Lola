@@ -43,7 +43,7 @@ async function load() {
 onMounted(load)
 watch([sourceFilter, readFilter], load)
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale.value === 'ru' ? 'ru-RU' : locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
 async function markRead(r: Row) {
   if (r.isRead) return

@@ -5,7 +5,7 @@ import { createTenant } from '../../../../services/platform'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 export const tenantCreateSchema = z.object({
   slug: z.string().regex(/^[a-z0-9-]{3,40}$/, 'slug: a-z, 0-9, дефіс'), name: z.string().min(2).max(120),
-  locale: z.enum(['uk', 'en']).optional(), timezone: z.string().max(60).optional(), plan: z.string().optional(), trialDays: z.number().int().min(1).max(90).optional(),
+  locale: z.enum(['uk', 'en', 'ru']).optional(), timezone: z.string().max(60).optional(), plan: z.string().optional(), trialDays: z.number().int().min(1).max(90).optional(),
   adminPhone: phoneSchema, adminName: z.string().min(2).max(200), locationName: z.string().max(120).optional(), positionName: z.string().max(120).optional(),
 })
 export default defineEventHandler(async (event) => {

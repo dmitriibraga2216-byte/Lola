@@ -33,6 +33,10 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'candidate_scores',
   'candidate_comments',
   'candidate_status_history',
+  // 37. Делегирование проверки: очередь как источник истины (PR-18, миграция 0066_v2_review_queue).
+  // Единственная таблица PR-18: делегирования, правила маршрутизации, ёмкость проверяющих и
+  // события SLA (`docs/v2/37` §3.2–3.4) приезжают следующим PR — они ссылаются на эту строку.
+  'review_queue_items',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

@@ -981,6 +981,8 @@
     "savedMore": "Saved. More answers pending in this attempt",
     "savedFinal": "Saved. Attempt: {status}",
     "queueTitle": "Review queue",
+    "conflictSelf": "You cannot review your own work",
+    "conflictAuthor": "You authored this material — grade the work, not your content",
     "chipWorkshops": "Workshop submissions",
     "chipAnswers": "Answers to review",
     "chipChecklists": "Checklists",

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Пять сквозных проверок пакета docs/v2 (HANDOFF.md §7.3, docs/v2/42-stages-delta.md §5,
+# Сквозные проверки пакета docs/v2 (HANDOFF.md §7.3, docs/v2/42-stages-delta.md §5,
 # docs/v2/39-patches.md П-07). Каждая — grep/поиск, обязанный вернуть пустой результат;
 # любое совпадение красит соответствующую проверку и весь скрипт.
 #
@@ -275,10 +275,31 @@ check5_tokens() {
   report "5. цвет/отступ мимо токенов (hex-литералы, inline style с px)" "$combined"
 }
 
+# ── Проверка 6. Очередь проверки не пересоздаётся ───────────────────────────────────────────
+# docs/v2/42-stages-delta.md §5 проверка 21, docs/v2/39-patches.md П-13, решение В-2.
+# Наполнение очереди производное, но перестроение «с нуля» запрещено: собственное состояние
+# строки (assigned_reviewer_id, sla_breached_at, delegation_depth, origin_reviewer_id) из
+# источников не восстанавливается, и `truncate`/`delete from` молча стёрли бы делегирование
+# и историю SLA. Закрытие элемента — `status = 'done'`, а не удаление строки.
+#
+# Проверяются server/ и миграции (drizzle/ — историческое имя каталога в `42` §5; в этом
+# репозитории миграции лежат в server/db/migrations, и они попадают под server/).
+# Allowlist пуст: ни одного места удаления на текущем main нет и появиться не должно.
+check6_review_queue_rebuild() {
+  local hits
+  # Строки-комментарии отбрасываются: запрет обязан быть объяснён в коде словами, и
+  # объяснение («ни truncate, ни delete from review_queue_items») не является нарушением.
+  hits="$(grep -rniE "truncate[[:space:]]+(table[[:space:]]+)?\"?review_queue_items|delete[[:space:]]+from[[:space:]]+\"?review_queue_items|\.delete\([[:space:]]*reviewQueueItems" \
+    server drizzle --include='*.ts' --include='*.sql' 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|--|#)' || true)"
+  report "6. очередь проверки не пересоздаётся (нет truncate/delete review_queue_items)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
 check4_i18n
 check5_tokens
+check6_review_queue_rebuild
 
 exit $overall

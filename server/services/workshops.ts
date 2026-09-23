@@ -1,12 +1,13 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  lessonProgress, locations, userPlacements, userRoles, roles, users, workshopComments, workshopSubmissions, workshops,
+  enrollments, lessonProgress, locations, userPlacements, userRoles, roles, users, workshopComments, workshopSubmissions, workshops,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import { enqueueNotification } from './notifications'
+import { claimReview, closeReview, enqueueReview, releaseReview, reviewConflict } from './reviewQueue'
 import type { ContentBlock } from '../../shared/schemas/content'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -189,6 +190,25 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
       slaDueAt: new Date(now.getTime() + w.slaHours * 3_600_000), device: input.device ?? null, updatedAt: now,
     }).where(eq(workshopSubmissions.id, draft!.id)).returning({ id: workshopSubmissions.id })
 
+    // Единая очередь проверки (docs/v2/44 В-2): строка ставится в той же транзакции, что и
+    // сама сдача, — иначе работа существует, а очереди о ней не знает. `subject_kind`
+    // снимается здесь же, внутри enqueueReview(), и больше не пересчитывается.
+    const [enr] = input.enrollmentId
+      ? await tx.select({ courseId: enrollments.subjectId }).from(enrollments)
+        .where(and(eq(enrollments.id, input.enrollmentId), eq(enrollments.subjectType, 'course')))
+      : []
+    await enqueueReview(tx, {
+      tenantId: ctx.tenantId,
+      taskType: 'workshop',
+      sourceId: s!.id,
+      userId: ctx.actorId,
+      taskTitle: w.title,
+      trackId: enr?.courseId ?? null,
+      submittedAt: now,
+      attemptNo: draft!.attemptNo,
+      slaHours: w.slaHours,
+    })
+
     const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
     for (const rid of await reviewersFor(tx, ctx.tenantId, w, ctx.actorId)) {
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: rid, code: 'workshop_submitted', payload: { name: me?.fullName, title: w.title, submissionId: s!.id }, dedupKey: `ws_submitted:${s!.id}:${rid}` })
@@ -267,6 +287,9 @@ export async function claim(ctx: Ctx, submissionId: string): Promise<ClaimResult
     const stale = s.claimedAt && s.claimedAt.getTime() < Date.now() - CLAIM_TTL_MS
     if (s.reviewerId && s.reviewerId !== ctx.actorId && !stale) return { ok: false as const, code: 'already_claimed' as const }
     await tx.update(workshopSubmissions).set({ status: 'in_review', reviewerId: ctx.actorId, claimedAt: new Date(), updatedAt: new Date() }).where(eq(workshopSubmissions.id, submissionId))
+    // `workshop_submissions.reviewer_id` и `claimed_at` с этого PR — зеркало для
+    // совместимости (В-2): источник истины о состоянии очереди — review_queue_items.
+    await claimReview(tx, { taskType: 'workshop', sourceId: submissionId, reviewerId: ctx.actorId })
     return { ok: true as const }
   })
 }
@@ -275,6 +298,7 @@ export async function release(ctx: Ctx, submissionId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null, updatedAt: new Date() })
       .where(and(eq(workshopSubmissions.id, submissionId), eq(workshopSubmissions.reviewerId, ctx.actorId)))
+    await releaseReview(tx, { taskType: 'workshop', sourceIds: [submissionId] })
     return true
   })
 }
@@ -292,7 +316,10 @@ export async function submissionForReview(ctx: Ctx, submissionId: string) {
     const comments = await tx.select({ id: workshopComments.id, authorId: workshopComments.authorId, authorName: users.fullName, body: workshopComments.body, isInternal: workshopComments.isInternal, createdAt: workshopComments.createdAt })
       .from(workshopComments).innerJoin(users, eq(users.id, workshopComments.authorId))
       .where(and(eq(workshopComments.submissionId, submissionId), isNull(workshopComments.deletedAt))).orderBy(asc(workshopComments.createdAt))
-    return { submission: s, workshop: w ? { id: w.id, title: w.title, description: w.description, passRule: w.passRule, allowRework: w.allowRework, maxReworks: w.maxReworks } : null, learner: { id: s.userId, fullName: u?.fullName }, history, comments }
+    // Конфликт интересов (docs/v2/37 §7.7–7.8): своя работа — решение запрещено; автор
+    // материала — решение разрешено, но карточка предупреждает, а факт идёт в audit_log.
+    const conflict = await reviewConflict(tx, { actorId: ctx.actorId, subjectUserId: s.userId, authorIds: w?.authorIds })
+    return { submission: s, workshop: w ? { id: w.id, title: w.title, description: w.description, passRule: w.passRule, allowRework: w.allowRework, maxReworks: w.maxReworks } : null, learner: { id: s.userId, fullName: u?.fullName }, history, comments, conflict }
   })
 }
 
@@ -344,9 +371,19 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
         .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: now } })
     }
 
+    // Решение принято — элемент очереди закрывается, но остаётся строкой (проверка 21:
+    // ни truncate, ни delete). Доработка тоже закрывает: работа вернулась к ученику, и
+    // повторная сдача откроет ту же строку заново через enqueueReview().
+    await closeReview(tx, { taskType: 'workshop', sourceIds: [submissionId], reviewerId: ctx.actorId, at: now })
+
     const code = input.decision === 'accepted' ? 'workshop_accepted' : input.decision === 'rework' ? 'workshop_rework' : 'workshop_rejected'
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s.userId, code, payload: { title: w.title, comment, submissionId }, dedupKey: `ws_${code}:${submissionId}:${s.reworkCount}` })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.grade', entity: 'workshop_submission', entityId: submissionId, after: { decision: input.decision, score } })
+    // Критерий приёмки docs/v2/37 §13 п. 6: автор материала вправе проверять работу по нему,
+    // но факт фиксируется отдельной записью — по ней строится отчёт «проверки авторами» (§9.2).
+    if (w.authorIds.includes(ctx.actorId)) {
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'review.author_conflict', entity: 'workshop_submission', entityId: submissionId, after: { workshopId: w.id, decision: input.decision } })
+    }
     // docs/33 D-020: рішення наставника по самостійному практикуму — єдиний хук (accepted → done, rejected → failed; rework — ще не завершено).
     // Практикум усередині курсу (`lesson_id`) фіксує курс.
     if (!s.lessonId && (input.decision === 'accepted' || input.decision === 'rejected')) {
@@ -395,6 +432,7 @@ export async function workshopSlaScan(tenantId: string): Promise<{ released: num
     const stale = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
     const released = await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null })
       .where(and(eq(workshopSubmissions.status, 'in_review'), sql`${workshopSubmissions.claimedAt} < ${stale}::timestamptz`)).returning({ id: workshopSubmissions.id })
+    await releaseReview(tx, { taskType: 'workshop', sourceIds: released.map(r => r.id) })
 
     let breached = 0
     const overdue = await tx.select({ s: workshopSubmissions, w: workshops }).from(workshopSubmissions).innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
@@ -410,6 +448,8 @@ export async function workshopSlaScan(tenantId: string): Promise<{ released: num
 
     const expired = await tx.update(workshopSubmissions).set({ status: 'expired', updatedAt: new Date() })
       .where(and(eq(workshopSubmissions.status, 'rework'), sql`${workshopSubmissions.slaDueAt} < now()`)).returning({ id: workshopSubmissions.id })
+    // Истёкшая доработка уже никем не проверяется — элемент очереди закрывается, а не удаляется.
+    await closeReview(tx, { taskType: 'workshop', sourceIds: expired.map(r => r.id) })
     return { released: released.length, breached, expired: expired.length }
   })
 }

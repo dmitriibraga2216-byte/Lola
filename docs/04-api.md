@@ -131,12 +131,22 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/review/answers` | очередь **ответов** (`12` §14.4); фильтры: `checked`, метки вопросов, точка, курс, давность |
+| GET | `/review/queue` | **единая очередь** поверх `review_queue_items` (`v2/37` §10, решение `v2/44` В-15): `?tab=mine\|delegated_in\|delegated_out\|done&taskType&locationId&trackId&reviewerId&subjectKind&from&to&overdue&cursor&limit`; ответ `{items, total, cursor}` |
+| GET | `/review/answers` | **узкий фильтр** поверх того же источника: очередь **ответов** (`12` §14.4) со своими фильтрами — `checked`, метки вопросов, «Поза програмами», «Поза курсами», точка, курс |
 | POST | `/review/answers/:id/grade` | `{score, comment}`; наставнику видна `grader_hint` |
-| GET | `/review/workshops` | очередь сдач практикумов; сортировка по времени в очереди |
+| GET | `/review/workshops` | **узкий фильтр**: очередь сдач практикумов, `?mine&overdue`; сортировка по времени в очереди |
 | POST | `/review/workshops/:id/claim` | взять в работу (блокировка 30 минут) (старый путь: `/review/submissions/:id/claim`, до конца R1) |
 | POST | `/review/workshops/:id/grade` | `{decision: passed\|rework\|failed, criteria[], comment}` (старый путь: `/review/submissions/:id/grade`, до конца R1) |
-| GET | `/review/checklists` | заполненные чек-листы на согласование — нет вовсе, долг (docs/28 «Spec 04») |
+| GET/POST | `/review/submissions/:id`, `/:id/claim`, `/:id/release`, `/:id/grade`, `/:id/comments` | карточка проверки и действия над **работой**; решение принимается над работой, а не над строкой очереди — очередь обновляется тем же сервисом в той же транзакции |
+
+> [исправлено, решение `docs/v2/44-decisions.md` В-15: путь никогда не существовал, а долг
+> закрывается удалением строки, а не реализацией — подтверждение чек-листа приходит в единую
+> очередь табом `offline_confirm`] Ранее: «`GET /review/checklists` — заполненные чек-листы на
+> согласование — нет вовсе, долг (docs/28 «Spec 04»)».
+
+Отношение путей между собой (В-15): `/review/queue` — один список на все виды работ, три базовых
+пути остаются, потому что несут фильтры, которых у очереди нет, и на них завязаны работающие
+экраны. Действия не дублируются: `claim`, `release`, `grade` живут на работе, а не на очереди.
 
 ## 4.8 Контент (методист)
 

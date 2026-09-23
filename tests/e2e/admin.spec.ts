@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import postgres from 'postgres'
-import { ADMIN_PHONE, EMPLOYEE_PHONE, api, apiLogin, cleanupCourses, loginViaUi, resetOtp } from './helpers'
+import { ADMIN_PHONE, EMPLOYEE_PHONE, MENTOR_PHONE, api, apiLogin, cleanupCourses, loginViaUi, resetOtp } from './helpers'
 
 const PREFIX = 'E2E-admin '
 const admin = postgres(process.env.DATABASE_ADMIN_URL ?? 'postgres://lola:lola_dev@localhost:5432/lola', { max: 1, onnotice: () => {} })
@@ -9,6 +9,12 @@ test.beforeEach(resetOtp)
 test.afterAll(async () => {
   await cleanupCourses(PREFIX)
   await admin`delete from users where full_name like 'E2E Імпорт%'`
+  const ws = (await admin`select id from workshops where title like ${`${PREFIX}%`}`).map(r => r.id as string)
+  if (ws.length) {
+    await admin`delete from review_queue_items where task_type = 'workshop' and source_id in (select id from workshop_submissions where workshop_id in ${admin(ws)})`
+    await admin`delete from workshop_submissions where workshop_id in ${admin(ws)}`
+    await admin`delete from workshops where id in ${admin(ws)}`
+  }
 })
 
 test('5. Методист создаёт курс из редактора и публикует за один сеанс', async ({ page }) => {
@@ -99,4 +105,60 @@ test('8. Доступ: employee не открывает админку ни по
     const res = await request.get(path)
     expect(res.status(), path).toBe(403)
   }
+})
+
+/**
+ * Критерий приёмки docs/v2/37 §13 п. 6 на экране (PR-18): наставник — автор материала.
+ * Карточка предупреждает жёлтой плашкой, но решение ему **разрешено** — кнопки активны,
+ * а факт проверки автором уходит в `audit_log` (основание отчёта `37` §9.2).
+ */
+test('9. Очередь проверки: автор материала предупреждён, но решает; работа уходит из очереди', async ({ page, request, browser }) => {
+  const { csrf } = await apiLogin(request, ADMIN_PHONE)
+  const workshop = await api<{ id: string }>(request, csrf, 'post', '/workshops', {
+    title: `${PREFIX}Практикум автора`,
+    description: [{ id: 'b1', type: 'text', html: '<p>Зберіть сет за чек-листом</p>' }],
+    submissionKinds: ['text'], minTextLength: 10,
+    criteria: [{ text: 'Дотримано температуру' }],
+    reviewerRule: 'any_mentor', slaHours: 48, status: 'published',
+  })
+  // Автор материала — наставник: `author_ids` проставляется создателем, здесь он подменяется
+  // напрямую, потому что права методиста наставнику не выдаются (docs/v2/37 §7.8).
+  const [mentor] = await admin`select id from users where phone = ${MENTOR_PHONE}`
+  await admin`update workshops set author_ids = array[${mentor!.id}]::uuid[] where id = ${workshop.id}`
+
+  const learnerCtx = await browser.newContext()
+  const lp = await learnerCtx.newPage()
+  await resetOtp()
+  await loginViaUi(lp, EMPLOYEE_PHONE)
+  const learnerCsrf = (await lp.context().cookies()).find(c => c.name === 'lola_csrf')!.value
+  await api(lp.request, learnerCsrf, 'post', `/learning/workshops/${workshop.id}/submit`, { text: 'Зібрав за чек-листом, температура +2' })
+  await learnerCtx.close()
+
+  await resetOtp()
+  await loginViaUi(page, MENTOR_PHONE)
+  await page.goto('/admin/review-workshops')
+  await page.locator('.row', { hasText: 'Практикум автора' }).getByRole('button').click()
+
+  await expect(page.getByText('Ви автор цього матеріалу')).toBeVisible()
+  // `exact: true` — иначе имя совпадает и с «Не зараховано» (подстрока).
+  const accept = page.getByRole('button', { name: 'Зараховано', exact: true })
+  // Правило зачёта по умолчанию — «всі критерії»: кнопка оживает после отметки критерия.
+  // Плашка автора её не блокирует — в этом и критерий 6, в отличие от своей работы.
+  await page.locator('.crit-row input[type="checkbox"]').first().check()
+  await expect(accept).toBeEnabled()
+  const graded = page.waitForResponse(r => r.url().includes('/grade') && r.request().method() === 'POST')
+  await accept.click()
+  const res = await graded
+  expect(res.status(), await res.text()).toBe(200)
+
+  // Решение принято: экран вернулся к списку и работы в нём больше нет.
+  await expect(page.locator('.error')).toHaveCount(0)
+  await expect(page.locator('.row', { hasText: 'Практикум автора' })).toHaveCount(0)
+
+  const mentorCsrf = (await page.context().cookies()).find(c => c.name === 'lola_csrf')!.value
+  const done = await api<{ items: { taskTitle: string, status: string }[], total: number }>(page.request, mentorCsrf, 'get', '/review/queue?tab=done&taskType=workshop')
+  const rows = await admin`select status, task_title, completed_at from review_queue_items where task_title = ${`${PREFIX}Практикум автора`}`
+  expect(done.items.some(i => i.taskTitle === `${PREFIX}Практикум автора`), `строки очереди в БД: ${JSON.stringify(rows)}; ответ: ${JSON.stringify(done.items)}`).toBe(true)
+  const [log] = await admin`select id from audit_log where action = 'review.author_conflict' and actor_id = ${mentor!.id} order by created_at desc limit 1`
+  expect(log, 'факт проверки автором не записан').toBeDefined()
 })

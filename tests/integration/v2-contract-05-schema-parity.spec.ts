@@ -19,6 +19,22 @@ import { V2_PACKAGE_PLATFORM_TABLES, V2_PACKAGE_TENANT_TABLES } from './v2-packa
 
 const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
 
+/**
+ * Поимённые исключения с причиной — по образцу `CONTENT_COLUMN_EXCEPTIONS` в
+ * `tests/integration/schema-parity.spec.ts`. Не ослабление проверки: правило CLAUDE.md п. 11
+ * говорит о **правилах прохождения в контенте** («сколько попыток», «какой проходной балл»,
+ * «до какого числа пройти»), а не о любом столбце, в имени которого встретилась подстрока.
+ *
+ * - `review_queue_items.sla_due_at` — срок, за который **наставник** обязан проверить работу,
+ *   а не срок прохождения назначения. Колонка с тем же именем и смыслом уже существует в
+ *   `workshop_submissions` (она и становится зеркалом этой, docs/v2/44 В-2); очередь — не
+ *   контент и не назначение, класть её срок в `assignments.params` некуда и незачем.
+ *
+ * Колонки `attempts_count` из `docs/v2/37` §3.1 здесь нет: она заведена под именем
+ * `attempt_no` — как в `workshop_submissions`, где тот же смысл («какая по счёту сдача»).
+ */
+const PACKAGE_COLUMN_EXCEPTIONS = new Set(['review_queue_items.sla_due_at'])
+
 const adminUrl = process.env.DATABASE_ADMIN_URL
 if (!adminUrl) throw new Error('DATABASE_ADMIN_URL должен быть задан (см. .env.example)')
 const admin = postgres(adminUrl, { max: 2, onnotice: () => {} })
@@ -39,6 +55,7 @@ describe('v2-contract-05: правила прохождения не в табл
     const bad = cols
       .filter(c => FORBIDDEN.test(c.column_name as string))
       .map(c => `${c.table_name}.${c.column_name}`)
+      .filter(k => !PACKAGE_COLUMN_EXCEPTIONS.has(k))
     expect(bad, `правила прохождения в таблице пакета: ${bad.join(', ')}`).toEqual([])
   })
 })

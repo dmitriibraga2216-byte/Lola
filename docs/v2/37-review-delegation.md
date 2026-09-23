@@ -40,9 +40,30 @@
 
 ## 3. Сущности и поля
 
-### 3.1 `alter table review_queue_items`
+### 3.1 `create table review_queue_items`
+
+> [исправлено, решение `44-decisions.md` В-2 и сверка `43-reconciliation.md` Р-3: объекта не
+> существовало ни в схеме, ни в БД — ни таблицы, ни представления, ни матвью, поэтому `alter`
+> по нему неисполним; «повышение витрины до таблицы» на деле оказалось созданием с нуля]
+> Ранее: «`alter table review_queue_items`» с 21 колонкой по существующей витрине.
+
+Реализовано миграцией `0066_v2_review_queue` (PR-18) как `create table` с идентичностью
+(`task_type`, `source_id`, `user_id`, `location_id`, `position_id`, `submitted_at`, `status`,
+`priority` — из `docs/14` §3.3) плюс перечисленные ниже колонки состояния. Полный DDL —
+`docs/02-data-model.md`, раздел «Очередь проверки». Два отличия реализации от списка ниже,
+оба зафиксированы в `docs/v2/46-progress.md`:
+
+- **одна ось вместо двух** — колонки `source` из В-2 нет: `task_type` указывает и таблицу
+  источника, и подпись в интерфейсе, а две колонки одной оси однажды разойдутся;
+- **`attempts_count` называется `attempt_no`** — как одноимённая колонка
+  `workshop_submissions` с тем же смыслом.
+
+Колонки `delegation_id` и `assigned_by_rule_id` заведены без внешних ключей: таблицы
+`review_delegations` и `review_routing_rules` появляются в PR-19, он же ставит оба ключа
+(развязка цикла `40` §5 0022).
 
 ```sql
+-- Историческая запись патча: как было заявлено до сверки с репозиторием.
 alter table review_queue_items
   add column subject_kind text not null default 'employee',
   add column task_type text not null default 'workshop',
@@ -426,7 +447,7 @@ alter table workshop_submissions add column attempt_seconds int not null default
 
 | Метод | Путь | Вход | Выход | Ошибки |
 |---|---|---|---|---|
-| GET | `/review/queue` | `?tab=mine\|delegated_out\|delegated_in\|done&location&track&task_type&from&to&reviewer&subject_kind&overdue` | `{data:[item],cursor}` | `403 forbidden` |
+| GET | `/review/queue` | `?tab=mine\|delegated_in\|delegated_out\|done&taskType&locationId&trackId&from&to&reviewerId&subjectKind&overdue&cursor&limit` | `{data:{items,total,cursor}}` | `403 forbidden` |
 | POST | `/review/items/:id/delegate` | `{toUserId, reasonCode, reasonText?, dueAt, notify}` | `{data:{delegationId,item}}` | `422 review.delegate_target_forbidden`, `422 review.delegate_target_declines`, `422 review.delegate_cycle`, `422 review.delegate_depth_exceeded`, `409 review.already_in_review` |
 | POST | `/review/delegations/:id/revoke` | `{reason?}` | `{data:{item}}` | `409 review.delegation_in_progress`, `403 forbidden` |
 | POST | `/review/items/bulk-delegate` | `{itemIds[≤25], toUserId, reasonCode, dueAt}` | `{data:{ok, failed:[{id,code}]}}` | `422 review.bulk_limit` |
@@ -441,6 +462,20 @@ alter table workshop_submissions add column attempt_seconds int not null default
 | GET/PUT | `/content/time-norms/:subjectType/:subjectId` | `{source, authorSeconds?}` | `{data:norm}` | `422 norm.value_range` |
 | POST | `/content/time-norms/:subjectType/:subjectId/apply-observed` | — | `{data:norm}` | `422 norm.sample_too_small` |
 | GET | `/reports/reviewers`, `/reports/time-plan-fact`, `/reports/delegations` | фильтры §9 | `{data:[…]}` | `403 forbidden` |
+
+**Отношение к трём базовым путям `docs/04-api.md` §4.7** (решение `44-decisions.md` В-15,
+добавлено PR-18): `/review/queue` — единый список поверх `review_queue_items`; `/review/answers`
+и `/review/workshops` остаются **узкими фильтрами** над теми же источниками, потому что несут
+фильтры, которых у очереди нет (метки вопросов, «Поза програмами», «Поза курсами», `quizId`), и
+на них завязаны работающие экраны. Действия не дублируются: `claim`, `release`, `grade`
+остаются на `/review/submissions/:id/*` и `/review/answers/:id/grade` — решение принимается над
+работой, а не над строкой очереди, а очередь обновляется тем же сервисом в той же транзакции.
+`/review/checklists` вычеркнут из `docs/04-api.md` §4.7 как никогда не существовавший:
+подтверждение чек-листа приходит табом `offline_confirm`.
+
+Табы и `taskType` — **две разные оси** (`shared/schemas/review.ts`): таб отвечает на вопрос
+«чья это работа сейчас», `taskType` — «что это за работа». В `44` В-15 оба набора значений
+названы словом `tab`; экран §5.1 показывает их одновременно, поэтому они разведены.
 
 `POST /learning/time/beat` идемпотентен по `(session_key, seq)` без заголовка `Idempotency-Key`: повтор возвращает тот же `credited` и ничего не начисляет. Остальные мутации — по общему правилу `Idempotency-Key`.
 

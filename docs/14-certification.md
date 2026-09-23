@@ -55,24 +55,44 @@
 
 ### 3.3 `review_queue_items` — единая очередь проверки
 
-Витрина поверх двух источников (ответы тестов и сдачи практикумов), чтобы у наставника
-было одно место, а не три раздела, как в эталоне.
+> [исправлено, решение `docs/v2/44-decisions.md` В-2: состояние очереди не выражается витриной]
+> Ранее: «Витрина поверх двух источников… Реализация: материализованное представление,
+> обновляемое триггером или задачей раз в минуту `[решение]`; либо обычная таблица, куда пишут
+> оба модуля — выбрать при реализации».
+
+**Полноценная таблица** — источник истины о состоянии очереди (миграция `0066_v2_review_queue`,
+полный DDL — `02-data-model.md`, раздел «Очередь проверки»). Одно место у наставника вместо трёх
+разделов эталона, но, в отличие от витрины, у строки есть устойчивая идентичность: на неё
+ссылаются делегирование (`v2/37` §3.2), события SLA, «каким правилом назначено» и суточная
+статистика проверяющего. Собранная запросом строка живёт только внутри ответа, и сослаться на
+неё нечем.
 
 | Поле | Тип | Комментарий |
 | --- | --- | --- |
-| `source` | text | `test_answer` \| `workshop` \| `offline_confirm` |
-| `source_id` | uuid | ссылка на `attempt_answers.id` / `workshop_submissions.id` / `certification_attempts.id` |
-| `user_id`, `location_id`, `position_id` | uuid | для фильтров |
-| `subject_title` | text | название теста/практикума |
-| `submitted_at` | timestamptz | |
-| `sla_due_at` | timestamptz | |
-| `claimed_by`, `claimed_at` | uuid, timestamptz | |
+| `task_type` | text | `quiz_open_answer` \| `workshop` \| `offline_confirm` \| `survey_open` \| `ai_interview_review`; он же фильтр «Тип завдання» |
+| `source_id` | uuid | ссылка на `attempt_answers.id` / `workshop_submissions.id` / `certification_attempts.id`; вместе с `task_type` уникальна в тенанте |
+| `user_id`, `subject_kind` | uuid, text | чья работа и кто он — сотрудник или кандидат; вид снимается из `users.kind` один раз, при постановке |
+| `location_id`, `position_id` | uuid | снимки для фильтров: перевод человека не перекладывает старую работу |
+| `task_title`, `track_id` | text, uuid | снимки названия и курса на момент сдачи — список рисуется одним запросом |
+| `submitted_at`, `completed_at` | timestamptz | когда пришла и когда закрыта |
+| `attempt_no` | int | «Кількість спроб» — какая по счёту сдача |
+| `estimated_seconds`, `content_seconds`, `attempt_seconds`, `time_confidence` | int, text | метрики времени (`v2/37` §3.5–3.6), наполняются биениями |
+| `sla_hours`, `sla_due_at`, `sla_warned_at`, `sla_breached_at` | int, timestamptz | срок проверки и отметки порогов 50 / 100 / 150 % |
+| `assigned_reviewer_id`, `assigned_at`, `assigned_by_rule_id` | uuid, timestamptz | кто проверяет и почему именно он |
+| `delegation_id`, `origin_reviewer_id`, `delegation_depth` | uuid, int | делегирование A→B→C с пределом глубины 2 |
+| `escalated_at`, `escalated_to_id` | timestamptz, uuid | эскалация руководителю |
 | `status` | text | `waiting` \| `in_review` \| `done` |
 | `priority` | int | просроченные и аттестации выше |
 
-Реализация: материализованное представление, обновляемое триггером или задачей раз в минуту
-`[решение]`; либо обычная таблица, куда пишут оба модуля — выбрать при реализации, но интерфейс
-обязан быть единым.
+**Пишет только сервис** `server/services/reviewQueue.ts`: `enqueueReview()` там, где работа
+появляется, `closeReview()` там, где принято решение, — обе в транзакции самого события. Ни
+триггера, ни задачи «раз в минуту»: в окне между обновлениями витрины двое наставников берут
+одну работу. **Очередь поддерживается, а не пересобирается**: `truncate` и `delete` запрещены
+(сквозная проверка 21 `docs/v2/42` §5), закрытие — это `status = 'done'`. Собственное состояние
+строки из источников не восстанавливается.
+
+`workshop_submissions.reviewer_id`, `claimed_at`, `sla_due_at` на переходный период остаются
+зеркалом и пишутся той же транзакцией; новому коду читать их нельзя.
 
 ### 3.4 `certificate_templates`
 

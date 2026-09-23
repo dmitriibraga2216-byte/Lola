@@ -5,6 +5,7 @@ import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import { resolveAudience } from './audience'
 import { countView } from './notices'
+import { employeeOnly } from './repo/people'
 import type { ContentBlock } from '../../shared/schemas/content'
 import type { Audience } from '../../shared/schemas/assignments'
 
@@ -150,7 +151,8 @@ export async function newsAckReport(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [n] = await tx.select().from(news).where(and(eq(news.id, id), isNull(news.deletedAt)))
     if (!n) return null
-    const audienceIds = n.audience ? [...await resolveAudience(tx, n.audience as Audience)] : (await tx.select({ id: users.id }).from(users).where(eq(users.status, 'active'))).map(u => u.id)
+    // Без аудитории объявление адресовано всему штату — но не кандидатам (П-16.1)
+    const audienceIds = n.audience ? [...await resolveAudience(tx, n.audience as Audience)] : (await tx.select({ id: users.id }).from(users).where(employeeOnly(eq(users.status, 'active')))).map(u => u.id)
     if (!audienceIds.length) return { news: n, total: 0, acked: 0, viewed: 0, byLocation: [], notAcked: [], readers: [] }
     const rows = await tx.execute(sql`
       select u.id, u.full_name, l.name as location, v.viewed_at, v.acked_at

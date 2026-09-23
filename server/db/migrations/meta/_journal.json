@@ -393,6 +393,13 @@
       "when": 1790120203875,
       "tag": "0055_r2_cloze_ratings_push_domain",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1790120263875,
+      "tag": "0056_v2_users_kind",
+      "breakpoints": true
     }
   ]
 }

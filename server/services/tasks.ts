@@ -20,6 +20,7 @@ import type {
   Audience, AudienceBuilder, audienceAssignSchema, audienceQuerySchema, taskParameterSchema, taskParameterValuesSchema,
 } from '../../shared/schemas/assignments'
 import type { ContentType } from '../../shared/enums'
+import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
 /**
  * Назначение по эталону (docs/15 §14, docs/04 §4.9 `/tasks/...`): параметры пяти групп,
@@ -159,7 +160,7 @@ export async function listAudience(ctx: Ctx, id: string, q: z.infer<typeof audie
       left join locations l on l.id = up.location_id
       left join org_units ou on ou.id = l.org_unit_id
       left join cities c on c.id = l.city_id
-      where u.status in ('invited','active') and not u.is_hidden
+      where u.status in ('invited','active') and not u.is_hidden ${EMPLOYEES_ONLY()}
         ${q.q ? sql`and u.full_name ilike ${`%${q.q}%`}` : sql``}
         ${q.positionId ? sql`and up.position_id = ${q.positionId}::uuid` : sql``}
         ${q.positionLevelId ? sql`and up.position_level_id = ${q.positionLevelId}::uuid` : sql``}
@@ -216,7 +217,7 @@ export async function resolveBuilder(tx: Tx, builder: AudienceBuilder): Promise<
         break
     }
   }
-  const rows = await tx.execute(sql`select u.id from users u where ${sql.join(conds, sql` and `)}`) as unknown as { id: string }[]
+  const rows = await tx.execute(sql`select u.id from users u where ${sql.join(conds, sql` and `)} ${EMPLOYEES_ONLY()}`) as unknown as { id: string }[]
   return new Set(rows.map(r => r.id))
 }
 
@@ -356,7 +357,7 @@ export async function previewCsv(ctx: Ctx, id: string, fileName: string, buffer:
     const values = raw.map(r => (r[keyHeader] ?? '').trim()).filter(Boolean)
     const col = key === 'email' ? users.email : key === 'phone' ? users.phone : users.externalId
     const found = values.length
-      ? await tx.select({ id: users.id, fullName: users.fullName, v: col }).from(users).where(and(inArray(col, values), inArray(users.status, ['invited', 'active'])))
+      ? await tx.select({ id: users.id, fullName: users.fullName, v: col }).from(users).where(employeeOnly(inArray(col, values), inArray(users.status, ['invited', 'active'])))
       : []
     const byValue = new Map(found.map(f => [String(f.v).toLowerCase(), f]))
     const assigned = await assignedMap(tx, a)

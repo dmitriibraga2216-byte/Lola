@@ -23,6 +23,9 @@ create table tenants (
   trial_ends_at timestamptz,
   branding jsonb not null default '{}',      -- logo_key, accent, space_name
   settings jsonb not null default '{}',      -- флаги модулей, пороги, политика паролей
+  candidates_enabled boolean not null default false, -- рекрутинг выключен, пока тенант его не включил
+                                             -- (`v2/28` §3, `v2/44` В-14): до включения кандидатов в тенанте нет
+                                             -- ни одного, и откат `users.kind` сводится к выключению флага
   archived_at timestamptz,                   -- `25` §8: мягкое удаление, tenant.purge через 30 дней; Spec 25
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -98,6 +101,10 @@ create table positions (
 create table users (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references tenants(id) on delete cascade,
+  kind text not null default 'employee',      -- user_kind: employee | candidate (`v2/28` §2, `v2/44` В-8, В-14).
+                                              -- Кандидат и сотрудник — одна запись с разным kind; перевод в штат
+                                              -- меняет kind, а не заводит вторую строку. CHECK users_kind_chk.
+                                              -- Любая списочная выборка людей идёт через server/services/repo/people.ts
   phone text,                                 -- E.164, уникален в тенанте
   email text,
   full_name text not null,
@@ -127,6 +134,8 @@ create table users (
   unique (tenant_id, phone),
   unique (tenant_id, email)
 );
+-- Индекс под списки сотрудников: (tenant_id, status) where kind = 'employee' (`v2/44` В-14).
+-- Полный (tenant_id, status) остаётся — по нему идут выборки кандидатов и платформенные счётчики.
 
 create table user_placements (                -- где человек работает
   id uuid primary key default gen_random_uuid(),
@@ -1389,6 +1398,11 @@ display_as: label | value
 
 -- Матеріал, який можна оцінити читачем («Оцінок: N», `21` §14.1); докс/33 D-042, своє
 content_rating_target: resource | knowledge_article
+
+-- Вид человека в `users` (`v2/28` §2, `v2/44` В-8, В-14): кандидат и сотрудник — одна запись
+-- с разным `kind`, а не две таблицы. Перевод кандидата в штат меняет `kind`, а не создаёт
+-- вторую строку: история откликов, оценок и обучения остаётся на том же `users.id`.
+user_kind: employee | candidate
 ```
 
 ## Что проверяет тест схемы

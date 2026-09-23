@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import { enqueueNotification } from './notifications'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 interface Ctx { tenantId: string, actorId: string }
 type Row = Record<string, unknown>
@@ -134,7 +135,7 @@ export async function activityExtra(ctx: Ctx, f: Period = {}) {
       (select count(distinct s.user_id)::int from sessions s where s.created_at >= current_date ${sc}) as dau,
       (select count(distinct s.user_id)::int from sessions s where s.created_at >= current_date - 7 ${sc}) as wau,
       (select count(distinct s.user_id)::int from sessions s where s.created_at >= current_date - 30 ${sc}) as mau,
-      (select count(*)::int from users u where u.status = 'active' and not u.is_hidden and coalesce(u.last_seen_at, u.created_at) < now() - interval '30 days'
+      (select count(*)::int from users u where u.status = 'active' and not u.is_hidden ${EMPLOYEES_ONLY()} and coalesce(u.last_seen_at, u.created_at) < now() - interval '30 days'
          ${scope === null ? sql`` : sql`and u.id in (select up.user_id from user_placements up where up.is_primary and up.ended_at is null ${inScope(scope)})`}) as inactive_30
   `)
   const hours = await q(ctx, sql`
@@ -181,7 +182,7 @@ export async function tiles(ctx: Ctx, report: string, f: Period = {}) {
   }
   const [cur, before] = await Promise.all([one(from, to), one(prev.from, prev.to)])
   const [snap] = await q(ctx, sql`
-    select (select count(*)::int from users u where u.status = 'active' and not u.is_hidden) as people,
+    select (select count(*)::int from users u where u.status = 'active' and not u.is_hidden ${EMPLOYEES_ONLY()}) as people,
            (select count(*)::int from certificates c where c.revoked_at is null and c.valid_until between now() and now() + interval '30 days') as certs_expiring,
            (select count(distinct e.user_id)::int from enrollments e join assignments a on a.id = e.assignment_id left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null where a.is_mandatory and e.cancelled_at is null and e.status in ('in_progress','not_started','failed') ${inScope(scope)}) as not_ready
   `)

@@ -8,6 +8,7 @@ import { recordAudit } from './audit'
 import { expandAssignment } from './assignments'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
+import { employeeOnly } from './repo/people'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { RuleDimensionInput, profileSchema, ruleSchema } from '../../shared/schemas/assignments'
 
@@ -294,7 +295,8 @@ export async function ruleUsers(ctx: Ctx, ruleId: string) {
 }
 
 async function peopleMatching(tx: TenantTx, cond: Conditions) {
-  const people = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.status, 'active')).orderBy(users.fullName)
+  // Автоматизация работает по штату: кандидату обучение выдаётся своим сценарием (П-16.1)
+  const people = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(employeeOnly(eq(users.status, 'active'))).orderBy(users.fullName)
   const out: { id: string, fullName: string }[] = []
   for (const p of people) if (await matchesConditions(tx, p.id, cond)) out.push(p)
   return out

@@ -10,6 +10,7 @@ import { enqueueNotification } from './notifications'
 import { currentLevels, defaultValidUntil, effectiveRequirements, levelLabel, profileForPosition } from './development'
 import type { CompetencyLevel, Requirement } from './development'
 import { scopeSql } from './access'
+import { EMPLOYEES_ONLY } from './repo/people'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { DisplayAs } from '../../shared/enums'
 
@@ -76,7 +77,7 @@ export async function competencyMatrix(ctx: Ctx, filter: { locationId?: string, 
       select u.id, u.full_name, up.position_id, up.position_level_id, p.name as position, l.name as location, up.location_id
       from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       join positions p on p.id = up.position_id join locations l on l.id = up.location_id
-      where u.status = 'active' and not u.is_hidden
+      where u.status = 'active' and not u.is_hidden ${EMPLOYEES_ONLY()}
         ${filter.locationId ? sql`and up.location_id = ${filter.locationId}::uuid` : sql``}
         ${scopeSql(filter.scope ?? null, sql`up.location_id`)}
       order by l.name, u.full_name limit 300
@@ -190,7 +191,7 @@ export async function promotionReadiness(ctx: Ctx, positionId: string, scope: st
       select u.id, u.full_name, p.name as position, l.name as location
       from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       join positions p on p.id = up.position_id join locations l on l.id = up.location_id
-      where u.status = 'active' and not u.is_hidden and up.position_id <> ${positionId}::uuid ${scopeSql(scope, sql`up.location_id`)}
+      where u.status = 'active' and not u.is_hidden and up.position_id <> ${positionId}::uuid ${EMPLOYEES_ONLY()} ${scopeSql(scope, sql`up.location_id`)}
       order by u.full_name limit 500
     `) as unknown as { id: string, full_name: string, position: string, location: string }[]
     const out = []

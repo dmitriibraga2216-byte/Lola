@@ -258,7 +258,9 @@ describe('D-054 — ліміти tenant_limits: диск, SMS, попередж�
   })
 
   it('usage.collect: 80%+ ліміту людей → limit_warning адміну і platform_audit, 100%+ → limit_exceeded', async () => {
-    const activeUsers = (await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked`)[0]!.n as number
+    // kind = 'employee' — счётчик оплачиваемых мест считает штат, кандидаты в него не входят
+    // (П-16.1, docs/v2/44 В-8); в посеве есть канареечные кандидаты, без фильтра лимит не совпадёт
+    const activeUsers = (await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and kind = 'employee' and status = 'active' and not is_blocked`)[0]!.n as number
     await admin`insert into tenant_limits (tenant_id, users) values (${tenantId}, ${activeUsers}) on conflict (tenant_id) do update set users = ${activeUsers}`
     invalidateLimits(tenantId)
     await admin`delete from notifications where tenant_id = ${tenantId} and code in ('limit_warning', 'limit_exceeded') and created_at > now() - interval '1 minute'`

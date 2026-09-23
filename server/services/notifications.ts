@@ -10,6 +10,7 @@ import { readSettings } from './settings'
 import type { NotificationSchedule } from '../../shared/schemas/settings'
 import { tenantOverrides } from './translations'
 import { buildEmailHtml } from './emailRender'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Уведомления (docs/03 §3.10, docs/06 §6.4): ни одна задача не шлёт напрямую —
@@ -572,7 +573,7 @@ export async function notificationsReport(ctx: { tenantId: string, actorId: stri
       from notifications n left join user_placements up on up.user_id = n.user_id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
       where n.channel = 'sms' and n.status in ('sent','read') ${period} group by 1 order by 3 desc
     `) as unknown as Record<string, unknown>[]
-    const blocked = await tx.execute(sql`select u.id, u.full_name, l.name as location from users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id where u.telegram_blocked and u.status = 'active' order by u.full_name limit 200`) as unknown as Record<string, unknown>[]
+    const blocked = await tx.execute(sql`select u.id, u.full_name, l.name as location from users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id where u.telegram_blocked and u.status = 'active' ${EMPLOYEES_ONLY()} order by u.full_name limit 200`) as unknown as Record<string, unknown>[]
     return { delivery, sms, blocked }
   })
 }

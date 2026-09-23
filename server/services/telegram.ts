@@ -8,6 +8,7 @@ import { createSession } from './session'
 import { logSecurity } from './securityLog'
 import { getSecret, SECRET_KEYS } from './secrets'
 import { frameJoins, frameSelect } from './reportFrame'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Telegram-бот (docs/04 §4.12, docs/06 §6.4; docs/09 §9.7.2, Spec 23): токен бота —
@@ -245,7 +246,7 @@ export async function listTelegramConnections(ctx: { tenantId: string, actorId: 
     return tx.execute(sql`
       select ${frameSelect()}, (u.telegram_chat_id is not null) as connected, u.telegram_blocked as blocked
       from users u ${frameJoins()}
-      where u.status <> 'archived'
+      where u.status <> 'archived' ${EMPLOYEES_ONLY()}
       order by connected desc, u.full_name
     `) as unknown as Promise<TelegramConnectionRow[]>
   })

@@ -2,16 +2,21 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { enrollments, orgUnits, roles, userGroups, userPlacements, userRoles, users } from '../db/schema'
 import type { TenantTx } from '../utils/withTenant'
 import type { Audience, AudienceRule } from '../../shared/schemas/assignments'
+import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
 /**
  * Раскрытие аудитории (docs/15 §3.2, §7.1): набор правил → множество userId.
  * match=any — объединение, all — пересечение; exclude вычитается.
  * Учитываются только активные размещения и люди в статусе invited/active.
+ *
+ * Аудитория — это сотрудники (`kind = 'employee'`, П-16.1): кандидату обучение выдаётся
+ * отдельным сценарием (docs/v2/28 §5, PR-13), а не тем, что он случайно попал в правило
+ * «посада» или «мітка». Фильтр стоит в `activePeople` — одной точкой на все правила.
  */
 
 async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string>> {
   // Скрытые (docs/16 §7.5) не попадают в выбор людей при назначении
-  const activePeople = and(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false))!
+  const activePeople = employeeOnly(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false))
 
   switch (rule.type) {
     case 'user': {
@@ -51,7 +56,7 @@ async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string
         select up.user_id as id from user_placements up
         join locations l on l.id = up.location_id
         join users u on u.id = up.user_id
-        where l.org_unit_id in ${unitIds} and up.ended_at is null and u.status in ('invited','active')
+        where l.org_unit_id in ${unitIds} and up.ended_at is null and u.status in ('invited','active') ${EMPLOYEES_ONLY()}
       `)
       return new Set((rows as unknown as { id: string }[]).map(r => r.id))
     }
@@ -64,7 +69,7 @@ async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string
     }
     case 'tag': {
       const rows = await tx.select({ id: users.id }).from(users)
-        .where(and(sql`${users.tags} && ARRAY[${sql.join(rule.values.map(v => sql`${v}`), sql`, `)}]::text[]`, activePeople))
+        .where(employeeOnly(sql`${users.tags} && ARRAY[${sql.join(rule.values.map(v => sql`${v}`), sql`, `)}]::text[]`, activePeople))
       return new Set(rows.map(r => r.id))
     }
     case 'group': {
@@ -99,7 +104,7 @@ async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string
       if (f.notCompletedCourseIds?.length) {
         conds.push(sql`not exists (select 1 from ${enrollments} e where e.user_id = ${users.id} and e.status = 'done' and e.cancelled_at is null and e.subject_id in ${f.notCompletedCourseIds})`)
       }
-      const rows = await tx.select({ id: users.id }).from(users).where(and(...conds))
+      const rows = await tx.select({ id: users.id }).from(users).where(employeeOnly(...conds))
       return new Set(rows.map(r => r.id))
     }
   }

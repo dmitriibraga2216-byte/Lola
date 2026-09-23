@@ -5,6 +5,7 @@ import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import type { Access } from './access'
 import { can } from './access'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -25,7 +26,7 @@ const PEOPLE_SQL = sql`
   left join cities c on c.id = coalesce(up.city_id, l.city_id)
   left join org_units o on o.id = coalesce(up.org_unit_id, l.org_unit_id)
   left join positions p on p.id = up.position_id
-  where u.status = 'active' and u.is_hidden = false`
+  where u.status = 'active' and u.is_hidden = false ${EMPLOYEES_ONLY()}`
 
 /** День рождения в году `year` (29 февраля → 28 февраля в невисокосный). */
 function birthdayIn(year: number, birth: string): Date {
@@ -134,7 +135,7 @@ export async function birthdayScan(tenantId: string): Promise<{ upcoming: number
     }
     for (const [locationId, celebrants] of todayByLocation) {
       const celebrantIds = new Set(celebrants.map(c => c.id))
-      const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${locationId}::uuid and u.status = 'active'`) as unknown as { id: string }[]
+      const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${locationId}::uuid and u.status = 'active' ${EMPLOYEES_ONLY()}`) as unknown as { id: string }[]
       const names = celebrants.map(c => c.fullName).join(', ')
       for (const m of mates) {
         if (celebrantIds.has(m.id)) continue // іменинник не отримує дайджест про самого себе
@@ -165,7 +166,7 @@ export async function anniversaryScan(tenantId: string): Promise<{ upcoming: num
     const rows = await tx.execute(sql`
       select u.id, u.full_name, up.started_at::text as started_at, up.location_id
       from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
-      where u.status = 'active'
+      where u.status = 'active' ${EMPLOYEES_ONLY()}
     `) as unknown as AnniversaryRow[]
     const mgrOf = new Map<string, string | null>()
     const todayByLocation = new Map<string, { id: string, fullName: string, years: number }[]>()
@@ -190,7 +191,7 @@ export async function anniversaryScan(tenantId: string): Promise<{ upcoming: num
     }
     for (const [locationId, celebrants] of todayByLocation) {
       const celebrantIds = new Set(celebrants.map(c => c.id))
-      const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${locationId}::uuid and u.status = 'active'`) as unknown as { id: string }[]
+      const mates = await tx.execute(sql`select u.id from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null where up.location_id = ${locationId}::uuid and u.status = 'active' ${EMPLOYEES_ONLY()}`) as unknown as { id: string }[]
       const names = celebrants.map(c => `${c.fullName} (${c.years} р.)`).join(', ')
       for (const m of mates) {
         if (celebrantIds.has(m.id)) continue

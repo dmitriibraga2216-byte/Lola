@@ -3,6 +3,7 @@ import { securityLog, tenants } from '../db/schema'
 import type { SecurityEvent, SecuritySeverity } from '../../shared/enums'
 import type { SecuritySettings } from '../../shared/schemas/reports'
 import { currentRequestContext } from '../utils/requestContext'
+import { EMPLOYEES_ONLY } from './repo/people'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 
@@ -88,7 +89,7 @@ async function alertAdmins(tx: TenantTx, tenantId: string, e: { id: string, even
   const admins = await tx.execute(sql`
     select distinct u.id from users u
     join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id
-    where r.code = 'admin' and u.status = 'active' and not u.is_blocked and u.email is not null
+    where r.code = 'admin' and u.status = 'active' and not u.is_blocked and u.email is not null ${EMPLOYEES_ONLY()}
       and (ur.valid_until is null or ur.valid_until > now())`) as unknown as { id: string }[]
   if (!admins.length) return
   const [person] = e.userId ? await tx.execute(sql`select full_name from users where id = ${e.userId}::uuid`) as unknown as { full_name: string }[] : []

@@ -115,6 +115,50 @@ create table tenant_limits (
   updated_at timestamptz not null default now()
 );
 
+-- Счётчик потребления за биллинговый период (`v2/35` §3.5, §7.5). Реальное время: строка
+-- пополняется там же, где ось проверяется на лимит. Лимит здесь не считается — формула одна
+-- и живёт в effectiveLimits() (`v2/35` §7.3, `v2/44` В-5). С RLS. `v2/45` PR-09
+create table usage_counters (
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  axis text not null,                        -- limit_axis (`v2/35` §7.1)
+  period_start date not null, period_end date not null,
+  used bigint not null default 0,
+  limit_snapshot bigint,                     -- снимок лимита на момент ОТКРЫТИЯ периода; null = без обмежень
+  updated_at timestamptz not null default now(),
+  primary key (tenant_id, axis, period_start)
+);
+create index usage_counters_axis_idx on usage_counters (tenant_id, axis, period_end desc);
+
+-- Журнал расхода, хранение 400 дней (`v2/35` §3.5, §9 «Журнал ШІ-операцій»). Пишется только
+-- измеряемыми операциями — шесть usage_ref_kind; моментальные оси строк расхода не создают. С RLS
+create table usage_events (
+  id bigserial primary key,
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  axis text not null,                        -- limit_axis
+  delta bigint not null,
+  ref_kind text not null,                    -- usage_ref_kind
+  ref_id uuid, actor_user_id uuid,
+  meta jsonb not null default '{}',
+  request_context jsonb,                     -- как у остальных журналов (правило «журналы пишут одинаково»)
+  occurred_at timestamptz not null default now()
+);
+create index usage_events_axis_idx on usage_events (tenant_id, axis, occurred_at desc);
+
+-- Открытое предупреждение по оси — состояние баннера, а не журнал (`v2/35` §3.5, §7.9).
+-- Частичный уникальный индекс держит «одно открытое предупреждение на ось и уровень». С RLS
+create table limit_notices (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  axis text not null,                        -- limit_axis
+  level text not null,                       -- limit_notice_level: warn | exceeded
+  value_at_raise bigint not null, limit_at_raise bigint,
+  resolved_at timestamptz,                   -- потребление вернулось ниже 80 % — запись закрыта
+  dismissed_by uuid, dismissed_until timestamptz, -- крестик прячет баннер на 24 часа; exceeded закрыть нельзя
+  raised_at timestamptz not null default now()
+);
+create unique index limit_notices_open_uidx on limit_notices (tenant_id, axis, level) where resolved_at is null;
+create index on limit_notices (tenant_id, raised_at desc);
+
 -- Журнал действий оператора платформы (`25` §3.1, §7 п. 5): платформенная, без tenant_id и RLS. Spec 25
 create table platform_audit (
   id bigserial primary key,
@@ -1275,7 +1319,13 @@ api_tokens(name, token_hash, scopes text[], last_used_at, expires_at, created_by
 translations(tenant_id, locale, key, value, updated_by, unique (tenant_id, locale, key)) -- переопределения строк тенантом поверх словаря (`24` §3.6); Spec 24
 tenant_usage(tenant_id, collected_at,           -- потребление раз в сутки, строка на сбор (`24` §4.4.1, задача usage.collect); Spec 24
        active_users int, blocked_users int, archived_users int, storage_bytes bigint,
-       sms_month int, courses_count int, assignments_count int, attempts_month int)
+       sms_month int, courses_count int, assignments_count int, attempts_month int,
+       -- восемь колонок пакета (`v2/35` §3.3, `v2/45` PR-09); plan_code, а не plan_id:
+       -- колонки id у тарифа нет (`v2/44` В-5). sms_month остаётся календарным месяцем,
+       -- sms_out — расход оси за биллинговый период
+       plan_code text references plans(code), candidates_active int,
+       storage_by_category jsonb, ai_ops jsonb, sms_out int, telegram_out int,
+       integrations_active int, axes jsonb)  -- axes — нетарифная ось без своей колонки
 saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
           schedule jsonb, owner_id)
 ```
@@ -1578,6 +1628,15 @@ user_kind: employee | candidate
 limit_axis: users_active | candidates_active | storage_bytes | ai_generate_ops | ai_review_ops
           | ai_interview_ops | sms_out | telegram_out | integrations_active | api_rate_rpm
           | export_rows
+
+-- Вид операции в журнале расхода (`v2/35` §3.5, `usage_events.ref_kind`): шесть измеряемых
+-- операций. Моментальные оси (люди, кандидаты, интеграции) строки расхода не создают —
+-- их счётчик сходится пересчётом факта, а не суммой журнала (`v2/35` §7.1, §7.5)
+usage_ref_kind: ai_generation | ai_review | ai_interview | sms | upload | export
+
+-- Уровень предупреждения по оси (`v2/35` §3.5, §7.9; `limit_notices.level`): 80 % и 100 %
+-- эффективного лимита. Третьего уровня нет — ниже 80 % запись закрывается resolved_at
+limit_notice_level: warn | exceeded
 ```
 
 ## Что проверяет тест схемы

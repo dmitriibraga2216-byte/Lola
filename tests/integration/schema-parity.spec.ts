@@ -37,7 +37,10 @@ const CONTENT_COLUMN_EXCEPTIONS = new Set(['lessons.pass_score_pct', 'questions.
 const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
 
 /** Журналы (docs/22 §13.4): технический контекст пишется одинаково во все. */
-const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events', 'notifications', 'import_jobs', 'goal_status_log', 'automation_runs', 'task_access_log', 'org_conflicts', 'task_status_log']
+const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events', 'notifications', 'import_jobs', 'goal_status_log', 'automation_runs', 'task_access_log', 'org_conflicts', 'task_status_log',
+  // `usage_events` — журнал расхода по осям лимита (docs/v2/35 §3.5, PR-09): колонки в DDL
+  // документа нет, но правило «все журналы пишут request_context одинаково» сильнее (docs/28)
+  'usage_events']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

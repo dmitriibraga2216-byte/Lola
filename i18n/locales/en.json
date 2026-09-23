@@ -4642,6 +4642,28 @@
       "integrations_active": "A new connection is not created. Turn off unused ones or change the plan.",
       "api_rate_rpm": "Requests over the rate get 429 with Retry-After.",
       "export_rows": "The export goes to a background job with a link to the file."
+    },
+    "unlimited": "unlimited",
+    "banner": {
+      "more": "and {n} more",
+      "change": "Change plan",
+      "hide": "Hide for a day"
+    },
+    "usage": {
+      "title": "Consumption by axis",
+      "period": "Billing period: {from} - {to}",
+      "live": "real time",
+      "counter": "period counter",
+      "soft": "soft axis: observation only"
+    },
+    "degradation": {
+      "reject": "new operations on this axis are rejected",
+      "finish_started": "new ones are not started, ongoing ones are finished",
+      "manual_review": "the check goes to the regular manual review queue",
+      "channel_fallback": "delivery goes via Telegram and in-app",
+      "background_job": "the export goes to a background job with a link to the file",
+      "retry_after": "429 with Retry-After",
+      "observe": "observation only, delivery is not stopped"
     }
   },
   "offboarding": {

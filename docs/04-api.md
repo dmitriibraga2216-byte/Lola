@@ -317,7 +317,10 @@
 | CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены |
 | POST | `/settings/integrations/:provider/test` | тестовое сообщение без постановки в очередь (пока только `smtp`, `23` §13.4) |
 | CRUD | `/settings/translations` | переопределение строк интерфейса: `GET ?locale&q&changedOnly&page`, `PUT {locale,key,value}`, `DELETE ?locale&key?` (без key — весь набор), `GET /export?locale`, `POST /import {locale, items}`; клиенту — `GET /translations/:locale` (любая сессия) поверх словаря |
-| GET | `/settings/usage` | потребление: активные, диск, SMS, дата последнего сбора, тариф и лимиты (`24` §4.4.1) |
+| GET | `/settings/usage` | потребление: активные, диск, SMS, дата последнего сбора, тариф и лимиты (`24` §4.4.1); с `v2/45` PR-09 — ещё `consumption[]` по одиннадцати осям и `notices[]` для баннера |
+| GET | `/billing/usage` | потребление по осям (`v2/35` §10): `axis, used, limit, pct, source (live\|counter), kind, degradation` плюс окно периода; скоуп `billing.usage.view` |
+| GET | `/billing/notices` | открытые предупреждения баннера (`v2/35` §5.5, §7.9); скрытые крестиком не возвращаются, пока не истекли 24 часа; скоуп `billing.view` |
+| POST | `/billing/notices/:id/dismiss` | скрыть предупреждение на 24 часа; у уровня `exceeded` крестика нет — 409 `limit_exceeded` (`v2/35` §7.9 п. 2) |
 | GET/PATCH | `/settings/modules` | переключатели модулей; выключенный модуль → 403 `module.disabled` на его маршрутах (`24` §3.2) |
 | CRUD | `/course-categories`, `POST /course-categories/reorder` | «Категорії каталогу навчання» с порядком (`24` §3.7.1); категория с курсами — 409 `in_use` |
 | GET/PATCH | `/settings/catalog` | тумблер «Використовувати обмеження доступу до завдань в каталозі навчання» — `{restrictAccess}`, за замовчуванням вимкнено (`10` §14.1, Spec 10); групи доступу — той самий `/access-groups?appliesTo=catalog` |

@@ -22,6 +22,10 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'offboarding_cases',
   // 35. Тарифы и лимиты (PR-08, миграция 0059_v2_billing_plans)
   'tenant_addons',
+  // 35. Потребление, предупреждения, деградация (PR-09, миграция 0061_v2_billing_usage)
+  'usage_counters',
+  'usage_events',
+  'limit_notices',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

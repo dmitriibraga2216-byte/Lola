@@ -7,6 +7,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
 import { effectiveLimits } from './tenantLimits'
+import { measureLive, syncCounter } from './usageCounters'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -51,14 +52,24 @@ export async function createEndpoint(ctx: Ctx, input: { url: string, events: str
     }).returning({ id: webhookEndpoints.id })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'webhook.create', entity: 'webhook_endpoint', entityId: e!.id, after: { url: input.url, events: input.events } })
     return { ok: true as const, id: e!.id, secret }
+  }).then(async (r) => {
+    // Ось `integrations_active` — моментальная (docs/v2/35 §7.1): счётчик приводится к факту
+    // сразу, отключение подключения освобождает место в тот же миг (§7.5).
+    await syncCounter(ctx.tenantId, 'integrations_active', await measureLive(ctx.tenantId, 'integrations_active')).catch(() => null)
+    return r
   })
 }
 
 export async function updateEndpoint(ctx: Ctx, id: string, input: { isActive?: boolean, events?: string[], url?: string }) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [e] = await tx.update(webhookEndpoints).set({ ...input, updatedAt: new Date() }).where(eq(webhookEndpoints.id, id)).returning({ id: webhookEndpoints.id })
-    return e ?? null
+  const e = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [row] = await tx.update(webhookEndpoints).set({ ...input, updatedAt: new Date() }).where(eq(webhookEndpoints.id, id)).returning({ id: webhookEndpoints.id })
+    return row ?? null
   })
+  // Отключение подключения освобождает место по оси немедленно (docs/v2/35 §7.5)
+  if (input.isActive !== undefined) {
+    await syncCounter(ctx.tenantId, 'integrations_active', await measureLive(ctx.tenantId, 'integrations_active')).catch(() => null)
+  }
+  return e
 }
 
 /** Постановка события в доставку — вызывается из доменных сервисов внутри их транзакции. */

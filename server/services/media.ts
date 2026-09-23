@@ -6,6 +6,7 @@ import { mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
 import { GIB, effectiveLimits } from './tenantLimits'
+import { recordUsage, syncCounter } from './usageCounters'
 
 /**
  * Медиа (docs/11 §3.4, Г-11.4, docs/04 §4.15): presigned PUT в S3, ключ — uuid
@@ -134,6 +135,9 @@ export async function createUploadUrl(ctx: Ctx, input: {
   if (limitBytes != null) {
     const used2 = await tenantStorageBytes(ctx)
     if (used2 + input.bytes > limitBytes) {
+      // Ось жёсткая: отклоняется загрузка нового файла, загруженное доступно (docs/v2/35
+      // §7.1). Задание при этом можно сдать текстом — обучение не останавливается (§12).
+      await syncCounter(ctx.tenantId, 'storage_bytes', used2).catch(() => null)
       return { ok: false, code: 'storage_limit', message: `Ліміт дискового простору (${(limitBytes / GIB).toFixed(0)} ГБ) вичерпано. Зверніться до адміністратора` }
     }
   }
@@ -154,6 +158,13 @@ export async function createUploadUrl(ctx: Ctx, input: {
     }).returning({ id: mediaAssets.id })
     return row!.id
   })
+
+  // Счётчик пополняется в той же точке, где ось проверена (docs/v2/45 PR-09): строка расхода
+  // `upload` в `usage_events` и `used += bytes` в счётчике периода. Отдельной формулы квоты
+  // здесь нет — лимит уже спросили у `effectiveLimits()` выше.
+  await recordUsage(ctx.tenantId, 'storage_bytes', input.bytes, {
+    refKind: 'upload', refId: mediaId, actorUserId: ctx.actorId, meta: { mime: input.mime },
+  }).catch(() => null)
 
   await ensureBucket()
   const uploadUrl = await getSignedUrl(s3(), new PutObjectCommand({

@@ -114,6 +114,14 @@ export async function runExport(exportId: string, tenantId: string): Promise<voi
       await tx.update(reportExports).set({ status: 'ready', rows: rows.length, fileKey: key, expiresAt, finishedAt: new Date(), updatedAt: new Date() }).where(eq(reportExports.id, exportId))
       await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'report_export_ready', payload: { report: e.report, rows: rows.length, url: `${process.env.APP_URL ?? ''}/admin/reports/exports/${exportId}` }, dedupKey: `export:${exportId}` })
     })
+    // Ось `export_rows` (docs/v2/35 §7.1) — «жёсткий с деградацией»: при исчерпании выгрузка
+    // уходит в фоновую задачу со ссылкой на файл. Она **и так** фоновая (`report.export`,
+    // docs/22 §7.3) — деградация здесь уже реализована архитектурой, и ни одна строка не
+    // теряется. Счётчик пополняется фактическим числом строк после успеха.
+    const { recordUsage } = await import('./usageCounters')
+    await recordUsage(tenantId, 'export_rows', rows.length, {
+      refKind: 'export', refId: exportId, actorUserId: e.userId, meta: { report: e.report, format: e.format },
+    }).catch(() => null)
   }
   catch (err) {
     await withTenant(tenantId, null, async (tx) => {

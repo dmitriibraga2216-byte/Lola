@@ -308,7 +308,11 @@ Sonnet — документы, i18n, вёрстка по готовому мок
 
 #### PR-09 · `v2-billing-09` · Потребление, предупреждения, деградация
 
-- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0059_v2_billing_usage.sql`.
+**Статус: выполнено** (2026-09-23, ветка `v2-billing-09`; миграция `0061_v2_billing_usage.sql`
+— `0060` заняла параллельный PR-07. Подробности — `docs/v2/46-progress.md`, запись «Фаза 3,
+PR-09»; решения при отступлениях — `docs/28-implementation-notes.md` §28.12.)
+
+- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0061_v2_billing_usage.sql` (план называл `0059`).
 - **Входит:** `usage_counters`, `usage_events`, `limit_notices`; `alter tenant_usage` +8
   колонок (`plan_id`, `candidates_active`, `storage_by_category`, `ai_ops`, `sms_out`,
   `telegram_out`, `integrations_active`, `axes`); `details.axis` рядом с `resource`,

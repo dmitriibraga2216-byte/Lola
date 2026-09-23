@@ -54,6 +54,15 @@ describe('scripts/extract-tenant.ts', () => {
     expect(manifest.tenantId).toBe(tenantId)
     expect(manifest.anonymized).toBe(false)
     expect(manifest.tableOrder.indexOf('users')).toBeLessThan(manifest.tableOrder.indexOf('enrollments'))
+    /**
+     * Цикл `users.candidate_status_id ↔ candidate_statuses.created_by` — настоящий
+     * (docs/v2/44-decisions.md В-13, PR-13): порядка создания, снимающего его, не существует.
+     * Выгрузка обязана разорвать его **нулевой** ссылкой и назвать разорванное в манифесте,
+     * а не сбросить обе таблицы в хвост: `users` позади своих детей — это выгрузка, из
+     * которой нельзя восстановиться, и внешне она выглядит целой.
+     */
+    expect(manifest.deferredRefs).toContainEqual({ table: 'users', column: 'candidate_status_id', references: 'candidate_statuses' })
+    expect(manifest.tableOrder.indexOf('users')).toBeLessThan(manifest.tableOrder.indexOf('candidate_statuses'))
     expect(manifest.rowCounts.users).toBeGreaterThanOrEqual(1)
     const users = JSON.parse(readFileSync(join(dir!, 'users.json'), 'utf8'))
     const admin = users.find((u: { full_name: string }) => u.full_name === 'Ганна Виговська')

@@ -109,6 +109,15 @@ const ALLOWLIST: Record<string, string> = {
   // ── Справочник ФИО ───────────────────────────────────────────────────────────────────────
   'server/services/requests.ts:81':
     'словарь id → ПІБ для колонки «Відповідальний» в таблице заявок: обогащение именем, корректное для обоих видов людей',
+
+  // ── Поиск того же человека перед созданием кандидата (PR-13) ─────────────────────────────
+  // Единственное место, где выборка по людям обязана быть межвидовой. docs/v2/28 §7.2 требует
+  // искать совпадение «среди всех users тенанта», а §12.1 — отвечать candidate.is_employee,
+  // если телефон принадлежит действующему сотруднику. Фильтр по виду сделал бы проверку
+  // не безопасной, а неверной: unique (tenant_id, phone) один на кандидатов и сотрудников,
+  // и отфильтрованный дубль прошёл бы валидацию и упал на вставке нарушением ключа.
+  'server/services/candidates.ts:376':
+    'поиск дубликата перед созданием кандидата: ключ (tenant_id, phone/email) общий для обоих видов, §7.2 и §12.1 требуют межвидовой сверки',
 }
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -321,7 +330,12 @@ describe('слой 3: канареечный кандидат не попада�
     const canary = canaries[0]!
     const [before] = await admin`select id, created_at from users where id = ${canary.id}`
     const [total] = await admin`select count(*)::int as n from users where tenant_id = ${tenantId}`
-    await admin`update users set kind = 'employee' where id = ${canary.id}`
+    // С PR-13 у записи есть вторая ось — `candidate_state`, и `users_candidate_coherence_chk`
+    // (docs/v2/28 §3.2) требует её ровно у кандидата: сотрудника с состоянием воронки не
+    // бывает. Поэтому «перевод в штат» здесь снимает состояние вместе со сменой вида — ровно
+    // так же, как это сделает транзакция найма (§7.6, PR-14). Факт прихода через воронку
+    // сохраняет `converted_from_candidate_at`, а не остаточный `candidate_state`.
+    await admin`update users set kind = 'employee', candidate_state = null, converted_from_candidate_at = now() where id = ${canary.id}`
     try {
       const { listPeople } = await import('../../server/services/people')
       const page = await listPeople(ctx(), { tab: 'all', limit: 100, includeHidden: true } as never)
@@ -333,7 +347,7 @@ describe('слой 3: канареечный кандидат не попада�
       expect(row!.created_at, 'история человека переехала на другую запись').toEqual(before!.created_at)
     }
     finally {
-      await admin`update users set kind = 'candidate' where id = ${canary.id}`
+      await admin`update users set kind = 'candidate', candidate_state = 'active', converted_from_candidate_at = null where id = ${canary.id}`
     }
   })
 

@@ -40,7 +40,11 @@ const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
 const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events', 'notifications', 'import_jobs', 'goal_status_log', 'automation_runs', 'task_access_log', 'org_conflicts', 'task_status_log',
   // `usage_events` — журнал расхода по осям лимита (docs/v2/35 §3.5, PR-09): колонки в DDL
   // документа нет, но правило «все журналы пишут request_context одинаково» сильнее (docs/28)
-  'usage_events']
+  'usage_events',
+  // `candidate_status_history` — лента смен колонки воронки (docs/v2/28 §3.6, PR-13): тем же
+  // решением, что и `usage_events`. Журнал, по которому считают «днів у статусі» и доказывают,
+  // кто подвинул карточку, обязан отвечать и на «с какого устройства»
+  'candidate_status_history']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

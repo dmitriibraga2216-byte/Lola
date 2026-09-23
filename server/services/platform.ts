@@ -256,15 +256,16 @@ export async function tenantUsers(tenantId: string) {
  * общей функцией `checkLimit` (docs/v2/44 В-5) — той же, что у баннера и расчёта счёта.
  *
  * `users` — активные сотрудники (`status = 'active'`, не заблокированные, `kind = 'employee'`):
- * блокировка человека сразу освобождает место. `candidates` — кандидаты не в архиве
- * (`35` §7.1); ось включается вместе с рекрутингом (`tenants.candidates_enabled`).
+ * блокировка человека сразу освобождает место. `candidates` — кандидаты в состоянии воронки
+ * `active` (`28` §7.1, `35` §7.1): отказ, архивация и найм освобождают место сразу, тенант не
+ * платит за архив. Ось включается вместе с рекрутингом (`tenants.candidates_enabled`).
  */
 export async function checkPlanLimit(tenantId: string, what: 'users' | 'candidates' = 'users'): Promise<{ ok: boolean, limit: number | null, current: number }> {
   const { checkLimit } = await import('./tenantLimits')
   const db = platformDb()
   const rows = what === 'users'
     ? await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}`) as unknown as { n: number }[]
-    : await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status <> 'archived' ${CANDIDATES_ONLY('')}`) as unknown as { n: number }[]
+    : await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and candidate_state = 'active' ${CANDIDATES_ONLY('')}`) as unknown as { n: number }[]
   const current = rows[0]?.n ?? 0
   const axis = what === 'users' ? 'users_active' : 'candidates_active'
   const check = await checkLimit(tenantId, axis, current)

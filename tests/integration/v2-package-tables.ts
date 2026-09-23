@@ -26,6 +26,13 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'usage_counters',
   'usage_events',
   'limit_notices',
+  // 28. Рекрутинг: кандидат как запись users (PR-13, миграция 0064_v2_candidates).
+  // Самого кандидата в списке нет и не будет: он живёт в `users` с `kind='candidate'`
+  // (docs/v2/44 В-8), а здесь — только то, чего у сотрудника не бывает.
+  'candidate_statuses',
+  'candidate_scores',
+  'candidate_comments',
+  'candidate_status_history',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

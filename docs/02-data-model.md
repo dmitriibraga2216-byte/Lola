@@ -246,11 +246,83 @@ create table users (
   telegram_chat_id bigint,
   password_hash text,                         -- только для e-mail входа
   last_seen_at timestamptz,
+  -- Колонки кандидата (`v2/28` §3.2, миграция 0064_v2_candidates; `v2/40` §3.2 — 11 из 16).
+  -- У сотрудника они пусты: users_candidate_coherence_chk требует candidate_state ровно
+  -- у кандидата и запрещает его у сотрудника. vacancy_id приезжает развязкой PR-15 (`v2/44` В-13)
+  candidate_state text,                       -- candidate_state, CHECK users_candidate_state_chk
+  candidate_status_id uuid references candidate_statuses(id) on delete set null, -- колонка канбана
+  source text,                                -- candidate_source, CHECK users_candidate_source_chk
+  source_detail text,                         -- площадка или ФИО рекомендателя
+  recruiter_id uuid references users(id) on delete set null,
+  access_until date,                          -- право входа, НЕ дедлайн прохождения (`v2/28` §3.2)
+  comm_language text not null default 'uk',   -- язык писем и интерфейса кандидата
+  resume_asset_id uuid references media_assets(id) on delete set null, -- origin='candidate_cv'
+  converted_from_candidate_at timestamptz,    -- факт прихода сотрудника через воронку
+  consent_given_at timestamptz,               -- согласие на обработку ПД (`v2/28` §7.9)
+  consent_expires_at date,                    -- дата, после которой ПД подлежат стиранию
   unique (tenant_id, phone),
   unique (tenant_id, email)
 );
 -- Индекс под списки сотрудников: (tenant_id, status) where kind = 'employee' (`v2/44` В-14).
 -- Полный (tenant_id, status) остаётся — по нему идут выборки кандидатов и платформенные счётчики.
+-- Рекрутинг добавляет idx_users_tenant_kind и два частичных where kind = 'candidate':
+-- idx_users_tenant_candidate_status и idx_users_tenant_recruiter (`v2/28` §3.2).
+
+-- Рекрутинг: воронка кандидата (`v2/28` §3.3–§3.6, миграция 0064_v2_candidates).
+-- Записи самого кандидата здесь нет — он живёт в users с kind='candidate'.
+create table candidate_statuses (             -- колонки канбана, расширяемый справочник тенанта
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  code text not null,
+  name_uk text not null, name_en text,
+  color text not null default 'ink',          -- токен бренд-бука: ink | sun | teal | coral
+  sort int not null,
+  is_system boolean not null default false,   -- шесть системных: нельзя удалить и сменить code
+  maps_to text not null default 'active',     -- candidate_state, к которому приравнена колонка
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  created_by uuid references users(id) on delete set null,
+  unique (tenant_id, code)
+);
+
+create table candidate_scores (               -- четыре независимых вида оценки, с историей
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  candidate_id uuid not null references users(id) on delete cascade,
+  kind text not null,                         -- candidate_score_kind
+  value_num numeric(6,2),
+  scale_id uuid references scales(id),
+  scale_level_id uuid references scale_levels(id),
+  comment text,
+  source_type text, source_id uuid,           -- чем порождена: попытка, практикум, собеседование
+  author_id uuid references users(id) on delete set null,
+  is_current boolean not null default true,   -- действующая одна: uq_candidate_scores_current
+  created_at timestamptz not null default now()
+);
+
+create table candidate_comments (             -- служебная переписка о кандидате; ему не видна
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  candidate_id uuid not null references users(id) on delete cascade,
+  author_id uuid not null references users(id),
+  body text not null,                         -- 1–4000
+  visibility text not null default 'recruiters', -- candidate_comment_visibility
+  created_at timestamptz not null default now(),
+  edited_at timestamptz, deleted_at timestamptz
+);
+
+create table candidate_status_history (       -- лента смен колонки канбана: журнал
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  candidate_id uuid not null references users(id) on delete cascade,
+  from_status_id uuid references candidate_statuses(id) on delete set null,
+  to_status_id uuid not null references candidate_statuses(id),
+  reason_code text, reason_text text,
+  actor_id uuid references users(id) on delete set null,
+  is_automatic boolean not null default false,
+  request_context jsonb,                      -- CLAUDE.md п. 14: журнал пишет контекст одинаково
+  created_at timestamptz not null default now()
+);
 
 create table user_placements (                -- где человек работает
   id uuid primary key default gen_random_uuid(),
@@ -1666,6 +1738,29 @@ media_origin: content_cover | lesson_attachment | workshop_submission | video_an
 -- status='ready' и lifecycle='orphaned' одновременно. purged терминально: строка
 -- media_assets не удаляется никогда, на неё ссылаются audit_log и workshop_submissions.files
 media_lifecycle: active | orphaned | pending_delete | purged
+
+-- Терминальное состояние воронки кандидата (`v2/28` §3.2, §4.2; `users.candidate_state`).
+-- Первая из двух независимых осей (§4.1): на неё смотрят отчёты, лимиты и уведомления.
+-- Вторая — колонка канбана `users.candidate_status_id` → candidate_statuses, расширяемая
+-- тенантом; связывает их candidate_statuses.maps_to. hired терминален: ошибочный найм
+-- исправляется офбордингом (`v2/33`), а не возвратом в воронку
+candidate_state: active | hired | rejected | archived | withdrawn
+
+-- Откуда пришёл кандидат (`v2/28` §3.2, `users.source`). Уточнение — в source_detail
+candidate_source: manual | vacancy_link | job_board | referral | import | api
+
+-- Вид оценки кандидата (`v2/28` §3.4, `candidate_scores.kind`): четыре независимых вида,
+-- не сводимые в одно число — усреднение прячет «блестящее тестовое, провальное
+-- собеседование», ради которого воронка и существует
+candidate_score_kind: manual | task | ai | recruiter
+
+-- Видимость комментария рекрутера (`v2/28` §3.5): самому кандидату комментарий не виден
+-- ни при какой видимости — это служебная переписка о человеке, а не с человеком
+candidate_comment_visibility: recruiters | managers | all_staff
+
+-- Причина отказа кандидату (`v2/28` §6.2); при other комментарий обязателен (10–500).
+-- Попадает в candidate_status_history.reason_code и в отчёт «Отказы по причинам» (§9)
+candidate_reject_reason: skills | experience | no_contact | conditions | vacancy_closed | other
 ```
 
 ## Что проверяет тест схемы

@@ -1,0 +1,301 @@
+<script setup lang="ts">
+/**
+ * Картка кандидата — `/admin/candidates/:id` (docs/v2/28-recruiting-candidates.md §5.3).
+ *
+ * Чотири вкладки з п'яти: «Огляд», «Оцінки», «Коментарі», «Історія». «Проходження» і
+ * «Співбесіда» приходять разом із призначеннями кандидату і авто-співбесідою (PR-14, PR-27).
+ *
+ * Усі рішення ухвалює сервер (CLAUDE.md п. 3): які переходи дозволені, чи маскувати контакти,
+ * скільки днів у статусі — рахує `server/services/candidates.ts`. Екран лише показує.
+ * Контакти приходять уже замаскованими (§7.10): роль без повного `candidate.view` фізично
+ * не отримує номера, а не «не бачить його на екрані».
+ */
+import { CANDIDATE_SCORE_KINDS } from '#shared/enums'
+import type { CandidateScoreKind, CandidateState } from '#shared/enums'
+
+definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'candidate.view' })
+
+const { t } = useI18n()
+const { api } = useApi()
+const { hasScope } = useAuth()
+const route = useRoute()
+const id = route.params.id as string
+
+interface Score {
+  id: string
+  kind: CandidateScoreKind
+  valueNum: string | null
+  scaleLevelId: string | null
+  comment: string | null
+  authorId: string | null
+  isCurrent: boolean
+  createdAt: string
+}
+interface History {
+  id: string
+  toStatusNameUk: string | null
+  reasonCode: string | null
+  reasonText: string | null
+  isAutomatic: boolean
+  createdAt: string
+}
+interface Comment { id: string, authorName: string | null, body: string, visibility: string, createdAt: string }
+interface Card {
+  id: string
+  fullName: string
+  phone: string | null
+  email: string | null
+  state: CandidateState
+  statusId: string | null
+  statusNameUk: string | null
+  statusColor: string | null
+  source: string | null
+  sourceDetail: string | null
+  recruiterName: string | null
+  accessUntil: string | null
+  commLanguage: string
+  resumeAssetId: string | null
+  consentExpiresAt: string | null
+  daysInStatus: number | null
+  pdMasked: boolean
+  createdAt: string
+  scores: Score[]
+  history: History[]
+  comments: Comment[]
+}
+interface Status { id: string, nameUk: string, color: string, mapsTo: CandidateState, isActive: boolean }
+
+type Tab = 'overview' | 'scores' | 'comments' | 'history'
+const TABS: Tab[] = ['overview', 'scores', 'comments', 'history']
+const tab = ref<Tab>('overview')
+
+const card = ref<Card | null>(null)
+const statuses = ref<Status[]>([])
+const error = ref('')
+const notice = ref('')
+const busy = ref('')
+
+const moveTo = ref('')
+const moveReason = ref('')
+const scoreForm = reactive({ kind: 'manual' as CandidateScoreKind, valueNum: '', comment: '' })
+const commentBody = ref('')
+
+/** Види оцінок, які ставить людина: `ai` пише система авто-співбесіди (§3.4). */
+const MANUAL_SCORE_KINDS = CANDIDATE_SCORE_KINDS.filter(k => k !== 'ai')
+
+async function load() {
+  error.value = ''
+  try {
+    card.value = await api<Card>(`/candidates/${id}`)
+    statuses.value = await api<Status[]>('/candidate-statuses', { query: { active: 'true' } }).catch(() => [])
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+onMounted(load)
+
+/** Світлофор «Доступ до» (§5.3): прострочено — кораловий, менше 3 днів — сонячний. */
+const accessTone = computed(() => {
+  const until = card.value?.accessUntil
+  if (!until) return ''
+  const days = Math.ceil((new Date(`${until}T23:59:59`).getTime() - Date.now()) / 86_400_000)
+  return days < 0 ? 'bad' : days <= 3 ? 'warn' : 'ok'
+})
+
+const currentScores = computed(() => (card.value?.scores ?? []).filter(s => s.isCurrent))
+
+async function move() {
+  if (!moveTo.value) return
+  busy.value = 'move'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}/status`, {
+      method: 'POST',
+      body: { statusId: moveTo.value, ...(moveReason.value ? { reasonText: moveReason.value } : {}) },
+    })
+    notice.value = t('candidate.moved')
+    moveTo.value = ''
+    moveReason.value = ''
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+async function addScore() {
+  busy.value = 'score'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}/scores`, {
+      method: 'POST',
+      body: {
+        kind: scoreForm.kind,
+        ...(scoreForm.valueNum === '' ? {} : { valueNum: Number(scoreForm.valueNum) }),
+        ...(scoreForm.comment ? { comment: scoreForm.comment } : {}),
+      },
+    })
+    notice.value = t('candidate.scoreAdded')
+    scoreForm.valueNum = ''
+    scoreForm.comment = ''
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+async function addComment() {
+  busy.value = 'comment'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}/comments`, { method: 'POST', body: { body: commentBody.value, visibility: 'recruiters' } })
+    commentBody.value = ''
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+</script>
+
+<template>
+  <div>
+    <PageHeader
+      :title="card?.fullName ?? t('candidate.title')"
+      :subtitle="t('candidate.hint')"
+      :crumbs="[{ label: t('admin.nav.people'), to: '/admin/people' }, { label: t('candidate.title') }]"
+    />
+
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+
+    <template v-if="card">
+      <div class="head">
+        <span :class="['pill', `tone-${card.statusColor ?? 'ink'}`]">{{ card.statusNameUk ?? '—' }}</span>
+        <span class="sub">{{ t(`candidate.state.${card.state}`) }}</span>
+        <span v-if="card.daysInStatus !== null" class="sub">{{ t('candidate.daysInStatus', { n: card.daysInStatus }) }}</span>
+        <span v-if="card.recruiterName" class="sub">{{ t('candidate.recruiter') }}: {{ card.recruiterName }}</span>
+      </div>
+
+      <div v-if="hasScope('candidate.decide')" class="filters">
+        <label>{{ t('candidate.moveTo') }}
+          <select v-model="moveTo">
+            <option value="">—</option>
+            <option v-for="s in statuses.filter(x => x.id !== card!.statusId)" :key="s.id" :value="s.id">{{ s.nameUk }}</option>
+          </select>
+        </label>
+        <label>{{ t('candidate.reason') }}
+          <input v-model="moveReason" maxlength="500">
+        </label>
+        <button class="btn" type="button" :disabled="!moveTo || busy === 'move'" @click="move">{{ t('candidate.move') }}</button>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button
+          v-for="tb in TABS" :key="tb" role="tab" :aria-selected="tab === tb"
+          :class="['tab', { on: tab === tb }]" @click="tab = tb"
+        >
+          {{ t(`candidate.tabs.${tb}`) }}
+        </button>
+      </div>
+
+      <section v-if="tab === 'overview'" class="panel card-grid">
+        <dl>
+          <dt>{{ t('candidate.phone') }}</dt>
+          <dd>{{ card.phone ?? '—' }}</dd>
+          <dt>{{ t('candidate.email') }}</dt>
+          <dd>{{ card.email ?? '—' }}</dd>
+          <dt>{{ t('candidate.source') }}</dt>
+          <dd>{{ card.source ? t(`candidate.sourceOf.${card.source}`) : '—' }}<span v-if="card.sourceDetail" class="sub"> · {{ card.sourceDetail }}</span></dd>
+          <dt>{{ t('candidate.accessUntil') }}</dt>
+          <dd :class="accessTone">{{ dateOf(card.accessUntil) }}</dd>
+          <dt>{{ t('candidate.commLanguage') }}</dt>
+          <dd>{{ card.commLanguage }}</dd>
+          <dt>{{ t('candidate.consentUntil') }}</dt>
+          <dd>{{ dateOf(card.consentExpiresAt) }}</dd>
+          <dt>{{ t('candidate.added') }}</dt>
+          <dd>{{ dateOf(card.createdAt) }}</dd>
+        </dl>
+        <p v-if="card.pdMasked" class="sub">{{ t('candidate.masked') }}</p>
+        <p class="sub">{{ t('candidate.accessHint') }}</p>
+      </section>
+
+      <section v-else-if="tab === 'scores'" class="panel">
+        <ul class="list">
+          <li v-for="s in currentScores" :key="s.id">
+            <strong>{{ t(`candidate.scoreKind.${s.kind}`) }}</strong>: {{ s.valueNum ?? '—' }}
+            <span class="sub">{{ dateOf(s.createdAt) }}</span>
+            <div v-if="s.comment" class="sub">{{ s.comment }}</div>
+          </li>
+          <li v-if="currentScores.length === 0" class="sub">{{ t('candidate.noScores') }}</li>
+        </ul>
+        <form v-if="hasScope('candidate.edit') || hasScope('review.grade')" class="filters" @submit.prevent="addScore">
+          <label>{{ t('candidate.scoreKindLabel') }}
+            <select v-model="scoreForm.kind">
+              <option v-for="k in MANUAL_SCORE_KINDS" :key="k" :value="k">{{ t(`candidate.scoreKind.${k}`) }}</option>
+            </select>
+          </label>
+          <label>{{ t('candidate.scoreValue') }}
+            <input v-model="scoreForm.valueNum" type="number" step="0.01" required>
+          </label>
+          <label>{{ t('candidate.scoreComment') }}
+            <input v-model="scoreForm.comment" maxlength="2000">
+          </label>
+          <button class="btn" type="submit" :disabled="busy === 'score'">{{ t('common.add') }}</button>
+        </form>
+      </section>
+
+      <section v-else-if="tab === 'comments'" class="panel">
+        <ul class="list">
+          <li v-for="c in card.comments" :key="c.id">
+            <strong>{{ c.authorName ?? '—' }}</strong> <span class="sub">{{ dateOf(c.createdAt) }}</span>
+            <div>{{ c.body }}</div>
+          </li>
+          <li v-if="card.comments.length === 0" class="sub">{{ t('candidate.noComments') }}</li>
+        </ul>
+        <form v-if="hasScope('candidate.edit')" class="filters" @submit.prevent="addComment">
+          <label class="grow">{{ t('candidate.newComment') }}
+            <input v-model="commentBody" maxlength="4000" required>
+          </label>
+          <button class="btn" type="submit" :disabled="busy === 'comment'">{{ t('common.add') }}</button>
+        </form>
+        <p class="sub">{{ t('candidate.commentsHint') }}</p>
+      </section>
+
+      <section v-else class="panel">
+        <ul class="list">
+          <li v-for="h in card.history" :key="h.id">
+            <strong>{{ h.toStatusNameUk ?? '—' }}</strong> <span class="sub">{{ dateOf(h.createdAt) }}</span>
+            <span v-if="h.isAutomatic" class="sub"> · {{ t('candidate.automatic') }}</span>
+            <div v-if="h.reasonText || h.reasonCode" class="sub">{{ h.reasonText ?? h.reasonCode }}</div>
+          </li>
+          <li v-if="card.history.length === 0" class="sub">{{ t('candidate.noHistory') }}</li>
+        </ul>
+      </section>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-3); }
+.filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
+.grow { flex: 1 1 14rem; }
+.tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+.tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
+.tab.on { color: var(--color-ink); border-color: var(--color-ink); }
+.card-grid dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
+.card-grid dt { color: var(--color-ink-muted); }
+.card-grid dd { margin: 0; }
+.list { list-style: none; padding: 0; margin: 0 0 var(--space-3); display: grid; gap: var(--space-2); }
+.tone-sun { background: var(--color-sun-soft); }
+.tone-teal { background: var(--color-teal-soft); }
+.tone-coral { background: var(--color-coral-soft); }
+/* Светофор «Доступ до»: бирюза — норма, солнце — истекает, коралл — просрочено (CLAUDE.md п. 9).
+   Берём «чернильные» варианты токенов: на бежевом фоне у них достаточный контраст. */
+.ok { color: var(--color-teal-ink); }
+.warn { color: var(--color-sun-ink); }
+.bad { color: var(--color-coral-ink); }
+@media (max-width: 480px) {
+  .filters { flex-direction: column; align-items: stretch; }
+  .card-grid dl { grid-template-columns: 1fr; }
+}
+</style>

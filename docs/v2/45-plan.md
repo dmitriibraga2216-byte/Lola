@@ -402,7 +402,15 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 
 #### PR-13 · `v2-recruiting-13` · Кандидат как запись `users`: схема и карточка
 
-- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0063_v2_candidates.sql`.
+**Статус: выполнено** (2026-09-23, ветка `v2-recruiting-13`, миграция `0064_v2_candidates.sql`,
+а не `0063`: `0063` занял параллельный PR-12. Подробности — `docs/v2/46-progress.md`, запись
+«Фаза 3, PR-13»; решения при отступлениях — `docs/28-implementation-notes.md` §28.15.
+Два отступления от буквы плана: FK `users_candidate_status_id_fk` поставлен здесь же, а не
+отложен до развязки PR-15 — справочник создаётся в этой же миграции, и цикл DDL снят
+порядком внутри файла; ось `candidates_active` переведена с приближения «`status <> archived`»
+на точное `candidate_state = 'active'` — колонка появилась именно здесь.)
+
+- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0064_v2_candidates.sql` (план называл `0063`).
 - **Входит:** `candidate_statuses`, `candidate_status_history`, `candidate_scores`
   (FK на готовые `scales`/`scale_levels`), `candidate_comments`; 11 колонок `users`
   (`candidate_state`, `candidate_status_id`, `source`, `source_detail`, `recruiter_id`,

@@ -14,6 +14,23 @@ export const users = pgTable('users', {
   // Кандидат и сотрудник — одна запись с разным kind; перевод в штат меняет kind, а не заводит
   // вторую строку. Списочные выборки людей идут только через server/services/repo/people.ts.
   kind: text('kind').notNull().default('employee'),
+  /**
+   * Колонки кандидата (docs/v2/28 §3.2, миграция 0064_v2_candidates). У сотрудника они пусты:
+   * `users_candidate_coherence_chk` требует `candidate_state` ровно у кандидата и запрещает
+   * его у сотрудника — две оси состояния (§4.1) не могут разъехаться. `vacancy_id` появится
+   * миграцией-развязкой PR-15 вместе с `vacancies` (решение docs/v2/44 В-13).
+   */
+  candidateState: text('candidate_state'), // одно из CANDIDATE_STATES — терминальное состояние воронки
+  candidateStatusId: uuid('candidate_status_id'), // колонка канбана, FK candidate_statuses (set null)
+  source: text('source'), // одно из CANDIDATE_SOURCES — откуда пришёл
+  sourceDetail: text('source_detail'), // название площадки или ФИО рекомендателя, ≤200
+  recruiterId: uuid('recruiter_id'), // ответственный рекрутер, самоссылка на users (set null)
+  accessUntil: date('access_until'), // право входа, НЕ дедлайн прохождения (§3.2): дедлайн живёт в назначении
+  commLanguage: text('comm_language').notNull().default('uk'), // язык писем и интерфейса кандидата
+  resumeAssetId: uuid('resume_asset_id'), // резюме, media_assets с origin='candidate_cv'
+  convertedFromCandidateAt: timestamp('converted_from_candidate_at', { withTimezone: true }), // факт прихода через воронку
+  consentGivenAt: timestamp('consent_given_at', { withTimezone: true }), // согласие на обработку ПД (§7.9)
+  consentExpiresAt: date('consent_expires_at'), // дата, после которой ПД подлежат стиранию
   phone: text('phone'), // E.164, уникален в тенанте — ключ входа
   email: text('email'),
   fullName: text('full_name').notNull(), // «Прізвище Імʼя По батькові» — собирается из частей
@@ -51,6 +68,14 @@ export const users = pgTable('users', {
   // Списки сотрудников — самый частый запрос; кандидаты в индекс не попадают (docs/v2/44 В-14).
   index('users_tenant_status_employee_idx').on(t.tenantId, t.status).where(sql`kind = 'employee'`),
   check('users_kind_chk', sql`${t.kind} in ('employee', 'candidate')`),
+  // Рекрутинг (docs/v2/28 §3.2, миграция 0064): вид ↔ состояние согласованы схемой,
+  // колонка канбана и ответственный рекрутер — только у кандидатов, поэтому индексы частичные.
+  index('idx_users_tenant_kind').on(t.tenantId, t.kind),
+  index('idx_users_tenant_candidate_status').on(t.tenantId, t.candidateStatusId).where(sql`kind = 'candidate'`),
+  index('idx_users_tenant_recruiter').on(t.tenantId, t.recruiterId).where(sql`kind = 'candidate'`),
+  check('users_candidate_state_chk', sql`${t.candidateState} is null or ${t.candidateState} in ('active', 'hired', 'rejected', 'archived', 'withdrawn')`),
+  check('users_candidate_coherence_chk', sql`(${t.kind} = 'candidate' and ${t.candidateState} is not null) or (${t.kind} = 'employee' and ${t.candidateState} is null)`),
+  check('users_candidate_source_chk', sql`${t.source} is null or ${t.source} in ('manual', 'vacancy_link', 'job_board', 'referral', 'import', 'api')`),
 ])
 
 export const userPlacements = pgTable('user_placements', {

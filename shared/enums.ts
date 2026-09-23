@@ -275,6 +275,74 @@ export type MediaOrigin = typeof MEDIA_ORIGINS[number]
 export const MEDIA_LIFECYCLES = ['active', 'orphaned', 'pending_delete', 'purged'] as const
 export type MediaLifecycle = typeof MEDIA_LIFECYCLES[number]
 
+/**
+ * Терминальное состояние воронки кандидата (`users.candidate_state`, docs/v2/28 §3.2, §4.2).
+ *
+ * Первая из **двух независимых осей** состояния (§4.1): на эту смотрят отчёты, лимиты тарифа
+ * и уведомления, и она закрыта пятью значениями. Вторая ось — колонка канбана
+ * (`users.candidate_status_id` → `candidate_statuses`), она расширяемая и нужна людям.
+ * Сливать оси нельзя: первая же пользовательская колонка («Передзвонити у січні») ломает
+ * всю отчётность по воронке — это самая частая ошибка систем с настраиваемыми статусами.
+ *
+ * `hired` терминален в обе стороны: ошибочный найм исправляется офбордингом (`docs/v2/33`),
+ * а не возвратом в воронку — иначе в системе появляется сотрудник с живым прогрессом,
+ * которого «вернули в кандидаты», и отчёты по штату начинают врать (§4.2).
+ */
+export const CANDIDATE_STATES = ['active', 'hired', 'rejected', 'archived', 'withdrawn'] as const
+export type CandidateState = typeof CANDIDATE_STATES[number]
+
+/** Откуда пришёл кандидат (`users.source`, docs/v2/28 §3.2). Уточнение — в `source_detail`. */
+export const CANDIDATE_SOURCES = ['manual', 'vacancy_link', 'job_board', 'referral', 'import', 'api'] as const
+export type CandidateSource = typeof CANDIDATE_SOURCES[number]
+
+/**
+ * Вид оценки кандидата (`candidate_scores.kind`, docs/v2/28 §3.4). Четыре независимых вида,
+ * **не сводимые в один `score`**: усреднение прячет случай «блестящее тестовое, провальное
+ * собеседование», ради которого воронка и существует. Действующая оценка каждого вида одна —
+ * частичный уникальный индекс `uq_candidate_scores_current`, история остаётся строками.
+ */
+export const CANDIDATE_SCORE_KINDS = ['manual', 'task', 'ai', 'recruiter'] as const
+export type CandidateScoreKind = typeof CANDIDATE_SCORE_KINDS[number]
+
+/**
+ * Видимость комментария о кандидате (`candidate_comments.visibility`, docs/v2/28 §3.5).
+ * Самому кандидату комментарий не виден **ни при какой** видимости: это служебная переписка
+ * о человеке, а не с человеком.
+ */
+export const CANDIDATE_COMMENT_VISIBILITIES = ['recruiters', 'managers', 'all_staff'] as const
+export type CandidateCommentVisibility = typeof CANDIDATE_COMMENT_VISIBILITIES[number]
+
+/**
+ * Причина отказа кандидату (docs/v2/28 §6.2). При `other` комментарий обязателен (10–500).
+ * Причина попадает в `candidate_status_history.reason_code` и в отчёт «Отказы по причинам» (§9).
+ */
+export const CANDIDATE_REJECT_REASONS = ['skills', 'experience', 'no_contact', 'conditions', 'vacancy_closed', 'other'] as const
+export type CandidateRejectReason = typeof CANDIDATE_REJECT_REASONS[number]
+
+/**
+ * Шесть системных колонок воронки нового тенанта (docs/v2/28 §3.3). `is_system` запрещает
+ * удаление и смену `code`; `name_uk`, `color` и `sort` тенант меняет. Каждая колонка знает
+ * своё `maps_to` — иначе отчётность по воронке разваливается на первой же своей колонке.
+ * Здесь и в миграции `0064_v2_candidates` — две копии одного списка, как у этапов цикла.
+ */
+export const SYSTEM_CANDIDATE_STATUSES: {
+  code: string
+  nameUk: string
+  nameEn: string
+  color: 'ink' | 'sun' | 'teal' | 'coral'
+  mapsTo: CandidateState
+}[] = [
+  { code: 'new', nameUk: 'Не розпочали', nameEn: 'Not started', color: 'ink', mapsTo: 'active' },
+  { code: 'in_progress', nameUk: 'Проходять', nameEn: 'In progress', color: 'teal', mapsTo: 'active' },
+  { code: 'on_review', nameUk: 'На перевірці', nameEn: 'On review', color: 'sun', mapsTo: 'active' },
+  { code: 'approved', nameUk: 'Схвалені', nameEn: 'Approved', color: 'teal', mapsTo: 'active' },
+  { code: 'doubt', nameUk: 'Під сумнівом', nameEn: 'In doubt', color: 'sun', mapsTo: 'active' },
+  { code: 'rejected', nameUk: 'Відхилені', nameEn: 'Rejected', color: 'coral', mapsTo: 'rejected' },
+]
+
+/** Срок согласия на обработку ПД по умолчанию — 6 месяцев (docs/v2/28 §7.9, диапазон 1–24). */
+export const CANDIDATE_CONSENT_MONTHS = 6
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -306,4 +374,9 @@ export const ENUMS: Record<string, readonly string[]> = {
   limit_notice_level: LIMIT_NOTICE_LEVELS,
   media_origin: MEDIA_ORIGINS,
   media_lifecycle: MEDIA_LIFECYCLES,
+  candidate_state: CANDIDATE_STATES,
+  candidate_source: CANDIDATE_SOURCES,
+  candidate_score_kind: CANDIDATE_SCORE_KINDS,
+  candidate_comment_visibility: CANDIDATE_COMMENT_VISIBILITIES,
+  candidate_reject_reason: CANDIDATE_REJECT_REASONS,
 }

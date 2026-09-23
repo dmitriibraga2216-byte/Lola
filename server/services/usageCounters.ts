@@ -226,7 +226,12 @@ export async function measureLive(tenantId: string, axis: LimitAxis): Promise<nu
       case 'users_active':
         return q(sql`select count(*)::int as n from users where status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}`)
       case 'candidates_active':
-        return q(sql`select count(*)::int as n from users where status <> 'archived' ${CANDIDATES_ONLY('')}`)
+        // До PR-13 колонки `candidate_state` не существовало, и «не в архиве» приходилось
+        // выводить из `users.status` — приближение, которое считало отказанных. С появлением
+        // оси воронки (docs/v2/28 §3.2) определение стало точным: в лимит идут только
+        // `active`; `hired`, `rejected`, `archived` и `withdrawn` мест не занимают
+        // (`35` §7.1, `28` §7.1, §15 Г-28.7 — тенант не должен платить за архив).
+        return q(sql`select count(*)::int as n from users where candidate_state = 'active' ${CANDIDATES_ONLY('')}`)
       case 'storage_bytes':
         return q(sql`select coalesce(sum(bytes), 0)::bigint as n from media_assets where deleted_at is null`)
       case 'integrations_active':

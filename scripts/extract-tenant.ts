@@ -66,40 +66,71 @@ async function tenantTables(sql: postgres.Sql): Promise<string[]> {
   return rows.map(r => r.t)
 }
 
+/** Ссылка, отложенная при восстановлении: её значение проставляется вторым проходом. */
+export interface DeferredRef { table: string, column: string, references: string }
+
 /**
  * Топологический порядок «родители раньше детей» среди переданных таблиц по внешним ключам
  * между ними (внешние ключи на таблицы вне списка — например, на справочники без tenant_id —
- * не учитываются, они не часть выгрузки). Цикл (SET CONSTRAINTS DEFERRED в схеме не встречался)
- * разрывается — таблица идёт в оставшемся порядке, это не должно случиться при консистентной схеме.
+ * не учитываются, они не часть выгрузки).
+ *
+ * Циклы в схеме **есть и будут**: `users.candidate_status_id → candidate_statuses`, а
+ * `candidate_statuses.created_by → users` (docs/v2/44-decisions.md В-13 — цикл настоящий,
+ * порядок создания, снимающий его, не существует; то же ждёт `users.vacancy_id ↔ vacancies`).
+ * Раньше такой цикл сбрасывал обе таблицы в хвост, и `users` оказывался **после** своих детей —
+ * выгрузка выглядела целой, а восстановление из неё падало бы на первом же `enrollments`.
+ *
+ * Поэтому цикл разрывается осознанно: снимается **нулевое** ребро (колонка FK допускает NULL),
+ * и снимается со стороны той таблицы, от которой зависит больше других, — так `users` остаётся
+ * впереди. Снятая ссылка не теряется: она перечислена в `manifest.deferredRefs`, и
+ * восстановление проставляет её вторым проходом, после вставки обеих таблиц.
  */
-async function dependencyOrder(sql: postgres.Sql, tables: string[]): Promise<string[]> {
+async function dependencyOrder(sql: postgres.Sql, tables: string[]): Promise<{ order: string[], deferred: DeferredRef[] }> {
   const set = new Set(tables)
   const deps = new Map<string, Set<string>>(tables.map(t => [t, new Set<string>()]))
-  const rows = await sql<{ child: string, parent: string }[]>`
-    select c.relname as child, p.relname as parent
+  const rows = await sql<{ child: string, parent: string, column: string, nullable: boolean }[]>`
+    select c.relname as child, p.relname as parent, a.attname as column, not a.attnotnull as nullable
     from pg_constraint con
     join pg_class c on c.oid = con.conrelid
     join pg_class p on p.oid = con.confrelid
     join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'public' and con.contype = 'f' and c.relname != p.relname`
-  for (const r of rows) {
-    if (set.has(r.child) && set.has(r.parent)) deps.get(r.child)!.add(r.parent)
-  }
+    join pg_attribute a on a.attrelid = c.oid and a.attnum = con.conkey[1]
+    where n.nspname = 'public' and con.contype = 'f' and c.relname != p.relname
+      and array_length(con.conkey, 1) = 1`
+  const edges = rows.filter(r => set.has(r.child) && set.has(r.parent))
+  for (const r of edges) deps.get(r.child)!.add(r.parent)
+
+  /** Сколько таблиц зависит от этой — чем больше, тем раньше её место в порядке. */
+  const dependents = new Map<string, number>(tables.map(t => [t, 0]))
+  for (const r of edges) dependents.set(r.parent, (dependents.get(r.parent) ?? 0) + 1)
+
   const ordered: string[] = []
   const done = new Set<string>()
-  let guard = 0
-  while (ordered.length < tables.length && guard++ < tables.length * tables.length + 1) {
+  const deferred: DeferredRef[] = []
+  for (;;) {
+    let progress = false
     for (const t of tables) {
       if (done.has(t)) continue
-      const parents = deps.get(t)!
-      if ([...parents].every(p => done.has(p) || p === t)) {
+      if ([...deps.get(t)!].every(p => done.has(p) || p === t)) {
         ordered.push(t)
         done.add(t)
+        progress = true
       }
     }
+    if (ordered.length === tables.length) break
+    if (progress) continue
+    // Застряли: в остатке цикл. Снимаем одно нулевое ребро — у таблицы, от которой зависит
+    // больше всего других (обычно `users`), чтобы она ушла вперёд, а не в хвост.
+    const stuck = edges
+      .filter(e => !done.has(e.child) && !done.has(e.parent) && e.nullable && deps.get(e.child)!.has(e.parent))
+      .sort((a, b) => (dependents.get(b.child) ?? 0) - (dependents.get(a.child) ?? 0) || a.child.localeCompare(b.child))
+    const edge = stuck[0]
+    if (!edge) break // цикл из обязательных ссылок — выгрузку не теряем, порядок дописываем ниже
+    deps.get(edge.child)!.delete(edge.parent)
+    deferred.push({ table: edge.child, column: edge.column, references: edge.parent })
   }
-  for (const t of tables) if (!done.has(t)) ordered.push(t) // цикл — добавляем как есть, лучше, чем потерять таблицу
-  return ordered
+  for (const t of tables) if (!done.has(t)) ordered.push(t) // не должно случиться при консистентной схеме
+  return { order: ordered, deferred }
 }
 
 function anonymizeRow(row: Record<string, unknown>, counter: { n: number }): Record<string, unknown> {
@@ -163,7 +194,7 @@ async function main() {
   await mkdir(dest, { recursive: true })
 
   const tables = await tenantTables(sql)
-  const order = await dependencyOrder(sql, tables)
+  const { order, deferred } = await dependencyOrder(sql, tables)
 
   const rowCounts: Record<string, number> = {}
   const nameCounter = { n: 0 }
@@ -182,6 +213,9 @@ async function main() {
   const manifest = {
     tenantId, slug: tenant.slug, extractedAt: new Date().toISOString(), anonymized: anonymize,
     tableOrder: order, rowCounts, totalRows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
+    // Ссылки, снятые при разрыве цикла: восстановление вставляет их вторым проходом (см.
+    // dependencyOrder). Пустой список — циклов между выгруженными таблицами не было.
+    deferredRefs: deferred,
     media,
   }
   await writeFile(join(dest, 'manifest.json'), JSON.stringify(manifest, null, 2))

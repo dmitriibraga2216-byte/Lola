@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest'
  */
 const cb = await import('../../server/api/v1/integrations/[provider]/_callback.render')
 
-const okResult = (accountLabel: string) => ({ ok: true as const, tenantId: 't1', provider: 'google' as const, accountLabel, purpose: 'connect', createdBy: null })
+const okResult = (accountLabel: string) => ({ ok: true as const, tenantId: 't1', provider: 'google' as const, accountLabel, purpose: 'connect' as const, createdBy: null })
 const errResult = (message: string) => ({ ok: false as const, code: 'provider_error' as const, message })
 
 afterEach(() => { delete process.env.APP_URL })

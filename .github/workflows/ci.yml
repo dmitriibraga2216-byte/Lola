@@ -56,6 +56,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Сквозные проверки пакета docs/v2 (HANDOFF.md §7.3, docs/v2/45-plan.md PR-01):
+      # коды этапов, фильтр users.kind, обход withTenant(), i18n, токены бренд-бука.
+      - name: Сквозные проверки docs/v2
+        run: scripts/v2-crosschecks.sh
+
       # MinIO для тестов S3 (PDF сертификата, медиа): у образа quay нет команды по умолчанию, поэтому не через services
       - name: MinIO
         run: |

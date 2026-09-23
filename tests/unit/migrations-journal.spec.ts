@@ -24,4 +24,15 @@ describe('журнал миграций', () => {
   it('idx идут подряд и совпадают с порядком записей', () => {
     expect(journal.entries.map(e => e.idx)).toEqual(journal.entries.map((_, i) => i))
   })
+
+  /**
+   * docs/v2/45-plan.md, PR-01, условие выхода: «порядок when совпадает с порядком idx/tag».
+   * idx уже проверен выше (порядок записей = 0..N). Здесь — что тег (числовой префикс имени
+   * миграции) идёт в том же порядке, что и запись в журнале: расхождение означало бы, что
+   * миграция с префиксом NNNN стоит не на своём месте в истории применения.
+   */
+  it('порядок when совпадает с порядком tag', () => {
+    const byTag = [...journal.entries].sort((a, b) => a.tag.localeCompare(b.tag))
+    expect(journal.entries.map(e => e.tag)).toEqual(byTag.map(e => e.tag))
+  })
 })

@@ -483,6 +483,20 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 Приглашение кандидата и назначение ему контента отдельной ручкой — PR-16 вместе с публичным
 контуром отклика: назначение кандидату делается обычным `POST /tasks` (инвариант 1).
 
+### Жалоба на материал (`docs/v2/36-content-feedback.md` §10, PR-23)
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| POST | `/content-issues/reports` | подача жалобы (`content_issue.report`): `{targetType, targetId, blockId?, issueType, comment?, screenshotMediaId?, source, enrollmentId?, lessonId?, attemptId?, context}`. Ответ — `{issueId, reportId, merged, deadlineShiftSec, reportsToday, limitPerDay}`; `merged=true` — жалоба приклеилась к открытой карточке. Ошибки: `400 validation_failed`, `404` (чужой тенант, чужая попытка, скриншот не с `origin='issue_screenshot'`), `409 content_issue.already_reported`, `423 content_issue.reporter_muted`, `429 content_issue.rate_limited` (в `details` — `reason`, `used`, `limit`) |
+| GET | `/me/content-reports` | «Мої повідомлення про помилки»: свои жалобы со статусом и ответом автора |
+
+Контекст жалобы собирает **сервер** (`36` §7.1): клиент присылает только то, чего сервер знать
+не может (позиция плеера, прокрутка, вьюпорт, время на устройстве), а версию материала, версию
+вопроса из снапшота попытки, заголовок карточки и `request_context` дописывает сам. Жалоба
+во время попытки её не прерывает и таймер не съедает: `deadline_at` сдвигается на время формы,
+до 60 секунд на жалобу и не больше 180 за попытку (§7.7). Очередь «Звіт про помилки», карточка
+жалобы, маршрутизация и пересчёт результатов — PR-24.
+
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом
 `server/api/v1/public/` → `/api/v1/public/*` (префикс задаёт дерево каталогов Nitro, а не

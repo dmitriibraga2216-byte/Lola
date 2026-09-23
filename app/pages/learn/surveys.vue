@@ -9,7 +9,7 @@ const { api } = useApi()
 const { upload, compressImage } = useMediaUpload()
 
 interface Opt { id: string, text: string }
-interface Q { id: string, type: 'single' | 'multi' | 'free' | 'scale', text: string, options?: Opt[], allowOwnOption?: boolean, allowFiles?: boolean, required?: boolean, scale: { name: string, options: { value: number, label: string }[] } | null }
+interface Q { id: string, type: 'single' | 'multi' | 'free' | 'scale', text: string, options?: Opt[], allowOwnOption?: boolean, allowFiles?: boolean, answerHint?: string, required?: boolean, scale: { name: string, options: { value: number, label: string }[] } | null }
 interface S { id: string, title: string, description: string | null, isAnonymous: boolean, closesAt: string | null, questions: number, inProgress: boolean }
 interface Step { question: Q | null, index: number, total: number, isAnonymous: boolean, mode: string, title: string }
 interface Results { total: number, hidden: boolean, threshold?: number, questions: { id: string, text: string, type: string, answered: number, avg?: number | null, distribution?: Record<string, number> }[] }
@@ -134,7 +134,8 @@ function togglePick(id: string) { const i = picks.value.indexOf(id); if (i >= 0)
           <button v-for="o in (q.scale?.options ?? [1, 2, 3, 4, 5].map(n => ({ value: n, label: String(n) })))" :key="o.value" type="button" role="radio" :aria-checked="value === o.value" :class="['opt', { on: value === o.value }]" :title="o.label" @click="value = o.value">{{ o.label }}</button>
         </div>
         <template v-else>
-          <textarea v-model="text" rows="4" class="field" :placeholder="t('survey.freeHint')" />
+          <!-- «Підказка для відповіді» (П-12.2) заміняє загальний плейсхолдер, якщо автор її задав -->
+          <textarea v-model="text" rows="4" class="field" :placeholder="q.answerHint || t('survey.freeHint')" />
           <div v-if="q.allowFiles" class="attach">
             <label class="ghost attach-btn">
               {{ t('survey.attachFile') }}

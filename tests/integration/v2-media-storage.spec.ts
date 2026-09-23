@@ -124,10 +124,14 @@ describe('PR-11 · переименование колонок (В-4)', () => {
 })
 
 describe('PR-12 · перечень origin и ключ разбивки (В-6, В-10)', () => {
-  it('shared/enums.ts содержит 15 значений редакции `40` §4.2', () => {
-    expect(MEDIA_ORIGINS).toHaveLength(15)
+  it('shared/enums.ts содержит 16 значений редакции `40` §4.2', () => {
+    // 15 значений собрал PR-12; шестнадцатое — `issue_screenshot` — добавил PR-23 правкой
+    // `40` §4 и одной миграцией (правило 19): `36` §3.2 ссылался на `media_assets`, но в
+    // сводку реестра не попал
+    expect(MEDIA_ORIGINS).toHaveLength(16)
     expect(MEDIA_ORIGINS).toContain('interview_answer') // значение `30`, которое `38` теряло
     expect(MEDIA_ORIGINS).toContain('person_document') // значение `38`
+    expect(MEDIA_ORIGINS).toContain('issue_screenshot') // значение `36`
   })
 
   it('БД не принимает значение вне перечня', async () => {

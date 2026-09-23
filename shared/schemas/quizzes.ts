@@ -23,6 +23,8 @@ export const answerByKindSchema = {
   classification: z.object({ placements: z.array(z.object({ itemId: z.string(), groupId: z.string() })).min(1) }),
   answer_by_map: z.object({ areaIds: z.array(z.string()).min(1) }),
   number: z.object({ value: z.number(), tolerance: z.number().min(0), toleranceType: z.enum(['abs', 'pct']).optional(), unit: z.string().max(20).optional() }),
+  // «Лінійна шкала» (патч П-12.1): эталон — то же число с допуском, что у `number`
+  scale: z.object({ value: z.number().int(), tolerance: z.number().min(0).default(0) }),
   text_short: z.object({ accepted: z.array(z.string().min(1)).min(1), caseSensitive: z.boolean().optional(), allowTypos: z.number().int().min(0).max(2).optional() }),
   free: z.object({ criteria: z.array(z.string()).optional(), reference: z.string().max(5000).optional(), minLength: z.number().int().min(0).optional(), maxLength: z.number().int().max(5000).optional() }).nullable().optional(),
   file: z.object({ criteria: z.array(z.string()).optional(), formats: z.array(z.string()).optional(), maxFiles: z.number().int().min(1).max(5).optional() }).nullable().optional(),
@@ -46,6 +48,17 @@ export const optionsByKindSchema = {
   comparison: z.object({ left: z.array(option).min(2).max(10), right: z.array(option).min(2) }),
   classification: z.object({ groups: z.array(z.object({ id: z.string().min(1).max(64), title: z.string().min(1).max(200) })).min(2).max(6), items: z.array(option).min(2).max(20) }),
   answer_by_map: z.object({ imageMediaId: z.string().uuid(), areas: z.array(mapAreaSchema).min(1).max(20) }),
+  /**
+   * «Лінійна шкала» (патч П-12.1, docs/v2/39): настраиваемые границы и подписи концов.
+   * Диапазон ограничен 2–11 делениями — шкала шире одиннадцати на телефоне нажимается
+   * мимо, а на эталоне её и нет.
+   */
+  scale: z.object({
+    min: z.number().int().min(0).max(10),
+    max: z.number().int().min(1).max(10),
+    minLabel: z.string().max(60).optional(),
+    maxLabel: z.string().max(60).optional(),
+  }).refine(v => v.max - v.min >= 1 && v.max - v.min <= 10, { message: 'Шкала — від 2 до 11 поділок' }),
 } as const
 
 export const questionSchema = z.object({
@@ -118,6 +131,14 @@ export const questionSchema = z.object({
     case 'number': {
       const a = answerByKindSchema.number.safeParse(q.answer)
       if (!a.success) fail('Вкажіть значення і допуск')
+      break
+    }
+    case 'scale': {
+      const opts = optionsByKindSchema.scale.safeParse(q.options)
+      if (!opts.success) return fail('Задайте межі шкали: від 2 до 11 поділок', ['options'])
+      const a = answerByKindSchema.scale.safeParse(q.answer)
+      if (!a.success) return fail('Позначте правильне значення шкали')
+      if (a.data.value < opts.data.min || a.data.value > opts.data.max) fail('Правильне значення має бути в межах шкали')
       break
     }
     case 'text_short': {

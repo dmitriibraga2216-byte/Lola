@@ -312,7 +312,12 @@ SQL: итоговый констрейнт `media_assets.origin` (§4), блок
 реализации `38` §3.2 исполняется **в редакции ниже**, а не дословно. Расхождение
 зафиксировано в §9, Р-1.
 
-### 4.1 Итоговый перечень — 15 значений
+> [исправлено, PR-23: реестр собирался из `34`, `30` и `38`, а `36` §3.2 в сводку не попал —
+> хотя скриншот жалобы в его DDL уже ссылается на `media_assets`. Шестнадцатое значение
+> `issue_screenshot` добавлено правкой **здесь**, как требует правило 19, и одной миграцией
+> `0069_v2_content_issues`, целиком пересоздающей констрейнт] Ранее: «15 значений»
+
+### 4.1 Итоговый перечень — 16 значений
 
 | Значение | Что это за файл | Порождает | Используют |
 |---|---|:-:|---|
@@ -330,6 +335,7 @@ SQL: итоговый констрейнт `media_assets.origin` (§4), блок
 | `report_export` | Сформированная выгрузка отчёта | 34 | базовое ТЗ |
 | `interview_answer` | Аудио- или видеозапись реплики кандидата на авто-собеседовании | **30** | 30 |
 | `person_document` | Документ человека: договор, инструктаж, внешний сертификат | **38** | 38 |
+| `issue_screenshot` | Скриншот, приложенный к жалобе на материал (`content_reports.screenshot_media_id`) | **36** | 36 |
 | `other` | Всё, что не отнесено; существует ради того, чтобы разбивка не падала на неизвестном виде | 34 | — |
 
 Значение для резюме кандидата — `candidate_cv`, оно уже унифицировано между `28`, `29`
@@ -340,7 +346,8 @@ SQL: итоговый констрейнт `media_assets.origin` (§4), блок
 ```sql
 -- migration 0019_media_origin_v2.sql
 -- Единый перечень origin. Заменяет: 34 §3.2 (13 значений),
--- патч П-30.1 из 30 §3.7 (+interview_answer), 38 §3.2 (+person_document).
+-- патч П-30.1 из 30 §3.7 (+interview_answer), 38 §3.2 (+person_document),
+-- 36 §3.2 (+issue_screenshot, добавлено PR-23 миграцией 0069_v2_content_issues).
 -- Два независимых check по одной колонке дали бы неразрешимую ошибку вставки,
 -- поэтому констрейнт всегда один и всегда пересоздаётся целиком.
 
@@ -361,19 +368,23 @@ alter table media_assets add constraint media_assets_origin_chk check (origin in
   'report_export',
   'interview_answer',
   'person_document',
+  'issue_screenshot',
   'other'
 ));
 ```
 
 ### 4.3 Политики хранения, привязанные к перечню
 
+> [исправлено, PR-23: новых значений стало три вместе с `issue_screenshot`] Ранее: «для двух новых значений»
+
 `storage_retention_policies` держит одну строку на значение `origin`. Пакет задаёт
-умолчания для двух новых значений:
+умолчания для трёх новых значений:
 
 | `origin` | `action` | `keep_months` | `anchor` | `keep_evidence` | Источник |
 |---|---|---:|---|:-:|---|
 | `interview_answer` | `purge` | 3 | `created_at` | `false` | `30` §7.7 |
 | `person_document` | `notify_only` | — | — | `true` | `38` §3.2 |
+| `issue_screenshot` | `purge` | 6 | `created_at` | `false` | `36` §12 (180 дней) |
 
 Обоснование в документах-владельцах: голос кандидата нельзя хранить по остаточному
 принципу, а документ человека нельзя удалять автоматически — он доказательство того, что
@@ -1000,7 +1011,7 @@ with expected(v) as (values
   ('content_cover'),('lesson_attachment'),('workshop_submission'),('video_answer'),
   ('candidate_cv'),('certificate'),('import'),('checklist_photo'),('avatar'),
   ('brand_asset'),('ai_artifact'),('report_export'),('interview_answer'),
-  ('person_document'),('other')
+  ('person_document'),('issue_screenshot'),('other')
 ),
 def as (
   select pg_get_constraintdef(oid) as d

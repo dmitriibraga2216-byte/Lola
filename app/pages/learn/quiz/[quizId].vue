@@ -297,7 +297,25 @@ function retry() {
         <span v-if="current.isCritical" class="critical">{{ t('quiz.critical') }}</span>
         <!-- cloze (докс/33 D-015): текст із пропусками показує сам QuestionInput -->
         <LessonBlocks v-if="current.kind !== 'cloze'" :blocks="current.stem" :blocks-state="{}" readonly />
-        <p class="kind-line">{{ t(`quiz.kindHint.${current.kind}`) }} · {{ t('quiz.pointsN', { n: current.points }) }}</p>
+        <div class="kind-line">
+          <span>{{ t(`quiz.kindHint.${current.kind}`) }} · {{ t('quiz.pointsN', { n: current.points }) }}</span>
+          <!--
+            Флажок у вопроса (docs/v2/36 §5.1): всегда виден, варианты ответа не перекрывает.
+            Жалоба не прерывает попытку и не съедает таймер — время в форме сервер вернёт
+            сдвигом дедлайна (§7.7); ответ оценивается по снапшоту, как и был.
+          -->
+          <ContentIssueReport
+            v-if="state"
+            compact
+            target-type="question"
+            :target-id="current.id"
+            source="attempt"
+            :enrollment-id="enrollmentId"
+            :lesson-id="lessonId"
+            :attempt-id="state.id"
+            :where-label="t('issue.whereQuestion', { n: index + 1 })"
+          />
+        </div>
         <QuestionInput
           v-model="answers[current.id]"
           :kind="current.kind"
@@ -526,6 +544,11 @@ dd {
   color: var(--color-ink-muted);
   font-size: var(--font-size-body-s);
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .attach {

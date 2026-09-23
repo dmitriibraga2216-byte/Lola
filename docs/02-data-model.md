@@ -1712,8 +1712,10 @@ security_severity: info | warning | critical
 
 -- Типы вопросов: семь эталона (`12` §14.3) + три Lola (number, text_short, file)
 -- + cloze — пропуски в тексте (`12` §3.3 п. 11, R2, докс/33 D-015)
+-- + scale — «Лінійна шкала»: числовой диапазон с настраиваемыми границами и подписями
+-- концов, снято со второго эталона (патч П-12.1 `v2/39`, PR-23)
 question_kind: single | multi | free | ordering | classification | comparison | answer_by_map
-            | number | text_short | file | cloze
+            | number | text_short | file | cloze | scale
 
 -- «Метод підрахунку балів» (`12` §14.6): «За формулою» | «Все або нічого»
 scoring_method: formula | all_or_nothing
@@ -1798,14 +1800,15 @@ usage_ref_kind: ai_generation | ai_review | ai_interview | sms | upload | export
 limit_notice_level: warn | exceeded
 
 -- Происхождение файла (`v2/34` §3.2, §7.1; итоговая редакция `v2/40` §4.2, решение В-6):
--- пятнадцать значений и ровно один check по колонке `media_assets.origin`. Три документа
+-- шестнадцать значений и ровно один check по колонке `media_assets.origin`. Три документа
 -- пакета описывали перечень по-разному, поэтому он собран один раз и правится только
 -- через `v2/40` §4 новой миграцией. Задаётся клиентом при выдаче presigned URL,
 -- без него `POST /media/upload-url` отвечает 400 origin_required; `other` — «не отнесено»,
--- доля выше 5 % объёма считается дефектом классификации, а не нормой
+-- доля выше 5 % объёма считается дефектом классификации, а не нормой.
+-- issue_screenshot — скриншот к жалобе на материал (`v2/36` §3.2, §6.1), добавлен PR-23
 media_origin: content_cover | lesson_attachment | workshop_submission | video_answer | candidate_cv
             | certificate | import | checklist_photo | avatar | brand_asset | ai_artifact
-            | report_export | interview_answer | person_document | other
+            | report_export | interview_answer | person_document | issue_screenshot | other
 
 -- Положение файла в хранилище (`v2/34` §3.1, §4): ось, отдельная от `media_assets.status`
 -- (uploading | processing | ready | failed — техническая готовность объекта). Файл бывает
@@ -1831,6 +1834,43 @@ candidate_score_kind: manual | task | ai | recruiter
 -- Видимость комментария рекрутера (`v2/28` §3.5): самому кандидату комментарий не виден
 -- ни при какой видимости — это служебная переписка о человеке, а не с человеком
 candidate_comment_visibility: recruiters | managers | all_staff
+
+-- На что жалуются (`v2/36` §3.1, `content_issues.target_type`): девять видов элементов
+-- контента. Жалоба всегда адресна — «где-то в курсе» автор чинить не может
+content_issue_target_type: resource | lesson | block | quiz | question | workshop | survey
+                         | knowledge_article | media
+
+-- Тип проблемы (`v2/36` §7.3) — закрытый список, он же фильтр «Тип» очереди. Построен по
+-- тому, кто чинит и чем: три broken_* — три разные починки, bad_question и wrong_key —
+-- единственные, что тянут пересчёт результатов, tech уходит администратору, а не автору
+content_issue_type: typo | wrong_fact | outdated | unclear | broken_media | broken_link
+                  | broken_file | bad_question | wrong_key | tech | other
+
+-- Статус карточки дефекта (`v2/36` §4). Автоматического переоткрытия нет: новая жалоба
+-- после closed создаёт новую карточку, и история «чинили трижды» не теряется
+content_issue_status: new | in_progress | fixed | rejected | deferred | closed
+
+-- Резолюция разбора (`v2/36` §4, §6.2): question_fixed и question_void — единственные,
+-- после которых считается пересчёт результатов (`v2/36` §7.8)
+content_issue_resolution: fixed | question_fixed | question_void | not_an_error | duplicate
+                        | wont_fix | spam
+
+-- Важность карточки (`v2/36` §7.4): считает система по типу проблемы и обязательности
+-- урока, а не человек — иначе всё становится blocking
+content_issue_severity: blocking | normal | cosmetic
+
+-- Состояние пересчёта результатов по карточке (`v2/36` §7.8): needed попадает в очередь
+-- с пометкой «впливає на бали» и не даёт закрыть карточку тихо
+content_issue_rescore_state: none | needed | in_progress | done | skipped
+
+-- Точка, из которой подана жалоба (`v2/36` §3.2, §5.1); в каталоге флажка нет —
+-- там нечему быть неверным
+content_report_source: lesson | attempt | workshop | catalog | knowledge | review
+
+-- Событие журнала карточки (`v2/36` §3): created и merged пишутся при подаче,
+-- остальные — при разборе
+content_issue_event_kind: created | merged | status_changed | assigned | commented
+                        | rescored | reopened
 
 -- Причина отказа кандидату (`v2/28` §6.2); при other комментарий обязателен (10–500).
 -- Попадает в candidate_status_history.reason_code и в отчёт «Отказы по причинам» (§9)

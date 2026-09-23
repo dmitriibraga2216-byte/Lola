@@ -18,6 +18,8 @@ interface Opened {
   lesson: {
     id: string, title: string, itemType: string, itemId: string, minSeconds: number | null, videoThresholdPct: number, body: ContentBlock[]
     kind: 'article' | 'file' | 'video' | 'link' | null, mediaId: string | null, externalUrl: string | null
+    /** Версия материала на экране — она же `content_version` жалобы (docs/v2/36 §7.1) */
+    resourceVersion: number | null
     requiredSeconds: number | null, canPrint: boolean, section: { title: string, number: number } | null
   }
   progress: { status: string, secondsSpent: number, blocksState: Record<string, unknown>, videoPct: number, scrollPct: number, acknowledged: boolean, downloaded: boolean, ready: boolean, reasons: string[] }
@@ -45,6 +47,31 @@ const serverReady = ref(false)
 const serverReasons = ref<string[]>([])
 const offline = ref(false)
 const bodyEl = ref<HTMLElement | null>(null)
+
+/**
+ * Строка-подтверждение формы жалобы (docs/v2/36 §5.2): «урок «…», версія N». Человек
+ * ничего не вводит — экран сам говорит серверу, где он был (§7.1).
+ */
+const whereLabel = computed(() => data.value
+  ? `${data.value.lesson.title}${data.value.lesson.resourceVersion ? `, v${data.value.lesson.resourceVersion}` : ''}`
+  : '')
+
+/** Точечный флажок у блока материала; для урока-теста или практикума блоков нет. */
+const blockReport = computed(() => data.value?.lesson.itemType === 'resource'
+  ? {
+      targetType: 'resource' as const,
+      targetId: data.value.lesson.itemId,
+      source: 'lesson' as const,
+      enrollmentId,
+      lessonId,
+      whereLabel: whereLabel.value,
+    }
+  : undefined)
+
+/** Позиция видео и прокрутка на момент жалобы — сервер их не знает (§7.1). */
+function collectIssueContext() {
+  return { playerPositionSec: Math.round(currentTime.value), scrollPct: scrollPct.value }
+}
 
 const lessonOrder = computed(() => tree.value?.modules.flatMap(m => m.lessons) ?? [])
 const position = computed(() => lessonOrder.value.findIndex(l => l.id === lessonId) + 1)
@@ -310,6 +337,18 @@ async function next() {
       </div>
       <div class="pos">{{ t('learner.lessonOf', { n: position, total: lessonOrder.length }) }}</div>
       <button v-if="data?.lesson.canPrint" class="print-btn" :aria-label="t('resource.print')" @click="print">⎙</button>
+      <!-- «Повідомити про помилку» в шапке плеера (docs/v2/36 §5.1): жалоба на урок целиком -->
+      <ContentIssueReport
+        v-if="data"
+        compact
+        target-type="lesson"
+        :target-id="lessonId"
+        source="lesson"
+        :enrollment-id="enrollmentId"
+        :lesson-id="lessonId"
+        :where-label="whereLabel"
+        :collect="collectIssueContext"
+      />
     </header>
 
     <div v-if="offline" class="offline">{{ t('learner.offline') }}</div>
@@ -371,6 +410,7 @@ async function next() {
           v-if="data.lesson.body.length"
           :blocks="data.lesson.body"
           :blocks-state="blocksState"
+          :report="blockReport"
           @checklist="onChecklist"
           @video="onVideo"
         />

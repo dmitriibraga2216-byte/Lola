@@ -17,6 +17,9 @@ const list = computed(() => (Array.isArray(props.options) ? props.options : []) 
 const matchOpts = computed(() => (props.options ?? { left: [], right: [] }) as { left: Opt[], right: Opt[] })
 const classOpts = computed(() => (props.options ?? { groups: [], items: [] }) as { groups: { id: string, title: string }[], items: Opt[] })
 const mapOpts = computed(() => (props.options ?? { imageMediaId: '', areas: [] }) as { imageMediaId: string, areas: Area[] })
+/** Межі й підписи кінців лінійної шкали (П-12.1); відповідь — число в цих межах. */
+const scaleOpts = computed(() => (props.options ?? { min: 1, max: 5 }) as { min: number, max: number, minLabel?: string, maxLabel?: string })
+const scalePoints = computed(() => Array.from({ length: Math.max(0, scaleOpts.value.max - scaleOpts.value.min + 1) }, (_, i) => scaleOpts.value.min + i))
 const mapUrl = ref('')
 watch(() => mapOpts.value.imageMediaId, async (id) => {
   mapUrl.value = ''
@@ -176,6 +179,25 @@ function pairFor(leftId: string) {
       </button>
     </div>
 
+    <!-- «Лінійна шкала» (П-12.1): поділки з підписами кінців, працює з клавіатури -->
+    <div v-else-if="kind === 'scale'" class="scale" role="radiogroup" :aria-label="scaleOpts.minLabel || String(scaleOpts.min)">
+      <span v-if="scaleOpts.minLabel" class="scale-end">{{ scaleOpts.minLabel }}</span>
+      <button
+        v-for="n in scalePoints"
+        :key="n"
+        type="button"
+        role="radio"
+        :class="['scale-point', { on: val.value === n }]"
+        :aria-checked="val.value === n"
+        :aria-label="String(n)"
+        :disabled="disabled"
+        @click="val = { value: n }"
+      >
+        {{ n }}
+      </button>
+      <span v-if="scaleOpts.maxLabel" class="scale-end">{{ scaleOpts.maxLabel }}</span>
+    </div>
+
     <input
       v-else-if="kind === 'number'"
       class="field"
@@ -225,6 +247,12 @@ function pairFor(leftId: string) {
 </template>
 
 <style scoped>
+.scale { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.scale-end { font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
+.scale-point { font: inherit; font-weight: 800; min-width: 40px; min-height: 40px; background: var(--color-bg-soft); color: var(--color-ink); border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); cursor: pointer; }
+.scale-point.on { background: var(--color-sun); color: var(--color-sun-ink); border-color: var(--color-sun); }
+.scale-point:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+
 .q-input {
   display: grid;
   gap: var(--space-2);

@@ -187,6 +187,10 @@ export function gradeAnswer(q: SnapshotQuestion, answer: unknown): GradeResult {
       return { isCorrect: exact, score: round2(Math.max(0, Math.min(q.points, raw))), auto: true }
     }
 
+    // «Лінійна шкала» (П-12.1) считается тем же правилом, что и число: у неё тот же эталон
+    // {value, tolerance}, а границы и подписи концов — свойство `options`, то есть вопрос
+    // к показу, а не к проверке. Отдельная ветка означала бы вторую копию той же формулы.
+    case 'scale':
     case 'number': {
       const spec = q.answer as { value: number, tolerance: number, toleranceType?: 'abs' | 'pct' }
       const raw = (answer as { value?: number | string }).value

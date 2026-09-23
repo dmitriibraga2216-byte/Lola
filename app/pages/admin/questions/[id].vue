@@ -58,6 +58,8 @@ const f = reactive({
   areas: [] as Area[],
   correctAreas: [] as string[],
   number: { value: 0, tolerance: 0, toleranceType: 'abs' as 'abs' | 'pct', unit: '' },
+  // «Лінійна шкала» (патч П-12.1): межі, підписи кінців і правильне значення
+  scale: { min: 1, max: 5, minLabel: '', maxLabel: '', value: 3 },
   accepted: '',
   allowTypos: 0,
   caseSensitive: false,
@@ -159,6 +161,11 @@ function fill(q: Record<string, unknown> & { kind: QuestionKind, stem: ContentBl
       break
     }
     case 'number': f.number = { value: Number(a.value ?? 0), tolerance: Number(a.tolerance ?? 0), toleranceType: (a.toleranceType as 'abs' | 'pct') ?? 'abs', unit: (a.unit as string) ?? '' }; break
+    case 'scale': {
+      const o = (q.options ?? {}) as { min?: number, max?: number, minLabel?: string, maxLabel?: string }
+      f.scale = { min: o.min ?? 1, max: o.max ?? 5, minLabel: o.minLabel ?? '', maxLabel: o.maxLabel ?? '', value: Number(a.value ?? 3) }
+      break
+    }
     case 'text_short': f.accepted = ((a.accepted as string[]) ?? []).join('\n'); f.allowTypos = (a.allowTypos as number) ?? 0; f.caseSensitive = !!a.caseSensitive; break
     case 'cloze': {
       const gaps = (a.gaps as { id: string, accepted: string[], allowTypos?: number, caseSensitive?: boolean }[]) ?? []
@@ -314,6 +321,14 @@ function build() {
       answer = { areaIds: f.correctAreas }
       break
     case 'number': answer = { value: f.number.value, tolerance: f.number.tolerance, toleranceType: f.number.toleranceType, ...(f.number.unit ? { unit: f.number.unit } : {}) }; break
+    case 'scale':
+      options = {
+        min: f.scale.min, max: f.scale.max,
+        ...(f.scale.minLabel.trim() ? { minLabel: f.scale.minLabel.trim() } : {}),
+        ...(f.scale.maxLabel.trim() ? { maxLabel: f.scale.maxLabel.trim() } : {}),
+      }
+      answer = { value: f.scale.value, tolerance: 0 }
+      break
     case 'text_short': answer = { accepted: f.accepted.split('\n').map(s => s.trim()).filter(Boolean), allowTypos: f.allowTypos, caseSensitive: f.caseSensitive }; break
     case 'cloze':
       answer = {
@@ -550,6 +565,17 @@ const title = computed(() => quiz.value
               <select v-model="f.number.toleranceType" class="field"><option value="abs">abs</option><option value="pct">%</option></select>
             </label>
             <label class="label">{{ t('questionEditor.unit') }}<input v-model="f.number.unit" class="field" maxlength="20"></label>
+          </div>
+        </template>
+
+        <!-- «Лінійна шкала» (П-12.1): межі й підписи кінців — властивість показу, еталон — число -->
+        <template v-else-if="f.kind === 'scale'">
+          <div class="cols">
+            <label class="label">{{ t('questionEditor.scaleMin') }}<input v-model.number="f.scale.min" type="number" min="0" max="10" class="field num"></label>
+            <label class="label">{{ t('questionEditor.scaleMax') }}<input v-model.number="f.scale.max" type="number" min="1" max="10" class="field num"></label>
+            <label class="label">{{ t('questionEditor.scaleMinLabel') }}<input v-model="f.scale.minLabel" class="field" maxlength="60"></label>
+            <label class="label">{{ t('questionEditor.scaleMaxLabel') }}<input v-model="f.scale.maxLabel" class="field" maxlength="60"></label>
+            <label class="label">{{ t('quizAdmin.value') }}<input v-model.number="f.scale.value" type="number" :min="f.scale.min" :max="f.scale.max" class="field num"></label>
           </div>
         </template>
 

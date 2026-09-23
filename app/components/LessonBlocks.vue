@@ -5,6 +5,19 @@ const props = defineProps<{
   blocks: ContentBlock[]
   blocksState: Record<string, unknown>
   readonly?: boolean
+  /**
+   * Точечный флажок «Повідомити про помилку» у каждого блока (docs/v2/36 §5.1): передаётся
+   * только плеером урока. Без него компонент выглядит ровно как раньше — предпросмотры,
+   * описание теста и админские экраны флажков не получают.
+   */
+  report?: {
+    targetType: 'resource' | 'lesson'
+    targetId: string
+    source: 'lesson' | 'catalog' | 'knowledge'
+    enrollmentId?: string | null
+    lessonId?: string | null
+    whereLabel?: string
+  }
 }>()
 
 const emit = defineEmits<{
@@ -39,13 +52,25 @@ function toggle(blockId: string, index: number) {
 }
 
 let maxPct = 0
+let lastVideoSec = 0
 function onTimeUpdate(e: Event) {
   const video = e.target as HTMLVideoElement
+  lastVideoSec = video.currentTime
   if (!video.duration) return
   const pct = Math.floor(video.currentTime / video.duration * 100)
   if (pct > maxPct) {
     maxPct = pct
     emit('video', pct)
+  }
+}
+
+/** Позиция плеера и прокрутка на момент жалобы (§7.1) — их знает только этот компонент. */
+function collectContext() {
+  return {
+    playerPositionSec: Math.round(lastVideoSec),
+    scrollPct: typeof window === 'undefined'
+      ? undefined
+      : Math.min(100, Math.round((window.scrollY + window.innerHeight) / Math.max(1, document.body.scrollHeight) * 100)),
   }
 }
 
@@ -130,6 +155,21 @@ function imageSrc(mediaId: string): string | undefined {
       </div>
 
       <hr v-else-if="block.type === 'divider'" class="divider">
+
+      <!-- Флажок у блока: подставляет block_id, чтобы автор понял, какой именно абзац (§5.1) -->
+      <div v-if="report && block.type !== 'divider'" class="block-flag">
+        <ContentIssueReport
+          compact
+          :target-type="report.targetType"
+          :target-id="report.targetId"
+          :block-id="block.id"
+          :source="report.source"
+          :enrollment-id="report.enrollmentId"
+          :lesson-id="report.lessonId"
+          :where-label="report.whereLabel"
+          :collect="collectContext"
+        />
+      </div>
     </template>
   </div>
 </template>
@@ -164,6 +204,12 @@ function imageSrc(mediaId: string): string | undefined {
 .text :deep(th) {
   border: 1px solid var(--color-bg-line);
   padding: var(--space-1) var(--space-2);
+}
+
+.block-flag {
+  display: flex;
+  justify-content: flex-end;
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
 }
 
 .image {

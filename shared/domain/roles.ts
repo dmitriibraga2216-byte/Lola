@@ -5,10 +5,13 @@
  * Скоупы пакета docs/v2 (патч П-01, docs/v2/39-patches.md) только объявлены — эндпоинтов под
  * них ещё нет (docs/v2/45-plan.md PR-03), это ожидаемо. Состав взят из §2 «Роли и скоупы»
  * каждого документа пакета (28–38), а не из обзорной таблицы патча — модульный документ
- * побеждает при расхождении, как и предписывает патч. Ни один новый скоуп не назначен ролям
- * `employee`, `mentor`, `manager`, `author` по умолчанию — только `admin` (через `[...SCOPES]`
- * ниже); распределение по будущим ролям `recruiter`, `hr`, `owner` — в PR, которые добавят
- * соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
+ * побеждает при расхождении, как и предписывает патч. Новый скоуп назначается ролям
+ * `employee`, `mentor`, `manager`, `author` не раньше, чем появляются эндпоинты под него, —
+ * до тех пор он есть только у `admin` (через `[...SCOPES]` ниже). Первое исключение —
+ * `lifecycle.view` у `mentor`, `manager` и `author` (PR-05: справочник этапов и экран
+ * `/admin/settings/lifecycle` уже работают, `docs/v2/33` §2 даёт им право видеть этап);
+ * `lifecycle.manage` остаётся только у `admin`. Распределение по будущим ролям `recruiter`,
+ * `hr`, `owner` — в PR, которые добавят соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
  * (`plans.manage`, `limits.override`, `ai.grant`, `payments.manage`) сюда не включены: доступ
  * оператора платформы работает отдельным механизмом (`platform_admin`, BYPASSRLS,
  * `server/services/platform.ts`), а не этим массивом скоупов тенанта.
@@ -87,7 +90,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'people.view', 'assignment.create', 'assignment.cancel',
       'review.queue', 'review.grade', 'certification.confirm',
       'report.own', 'report.team', 'development.own', 'development.team', 'assessment.own', 'checklist.run',
-      'meetup.view', 'meetup.enroll', 'meetup.attendance',
+      'meetup.view', 'meetup.enroll', 'meetup.attendance', 'lifecycle.view',
     ],
   },
   manager: {
@@ -99,7 +102,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'review.queue', 'review.grade', 'certification.confirm',
       'report.own', 'report.team', 'report.export', 'development.own', 'development.team', 'request.decide',
       'assessment.own', 'assessment.team', 'assessment.run', 'checklist.run',
-      'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage',
+      'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'lifecycle.view',
     ],
   },
   author: {
@@ -115,7 +118,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'development.own', 'development.team', 'development.manage', 'competency.manage', 'position_profile.manage',
       'assessment.own', 'assessment.run', 'assessment.manage', 'checklist.manage',
       'meetup.view', 'meetup.enroll', 'meetup.manage', 'webinar.manage', 'complextest.manage', 'wiki.edit', 'report.builder',
-      'program.manage', 'program.publish',
+      'program.manage', 'program.publish', 'lifecycle.view',
     ],
   },
   admin: {

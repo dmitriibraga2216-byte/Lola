@@ -137,7 +137,8 @@
       "certificates": "Certificates",
       "tags": "Tags",
       "orgConflicts": "Org structure conflicts",
-      "assessForms": "Assessment forms"
+      "assessForms": "Assessment forms",
+      "lifecycle": "Lifecycle stages"
     },
     "section": {
       "learning": "Learning",
@@ -4507,6 +4508,35 @@
       "courses": "Courses",
       "assignments": "Active assignments",
       "attemptsMonth": "Attempts this month"
+    },
+    "lifecycle": {
+      "title": "Lifecycle stages",
+      "hint": "A stage is an optional property of a course. A course without a stage behaves like a regular catalog course.",
+      "code": "Code",
+      "name": "Name",
+      "color": "Color",
+      "sort": "Order",
+      "enabled": "Enabled",
+      "expectedDays": "Norm, days",
+      "expectedDaysHint": "Exceeding it shows up in the “stuck” report but blocks nothing",
+      "coursesCount": "Courses",
+      "capabilities": "Capabilities",
+      "capabilitiesReadonly": "The set of stage capabilities is defined by the platform. Contact support to change it.",
+      "empty": "No stages yet",
+      "disabledBadge": "Disabled",
+      "cap": {
+        "progress": "Progress",
+        "deadline": "Deadline",
+        "grading": "Grading",
+        "attempts": "Attempts",
+        "review": "Review",
+        "certificate": "Certificate",
+        "graph": "Graph",
+        "ai_generate": "AI generation",
+        "applies_to_candidate": "For candidates",
+        "applies_to_employee": "For employees",
+        "counts_in_rating": "In rating"
+      }
     }
   },
   "conflicts": {

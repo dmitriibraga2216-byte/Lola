@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { PgTransaction } from 'drizzle-orm/pg-core'
+import { STAGE_CAPABILITIES } from '../../shared/enums'
+import type { LifecycleStageCode, StageCapability } from '../../shared/enums'
 
 /**
  * Справочники по умолчанию для нового тенанта. Вызывается из сида и createTenant
@@ -22,6 +24,39 @@ export const DEFAULT_LEVEL_SCALES = [
   { name: 'Шкала від 0 до 10', levels: Array.from({ length: 11 }, (_, i) => ({ value: i, label: String(i) })) },
 ]
 
+/**
+ * Восемь этапов жизненного цикла нового тенанта (docs/v2/33-lifecycle.md §3.3, таблица
+ * «Значения по умолчанию»; критерий приёмки §13 п. 12). Коды — платформенные
+ * (`LIFECYCLE_STAGE_CODES`), их перечень закрыт констрейнтом миграции; здесь — **посев**,
+ * одно из трёх мест, где код этапа вообще встречается буквально (справочник, посев,
+ * миграция; сквозная проверка 1 `scripts/v2-crosschecks.sh`).
+ *
+ * `expectedDays` — норма времени в этапе (§7.11): онбординг 14, интеграция 30, аттестация 7,
+ * офбординг 14; у остальных нормы нет. `color` у всех — значение по умолчанию `ink`: палитру
+ * этапов ТЗ не задаёт, а выдумывать её («Чего не делать») не нужно — тенант красит сам.
+ */
+export const DEFAULT_LIFECYCLE_STAGES: {
+  code: LifecycleStageCode
+  nameUk: string
+  nameEn: string
+  expectedDays: number | null
+  capabilities: Record<StageCapability, boolean>
+}[] = [
+  { code: 'recruiting', nameUk: 'Рекрутинг', nameEn: 'Recruiting', expectedDays: null, capabilities: caps({ progress: true, deadline: true, grading: true, attempts: true, review: true, graph: true, ai_generate: true, applies_to_candidate: true }) },
+  { code: 'onboarding', nameUk: 'Онбординг', nameEn: 'Onboarding', expectedDays: 14, capabilities: caps({ progress: true, deadline: true, grading: true, attempts: true, review: true, certificate: true, graph: true, ai_generate: true, applies_to_employee: true, counts_in_rating: true }) },
+  { code: 'integration', nameUk: 'Інтеграція', nameEn: 'Integration', expectedDays: 30, capabilities: caps({ progress: true, deadline: true, grading: true, attempts: true, review: true, graph: true, ai_generate: true, applies_to_employee: true, counts_in_rating: true }) },
+  { code: 'training', nameUk: 'Підвищення кваліфікації', nameEn: 'Professional development', expectedDays: null, capabilities: caps({ progress: true, deadline: true, grading: true, attempts: true, review: true, certificate: true, graph: true, ai_generate: true, applies_to_employee: true, counts_in_rating: true }) },
+  { code: 'attestation', nameUk: 'Атестація', nameEn: 'Attestation', expectedDays: 7, capabilities: caps({ progress: true, deadline: true, grading: true, attempts: true, review: true, certificate: true, graph: true, applies_to_employee: true, counts_in_rating: true }) },
+  { code: 'psychological', nameUk: 'Психологічні тести', nameEn: 'Psychological tests', expectedDays: null, capabilities: caps({ progress: true, deadline: true, applies_to_candidate: true, applies_to_employee: true }) },
+  { code: 'knowledge', nameUk: 'База знань', nameEn: 'Knowledge base', expectedDays: null, capabilities: caps({ ai_generate: true, applies_to_employee: true }) },
+  { code: 'offboarding', nameUk: 'Офбординг', nameEn: 'Offboarding', expectedDays: 14, capabilities: caps({ progress: true, deadline: true, review: true, graph: true, applies_to_employee: true }) },
+]
+
+/** Достраивает карту возможностей до полного перечня: не указанный ключ — `false` (§3.3). */
+function caps(on: Partial<Record<StageCapability, boolean>>): Record<StageCapability, boolean> {
+  return Object.fromEntries(STAGE_CAPABILITIES.map(k => [k, on[k] ?? false])) as Record<StageCapability, boolean>
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, tenantId: string): Promise<void> {
   const arr = (xs: string[]) => xs.length ? sql`ARRAY[${sql.join(xs.map(x => sql`${x}`), sql`, `)}]::text[]` : sql`'{}'::text[]`
@@ -41,5 +76,11 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
     for (const [i, l] of s.levels.entries()) {
       await tx.execute(sql`insert into scale_levels (tenant_id, scale_id, label, value, sort_order) values (${tenantId}::uuid, ${id}::uuid, ${l.label}, ${l.value}, ${i})`)
     }
+  }
+  for (const [i, s] of DEFAULT_LIFECYCLE_STAGES.entries()) {
+    await tx.execute(sql`
+      insert into lifecycle_stages (tenant_id, code, name_uk, name_en, sort, expected_days, capabilities)
+      values (${tenantId}::uuid, ${s.code}, ${s.nameUk}, ${s.nameEn}, ${i}, ${s.expectedDays}, ${JSON.stringify(s.capabilities)}::jsonb)
+      on conflict (tenant_id, code) do nothing`)
   }
 }

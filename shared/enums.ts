@@ -127,6 +127,37 @@ export const RATER_ROLE_DEFAULTS: Record<RaterKind, RaterRole> = {
 export const USER_KINDS = ['employee', 'candidate'] as const
 export type UserKind = typeof USER_KINDS[number]
 
+/**
+ * Коды этапов жизненного цикла (docs/v2/33-lifecycle.md §3.2, docs/v2/44-decisions.md В-3).
+ * Перечень **платформенный**: тенант включает, переименовывает и сортирует этапы, но
+ * выдумать девятый код не может (`33` §12.8) — на этом держится сравнимость отчётов и
+ * ключей разбивки хранилища между тенантами (В-10). Код неизменяем и закрыт констрейнтом
+ * `lifecycle_stages_code_check`.
+ *
+ * Единственное место кроме посева (`server/db/tenantDefaults.ts`) и миграции, где коды
+ * встречаются буквально: ветвление по коду запрещено, все различия — через `stageCan()`
+ * (`33` §7.1, сквозная проверка 1 в `scripts/v2-crosschecks.sh`).
+ */
+export const LIFECYCLE_STAGE_CODES = [
+  'recruiting', 'onboarding', 'integration', 'training',
+  'attestation', 'psychological', 'knowledge', 'offboarding',
+] as const
+export type LifecycleStageCode = typeof LIFECYCLE_STAGE_CODES[number]
+
+/**
+ * Возможности этапа (docs/v2/33 §3.3) — **фиксированный** перечень ключей `capabilities`
+ * (docs/v2/44 В-3: «не свободный jsonb»). Неизвестный ключ отвергается `422`, а не
+ * игнорируется: опечатка `certificat` вместо `certificate` иначе тихо выключила бы
+ * возможность. Отсутствующий ключ читается как `false`.
+ */
+export const STAGE_CAPABILITIES = [
+  'progress', 'deadline', 'grading', 'attempts', 'review', 'certificate', 'graph',
+  'ai_generate', 'applies_to_candidate', 'applies_to_employee', 'counts_in_rating',
+] as const
+export type StageCapability = typeof STAGE_CAPABILITIES[number]
+/** Карта возможностей этапа: отсутствующий ключ = `false` (`33` §3.3). */
+export type StageCapabilityMap = Partial<Record<StageCapability, boolean>>
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -148,4 +179,6 @@ export const ENUMS: Record<string, readonly string[]> = {
   display_as: DISPLAY_AS,
   content_rating_target: CONTENT_RATING_TARGETS,
   user_kind: USER_KINDS,
+  lifecycle_stage_code: LIFECYCLE_STAGE_CODES,
+  stage_capability: STAGE_CAPABILITIES,
 }

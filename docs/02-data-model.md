@@ -1318,6 +1318,31 @@ access_groups(id, tenant_id, name, description, applies_to text)  -- knowledge |
 access_group_members(id, tenant_id, group_id, subject_type text, subject_id uuid) -- position | org_unit | user | role (tenant_id — ради RLS)
 content_access_groups(id, tenant_id, content_type, content_id, group_id)          -- ресурс без групп открыт всем
 
+-- Этапы жизненного цикла (`v2/33` §3.2, `v2/40` 0005; PR-05 пакета, миграция 0057).
+-- Справочник тенанта с ПЛАТФОРМЕННЫМ перечнем кодов: тенант включает, переименовывает
+-- и сортирует, девятый код не заводит (`v2/33` §12.8). Поведение продукта зависит не от
+-- названия этапа, а от карты возможностей `capabilities` — её читает единственная функция
+-- `stageCan()` (server/services/lifecycle.ts); ветвление `if (stage.code === …)` запрещено
+-- и ловится сквозной проверкой 1 в scripts/v2-crosschecks.sh.
+lifecycle_stages(
+  id, tenant_id, created_at, updated_at,
+  code text not null,             -- lifecycle_stage_code (см. перечисления), неизменяем, CHECK
+  name_uk text not null, name_en text, icon text,
+  color text not null default 'ink',     -- токен бренд-бука: ink | sun | teal | coral, CHECK
+  sort int not null,
+  is_enabled boolean not null default true,
+  expected_days int,              -- норма времени в этапе (`v2/33` §7.11), только сигнал
+  capabilities jsonb not null default '{}',  -- ключи stage_capability, CHECK на состав ключей
+  applies_to_candidate boolean generated always as
+    (coalesce((capabilities->>'applies_to_candidate')::boolean, false)) stored,
+  unique (tenant_id, code)
+)
+-- Восемь этапов сеются при создании тенанта (server/db/tenantDefaults.ts), значения — `v2/33` §3.3.
+-- Возможности меняет только оператор платформы; тенанту — `403 capabilities.readonly` (`v2/33` §2).
+-- courses += lifecycle_stage_id uuid (FK, необязателен: курс без этапа = полный набор
+-- возможностей, `v2/33` §7.3), stage_locked boolean not null default false (запирается после
+-- первого завершённого прохождения, §7.4; смена без подтверждения — `409 course.stage_locked`).
+
 -- Единая лента комментариев (`10` §14.2)
 comments(
   id, tenant_id, author_id, body text,
@@ -1395,6 +1420,16 @@ competency_source: assessment | task | manual
 
 -- Спосіб відображення рівня компетенції (`19` §14.1 «Шкала компетенцій»): назва рівня чи число; Spec 19
 display_as: label | value
+
+-- Коды этапов жизненного цикла (`v2/33` §3.2, `v2/44` В-3): платформенный перечень,
+-- тенант включает и переименовывает, но девятый код не выдумывает (`v2/33` §12.8)
+lifecycle_stage_code: recruiting | onboarding | integration | training
+                    | attestation | psychological | knowledge | offboarding
+
+-- Возможности этапа (`v2/33` §3.3) — фиксированный перечень ключей `lifecycle_stages.capabilities`;
+-- неизвестный ключ отвергается 422, отсутствующий читается как false (`v2/44` В-3)
+stage_capability: progress | deadline | grading | attempts | review | certificate | graph
+                | ai_generate | applies_to_candidate | applies_to_employee | counts_in_rating
 
 -- Матеріал, який можна оцінити читачем («Оцінок: N», `21` §14.1); докс/33 D-042, своє
 content_rating_target: resource | knowledge_article

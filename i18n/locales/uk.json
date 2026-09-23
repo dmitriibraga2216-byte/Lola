@@ -137,7 +137,8 @@
       "certificates": "Сертифікати",
       "tags": "Мітки",
       "orgConflicts": "Конфлікти оргструктури",
-      "assessForms": "Анкети оцінки"
+      "assessForms": "Анкети оцінки",
+      "lifecycle": "Етапи життєвого циклу"
     },
     "section": {
       "learning": "Навчання",
@@ -4507,6 +4508,35 @@
       "courses": "Курсів",
       "assignments": "Активних призначень",
       "attemptsMonth": "Спроб цього місяця"
+    },
+    "lifecycle": {
+      "title": "Етапи життєвого циклу",
+      "hint": "Етап — необов’язкова властивість курсу. Курс без етапу працює як звичайний курс каталогу.",
+      "code": "Код",
+      "name": "Назва",
+      "color": "Колір",
+      "sort": "Порядок",
+      "enabled": "Увімкнено",
+      "expectedDays": "Норма, днів",
+      "expectedDaysHint": "Перевищення потрапляє у звіт «застрягли», але нічого не блокує",
+      "coursesCount": "Курсів",
+      "capabilities": "Можливості",
+      "capabilitiesReadonly": "Набір можливостей етапу задає платформа. Щоб змінити — зверніться до підтримки.",
+      "empty": "Етапів ще немає",
+      "disabledBadge": "Вимкнено",
+      "cap": {
+        "progress": "Прогрес",
+        "deadline": "Дедлайн",
+        "grading": "Оцінка",
+        "attempts": "Спроби",
+        "review": "Перевірка",
+        "certificate": "Сертифікат",
+        "graph": "Граф",
+        "ai_generate": "ШІ-генерація",
+        "applies_to_candidate": "Кандидатам",
+        "applies_to_employee": "Співробітникам",
+        "counts_in_rating": "У рейтингу"
+      }
     }
   },
   "conflicts": {

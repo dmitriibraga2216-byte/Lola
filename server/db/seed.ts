@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import * as schema from './schema'
 import { SYSTEM_ROLES } from '../../shared/domain/roles'
 import { ensureTenantDefaults } from './tenantDefaults'
@@ -137,12 +137,35 @@ await db.transaction(async (tx) => {
   // активный с тегом — в списках людей и в раскрытии аудитории по метке; с заблокированным
   // ботом — в отчёте по Telegram; давно не заходивший — в «неактивні понад 30 днів».
   // Размещения им не выдаются: кандидат не занимает должности (docs/v2/28 §2).
+  // С PR-13 у канарейки есть и состояние воронки: `users_candidate_coherence_chk` требует
+  // `candidate_state` ровно у кандидата (docs/v2/28 §3.2), а колонка канбана и согласие на
+  // обработку ПД (§7.9) делают её похожей на настоящего кандидата, а не на строку с `kind`.
   const longAgo = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000)
-  await tx.insert(schema.users).values([
-    { tenantId, kind: 'candidate', phone: '+380671000001', email: 'kanarka1@kappi.test', fullName: 'Канарка Перша', status: 'active', tags: ['кандидат'] },
-    { tenantId, kind: 'candidate', phone: '+380671000002', fullName: 'Канарка Друга', status: 'active', tags: ['кандидат'], telegramBlocked: true },
-    { tenantId, kind: 'candidate', phone: '+380671000003', fullName: 'Канарка Третя', status: 'active', tags: ['кандидат'], createdAt: longAgo, lastSeenAt: longAgo },
-  ])
+  const [newStatus] = await tx.select().from(schema.candidateStatuses)
+    .where(and(eq(schema.candidateStatuses.tenantId, tenantId), eq(schema.candidateStatuses.code, 'new')))
+  const consentUntil = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const candidateBase = {
+    tenantId,
+    kind: 'candidate' as const,
+    candidateState: 'active' as const,
+    candidateStatusId: newStatus?.id ?? null,
+    source: 'manual' as const,
+    recruiterId: adminU!.id,
+    consentGivenAt: new Date(),
+    consentExpiresAt: consentUntil,
+    tags: ['кандидат'],
+    status: 'active',
+  }
+  const canaries = await tx.insert(schema.users).values([
+    { ...candidateBase, phone: '+380671000001', email: 'kanarka1@kappi.test', fullName: 'Канарка Перша' },
+    { ...candidateBase, phone: '+380671000002', fullName: 'Канарка Друга', telegramBlocked: true },
+    { ...candidateBase, phone: '+380671000003', fullName: 'Канарка Третя', createdAt: longAgo, lastSeenAt: longAgo },
+  ]).returning({ id: schema.users.id })
+  if (newStatus) {
+    await tx.insert(schema.candidateStatusHistory).values(canaries.map(c => ({
+      tenantId, candidateId: c.id, toStatusId: newStatus.id, actorId: adminU!.id,
+    })))
+  }
 
   await tx.insert(schema.userPlacements).values([
     { tenantId, userId: chef!.id, locationId: lazareva!.id, positionId: pos['cook-hot']!.id },

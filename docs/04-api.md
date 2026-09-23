@@ -439,6 +439,29 @@
 Назначение курса этапа, у которого выключен `applies_to_candidate`, кандидату — `422
 lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7.9).
 
+### Кандидаты и воронка (`docs/v2/28-recruiting-candidates.md` §10, PR-13)
+
+Кандидат — это `users` с `kind='candidate'` (`docs/v2/44` В-8), поэтому отдельного
+`/people`-подобного контура у него нет: тот же человек, другой вид записи. Пути ниже
+показывают и меняют ровно то, чего у сотрудника не бывает.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/candidates` | реестр: фильтры `q`, `statusId`, `state`, `recruiterId`, `source`, `from`, `to`, `limit` (`candidate.view`); в `meta` — счётчик «Кандидатів: N із M» по общей формуле лимита |
+| POST | `/candidates` | создание по форме `28` §6.1 (`candidate.edit`); `400 candidate.contact_required`, `409 candidate.is_employee`, `409 candidate.duplicate` (в деталях — карточка найденного), `409 candidate.contact_taken`, `409 limit_exceeded` (`axis=candidates_active`) |
+| GET | `/candidates/duplicates` | поиск того же человека по телефону и почте до сохранения (`candidate.edit`); контакты найденного в ответ не отдаются |
+| GET | `/candidates/:id` | карточка (`candidate.view` или `review.queue` — наставнику без контактов, резюме и комментариев); чужой тенант и чужая область — `404` |
+| PATCH | `/candidates/:id` | правка карточки (`candidate.edit`); `409 conflict` — оптимистическая блокировка по `updatedAt` |
+| POST | `/candidates/:id/status` | перенос по колонкам воронки (`candidate.decide`); `409 status.same`, `409 candidate.transition_not_allowed` (из `hired` переходов нет), `422 reason.required` |
+| GET | `/candidates/:id/history` | лента смен колонки: кто, когда, почему (`candidate.view`) |
+| GET/POST | `/candidates/:id/scores` | четыре независимых вида оценки, `?history=true` — вместе со снятыми; вид `ai` ставит только авто-собеседование |
+| GET/POST | `/candidates/:id/comments` | тред рекрутеров; кандидату не виден никогда |
+| GET/POST | `/candidate-statuses` | справочник колонок канбана со счётчиком кандидатов; создание — `candidate.status.manage`, `409 code.exists` |
+| PATCH/DELETE | `/candidate-statuses/:id` | правка и удаление; `403 status.system`, `409 candidate_status.in_use` со списком кандидатов внутри |
+
+Найм, отказ, архивация, приглашение и назначение контента кандидату — PR-14: они меняют
+состояние человека и два лимита сразу, и отдельная ручка появится вместе с транзакцией найма.
+
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом
 `server/api/v1/public/` → `/api/v1/public/*` (префикс задаёт дерево каталогов Nitro, а не

@@ -259,7 +259,9 @@ describe('42 §5 проверка 15: счётчик сходится с пря�
   it('кандидат не попадает в ось сотрудников и наоборот (§7.1, В-8)', async () => {
     await syncLiveAxes(tenantId)
     const [employees] = await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked and kind = 'employee'`
-    const [candidates] = await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and status <> 'archived' and kind = 'candidate'`
+    // С PR-13 ось считается по состоянию воронки, а не по `users.status`: в лимит идут только
+    // `candidate_state = 'active'` (docs/v2/28 §7.1) — тенант не платит за отказанных и архив.
+    const [candidates] = await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and candidate_state = 'active' and kind = 'candidate'`
     expect(await currentUsage(tenantId, 'users_active')).toBe(employees!.n)
     expect(await currentUsage(tenantId, 'candidates_active')).toBe(candidates!.n)
     expect(candidates!.n, 'в сиде есть канареечные кандидаты — без них тест зелёный всегда').toBeGreaterThan(0)

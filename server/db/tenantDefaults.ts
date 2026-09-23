@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { PgTransaction } from 'drizzle-orm/pg-core'
-import { STAGE_CAPABILITIES } from '../../shared/enums'
+import { STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES } from '../../shared/enums'
 import type { LifecycleStageCode, StageCapability } from '../../shared/enums'
 
 /**
@@ -76,6 +76,14 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
     for (const [i, l] of s.levels.entries()) {
       await tx.execute(sql`insert into scale_levels (tenant_id, scale_id, label, value, sort_order) values (${tenantId}::uuid, ${id}::uuid, ${l.label}, ${l.value}, ${i})`)
     }
+  }
+  // Шесть системных колонок воронки (docs/v2/28 §3.3): их нельзя удалить и переименовать `code`.
+  // Тот же список — в миграции 0064_v2_candidates догоняющей вставкой для уже заведённых тенантов.
+  for (const [i, s] of SYSTEM_CANDIDATE_STATUSES.entries()) {
+    await tx.execute(sql`
+      insert into candidate_statuses (tenant_id, code, name_uk, name_en, color, sort, is_system, maps_to)
+      values (${tenantId}::uuid, ${s.code}, ${s.nameUk}, ${s.nameEn}, ${s.color}, ${i}, true, ${s.mapsTo})
+      on conflict (tenant_id, code) do nothing`)
   }
   for (const [i, s] of DEFAULT_LIFECYCLE_STAGES.entries()) {
     await tx.execute(sql`

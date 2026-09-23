@@ -4713,5 +4713,61 @@
       "transfer_out": "Transfer out",
       "other": "Other"
     }
+  },
+  "candidate": {
+    "title": "Candidate",
+    "hint": "Candidate card: contacts, source, scores, comments and status history",
+    "tabs": {
+      "overview": "Overview",
+      "scores": "Scores",
+      "comments": "Comments",
+      "history": "History"
+    },
+    "state": {
+      "active": "In selection",
+      "hired": "Hired",
+      "rejected": "Rejected",
+      "archived": "Archived",
+      "withdrawn": "Withdrew"
+    },
+    "sourceOf": {
+      "manual": "Added manually",
+      "vacancy_link": "Vacancy link",
+      "job_board": "Job board",
+      "referral": "Referral",
+      "import": "Import",
+      "api": "Integration"
+    },
+    "scoreKind": {
+      "manual": "Score",
+      "task": "Task score",
+      "ai": "AI score",
+      "recruiter": "Recruiter score"
+    },
+    "phone": "Phone",
+    "email": "Email",
+    "source": "Source",
+    "recruiter": "Recruiter",
+    "accessUntil": "Access until",
+    "accessHint": "Until this date the candidate can sign in and take the materials. This is not a task deadline — the deadline lives in the assignment",
+    "commLanguage": "Communication language",
+    "consentUntil": "Consent valid until",
+    "added": "Added",
+    "daysInStatus": "Days in status: {n}",
+    "masked": "Contacts are hidden: your role has no full access to the candidate's personal data",
+    "moveTo": "Move to column",
+    "move": "Move",
+    "moved": "Status changed",
+    "reason": "Reason",
+    "scoreKindLabel": "Score kind",
+    "scoreValue": "Value",
+    "scoreComment": "Score comment",
+    "scoreAdded": "Score saved",
+    "noScores": "No scores yet",
+    "noComments": "No comments yet",
+    "newComment": "New comment",
+    "commentsHint": "Comments are visible to staff only — the candidate never sees them",
+    "automatic": "automatic",
+    "noHistory": "History is empty"
   }
 }

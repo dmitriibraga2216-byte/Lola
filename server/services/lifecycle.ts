@@ -1,10 +1,12 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
-import { courses, lifecycleStages } from '../db/schema'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { courses, lifecycleStages, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
-import type { StageCapability, StageCapabilityMap } from '../../shared/enums'
+import type { ContentType, StageCapability, StageCapabilityMap } from '../../shared/enums'
 import type { LifecycleStagePatch, StageCapabilitiesInput } from '../../shared/schemas/lifecycle'
 import { recordAudit } from './audit'
+import { peopleCounts } from './lifecycleState'
+import { CANDIDATE } from './repo/people'
 
 /**
  * Этапы жизненного цикла (docs/v2/33-lifecycle.md; решение docs/v2/44-decisions.md В-3).
@@ -32,6 +34,8 @@ export interface StageRow {
   appliesToCandidate: boolean
   /** Счётчики для экрана настроек (`33` §5.2) — курсов в этапе. */
   coursesCount: number
+  /** …и людей, находящихся в этапе сейчас (PR-07: `employee_lifecycle_state`). */
+  peopleCount: number
 }
 
 export type StageError = 'not_found' | 'capabilities_readonly' | 'stage_in_use'
@@ -76,7 +80,7 @@ export async function courseStageCan(tx: TenantTx, courseId: string, capability:
   return stageCan(await courseStage(tx, courseId), capability)
 }
 
-const toRow = (s: typeof lifecycleStages.$inferSelect, coursesCount: number): StageRow => ({
+const toRow = (s: typeof lifecycleStages.$inferSelect, coursesCount: number, peopleCount = 0): StageRow => ({
   id: s.id,
   code: s.code,
   nameUk: s.nameUk,
@@ -89,6 +93,7 @@ const toRow = (s: typeof lifecycleStages.$inferSelect, coursesCount: number): St
   capabilities: s.capabilities ?? {},
   appliesToCandidate: s.appliesToCandidate,
   coursesCount,
+  peopleCount,
 })
 
 /** Справочник этапов тенанта с возможностями (`33` §10 `GET /lifecycle/stages`). */
@@ -96,7 +101,8 @@ export async function listStages(ctx: Ctx): Promise<StageRow[]> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select().from(lifecycleStages).orderBy(asc(lifecycleStages.sort))
     const counts = await courseCounts(tx)
-    return rows.map(r => toRow(r, counts.get(r.id) ?? 0))
+    const people = await peopleCounts(tx)
+    return rows.map(r => toRow(r, counts.get(r.id) ?? 0, people.get(r.id) ?? 0))
   })
 }
 
@@ -123,9 +129,13 @@ export async function updateStage(ctx: Ctx, id: string, patch: LifecycleStagePat
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [before] = await tx.select().from(lifecycleStages).where(eq(lifecycleStages.id, id))
     if (!before) return 'not_found'
+    // §5.2: выключить можно только этап без курсов **и без людей** — §12.5 («выключен этап,
+    // в котором люди сейчас находятся» → блокируется). Люди появились в PR-07 вместе с
+    // `employee_lifecycle_state`; до него проверялись только курсы.
     if (patch.isEnabled === false && before.isEnabled) {
       const counts = await courseCounts(tx)
-      if ((counts.get(id) ?? 0) > 0) return 'stage_in_use'
+      const people = await peopleCounts(tx)
+      if ((counts.get(id) ?? 0) > 0 || (people.get(id) ?? 0) > 0) return 'stage_in_use'
     }
     const [after] = await tx
       .update(lifecycleStages)
@@ -143,7 +153,8 @@ export async function updateStage(ctx: Ctx, id: string, patch: LifecycleStagePat
       .returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'lifecycle.stage_updated', entity: 'lifecycle_stages', entityId: id, before, after })
     const counts = await courseCounts(tx)
-    return toRow(after!, counts.get(id) ?? 0)
+    const people = await peopleCounts(tx)
+    return toRow(after!, counts.get(id) ?? 0, people.get(id) ?? 0)
   })
 }
 
@@ -168,7 +179,8 @@ export async function setStageCapabilities(
       .returning()
     await recordAudit(tx, { tenantId, actorId: null, action: 'lifecycle.capabilities_changed', entity: 'lifecycle_stages', entityId: stageId, before, after })
     const counts = await courseCounts(tx)
-    return toRow(after!, counts.get(stageId) ?? 0)
+    const people = await peopleCounts(tx)
+    return toRow(after!, counts.get(stageId) ?? 0, people.get(stageId) ?? 0)
   })
 }
 
@@ -211,6 +223,30 @@ export async function setCourseStage(
   })
 }
 
+/**
+ * Правило §7.9 (критерий приёмки §13 п. 5): кандидату можно назначить только курсы этапов с
+ * `applies_to_candidate = true` (по умолчанию `recruiting` и `psychological`). Попытка назначить
+ * иной курс — `422 lifecycle.not_for_candidate`, назначение не создаётся.
+ *
+ * Проверка стоит **до** раскрытия аудитории и смотрит на людей, названных в правиле поимённо:
+ * так отказ приходит именно как «этап не для кандидата», а не как «под условие никто не
+ * подпадает». Решение принимает `stageCan()` — ветвления по коду этапа нет (§7.1).
+ *
+ * Обратная сторона (`applies_to_employee`) здесь не проверяется намеренно: документ её в
+ * правилах не называет, а курс рекрутингового этапа сотруднику назначают в реальных сценариях
+ * (кандидат нанят с незакрытым назначением — §12.6). Выдумывать запрет запрещено (CLAUDE.md).
+ */
+export async function stageForbidsCandidates(tx: TenantTx, contentType: ContentType, subjectId: string, userIds: string[]): Promise<boolean> {
+  if (contentType !== 'course' || userIds.length === 0) return false
+  if (stageCan(await courseStage(tx, subjectId), 'applies_to_candidate')) return false
+  const rows = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(and(inArray(users.id, userIds), eq(users.kind, CANDIDATE)))
+    .limit(1)
+  return rows.length > 0
+}
+
 /** Этапы, доступные кандидату (`33` §7.9): фильтр по зеркалу `applies_to_candidate`. */
 export async function listCandidateStages(ctx: Ctx): Promise<StageRow[]> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -220,6 +256,7 @@ export async function listCandidateStages(ctx: Ctx): Promise<StageRow[]> {
       .where(and(eq(lifecycleStages.appliesToCandidate, true), eq(lifecycleStages.isEnabled, true)))
       .orderBy(asc(lifecycleStages.sort))
     const counts = await courseCounts(tx)
-    return rows.map(r => toRow(r, counts.get(r.id) ?? 0))
+    const people = await peopleCounts(tx)
+    return rows.map(r => toRow(r, counts.get(r.id) ?? 0, people.get(r.id) ?? 0))
   })
 }

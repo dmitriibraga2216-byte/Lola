@@ -6,6 +6,7 @@ import { currentRequestContext } from '../utils/requestContext'
 import type { ContentType } from '../../shared/enums'
 import { findAssignmentFor } from './taskParams'
 import { confirmAssignmentCompetencies } from './developmentExtra'
+import { advanceLifecycleTx } from './lifecycleState'
 
 /**
  * Єдина точка «завдання завершено» для всіх типів контенту (docs/33 D-020, D-034; docs/15 §14, docs/22 §13.4).
@@ -93,6 +94,10 @@ export async function onTaskCompleted(tx: TenantTx, tenantId: string, userId: st
     if (input.status === 'done' && assignmentId) {
       competencies = await confirmAssignmentCompetencies(tx, tenantId, userId, assignmentId, input.sourceId ?? input.enrollmentId ?? null)
     }
+    // `lifecycle.advance` (docs/v2/33 §11): переход человека на следующий этап проверяется
+    // по событию завершения назначения — здесь, в единой точке, а не в каждом модуле.
+    // Не переводит, пока открыто хоть одно обязательное назначение текущего этапа (§7.6).
+    if (input.status === 'done') await advanceLifecycleTx(tx, tenantId, userId)
     return { logged: true, assignmentId, competencies }
   }
   catch (err) {

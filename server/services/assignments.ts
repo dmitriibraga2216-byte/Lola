@@ -9,6 +9,7 @@ import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS, paramsFor } from '../../shared/schemas/assignments'
 import { stageParamsFor } from './taskParams'
+import { stageForbidsCandidates } from './lifecycle'
 import { deriveTaskState, overdueSql } from './enrollmentStatus'
 import { findContent } from './taskContent'
 import { employeeOnly } from './repo/people'
@@ -73,7 +74,7 @@ async function subjectTitle(tx: TenantTx, subjectType: ContentType, subjectId: s
 
 export type CreateResult
   = | { ok: true, assignmentId: string, expanded: number }
-    | { ok: false, code: 'subject_not_found' | 'empty_audience' }
+    | { ok: false, code: 'subject_not_found' | 'empty_audience' | 'not_for_candidate' }
 
 export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmentCreateSchema>): Promise<CreateResult> {
   const created = await withTenant(ctx.tenantId, ctx.actorId, tx => createAssignmentTx(tx, ctx, input))
@@ -93,9 +94,16 @@ export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmen
  * назначение той же транзакцией, что и состояние узла; раскрытие — после фиксации.
  * `source.kind` — task_type (docs/02): manual | trajectory; `source.trajectoryId/nodeId` кладутся в audience.
  */
-export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory' | 'catalog', trajectoryId?: string, nodeId?: string, enrollmentId?: string } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' }> {
+export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory' | 'catalog', trajectoryId?: string, nodeId?: string, enrollmentId?: string } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' | 'not_for_candidate' }> {
   const title = await subjectTitle(tx, input.subjectType, input.subjectId)
   if (!title) return { ok: false as const, code: 'subject_not_found' as const }
+
+  // docs/v2/33 §7.9: кандидату — только курсы этапов с `applies_to_candidate`. Проверка идёт
+  // по людям, названным в правиле поимённо, и до раскрытия аудитории (критерий §13 п. 5).
+  const namedUsers = input.audience.rules.flatMap(r => r.type === 'user' ? r.ids : [])
+  if (await stageForbidsCandidates(tx, input.subjectType, input.subjectId, namedUsers)) {
+    return { ok: false as const, code: 'not_for_candidate' as const }
+  }
 
   const count = (await resolveAudience(tx, input.audience, input.exclude)).size
   if (count === 0 && input.status === 'active') return { ok: false as const, code: 'empty_audience' as const }

@@ -67,6 +67,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/tags', label: t('admin.nav.tags'), show: hasScope('people.view') },
     { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import') },
     { to: '/admin/org-conflicts', label: t('admin.nav.orgConflicts'), show: hasScope('people.edit') },
+    { to: '/admin/offboarding', label: t('admin.nav.offboarding'), show: hasScope('offboarding.start') },
     { to: '/admin/development/competencies', label: t('admin.nav.competencies'), show: hasScope('competency.manage') },
     { to: '/admin/development/profiles', label: t('admin.nav.positionProfiles'), show: hasScope('position_profile.manage') },
     { to: '/admin/development/plans', label: t('admin.nav.developmentPlans'), show: hasScope('development.team') },

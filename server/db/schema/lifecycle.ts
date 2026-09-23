@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm'
-import { boolean, index, integer, jsonb, pgTable, text, unique } from 'drizzle-orm/pg-core'
+import { boolean, date, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
+import { users } from './people'
+import { enrollments } from './learning'
 import type { StageCapabilityMap } from '../../../shared/enums'
 
 /**
@@ -45,4 +47,67 @@ export const lifecycleStages = pgTable('lifecycle_stages', {
 }, t => [
   unique().on(t.tenantId, t.code),
   index().on(t.tenantId, t.sort),
+])
+
+/**
+ * Где человек находится сейчас (docs/v2/33-lifecycle.md §3.5, docs/v2/40 §0021).
+ *
+ * Этап человека и этап курса — **разные вещи**, и вывести один из другого нельзя (§3.5):
+ * человек «на онбординге» параллельно проходит курс этапа «база знань», а давно работающий
+ * сотрудник после перевода проходит онбординг новой точки. Поэтому состояние хранится явно.
+ *
+ * Текущая запись ровно одна — частичным уникальным индексом `uq_employee_lifecycle_current`,
+ * а не проверкой в коде (критерий §13 п. 7). История не удаляется: предыдущие записи получают
+ * `left_at` и `is_current = false`, по ним считается «дней в этапе» и отчёт «застрягли» (§9).
+ */
+export const employeeLifecycleState = pgTable('employee_lifecycle_state', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  stageId: uuid('stage_id').notNull().references(() => lifecycleStages.id),
+  enteredAt: timestamp('entered_at', { withTimezone: true }).notNull().defaultNow(),
+  leftAt: timestamp('left_at', { withTimezone: true }),
+  enteredBy: uuid('entered_by').references(() => users.id, { onDelete: 'set null' }),
+  /** Почему человек сюда попал: `hire`, `rehire`, `advance`, `offboarding`, `manual`, `backfill`. */
+  reasonCode: text('reason_code'),
+  isCurrent: boolean('is_current').notNull().default(true),
+}, t => [
+  index().on(t.tenantId, t.userId, t.enteredAt.desc()),
+  uniqueIndex('uq_employee_lifecycle_current').on(t.tenantId, t.userId).where(sql`is_current`),
+])
+
+/**
+ * Процесс увольнения (docs/v2/33-lifecycle.md §3.6, §4.2, §7.7).
+ *
+ * Офбординг — не только курсы, но и процесс: передача дел, выходное интервью, закрытие
+ * доступа и освобождение лимита активных людей (§15 Г-33.3 — иначе тенант платит за уволенных,
+ * а они продолжают получать уведомления). Завершение **не удаляет человека и не обезличивает
+ * его** (§4.2): история обучения — доказательство того, что инструктаж проводился, и живёт
+ * дольше, чем сам сотрудник работает; обезличивание — отдельная операция `gdpr.erase`.
+ *
+ * Активный случай на человека один — частичным уникальным индексом `uq_offboarding_case_active`
+ * (`409 offboarding.active_exists`).
+ */
+export const offboardingCases = pgTable('offboarding_cases', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** `OFFBOARDING_STATES`: started | handover | interview | done | cancelled (§4.2). */
+  state: text('state').notNull().default('started'),
+  /** `OFFBOARDING_REASONS` — восемь кодов §3.6; свободный текст только при `other` (§6.2). */
+  reasonCode: text('reason_code').notNull(),
+  reasonText: text('reason_text'),
+  lastWorkingDay: date('last_working_day').notNull(),
+  initiatedBy: uuid('initiated_by').references(() => users.id, { onDelete: 'set null' }),
+  /** «Відповідальний» (§6.2, колонка списка §5.4) — не обязательно инициатор. */
+  responsibleId: uuid('responsible_id').references(() => users.id, { onDelete: 'set null' }),
+  exitInterviewEnrollmentId: uuid('exit_interview_enrollment_id').references(() => enrollments.id, { onDelete: 'set null' }),
+  handoverDoneAt: timestamp('handover_done_at', { withTimezone: true }),
+  accessRevokedAt: timestamp('access_revoked_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelReason: text('cancel_reason'),
+}, t => [
+  index().on(t.tenantId, t.state),
+  uniqueIndex('uq_offboarding_case_active').on(t.tenantId, t.userId).where(sql`state not in ('done', 'cancelled')`),
 ])

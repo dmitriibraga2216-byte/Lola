@@ -138,7 +138,8 @@
       "tags": "Tags",
       "orgConflicts": "Org structure conflicts",
       "assessForms": "Assessment forms",
-      "lifecycle": "Lifecycle stages"
+      "lifecycle": "Lifecycle stages",
+      "offboarding": "Offboarding"
     },
     "section": {
       "learning": "Learning",
@@ -4542,7 +4543,8 @@
         "applies_to_candidate": "For candidates",
         "applies_to_employee": "For employees",
         "counts_in_rating": "In rating"
-      }
+      },
+      "peopleCount": "People"
     }
   },
   "conflicts": {
@@ -4640,6 +4642,54 @@
       "integrations_active": "A new connection is not created. Turn off unused ones or change the plan.",
       "api_rate_rpm": "Requests over the rate get 429 with Retry-After.",
       "export_rows": "The export goes to a background job with a link to the file."
+    }
+  },
+  "offboarding": {
+    "title": "Offboarding",
+    "hint": "Offboarding is a process: handover, exit interview, access revocation. Learning history is kept",
+    "start": "Start offboarding",
+    "startTitle": "New offboarding",
+    "started": "Offboarding started",
+    "handover": "Handover completed",
+    "complete": "Complete",
+    "cancel": "Cancel offboarding",
+    "cancelTitle": "Cancel offboarding",
+    "cancelHint": "The person stays, the stage returns to the previous one, offboarding assignments are withdrawn",
+    "cancelReason": "Cancellation reason",
+    "reasonText": "Comment",
+    "lastDayHint": "Access is kept until this day; no earlier than 30 days ago",
+    "stageCourses": "Offboarding stage courses: {n} — they will be assigned",
+    "anyState": "Any state",
+    "onlyActive": "Active only",
+    "empty": "No active offboardings",
+    "done": {
+      "handover": "Handover recorded",
+      "complete": "Offboarding completed. Access revoked, learning history kept",
+      "cancel": "Offboarding cancelled"
+    },
+    "col": {
+      "person": "Person",
+      "reason": "Reason",
+      "lastDay": "Last working day",
+      "state": "State",
+      "responsible": "Responsible"
+    },
+    "state": {
+      "started": "Started",
+      "handover": "Handover",
+      "interview": "Exit interview",
+      "done": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "reason": {
+      "own_wish": "Own wish",
+      "probation_failed": "Probation failed",
+      "performance": "Performance",
+      "redundancy": "Redundancy",
+      "no_show": "No show",
+      "end_of_contract": "End of contract",
+      "transfer_out": "Transfer out",
+      "other": "Other"
     }
   }
 }

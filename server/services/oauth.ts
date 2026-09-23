@@ -13,23 +13,39 @@ import { SECRET_KEYS, disconnect as revokeSecrets, getSecret, markSecretResult, 
 
 export type OAuthProvider = 'google' | 'zoom'
 
+/** Зачем человека ведут к провайдеру: подключить интеграцию тенанта или войти в систему (docs/09 §9.1–9.2). */
+export type OAuthPurpose = 'connect' | 'signin'
+
+export const oauthPurpose = (v: string | null | undefined): OAuthPurpose => v === 'signin' ? 'signin' : 'connect'
+
 export interface ProviderDef {
   authUrl: string
   tokenUrl: string
-  scopes: string[]
-  extraAuthParams: Record<string, string>
+  /**
+   * Права запрашиваются по назначению, а не «все сразу»: вход спрашивает только личность,
+   * подключение интеграции — рабочие права. Иначе обычный вход каждый раз показывает длинный
+   * экран согласия на календарь и справочник Workspace.
+   */
+  scopes: (purpose: OAuthPurpose) => string[]
+  extraAuthParams: (purpose: OAuthPurpose) => Record<string, string>
   clientId: () => string | undefined
   clientSecret: () => string | undefined
   /** Кто подключился — для account_label. */
   whoAmI: (accessToken: string) => Promise<string>
 }
 
+/** Вход: только личность. Подключение: плюс рабочие права (календарь, справочник людей). */
+const GOOGLE_SIGNIN_SCOPES = ['openid', 'email', 'profile']
+const GOOGLE_CONNECT_SCOPES = ['openid', 'email', 'https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/admin.directory.user.readonly']
+
 export const PROVIDERS: Record<OAuthProvider, ProviderDef> = {
   google: {
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
-    scopes: ['openid', 'email', 'https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/admin.directory.user.readonly'],
-    extraAuthParams: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
+    scopes: purpose => purpose === 'signin' ? GOOGLE_SIGNIN_SCOPES : GOOGLE_CONNECT_SCOPES,
+    // access_type=offline и prompt=consent нужны только ради refresh_token при подключении;
+    // входу refresh_token не нужен, а consent заставлял бы подтверждать доступ при каждом входе.
+    extraAuthParams: (purpose): Record<string, string> => purpose === 'signin' ? {} : { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
     clientId: () => process.env.GOOGLE_CLIENT_ID,
     clientSecret: () => process.env.GOOGLE_CLIENT_SECRET,
     whoAmI: async (token) => {
@@ -41,8 +57,9 @@ export const PROVIDERS: Record<OAuthProvider, ProviderDef> = {
   zoom: {
     authUrl: 'https://zoom.us/oauth/authorize',
     tokenUrl: 'https://zoom.us/oauth/token',
-    scopes: ['meeting:write', 'meeting:read', 'report:read:admin', 'user:read'],
-    extraAuthParams: {},
+    // Входа через Zoom нет — набор прав один на любое назначение
+    scopes: () => ['meeting:write', 'meeting:read', 'report:read:admin', 'user:read'],
+    extraAuthParams: () => ({}),
     clientId: () => process.env.ZOOM_CLIENT_ID,
     clientSecret: () => process.env.ZOOM_CLIENT_SECRET,
     whoAmI: async (token) => {
@@ -66,26 +83,42 @@ export function isConfigured(provider: OAuthProvider): boolean {
 const STATE_TTL_MS = 10 * 60_000
 const hash = (s: string) => createHash('sha256').update(s).digest('hex')
 
-function redirectUri(provider: OAuthProvider): string {
+/**
+ * Режим адреса возврата для входа. `shared` (по умолчанию) — вход возвращается на тот же путь, что и
+ * подключение интеграции: этот адрес уже зарегистрирован в консоли провайдера, поэтому вход работает
+ * без похода к владельцу внешнего аккаунта (HANDOFF §6). `split` включают только после того, как
+ * `/api/v1/auth/<provider>/callback` добавлен в список Redirect URI в Google Cloud Console —
+ * иначе провайдер ответит redirect_uri_mismatch ещё до экрана согласия.
+ */
+export const signinCallbackMode = (): 'shared' | 'split' => process.env.OAUTH_SIGNIN_CALLBACK === 'split' ? 'split' : 'shared'
+
+/**
+ * Адрес возврата. Он же уходит в обмен кода на токен — провайдер требует совпадения с тем, что был
+ * в ссылке авторизации, поэтому purpose обязателен в обоих местах (в handleCallback он известен из state).
+ */
+export function redirectUri(provider: OAuthProvider, purpose: OAuthPurpose = 'connect'): string {
   const base = (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+  if (purpose === 'signin' && signinCallbackMode() === 'split') return `${base}/api/v1/auth/${provider}/callback`
   return `${base}/api/v1/integrations/${provider}/callback`
 }
 
 /** Ссылка собирается сервером; state одноразовый, 10 минут, в БД. */
-export async function authUrl(ctx: { tenantId: string, actorId: string | null }, provider: OAuthProvider, purpose: 'connect' | 'signin' = 'connect'): Promise<{ url: string } | { error: 'not_configured' }> {
+export async function authUrl(ctx: { tenantId: string, actorId: string | null }, provider: OAuthProvider, purpose: OAuthPurpose = 'connect'): Promise<{ url: string } | { error: 'not_configured' }> {
   if (!isConfigured(provider)) return { error: 'not_configured' }
   const d = PROVIDERS[provider]
   const state = randomBytes(24).toString('base64url')
   await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     await tx.insert(oauthStates).values({ tenantId: ctx.tenantId, provider, stateHash: hash(state), purpose, createdBy: ctx.actorId, expiresAt: new Date(Date.now() + STATE_TTL_MS) })
   })
-  const params = new URLSearchParams({ client_id: d.clientId()!, redirect_uri: redirectUri(provider), response_type: 'code', scope: d.scopes.join(' '), state, ...d.extraAuthParams })
+  const params = new URLSearchParams({ client_id: d.clientId()!, redirect_uri: redirectUri(provider, purpose), response_type: 'code', scope: d.scopes(purpose).join(' '), state, ...d.extraAuthParams(purpose) })
   return { url: `${d.authUrl}?${params}` }
 }
 
 export type CallbackResult
-  = | { ok: true, tenantId: string, provider: OAuthProvider, accountLabel: string, purpose: string, createdBy: string | null }
-    | { ok: false, code: 'bad_state' | 'state_expired' | 'state_used' | 'provider_error' | 'no_refresh_token', message: string, tenantId?: string }
+  = | { ok: true, tenantId: string, provider: OAuthProvider, accountLabel: string, purpose: OAuthPurpose, createdBy: string | null }
+    // purpose известен, как только нашёлся state: по нему колбек решает, вести ли человека в систему
+    // или показать окно «Підключено». Пока state неизвестен (bad_state) — назначения нет.
+    | { ok: false, code: 'bad_state' | 'state_expired' | 'state_used' | 'provider_error' | 'no_refresh_token', message: string, tenantId?: string, purpose?: OAuthPurpose }
 
 /** Колбек: тенант — из state (окно без cookie), state потребляется; обмен кода; refresh_token → зашифрованный секрет. */
 export async function handleCallback(provider: OAuthProvider, query: { code?: string, state?: string, error?: string }): Promise<CallbackResult> {
@@ -93,31 +126,33 @@ export async function handleCallback(provider: OAuthProvider, query: { code?: st
   const rows = await db.execute(sql`select * from oauth_state_lookup(${hash(query.state)})`) as unknown as { id: string, tenant_id: string, provider: string, purpose: string, created_by: string | null, expires_at: string, consumed_at: string | null }[]
   const st = rows[0]
   if (!st || st.provider !== provider) return { ok: false, code: 'bad_state', message: 'Вхід не завершено: невідомий state' }
-  if (st.consumed_at) return { ok: false, code: 'state_used', message: 'Це посилання вже використано. Спробуйте підключити ще раз', tenantId: st.tenant_id }
-  if (new Date(st.expires_at) < new Date()) return { ok: false, code: 'state_expired', message: 'Посилання застаріло (10 хвилин). Спробуйте ще раз', tenantId: st.tenant_id }
+  const purpose = oauthPurpose(st.purpose)
+  if (st.consumed_at) return { ok: false, code: 'state_used', message: 'Це посилання вже використано. Спробуйте підключити ще раз', tenantId: st.tenant_id, purpose }
+  if (new Date(st.expires_at) < new Date()) return { ok: false, code: 'state_expired', message: 'Посилання застаріло (10 хвилин). Спробуйте ще раз', tenantId: st.tenant_id, purpose }
   await withTenant(st.tenant_id, null, tx => tx.update(oauthStates).set({ consumedAt: new Date() }).where(eq(oauthStates.id, st.id)))
   const ctx = { tenantId: st.tenant_id, actorId: st.created_by }
 
   if (query.error || !query.code) {
     await withTenant(ctx.tenantId, ctx.actorId, tx => recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'integration.oauth_denied', entity: 'tenant_secret', after: { provider, error: query.error ?? 'no_code' } }))
-    return { ok: false, code: 'provider_error', message: query.error === 'access_denied' ? 'Доступ не надано' : 'Вхід не завершено: немає коду', tenantId: ctx.tenantId }
+    return { ok: false, code: 'provider_error', message: query.error === 'access_denied' ? 'Доступ не надано' : 'Вхід не завершено: немає коду', tenantId: ctx.tenantId, purpose }
   }
   const d = PROVIDERS[provider]
   let tokens: { access_token?: string, refresh_token?: string, error?: string, error_description?: string }
   try {
-    const body = new URLSearchParams({ code: query.code, client_id: d.clientId()!, client_secret: d.clientSecret()!, redirect_uri: redirectUri(provider), grant_type: 'authorization_code' })
+    // redirect_uri при обмене кода обязан совпасть с тем, что был в ссылке авторизации — отсюда purpose из state
+    const body = new URLSearchParams({ code: query.code, client_id: d.clientId()!, client_secret: d.clientSecret()!, redirect_uri: redirectUri(provider, purpose), grant_type: 'authorization_code' })
     const r = await http(d.tokenUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...(provider === 'zoom' ? { authorization: `Basic ${Buffer.from(`${d.clientId()}:${d.clientSecret()}`).toString('base64')}` } : {}) }, body })
     tokens = await r.json() as typeof tokens
   }
   catch (e) {
-    return { ok: false, code: 'provider_error', message: `Провайдер не відповідає: ${(e as Error).message}`, tenantId: ctx.tenantId }
+    return { ok: false, code: 'provider_error', message: `Провайдер не відповідає: ${(e as Error).message}`, tenantId: ctx.tenantId, purpose }
   }
-  if (tokens.error || !tokens.access_token) return { ok: false, code: 'provider_error', message: tokens.error_description ?? tokens.error ?? 'Провайдер відхилив код', tenantId: ctx.tenantId }
-  if (st.purpose === 'signin') {
+  if (tokens.error || !tokens.access_token) return { ok: false, code: 'provider_error', message: tokens.error_description ?? tokens.error ?? 'Провайдер відхилив код', tenantId: ctx.tenantId, purpose }
+  if (purpose === 'signin') {
     const email = await d.whoAmI(tokens.access_token)
     return { ok: true, tenantId: ctx.tenantId, provider, accountLabel: email, purpose: 'signin', createdBy: st.created_by }
   }
-  if (!tokens.refresh_token) return { ok: false, code: 'no_refresh_token', message: 'Провайдер не видав refresh_token: відкличте доступ у налаштуваннях акаунта і підключіть знову', tenantId: ctx.tenantId }
+  if (!tokens.refresh_token) return { ok: false, code: 'no_refresh_token', message: 'Провайдер не видав refresh_token: відкличте доступ у налаштуваннях акаунта і підключіть знову', tenantId: ctx.tenantId, purpose }
   const email = await d.whoAmI(tokens.access_token).catch(() => provider)
   const keys = SECRET_KEYS[provider]
   await setSecret({ tenantId: ctx.tenantId, actorId: ctx.actorId ?? '' }, provider, keys.REFRESH_TOKEN, tokens.refresh_token, email)

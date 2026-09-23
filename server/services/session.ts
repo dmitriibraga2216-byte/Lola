@@ -1,10 +1,13 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import type { H3Event } from 'h3'
 import { currentRequestContext } from '../utils/requestContext'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { sessions, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { sessionByTokenHash } from './authLookup'
 import { defaultRoleOf, effectiveRoles } from './activeRole'
+import type { CallbackResult } from './oauth'
+import { logSecurity } from './securityLog'
 import { TenantClosedError, tenantById } from './tenantResolve'
 
 /**
@@ -83,6 +86,42 @@ export async function createSession(input: {
   })
 
   return { token, sessionId, expiresAt }
+}
+
+/** Куда вести человека после колбека провайдера. Редирект делает эндпоинт — сессию ставит сервис. */
+export interface SigninOutcome {
+  ok: boolean
+  userId?: string
+  redirectTo: string
+}
+
+/**
+ * Завершение входа через внешнего провайдера (docs/09 §9.1): e-mail из профиля → ровно один активный
+ * пользователь тенанта → сессия, cookie и запись в журнал безопасности.
+ *
+ * Логика общая для двух колбеков — собственного `/api/v1/auth/<provider>/callback` и общего
+ * `/api/v1/integrations/<provider>/callback`: адрес возврата зависит от `OAUTH_SIGNIN_CALLBACK`
+ * (см. `redirectUri` в services/oauth.ts), и вернуться может любой из них. Именно раздвоение
+ * поведения и ломало вход: колбек интеграций не смотрел `purpose` и показывал окно «Підключено»,
+ * не заводя сессию, — поэтому копии этой функции быть не должно (CLAUDE.md п. 6).
+ */
+export async function completeSignin(event: H3Event, r: CallbackResult): Promise<SigninOutcome> {
+  if (!r.ok) return { ok: false, redirectTo: `/login?error=${encodeURIComponent(r.code)}` }
+  if (r.purpose !== 'signin') return { ok: false, redirectTo: '/login?error=bad_purpose' }
+  const rows = await withTenant(r.tenantId, null, tx => tx.execute(
+    sql`select id from users where lower(email) = ${r.accountLabel.toLowerCase()} and status = 'active' limit 2`,
+  )) as unknown as { id: string }[]
+  // Ровно один: ни «никого» (человека в этом пространстве нет), ни «двое» — угадывать, кем войти, нельзя
+  if (rows.length !== 1) return { ok: false, redirectTo: '/login?error=google_no_user' }
+  const userId = rows[0]!.id
+  // Лениво: utils/authCookies тянет middleware/01.session, а тот — обратно сюда (цикл на уровне модулей)
+  const { clientIp, setSessionCookies } = await import('../utils/authCookies')
+  const userAgent = getHeader(event, 'user-agent')
+  const ip = clientIp(event)
+  const { token } = await createSession({ tenantId: r.tenantId, userId, userAgent, ip, loginMethod: 'google' })
+  setSessionCookies(event, token)
+  await logSecurity({ tenantId: r.tenantId, userId, event: 'login.success', meta: { method: 'google' }, ip, userAgent })
+  return { ok: true, userId, redirectTo: '/' }
 }
 
 export interface AuthContext {

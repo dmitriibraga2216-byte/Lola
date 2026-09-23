@@ -343,6 +343,44 @@ export const SYSTEM_CANDIDATE_STATUSES: {
 /** Срок согласия на обработку ПД по умолчанию — 6 месяцев (docs/v2/28 §7.9, диапазон 1–24). */
 export const CANDIDATE_CONSENT_MONTHS = 6
 
+/**
+ * Вид работы в очереди проверки (`review_queue_items.task_type`, docs/v2/37 §3.1,
+ * решение docs/v2/44 В-2). Он же «Тип завдання» — колонка, фильтр и таб экрана «Черга
+ * перевірки» (`37` §5.1).
+ *
+ * **Одна ось, а не две.** В-2 перечисляет `source` (`test_answer` | `workshop` |
+ * `offline_confirm` | `survey_open`), `37` §3.1 — `task_type` (те же четыре под именами
+ * интерфейса плюс `ai_interview_review`). Это одно и то же измерение под двумя именами:
+ * значение однозначно указывает и таблицу источника, и подпись в интерфейсе. Две колонки
+ * одной оси однажды разойдутся, и починить их будет нечем — оставлено `task_type`
+ * (Р-18.1 в `docs/v2/46-progress.md`).
+ *
+ * Куда смотрит `source_id` при каждом значении:
+ * `quiz_open_answer` → `attempt_answers.id`; `workshop` → `workshop_submissions.id`;
+ * `offline_confirm` → `certification_attempts.id`; `survey_open` → ответ опроса;
+ * `ai_interview_review` → сессия ИИ-собеседования (PR-28). Первые два наполняются с PR-18,
+ * остальные — по мере появления своих модулей.
+ */
+export const REVIEW_TASK_TYPES = ['quiz_open_answer', 'workshop', 'offline_confirm', 'survey_open', 'ai_interview_review'] as const
+export type ReviewTaskType = typeof REVIEW_TASK_TYPES[number]
+
+/**
+ * Состояние элемента очереди (`review_queue_items.status`, docs/14 §3.3, docs/v2/37 §4).
+ * `done` — терминальное: решение принято. Повторная сдача после доработки открывает **ту же**
+ * строку заново (`enqueueReview()` через `on conflict do update`), потому что источник
+ * переиспользует ту же `workshop_submissions.id`.
+ */
+export const REVIEW_QUEUE_STATUSES = ['waiting', 'in_review', 'done'] as const
+export type ReviewQueueStatus = typeof REVIEW_QUEUE_STATUSES[number]
+
+/**
+ * Достоверность измерения времени (`review_queue_items.time_confidence`, docs/v2/37 §7.15).
+ * `partial` — биения дошли не все (офлайн-досылка); `unreliable` — в расчёт нормы
+ * (`observed_seconds`) сеанс не входит. Наполняется с PR-21, до него всегда `ok`.
+ */
+export const REVIEW_TIME_CONFIDENCE = ['ok', 'partial', 'unreliable'] as const
+export type ReviewTimeConfidence = typeof REVIEW_TIME_CONFIDENCE[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -379,4 +417,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   candidate_score_kind: CANDIDATE_SCORE_KINDS,
   candidate_comment_visibility: CANDIDATE_COMMENT_VISIBILITIES,
   candidate_reject_reason: CANDIDATE_REJECT_REASONS,
+  review_task_type: REVIEW_TASK_TYPES,
+  review_queue_status: REVIEW_QUEUE_STATUSES,
+  review_time_confidence: REVIEW_TIME_CONFIDENCE,
 }

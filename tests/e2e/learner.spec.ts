@@ -104,10 +104,27 @@ test('3. Тест с ручной проверкой: ученик сдаёт �
   await loginViaUi(mp, MENTOR_PHONE)
   await mp.goto('/admin/review')
   await expect(mp.getByRole('tab', { name: /Неперевірені · \d+/ })).toBeVisible()
-  const queue = await api<{ answerId: string, question: { stem: { html: string }[] } }[]>(mp.request, (await mp.context().cookies()).find(c => c.name === 'lola_csrf')!.value, 'get', '/review/queue')
-  const ours = queue.find(i => JSON.stringify(i.question.stem).includes('гість каже'))!
+  const mentorCsrf = (await mp.context().cookies()).find(c => c.name === 'lola_csrf')!.value
+  // `/review/answers` — узкий фильтр по ответам со своими фильтрами и своей формой (docs/v2/44 В-15)
+  const answers = await api<{ answerId: string, question: { stem: { html: string }[] } }[]>(mp.request, mentorCsrf, 'get', '/review/answers')
+  const ours = answers.find(i => JSON.stringify(i.question.stem).includes('гість каже'))!
   expect(ours).toBeDefined()
-  await api(mp.request, (await mp.context().cookies()).find(c => c.name === 'lola_csrf')!.value, 'post', `/review/answers/${ours.answerId}/grade`, { isCorrect: true, comment: 'Добре' })
+
+  // `/review/queue` — единая очередь поверх review_queue_items (PR-18): та же работа строкой
+  // таблицы, ответ несёт total и курсор.
+  type Queue = { items: { id: string, sourceId: string, taskType: string, status: string }[], total: number, cursor: string | null }
+  const queue = await api<Queue>(mp.request, mentorCsrf, 'get', '/review/queue?taskType=quiz_open_answer')
+  expect(queue.total).toBeGreaterThan(0)
+  expect(queue.items.some(i => i.sourceId === ours.answerId)).toBe(true)
+  expect(queue).toHaveProperty('cursor')
+
+  await api(mp.request, mentorCsrf, 'post', `/review/answers/${ours.answerId}/grade`, { isCorrect: true, comment: 'Добре' })
+
+  // Решение убирает работу из «Мої» и переносит в «Завершені» — строка не исчезает.
+  const afterMine = await api<Queue>(mp.request, mentorCsrf, 'get', '/review/queue?taskType=quiz_open_answer')
+  expect(afterMine.items.some(i => i.sourceId === ours.answerId)).toBe(false)
+  const done = await api<Queue>(mp.request, mentorCsrf, 'get', '/review/queue?tab=done&taskType=quiz_open_answer')
+  expect(done.items.some(i => i.sourceId === ours.answerId && i.status === 'done')).toBe(true)
   await mentorCtx.close()
 
   // Ученик видит результат и разбор

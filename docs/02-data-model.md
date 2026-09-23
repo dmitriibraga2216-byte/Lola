@@ -1123,6 +1123,74 @@ workshop_submissions(workshop_id, user_id, enrollment_id, body jsonb, files json
 workshop_comments(submission_id, author_id, body text, is_internal boolean)
 ```
 
+## Очередь проверки
+
+> [исправлено, `docs/v2/43-reconciliation.md` Р-3 и решение `docs/v2/44-decisions.md` В-2:
+> таблицы не было ни в этом документе, ни в базе — «витрина» была реализована двумя запросами
+> на лету] Ранее: раздела не существовало; `14` §3.3 оставлял выбор реализации открытым.
+
+Единая очередь проверки — **таблица**, а не витрина и не матвью: на строку очереди ссылаются
+делегирование, события SLA, «каким правилом назначено» и суточная статистика проверяющего,
+а у строки, собранной запросом, устойчивого идентификатора нет (обоснование целиком —
+`docs/v2/44-decisions.md` В-2). Содержание работы сюда не копируется: текст ответа, файлы и
+критерии читаются из источника по `(task_type, source_id)`.
+
+```sql
+-- Миграция 0066_v2_review_queue. Наполняется только server/services/reviewQueue.ts
+-- (enqueueReview / closeReview) в транзакции самого события: ни триггера, ни матвью
+-- «раз в минуту», ни пересборки с нуля (`v2/42` §5, сквозная проверка 21).
+create table review_queue_items (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  -- идентичность работы: одна ось `task_type` (review_task_type), ссылка полиморфная
+  task_type text not null,
+  source_id uuid not null,        -- attempt_answers.id | workshop_submissions.id | …
+  user_id uuid not null references users(id) on delete cascade,
+  subject_kind text not null default 'employee',   -- снимок users.kind на момент постановки
+  -- снимки для списка: экран рисуется одним запросом, без join к четырём источникам
+  task_title text, track_id uuid,
+  location_id uuid references locations(id) on delete set null,
+  position_id uuid references positions(id) on delete set null,
+  submitted_at timestamptz not null default now(),
+  completed_at timestamptz,       -- «Дата виконання»: момент решения, у waiting пусто
+  attempt_no int not null default 1,
+  estimated_seconds int, content_seconds int not null default 0,
+  attempt_seconds int not null default 0, time_confidence text not null default 'ok',
+  -- состояние очереди
+  status text not null default 'waiting', priority int not null default 0,
+  -- маршрутизация и делегирование (наполняется PR-19; два FK ставит его же миграция)
+  assigned_reviewer_id uuid references users(id) on delete set null,
+  assigned_at timestamptz, assigned_by_rule_id uuid, delegation_id uuid,
+  origin_reviewer_id uuid references users(id) on delete set null,
+  delegation_depth int not null default 0,
+  -- сроки
+  sla_hours int not null default 48, sla_due_at timestamptz,
+  sla_warned_at timestamptz, sla_breached_at timestamptz,
+  escalated_at timestamptz, escalated_to_id uuid references users(id) on delete set null,
+  constraint rqi_task_type_chk check (task_type in
+    ('quiz_open_answer','workshop','offline_confirm','survey_open','ai_interview_review')),
+  constraint rqi_subject_kind_chk check (subject_kind in ('employee','candidate')),
+  constraint rqi_status_chk check (status in ('waiting','in_review','done')),
+  constraint rqi_time_confidence_chk check (time_confidence in ('ok','partial','unreliable')),
+  constraint rqi_depth_chk check (delegation_depth between 0 and 2),
+  constraint rqi_sla_hours_chk check (sla_hours between 1 and 720),
+  constraint rqi_attempt_no_chk check (attempt_no >= 1),
+  constraint rqi_seconds_chk check (content_seconds >= 0 and attempt_seconds >= 0
+    and (estimated_seconds is null or estimated_seconds between 60 and 216000))
+);
+create index idx_review_queue_items_tenant on review_queue_items (tenant_id, status, sla_due_at);
+create index idx_review_queue_items_reviewer on review_queue_items (tenant_id, assigned_reviewer_id, status) where status <> 'done';
+create index idx_review_queue_items_origin on review_queue_items (tenant_id, origin_reviewer_id) where delegation_id is not null;
+-- одна единица работы — одна строка: повторная сдача после доработки открывает ту же строку
+create unique index uq_review_queue_items_source on review_queue_items (tenant_id, task_type, source_id);
+```
+
+`workshop_submissions.reviewer_id`, `claimed_at`, `sla_due_at` на переходный период остаются и
+заполняются той же транзакцией — **зеркало для совместимости**. Новому коду читать их нельзя;
+удаляются отдельной миграцией через один PR после перевода читателей (В-2).
+
 ## Программы и траектории
 
 ```sql
@@ -1761,6 +1829,23 @@ candidate_comment_visibility: recruiters | managers | all_staff
 -- Причина отказа кандидату (`v2/28` §6.2); при other комментарий обязателен (10–500).
 -- Попадает в candidate_status_history.reason_code и в отчёт «Отказы по причинам» (§9)
 candidate_reject_reason: skills | experience | no_contact | conditions | vacancy_closed | other
+
+-- Вид работы в очереди проверки (`review_queue_items.task_type`, раздел «Очередь проверки» ниже, `v2/37` §3.1,
+-- решение `v2/44` В-2). Он же «Тип завдання»: колонка, фильтр и таб экрана «Черга перевірки».
+-- Одна ось, а не две: В-2 называл её `source` с четырьмя значениями, `v2/37` — `task_type`
+-- с пятью; значение однозначно указывает и таблицу источника (`source_id`), и подпись в
+-- интерфейсе, поэтому вторая колонка не заводится
+review_task_type: quiz_open_answer | workshop | offline_confirm | survey_open | ai_interview_review
+
+-- Состояние элемента очереди проверки (`review_queue_items.status`, раздел «Очередь проверки» ниже).
+-- done терминально; повторная сдача после доработки открывает ту же строку заново
+-- (`enqueueReview()` через on conflict do update) — второй строки не появляется,
+-- удаления не происходит
+review_queue_status: waiting | in_review | done
+
+-- Достоверность измерения времени (`review_queue_items.time_confidence`, `v2/37` §7.15):
+-- partial — биения дошли не все (офлайн-досылка), unreliable — в расчёт нормы не входит
+review_time_confidence: ok | partial | unreliable
 ```
 
 ## Что проверяет тест схемы

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  attemptAnswers, attemptRequests, attemptResults, attempts, lessonProgress, lessons, locations, mediaAssets,
+  attemptAnswers, attemptRequests, attemptResults, attempts, enrollments, lessonProgress, lessons, locations, mediaAssets,
   positions, questions, quizQuestions, quizzes, userPlacements, users,
 } from '../db/schema'
 import type { z } from 'zod'
@@ -18,6 +18,7 @@ import type { ScoringMethod } from '../../shared/enums'
 import { completeLesson, rollbackLessonCompletion, type RollbackResult } from './learning'
 import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
+import { closeReview, enqueueReview } from './reviewQueue'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -336,6 +337,34 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
     updatedAt: now,
   }).where(eq(attempts.id, attempt.id))
   await writeResult(tx, ctx, attempt.id, 'submit', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, reason === 'expire' ? 'expired' : null)
+
+  // Единая очередь проверки (docs/v2/44 В-2). Точка одна на оба пути завершения попытки —
+  // отправку и истечение по дедлайну: очередь не должна зависеть от того, каким из них
+  // работа дошла до наставника. Единица работы — **ответ**, а не попытка целиком
+  // (docs/12 §14.4): наставник решает по ответу, и делегируется тоже ответ.
+  if (status === 'review') {
+    const pending = await tx.select({ id: attemptAnswers.id }).from(attemptAnswers)
+      .where(and(eq(attemptAnswers.attemptId, attempt.id), eq(attemptAnswers.autoGraded, false), isNull(attemptAnswers.isCorrect)))
+    if (pending.length) {
+      const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
+      const [enr] = attempt.enrollmentId
+        ? await tx.select({ courseId: enrollments.subjectId }).from(enrollments)
+          .where(and(eq(enrollments.id, attempt.enrollmentId), eq(enrollments.subjectType, 'course')))
+        : []
+      for (const a of pending) {
+        await enqueueReview(tx, {
+          tenantId: ctx.tenantId,
+          taskType: 'quiz_open_answer',
+          sourceId: a.id,
+          userId: attempt.userId,
+          taskTitle: quiz?.title ?? null,
+          trackId: enr?.courseId ?? null,
+          submittedAt: attempt.submittedAt ?? now,
+          attemptNo: attempt.attemptNo,
+        })
+      }
+    }
+  }
 
   if (status === 'passed') await onAttemptPassed(tx, ctx, attempt)
   if (status !== 'review') await logAttemptCompletion(tx, ctx.tenantId, attempt, status, totals)
@@ -775,6 +804,9 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
       updatedAt: new Date(),
     }).where(eq(attemptAnswers.id, answerId))
 
+    // Решение по ответу принято — элемент очереди закрывается (не удаляется, проверка 21).
+    await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: [answerId], reviewerId: ctx.actorId })
+
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.grade', entity: 'attempt_answer', entityId: answerId, after: { isCorrect: input.isCorrect, score } })
 
     // Все ручные проверены? → пересчёт
@@ -826,6 +858,10 @@ export async function annulAttempt(ctx: Ctx, attemptId: string, reason: string) 
       updatedAt: new Date(),
     }).where(and(eq(attempts.id, attemptId), sql`${attempts.status} <> 'annulled'`)).returning({ id: attempts.id })
     if (!attempt) return null
+    // Аннулированную попытку проверять больше некому и незачем: её ответы уходят из очереди
+    // закрытием, а не удалением строк — иначе терялась бы история проверяющего (В-2).
+    const pendingAnswers = await tx.select({ id: attemptAnswers.id }).from(attemptAnswers).where(eq(attemptAnswers.attemptId, attemptId))
+    await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: pendingAnswers.map(a => a.id) })
     // D-013: аннулированная зачтённая попытка снимает зачёт урока так же, как пересчёт (docs/12 §7 п. 10, docs/14 §12)
     const rollback = before?.status === 'passed' && before.enrollmentId && before.lessonId
       ? await rollbackLessonCompletion(tx, ctx, before.enrollmentId, before.lessonId)

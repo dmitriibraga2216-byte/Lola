@@ -89,6 +89,7 @@
   "GET /resources/:id",
   "GET /resources/:id/versions",
   "GET /review/answers",
+  "GET /review/queue",
   "GET /review/workshops",
   "GET /scales",
   "GET /settings/email-layout",

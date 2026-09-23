@@ -14,6 +14,8 @@ interface Card {
   learner: { id: string, fullName: string }
   history: { attemptNo: number, status: string, reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean }[] | null }[]
   comments: { id: string, authorName: string, body: string, isInternal: boolean, createdAt: string }[]
+  /** Конфликт интересов проверяющего (docs/v2/37 §7.7–7.8): 'self' — своя работа, 'author' — автор материала. */
+  conflict: 'self' | 'author' | null
 }
 
 const queue = ref<Item[]>([])
@@ -137,6 +139,10 @@ async function skip() {
       </section>
 
       <section class="pane decide">
+        <!-- Конфликт интересов (docs/v2/37 §5.2): коралловая плашка запрещает решение по своей
+             работе, жёлтая предупреждает автора материала — кнопки при этом активны. -->
+        <p v-if="card.conflict === 'self'" class="conflict self">{{ t('review.conflictSelf') }}</p>
+        <p v-else-if="card.conflict === 'author'" class="conflict author">{{ t('review.conflictAuthor') }}</p>
         <h2>{{ t('workshop.criteria') }}</h2>
         <div v-for="c in card.submission.criteriaSnapshot" :key="c.id" class="crit">
           <label class="crit-row">
@@ -147,9 +153,9 @@ async function skip() {
         </div>
         <textarea v-model="comment" rows="3" :placeholder="t('review.commentHint')" />
         <div class="actions">
-          <button class="ok" :disabled="busy || (card.workshop?.passRule.type === 'all_criteria' && !allPassed)" :title="!allPassed ? t('workshop.needAll') : ''" @click="decide('accepted')">{{ t('review.accept') }}</button>
-          <button v-if="reworkAvailable" class="warn" :disabled="busy" @click="decide('rework')">{{ t('workshop.toRework') }}</button>
-          <button class="bad" :disabled="busy" @click="decide('rejected')">{{ t('review.reject') }}</button>
+          <button class="ok" :disabled="busy || card.conflict === 'self' || (card.workshop?.passRule.type === 'all_criteria' && !allPassed)" :title="!allPassed ? t('workshop.needAll') : ''" @click="decide('accepted')">{{ t('review.accept') }}</button>
+          <button v-if="reworkAvailable" class="warn" :disabled="busy || card.conflict === 'self'" @click="decide('rework')">{{ t('workshop.toRework') }}</button>
+          <button class="bad" :disabled="busy || card.conflict === 'self'" @click="decide('rejected')">{{ t('review.reject') }}</button>
           <button class="ghost" :disabled="busy" @click="skip">{{ t('workshop.skip') }}</button>
         </div>
       </section>
@@ -196,6 +202,9 @@ h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--font-size-body-s)
 .ghost { background: transparent; border: 1px solid var(--color-bg-line); color: var(--color-ink-muted); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .empty { color: var(--color-ink-faint); padding: var(--space-7); text-align: center; }
+.conflict { margin: 0; border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); font-weight: 700; }
+.conflict.self { background: var(--color-coral); color: var(--color-coral-deep); }
+.conflict.author { background: var(--color-sun); color: var(--color-sun-ink); }
 .error { color: var(--color-coral-ink); }
 .notice { color: var(--color-teal-ink); }
 </style>

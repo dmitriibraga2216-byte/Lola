@@ -106,4 +106,36 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.status).not.toBe(0)
     expect(res.stdout).toContain('5. цвет/отступ мимо токенов')
   })
+
+  /**
+   * Сквозная проверка 21 (`docs/v2/42-stages-delta.md` §5, решение В-2): очередь проверки
+   * поддерживается, а не пересобирается. Две фикстуры: удаление в коде и удаление в миграции —
+   * плюс отдельная проверка, что объяснение запрета в комментарии нарушением не считается.
+   */
+  it('6. очередь проверки пересобирается в коде', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/bad.ts'), 'export async function rebuild(tx) { await tx.delete(reviewQueueItems) }\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('6. очередь проверки не пересоздаётся')
+  })
+
+  it('6. очередь пересобирается миграцией', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/db/migrations'), { recursive: true })
+    writeFileSync(join(dir, 'server/db/migrations/9999_rebuild.sql'), 'DELETE FROM review_queue_items;\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('6. очередь проверки не пересоздаётся')
+  })
+
+  it('6. объяснение запрета в комментарии не считается нарушением', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ok.ts'), '// ни truncate, ни delete from review_queue_items\nexport const x = 1\n')
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   6.')
+  })
 })

@@ -2,8 +2,9 @@ import { eq, sql } from 'drizzle-orm'
 import { tenants } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import {
-  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type TenantPatch, type TenantSettings,
+  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type RecruitingPatch, type TenantPatch, type TenantSettings,
 } from '../../shared/schemas/settings'
+import { SETTINGS_GROUP_RECRUITING } from '../../shared/enums'
 import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
 
@@ -103,6 +104,60 @@ export async function updateEmailLayout(ctx: Ctx, patch: Partial<EmailLayout>) {
     const r = await writeGroup(tx, ctx, 'emailLayout', patch)
     return r.settings.emailLayout
   })
+}
+
+// ── Рекрутинг (docs/v2/28 §7.5, §7.9; план docs/v2/45 PR-14) ──
+
+/** `enabled` — колонка `tenants.candidates_enabled`, остальное — группа настроек (В-14). */
+export type RecruitingSettings = TenantSettings[typeof SETTINGS_GROUP_RECRUITING] & { enabled: boolean }
+
+/** Что показывает экран «Налаштування → Рекрутинг»: флаг модуля плюс два срока. */
+export async function recruitingSettings(ctx: Ctx): Promise<RecruitingSettings> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const s = await readSettings(tx, ctx.tenantId)
+    const [t] = await tx.select({ on: tenants.candidatesEnabled }).from(tenants).where(eq(tenants.id, ctx.tenantId))
+    return { ...s.recruiting, enabled: t?.on ?? false }
+  })
+}
+
+/**
+ * Включение рекрутинга и его сроки одним патчем (§7.5, §7.9).
+ *
+ * `enabled` пишется в колонку `tenants.candidates_enabled`, остальное — в группу настроек:
+ * у флага и у сроков разные носители, и это не оплошность. Флаг заведён миграцией 0056 до
+ * появления кандидатов, по нему считается ось `candidates_active` и гасятся маршруты воронки
+ * (`modules.isRecruitingRoute`); класть его копию в `settings` значило бы завести вторую
+ * правду о том, включён ли модуль.
+ *
+ * Изменение флага — критичное: оно открывает и закрывает раздел с самой чувствительной
+ * категорией ПД в продукте, поэтому идёт и в `audit_log`, и в журнал безопасности.
+ */
+export async function updateRecruiting(ctx: Ctx, patch: RecruitingPatch): Promise<RecruitingSettings> {
+  const { enabled, ...rest } = patch
+  const settings = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    if (Object.keys(rest).length) {
+      const r = await writeGroup(tx, ctx, SETTINGS_GROUP_RECRUITING, rest, { critical: false })
+      return r.settings.recruiting
+    }
+    return (await readSettings(tx, ctx.tenantId)).recruiting
+  })
+
+  let on = (await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [t] = await tx.select({ on: tenants.candidatesEnabled }).from(tenants).where(eq(tenants.id, ctx.tenantId))
+    return t?.on ?? false
+  }))
+  if (enabled !== undefined && enabled !== on) {
+    await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+      // `tenants` без RLS: любой update — строго `where id = tenantId` (преамбула файла).
+      await tx.execute(sql`update tenants set candidates_enabled = ${enabled}, updated_at = now() where id = ${ctx.tenantId}::uuid`)
+      await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'settings.recruiting', entity: 'tenant', entityId: ctx.tenantId, before: { enabled: on }, after: { enabled } })
+    })
+    await logSecurity({ tenantId: ctx.tenantId, userId: ctx.actorId, event: 'settings.security_changed', meta: { group: SETTINGS_GROUP_RECRUITING, changed: ['enabled'] } })
+    const { invalidateRecruiting } = await import('./modules')
+    invalidateRecruiting(ctx.tenantId)
+    on = enabled
+  }
+  return { ...settings, enabled: on }
 }
 
 /** Включён ли модуль — для middleware маршрутов и меню. */

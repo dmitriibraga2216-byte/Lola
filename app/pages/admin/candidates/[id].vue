@@ -10,7 +10,7 @@
  * Контакти приходять уже замаскованими (§7.10): роль без повного `candidate.view` фізично
  * не отримує номера, а не «не бачить його на екрані».
  */
-import { CANDIDATE_SCORE_KINDS } from '#shared/enums'
+import { CANDIDATE_REJECT_REASONS, CANDIDATE_SCORE_KINDS } from '#shared/enums'
 import type { CandidateScoreKind, CandidateState } from '#shared/enums'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'candidate.view' })
@@ -76,18 +76,31 @@ const notice = ref('')
 const busy = ref('')
 
 const moveTo = ref('')
+/** Модальне вікно найму (§5.5): точка, посада, дата виходу — обовʼязкові. */
+const hireOpen = ref(false)
+const hireForm = reactive({ locationId: '', positionId: '', startDate: new Date().toISOString().slice(0, 10), mentorId: '', welcomeLetter: true })
+const locations = ref<{ id: string, name: string }[]>([])
+const positions = ref<{ id: string, name: string }[]>([])
+const rejectOpen = ref(false)
+const rejectForm = reactive({ reasonCode: 'skills', reasonText: '', notify: false })
 const moveReason = ref('')
 const scoreForm = reactive({ kind: 'manual' as CandidateScoreKind, valueNum: '', comment: '' })
 const commentBody = ref('')
 
 /** Види оцінок, які ставить людина: `ai` пише система авто-співбесіди (§3.4). */
 const MANUAL_SCORE_KINDS = CANDIDATE_SCORE_KINDS.filter(k => k !== 'ai')
+/** Причини відмови — закритий перелік (§6.2): звіт «Відмови за причинами» рахує саме їх. */
+const REJECT_REASONS = CANDIDATE_REJECT_REASONS
 
 async function load() {
   error.value = ''
   try {
     card.value = await api<Card>(`/candidates/${id}`)
     statuses.value = await api<Status[]>('/candidate-statuses', { query: { active: 'true' } }).catch(() => [])
+    if (hasScope('candidate.hire') && !locations.value.length) {
+      locations.value = await api<{ id: string, name: string }[]>('/refs/locations').catch(() => [])
+      positions.value = await api<{ id: string, name: string }[]>('/refs/positions').catch(() => [])
+    }
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -154,6 +167,58 @@ async function addComment() {
   finally { busy.value = '' }
 }
 
+/**
+ * Найм (§7.6): одна ручка, одна транзакція на сервері. Екран нічого не рахує — він показує,
+ * що відповів сервер, у тому числі відмову за лімітом тарифу з продовженим доступом (§12.5).
+ */
+async function hire() {
+  busy.value = 'hire'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}/hire`, {
+      method: 'POST',
+      body: {
+        locationId: hireForm.locationId,
+        positionId: hireForm.positionId,
+        startDate: hireForm.startDate,
+        ...(hireForm.mentorId ? { mentorId: hireForm.mentorId } : {}),
+        welcomeLetter: hireForm.welcomeLetter,
+      },
+    })
+    hireOpen.value = false
+    notice.value = t('candidate.hired')
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+/** Відмова з причиною (§6.2). Автоматично система не відмовляє ніколи (§7.4). */
+async function reject() {
+  busy.value = 'reject'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}/reject`, { method: 'POST', body: { ...rejectForm, reasonText: rejectForm.reasonText || undefined } })
+    rejectOpen.value = false
+    notice.value = t('candidate.rejected')
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+async function archive() {
+  busy.value = 'archive'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}/archive`, { method: 'POST', body: {} })
+    notice.value = t('candidate.archived')
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
 const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 </script>
 
@@ -175,6 +240,74 @@ const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { 
         <span v-if="card.daysInStatus !== null" class="sub">{{ t('candidate.daysInStatus', { n: card.daysInStatus }) }}</span>
         <span v-if="card.recruiterName" class="sub">{{ t('candidate.recruiter') }}: {{ card.recruiterName }}</span>
       </div>
+
+      <div class="filters">
+        <button
+          v-if="hasScope('candidate.hire') && card.state === 'active'" class="btn" type="button"
+          @click="hireOpen = true"
+        >
+          {{ t('candidate.hire') }}
+        </button>
+        <button
+          v-if="hasScope('candidate.decide') && card.state === 'active'" class="btn ghost" type="button"
+          @click="rejectOpen = true"
+        >
+          {{ t('candidate.reject') }}
+        </button>
+        <button
+          v-if="hasScope('candidate.decide') && card.state === 'active'" class="btn ghost" type="button"
+          :disabled="busy === 'archive'" @click="archive"
+        >
+          {{ t('candidate.archive') }}
+        </button>
+      </div>
+
+      <form v-if="hireOpen" class="panel form" @submit.prevent="hire">
+        <h2 class="title">{{ t('candidate.hireTitle') }}</h2>
+        <label>{{ t('candidate.location') }}
+          <select v-model="hireForm.locationId" required>
+            <option value="">—</option>
+            <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
+          </select>
+        </label>
+        <label>{{ t('candidate.position') }}
+          <select v-model="hireForm.positionId" required>
+            <option value="">—</option>
+            <option v-for="pos in positions" :key="pos.id" :value="pos.id">{{ pos.name }}</option>
+          </select>
+        </label>
+        <label>{{ t('candidate.startDate') }}
+          <input v-model="hireForm.startDate" type="date" required>
+        </label>
+        <label class="row">
+          <input v-model="hireForm.welcomeLetter" type="checkbox">
+          <span>{{ t('candidate.welcomeLetter') }}</span>
+        </label>
+        <div class="row">
+          <button class="btn" type="submit" :disabled="busy === 'hire'">{{ t('candidate.hire') }}</button>
+          <button class="btn ghost" type="button" @click="hireOpen = false">{{ t('common.cancel') }}</button>
+        </div>
+      </form>
+
+      <form v-if="rejectOpen" class="panel form" @submit.prevent="reject">
+        <h2 class="title">{{ t('candidate.rejectTitle') }}</h2>
+        <label>{{ t('candidate.reasonCode') }}
+          <select v-model="rejectForm.reasonCode">
+            <option v-for="r in REJECT_REASONS" :key="r" :value="r">{{ t(`candidate.reason.${r}`) }}</option>
+          </select>
+        </label>
+        <label>{{ t('candidate.reason') }}
+          <input v-model="rejectForm.reasonText" maxlength="500">
+        </label>
+        <label class="row">
+          <input v-model="rejectForm.notify" type="checkbox">
+          <span>{{ t('candidate.notifyRejected') }}</span>
+        </label>
+        <div class="row">
+          <button class="btn" type="submit" :disabled="busy === 'reject'">{{ t('candidate.reject') }}</button>
+          <button class="btn ghost" type="button" @click="rejectOpen = false">{{ t('common.cancel') }}</button>
+        </div>
+      </form>
 
       <div v-if="hasScope('candidate.decide')" class="filters">
         <label>{{ t('candidate.moveTo') }}
@@ -276,6 +409,9 @@ const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { 
 </template>
 
 <style scoped>
+.form { display: grid; gap: var(--space-3); max-width: 32rem; margin-bottom: var(--space-3); }
+.row { display: flex; gap: var(--space-2); align-items: center; }
+.title { margin: 0; }
 .head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-3); }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
 .grow { flex: 1 1 14rem; }

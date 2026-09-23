@@ -1,5 +1,5 @@
 import type { AuthContext } from '../services/session'
-import { isModuleEnabled, moduleLock, moduleOfRoute } from '../services/modules'
+import { isModuleEnabled, isRecruitingEnabled, isRecruitingRoute, moduleLock, moduleOfRoute } from '../services/modules'
 import { forbiddenFor } from '../services/impersonation'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
@@ -33,6 +33,14 @@ export default defineEventHandler(async (event) => {
     if (what) {
       throw createError({ statusCode: 403, data: { code: 'impersonation_forbidden', message: 'У режимі «від імені» ця дія заборонена. Вийдіть з режиму і виконайте її від свого імені', details: { what } } })
     }
+  }
+
+  // Рекрутинг выключен у тенанта (docs/v2/28, флаг `tenants.candidates_enabled`): маршруты
+  // воронки отвечают так же, как выключенный модуль, — данные остаются, экран исчезает.
+  // Ответ 403, а не 404: тенант не «чужой» (правило 15 про чужого), он просто ещё не включил
+  // раздел, и текст должен вести туда, где его включают.
+  if (isRecruitingRoute(event.path) && !(await isRecruitingEnabled(auth.tenantId))) {
+    throw createError({ statusCode: 403, data: { code: 'candidates.disabled', message: 'Рекрутинг вимкнено в просторі. Увімкніть його в «Налаштування → Рекрутинг»' } })
   }
 
   const module = moduleOfRoute(event.path)

@@ -234,15 +234,26 @@ describe('миграция 0056: users.kind и tenants.candidates_enabled', () =
     expect(String(idx!.indexdef)).toContain(`kind = 'employee'`)
   })
 
-  it('tenants.candidates_enabled выключен у всех тенантов — рекрутинг включается решением тенанта', async () => {
+  /**
+   * До PR-14 здесь проверялось «флаг выключен у всех тенантов» — условие выхода PR-04,
+   * пока воронки не существовало и включать её было нечем. С PR-14 включение стало
+   * **условием выхода**, а не нарушением (`docs/v2/45-plan.md` PR-14), и проверка сменила
+   * смысл: рекрутинг выключен **по умолчанию** — у колонки `not null default false`, и
+   * новый тенант получает выключенный флаг. Включённый у кого-то флаг с этого PR законен.
+   */
+  it('tenants.candidates_enabled выключен по умолчанию — рекрутинг включается решением тенанта', async () => {
     const [col] = await admin`
       select is_nullable, column_default from information_schema.columns
       where table_name = 'tenants' and column_name = 'candidates_enabled'`
     expect(col, 'нет колонки tenants.candidates_enabled').toBeDefined()
     expect(col!.is_nullable).toBe('NO')
     expect(String(col!.column_default)).toContain('false')
-    const [on] = await admin`select count(*)::int as n from tenants where candidates_enabled`
-    expect(on!.n, 'кандидаты где-то включены — условие выхода PR-04 нарушено').toBe(0)
+    const [fresh] = await admin`
+      insert into tenants (slug, name) values ('kind-filter-default', 'Перевірка умовчання')
+      on conflict (slug) do update set name = excluded.name
+      returning candidates_enabled`
+    expect(fresh!.candidates_enabled, 'новый тенант обязан заводиться с выключенным рекрутингом').toBe(false)
+    await admin`delete from tenants where slug = 'kind-filter-default'`
   })
 
   it('существующие люди остались сотрудниками — миграция никого не превратила в кандидата', async () => {

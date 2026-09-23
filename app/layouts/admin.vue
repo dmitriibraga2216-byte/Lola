@@ -5,7 +5,7 @@
  * страница сама рисует шапку через <PageHeader>.
  */
 const { t } = useI18n()
-const { me, logout, hasScope, moduleOn, initials, switchRole } = useAuth()
+const { me, logout, hasScope, moduleOn, recruitingOn, initials, switchRole } = useAuth()
 const route = useRoute()
 
 interface Item { to: string, label: string, show: boolean }
@@ -61,6 +61,9 @@ const sections = computed<Section[]>(() => [
   ] },
   { key: 'people', label: t('admin.section.people'), icon: 'people', items: [
     { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view') },
+    // Воронка кандидатов (docs/v2/28 §5.1, §5.2) — только при включённом рекрутинге:
+    // флаг тенанта, а не модуль настроек, поэтому проверка своя (`recruitingOn`).
+    { to: '/admin/candidates', label: t('admin.nav.candidates'), show: recruitingOn() && hasScope('candidate.view') },
     { to: '/admin/people/groups', label: t('admin.nav.groups'), show: hasScope('people.view') },
     { to: '/admin/org', label: t('admin.nav.org'), show: hasScope('people.view') },
     { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },
@@ -85,6 +88,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/reports/tasks/test', label: t('admin.nav.taskReports'), show: hasScope('report.team') },
     { to: '/admin/reports/builder', label: t('admin.nav.reportBuilder'), show: hasScope('report.builder') },
     { to: '/admin/reports/people', label: t('admin.nav.peopleReport'), show: hasScope('report.team') },
+    { to: '/admin/reports/recruiting-funnel', label: t('admin.nav.funnelReport'), show: recruitingOn() && hasScope('candidate.view') },
     { to: '/admin/checklists/report', label: t('admin.nav.checklistReport'), show: hasScope('report.team') },
     { to: '/admin/meetups/report', label: t('admin.nav.attendanceReport'), show: hasScope('report.team') },
     { to: '/admin/development/reports', label: t('admin.nav.devReports'), show: hasScope('report.team') },
@@ -100,6 +104,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/position-role-map', label: t('admin.nav.positionRoleMap'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/scales', label: t('admin.nav.scales'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/lifecycle', label: t('admin.nav.lifecycle'), show: hasScope('lifecycle.view') },
+    { to: '/admin/settings/recruiting', label: t('admin.nav.recruitingSettings'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('settings.tenant') },
     { to: '/admin/certificates', label: t('admin.nav.certificates'), show: hasScope('report.team') },

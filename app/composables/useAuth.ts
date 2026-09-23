@@ -2,7 +2,7 @@ export interface RoleRef { id: string, code: string, name: string }
 
 export interface Me {
   user: { id: string, fullName: string, phone: string | null, email: string | null, locale: string | null, status: string, roles: RoleRef[], position: string | null, location: string | null }
-  tenant: { id: string, slug: string, name: string, locale: string, timezone: string, accent: 'sun' | 'teal' | 'coral' | 'ink', modules: Record<string, boolean>, localesEnabled: string[], passwordMinLength: number }
+  tenant: { id: string, slug: string, name: string, locale: string, timezone: string, accent: 'sun' | 'teal' | 'coral' | 'ink', modules: Record<string, boolean>, candidatesEnabled: boolean, localesEnabled: string[], passwordMinLength: number }
   /** Скоупы активной роли (docs/01 §1.9.2) */
   scopes: string[]
   activeRole: RoleRef | null
@@ -50,6 +50,15 @@ export function useAuth() {
     return me.value?.tenant?.modules?.[module] ?? true
   }
 
+  /**
+   * Рекрутинг включён у простору (docs/v2/28, `tenants.candidates_enabled`). На відміну від
+   * модулів, умовчання — **вимкнено**: поки тенант свідомо не увімкнув воронку, розділу в
+   * меню немає, а його ручки відповідають `403 candidates.disabled`.
+   */
+  function recruitingOn(): boolean {
+    return me.value?.tenant?.candidatesEnabled === true
+  }
+
   /** Кнопка «Вихід» на плашке «Ви увійшли як …»: сессия «от имени» закрывается, событие impersonation.ended. */
   async function stopImpersonation(): Promise<void> {
     try { await api('/auth/impersonation/stop', { method: 'POST' }) }
@@ -84,7 +93,7 @@ export function useAuth() {
   /** Инициалы для аватара: «Ткаченко Аліна» → «ТА». */
   const initials = computed(() => (me.value?.user.fullName ?? '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join(''))
 
-  return { me, loaded, fetchMe, logout, hasScope, moduleOn, stopImpersonation, startPreview, stopPreview, switchRole, initials }
+  return { me, loaded, fetchMe, logout, hasScope, moduleOn, recruitingOn, stopImpersonation, startPreview, stopPreview, switchRole, initials }
 }
 
 /** Стартовый экран под активную роль: админка, если роль даёт туда доступ, иначе кабинет. */

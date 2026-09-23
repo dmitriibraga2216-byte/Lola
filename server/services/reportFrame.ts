@@ -3,7 +3,8 @@ import type { SQL } from 'drizzle-orm'
 import type { PassContext, ReportFilter } from '../../shared/schemas/reports'
 import { FRAME_COLUMNS } from '../../shared/schemas/reports'
 import { scopeSql } from './access'
-import { EMPLOYEES_ONLY } from './repo/people'
+import { CANDIDATES_ONLY, EMPLOYEES_ONLY } from './repo/people'
+import type { UserKind } from '../../shared/enums'
 
 /**
  * Единый каркас отчётов и журналов (docs/22 §13.3, §13.4; CLAUDE.md «Отчёт или журнал»).
@@ -43,7 +44,7 @@ export function frameJoins(): SQL {
     left join cities ci on ci.id = coalesce(pl.city_id, l.city_id, u.city_id)`
 }
 
-type FrameFilter = Partial<Pick<ReportFilter, 'positionIds' | 'orgUnitId' | 'tags' | 'includeArchived' | 'q'>> & { scope?: string[] | null }
+type FrameFilter = Partial<Pick<ReportFilter, 'positionIds' | 'orgUnitId' | 'tags' | 'includeArchived' | 'q'>> & { scope?: string[] | null, kind?: UserKind }
 
 /**
  * Фильтры каркаса (docs/22 §3, §7.1, §7.5): область видимости применяется всегда и первой,
@@ -52,14 +53,19 @@ type FrameFilter = Partial<Pick<ReportFilter, 'positionIds' | 'orgUnitId' | 'tag
  * Здесь же — единственная точка фильтра по виду человека для всех отчётов и журналов
  * (П-16.1, решение docs/v2/44-decisions.md В-8): каркас один на все отчёты, значит и
  * `kind = 'employee'` должен стоять один раз, а не повторяться в двух десятках запросов.
- * Отчёт по кандидатам, когда он появится (docs/v2/28 §9), меняет это место параметром —
- * и меняет его сразу во всех отчётах, а не в одном забытом.
+ *
+ * Отчёт по кандидатам (docs/v2/28 §9, PR-14) меняет это место **параметром** `kind`, как и
+ * было задумано: вид всегда назван явно, умолчание — сотрудник, и ни один существующий отчёт
+ * от этого не меняется. Архивных кандидат не знает: `users.status` у него служебный
+ * (`invited`, пока не вошёл), а «архив» воронки живёт в `candidate_state` — поэтому отсечка
+ * по статусу для кандидатов не применяется, её роль играет фильтр состояния самого отчёта.
  */
 export function frameWhere(f: FrameFilter = {}): SQL {
+  const kind = f.kind ?? 'employee'
   return sql`
-    ${EMPLOYEES_ONLY('u')}
+    ${kind === 'candidate' ? CANDIDATES_ONLY('u') : EMPLOYEES_ONLY('u')}
     ${scopeSql(f.scope ?? null, sql`pl.location_id`)}
-    ${f.includeArchived ? sql`` : sql`and u.status <> 'archived'`}
+    ${f.includeArchived || kind === 'candidate' ? sql`` : sql`and u.status <> 'archived'`}
     ${f.positionIds?.length ? sql`and pl.position_id in ${f.positionIds}` : sql``}
     ${f.orgUnitId ? sql`and coalesce(pl.org_unit_id, l.org_unit_id) in (select id from org_units where path <@ (select path from org_units where id = ${f.orgUnitId}::uuid))` : sql``}
     ${f.tags?.length ? sql`and u.tags && array[${sql.join(f.tags.map(t => sql`${t}::text`), sql`, `)}]::text[]` : sql``}

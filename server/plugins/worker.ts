@@ -2,12 +2,14 @@ import { getBoss } from '../services/queue'
 import { timedJob } from '../utils/metrics'
 import { processMedia, type MediaProcessJob } from '../jobs/mediaProcess'
 import { dueScanTenant } from '../jobs/dueScanTenant'
+import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs/candidateScan'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
 import { expandAssignment, syncAssignments } from '../services/assignments'
 import { workshopSlaScan } from '../services/workshops'
 import { deliverPending, tenantsWithPendingWebhooks } from '../services/webhooks'
 import { ensureFirstAdmin } from '../services/platform'
+import { recruitingTenantIds } from '../services/modules'
 import { enqueueForTenant, runPerTenant, workByTenant } from '../services/tenantQueue'
 import { activeTenantIds } from '../services/tenantResolve'
 
@@ -79,6 +81,17 @@ export default defineNitroPlugin(async () => {
       const n = await limitScanAll()
       if (n) console.log(`[billing.limit_scan] поднято предупреждений: ${n}`)
     })
+    // docs/v2/28 §11: воронка кандидатов — только у тенантов с включённым рекрутингом
+    // (`tenants.candidates_enabled`). Круг строится по ним, а не по всем активным: у
+    // остальных кандидатов нет вовсе, и проход по ним — пустая работа каждую ночь.
+    await work('candidate.auto_archive', () => runPerTenant('candidate.auto_archive', async (tenantId) => {
+      const n = await candidateAutoArchiveTenant(tenantId)
+      if (n) console.log(`[candidate.auto_archive] ${tenantId}: заархивировано ${n}`)
+    }, recruitingTenantIds))
+    await work('candidate.consent_sweep', () => runPerTenant('candidate.consent_sweep', async (tenantId) => {
+      const s = await candidateConsentSweepTenant(tenantId)
+      if (s.erased || s.warned || s.stale) console.log(`[candidate.consent_sweep] ${tenantId}:`, s)
+    }, recruitingTenantIds))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

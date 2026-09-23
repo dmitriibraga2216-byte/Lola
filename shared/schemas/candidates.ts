@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
-  CANDIDATE_COMMENT_VISIBILITIES, CANDIDATE_SCORE_KINDS, CANDIDATE_SOURCES, CANDIDATE_STATES,
+  CANDIDATE_COMMENT_VISIBILITIES, CANDIDATE_REJECT_REASONS, CANDIDATE_SCORE_KINDS,
+  CANDIDATE_SOURCES, CANDIDATE_STATES,
 } from '../enums'
 
 /**
@@ -140,6 +141,109 @@ export const candidateCommentSchema = z
   .strict()
 
 export type CandidateCommentInput = z.infer<typeof candidateCommentSchema>
+
+/**
+ * Найм (`28` §5.5, §7.6, §10 `POST /candidates/:id/hire`).
+ *
+ * Точка, должность и дата выхода обязательны — это и есть размещение, которое создаётся той же
+ * транзакцией (§7.6). Курсы онбординга приходят списком: назначение создаётся обычным
+ * `assignments`, своего механизма выдачи у найма нет (инвариант 1, §1 «Границы ответственности»).
+ */
+export const candidateHireSchema = z
+  .object({
+    locationId: z.string().uuid(),
+    positionId: z.string().uuid(),
+    startDate: z.string().date(),
+    orgUnitId: z.string().uuid().nullable().optional(),
+    positionLevelId: z.string().uuid().nullable().optional(),
+    mentorId: z.string().uuid().nullable().optional(),
+    onboardingCourseIds: z.array(z.string().uuid()).max(20).default([]),
+    welcomeLetter: z.boolean().default(false),
+  })
+  .strict()
+
+export type CandidateHireInput = z.infer<typeof candidateHireSchema>
+
+/**
+ * Отказ (`28` §6.2, §10 `POST /candidates/:id/reject`). Причина обязательна и берётся из
+ * закрытого перечня: она уходит в отчёт «Відмови за причинами» (§9 п. 5) и в письмо кандидату,
+ * а восстановить её задним числом неоткуда.
+ */
+export const candidateRejectSchema = z
+  .object({
+    reasonCode: z.enum(CANDIDATE_REJECT_REASONS),
+    reasonText: z.string().trim().max(500).nullable().optional(),
+    notify: z.boolean().default(false),
+  })
+  .strict()
+
+export type CandidateRejectInput = z.infer<typeof candidateRejectSchema>
+
+/** Архивация и самоотвод (`28` §4.2, §10): причина свободным текстом, необязательна. */
+export const candidateArchiveSchema = z
+  .object({ reasonText: z.string().trim().max(500).nullable().optional() })
+  .strict()
+
+export type CandidateArchiveInput = z.infer<typeof candidateArchiveSchema>
+
+/**
+ * Повторное открытие (`28` §4.2, §10 `POST /candidates/:id/reopen`). Причина обязательна:
+ * возврат в воронку — решение администратора, и оно должно быть объяснено в `audit_log`.
+ */
+export const candidateReopenSchema = z
+  .object({ reasonText: z.string().trim().min(3).max(500) })
+  .strict()
+
+export type CandidateReopenInput = z.infer<typeof candidateReopenSchema>
+
+/**
+ * Страница колонки канбана (`28` §5.2, §10 `GET /candidates/board`).
+ *
+ * Доска не грузит колонку целиком: 250 карточек в одной колонке — обычное дело на массовом
+ * найме, и это первое место, где страница умирает (§5.2, критерий §13 к. 12). Поэтому
+ * `limit` ограничен полусотней, а догрузка идёт курсором по `(created_at, id)`.
+ */
+export const candidateBoardSchema = z
+  .object({
+    statusId: z.string().uuid().optional(),
+    recruiterId: z.string().uuid().optional(),
+    source: z.enum(CANDIDATE_SOURCES).optional(),
+    q: z.string().trim().max(200).optional(),
+    cursor: z.string().max(80).optional(), // «<createdAt ISO>|<id>» последней показанной карточки
+    limit: z.coerce.number().int().min(1).max(50).default(50),
+  })
+  .strict()
+
+export type CandidateBoardFilter = z.infer<typeof candidateBoardSchema>
+
+/** Массовая смена колонки (`28` §6.3, §10 `POST /candidates/bulk/status`). */
+export const candidateBulkStatusSchema = z
+  .object({
+    ids: z.array(z.string().uuid()).min(1).max(200),
+    statusId: z.string().uuid(),
+    reasonCode: z.string().trim().max(60).nullable().optional(),
+    reasonText: z.string().trim().max(500).nullable().optional(),
+    notify: z.boolean().default(false),
+  })
+  .strict()
+
+export type CandidateBulkStatusInput = z.infer<typeof candidateBulkStatusSchema>
+
+/**
+ * Отчёт по воронке (`28` §9 п. 1, §10 `GET /reports/recruiting-funnel`). Фильтры — период,
+ * рекрутер, источник; точка и вакансия приедут вместе с `users.vacancy_id` (PR-15).
+ */
+export const funnelReportSchema = z
+  .object({
+    from: z.string().date().optional(),
+    to: z.string().date().optional(),
+    recruiterId: z.string().uuid().optional(),
+    source: z.enum(CANDIDATE_SOURCES).optional(),
+    format: z.enum(['json', 'xlsx']).default('json'),
+  })
+  .strict()
+
+export type FunnelReportFilter = z.infer<typeof funnelReportSchema>
 
 /**
  * Колонка воронки (`28` §3.3, §10 `/candidate-statuses`). `mapsTo` обязателен: колонка без

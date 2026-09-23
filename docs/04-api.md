@@ -468,9 +468,20 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | GET/POST | `/candidates/:id/comments` | тред рекрутеров; кандидату не виден никогда |
 | GET/POST | `/candidate-statuses` | справочник колонок канбана со счётчиком кандидатов; создание — `candidate.status.manage`, `409 code.exists` |
 | PATCH/DELETE | `/candidate-statuses/:id` | правка и удаление; `403 status.system`, `409 candidate_status.in_use` со списком кандидатов внутри |
+| GET | `/candidates/board` | канбан: активные колонки, в каждой страница по 50 карточек, общее число и курсор; с `statusId` и `cursor` — следующая страница **одной** колонки (`candidate.view`); чужая колонка — `404` |
+| POST | `/candidates/:id/hire` | найм одной транзакцией: `kind='employee'`, размещение, наставник, этап онбординга, курсы (`candidate.hire`); `409 candidate.not_active`, `409 limit.users_exceeded` (в деталях — продлённое на 14 дней право входа, `28` §12.5) |
+| POST | `/candidates/:id/reject` | отказ с причиной из перечня (`candidate.decide`); `422 reason.required`, `409 candidate.not_active` |
+| POST | `/candidates/:id/archive` | архивация вручную; `?withdraw=true` — самоотвод кандидата (`candidate.decide`) |
+| POST | `/candidates/:id/reopen` | возврат в воронку с причиной (`candidate.delete` — решение администратора); `409 consent.expired`, из `hired` — `404`: сотрудник уже не кандидат |
+| POST | `/candidates/bulk/status` | массовый перенос колонок (`candidate.decide`); в ответе `changed` и поимённый `skipped` с причиной; найм пачкой не делается |
+| GET | `/reports/recruiting-funnel` | отчёт по воронке: колонки, доли, среднее время и конверсия плюс люди единым каркасом колонок `docs/22` §13.3 (`candidate.view`); `format=xlsx` требует `report.export` |
+| GET/PATCH | `/settings/recruiting` | включение рекрутинга тенанту (`tenants.candidates_enabled`) и его сроки: авто-архивация и согласие (`settings.tenant`) |
 
-Найм, отказ, архивация, приглашение и назначение контента кандидату — PR-14: они меняют
-состояние человека и два лимита сразу, и отдельная ручка появится вместе с транзакцией найма.
+Все пути воронки закрыты флагом тенанта: при `candidates_enabled = false` они отвечают
+`403 candidates.disabled` — так же, как выключенный модуль (`docs/24` §3.2), данные остаются.
+
+Приглашение кандидата и назначение ему контента отдельной ручкой — PR-16 вместе с публичным
+контуром отклика: назначение кандидату делается обычным `POST /tasks` (инвариант 1).
 
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом

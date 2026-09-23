@@ -30,6 +30,9 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('trajectory.timer', { retryLimit: 5, retryBackoff: true, expireInSeconds: 300 }) // docs/17 §14.3: затримка / закриття доступу
       await b.createQueue('usage.collect', { retryLimit: 2, expireInSeconds: 600 }) // docs/24 §4.4.1: потребление раз в сутки
       await b.createQueue('billing.limit_scan', { retryLimit: 2, expireInSeconds: 600 }) // docs/v2/35 §11: поднимает и гасит limit_notices
+      // docs/v2/28 §11: две ночные задачи воронки кандидатов (PR-14)
+      await b.createQueue('candidate.auto_archive', { retryLimit: 2, expireInSeconds: 600 })
+      await b.createQueue('candidate.consent_sweep', { retryLimit: 2, expireInSeconds: 900 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -43,6 +46,10 @@ export async function getBoss(): Promise<PgBoss> {
       // Ежечасно: поднимает и гасит limit_notices, шлёт limit_warning / limit_exceeded
       // с дедупликацией по оси (docs/v2/35 §11, §8; решение docs/v2/44 В-16)
       await b.schedule('billing.limit_scan', '15 * * * *', {}, { singletonKey: 'billing.limit_scan' })
+      // Воронка кандидатов (docs/v2/28 §11): архивация отказанных в 03:00, стирание ПД по
+      // истёкшему согласию в 03:20 — по времени Киева, как и остальные суточные сканы
+      await b.schedule('candidate.auto_archive', '0 3 * * *', {}, { singletonKey: 'candidate.auto_archive', tz: 'Europe/Kyiv' })
+      await b.schedule('candidate.consent_sweep', '20 3 * * *', {}, { singletonKey: 'candidate.consent_sweep', tz: 'Europe/Kyiv' })
       return b
     })
   }

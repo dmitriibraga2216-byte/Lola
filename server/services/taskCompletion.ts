@@ -7,6 +7,7 @@ import type { ContentType } from '../../shared/enums'
 import { findAssignmentFor } from './taskParams'
 import { confirmAssignmentCompetencies } from './developmentExtra'
 import { advanceLifecycleTx } from './lifecycleState'
+import { syncCandidateStatusTx } from './candidateJobs'
 
 /**
  * Єдина точка «завдання завершено» для всіх типів контенту (docs/33 D-020, D-034; docs/15 §14, docs/22 §13.4).
@@ -98,6 +99,10 @@ export async function onTaskCompleted(tx: TenantTx, tenantId: string, userId: st
     // по событию завершения назначения — здесь, в единой точке, а не в каждом модуле.
     // Не переводит, пока открыто хоть одно обязательное назначение текущего этапа (§7.6).
     if (input.status === 'done') await advanceLifecycleTx(tx, tenantId, userId)
+    // Авто-переходи колонки канбана кандидата (docs/v2/28 §4.3, §7.4) — тією ж транзакцією:
+    // провал обов'язкового завдання кличе рекрутера, а не відмовляє людині автоматично.
+    // Для співробітника виклик нічого не робить: колонок воронки в нього немає.
+    await syncCandidateStatusTx(tx, tenantId, userId, input.status, assignmentId)
     return { logged: true, assignmentId, competencies }
   }
   catch (err) {

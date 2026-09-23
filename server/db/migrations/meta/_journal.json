@@ -463,6 +463,13 @@
       "when": 1790120923875,
       "tag": "0066_v2_review_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1790146860000,
+      "tag": "0068_v2_candidates_funnel",
+      "breakpoints": true
     }
   ]
 }

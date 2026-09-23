@@ -43,7 +43,7 @@ const text = (html: string, id = 'b1') => [{ id, type: 'text' as const, html }]
 const base = { language: 'uk' as const, tags: [] as string[], categoryIds: [] as string[], allowPrint: true, body: [] as never[] }
 
 async function media(kind: 'video' | 'file', status = 'ready', variants: Record<string, number> = {}) {
-  const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, variants, uploaded_by)
+  const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, variants, owner_user_id)
     values (${tenantId}, ${`t/${tenantId}/test/${crypto.randomUUID()}.${kind === 'video' ? 'mp4' : 'pdf'}`}, ${kind === 'video' ? 'v.mp4' : 'doc.pdf'}, ${kind}, ${kind === 'video' ? 'video/mp4' : 'application/pdf'}, 1000, ${status}, ${admin.json(variants)}, ${authorId})
     returning id`
   mediaIds.push(m!.id as string)

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { COURSE_CATALOG_MODES } from './catalog'
-import { CONTENT_RATING_TARGETS } from '../enums'
+import { CONTENT_RATING_TARGETS, MEDIA_ORIGINS } from '../enums'
 
 /** Блоки контента (docs/11-content-lessons.md §3.3). */
 
@@ -98,11 +98,30 @@ export const publishSchema = z.object({
   notifyAssigned: z.boolean().default(false), // «Сповістити про оновлення» (docs/11 §14.2, docs/04 §4.8)
 })
 
+/**
+ * Единственный вход загрузки (`POST /media/upload-url`, решение docs/v2/44 В-17;
+ * `POST /storage/upload-intent` из `34` §10 отменён как второе имя того же).
+ *
+ * `origin` обязателен (`34` §7.1): классификация задаётся при выдаче presigned URL, а не
+ * вычисляется потом. Второго пути загрузки нет — иначе контрактный тест №4 остаётся зелёным,
+ * пока копятся неклассифицированные файлы.
+ */
 export const uploadUrlSchema = z.object({
   filename: z.string().min(1).max(300),
   mime: z.string().min(3).max(100),
   bytes: z.number().int().min(1),
   resourceId: z.string().uuid().optional(), // для лимита «на ресурс суммарно ≤ 1 ГБ» (Г-11.4)
+  origin: z.enum(MEDIA_ORIGINS), // 15 значений docs/v2/40 §4.2; без него — 400 origin_required
+  sourceEntity: z.string().min(1).max(64).optional(), // мягкая полиморфная ссылка (В-11)
+  sourceId: z.string().uuid().optional(),
+  courseId: z.string().uuid().optional(), // из него производится stage_code — ключ разбивки (В-10)
+  enrollmentId: z.string().uuid().optional(),
+})
+
+/** Мягкое удаление файла (`DELETE /media/:id`, docs/04 §4.15, docs/v2/34 §6.1, §7.2). */
+export const deleteMediaSchema = z.object({
+  reason: z.string().min(1).max(500).optional(),
+  confirmPhrase: z.string().max(64).optional(), // «ВИДАЛИТИ» — только для is_evidence
 })
 
 /** Тик прохождения (docs/04 §4.5, docs/11 §7.4): клиент шлёт факты (секунды, скролл, видео), сервер решает зачёт. */

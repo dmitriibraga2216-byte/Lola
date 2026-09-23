@@ -900,7 +900,20 @@ create table media_assets (
   width int, height int, duration_sec int,
   poster_key text,
   status text not null default 'uploaded',     -- uploaded | processing | ready | failed
-  uploaded_by uuid references users(id),
+  checksum_sha256 text,                        -- sha256, дедупликация в тенанте (`11` §7 п. 7)
+  owner_user_id uuid references users(id) on delete set null, -- чей файл по смыслу (`v2/34` §7.1); кто загрузил — событие media.upload в audit_log (`v2/44` В-4)
+  origin text not null default 'other',        -- media_origin, 15 значений (`v2/40` §4.2); задаётся при выдаче presigned URL
+  course_id uuid references courses(id) on delete set null,
+  stage_code text,                             -- ключ разбивки хранилища = код этапа (`v2/44` В-10), снимок на момент создания
+  enrollment_id uuid references enrollments(id) on delete set null,
+  source_entity text, source_id uuid,          -- мягкая полиморфная ссылка (`v2/44` В-11), без FK
+  lifecycle text not null default 'active',    -- media_lifecycle; ось отдельная от status (`v2/34` §3.1)
+  is_evidence boolean not null default false,  -- файл, на который опирается кадровое решение (`v2/34` §7.1)
+  retention_until timestamptz, orphaned_at timestamptz, purge_after timestamptz,
+  last_accessed_at timestamptz,
+  deleted_at timestamptz,                      -- мягкое удаление: объект в S3 остаётся до purge_after (`v2/34` §7.2)
+  deleted_by uuid references users(id) on delete set null,
+  delete_reason text,                          -- обязательна для is_evidence (`v2/34` §6.1)
   unique (tenant_id, key)
 );
 
@@ -1637,6 +1650,22 @@ usage_ref_kind: ai_generation | ai_review | ai_interview | sms | upload | export
 -- Уровень предупреждения по оси (`v2/35` §3.5, §7.9; `limit_notices.level`): 80 % и 100 %
 -- эффективного лимита. Третьего уровня нет — ниже 80 % запись закрывается resolved_at
 limit_notice_level: warn | exceeded
+
+-- Происхождение файла (`v2/34` §3.2, §7.1; итоговая редакция `v2/40` §4.2, решение В-6):
+-- пятнадцать значений и ровно один check по колонке `media_assets.origin`. Три документа
+-- пакета описывали перечень по-разному, поэтому он собран один раз и правится только
+-- через `v2/40` §4 новой миграцией. Задаётся клиентом при выдаче presigned URL,
+-- без него `POST /media/upload-url` отвечает 400 origin_required; `other` — «не отнесено»,
+-- доля выше 5 % объёма считается дефектом классификации, а не нормой
+media_origin: content_cover | lesson_attachment | workshop_submission | video_answer | candidate_cv
+            | certificate | import | checklist_photo | avatar | brand_asset | ai_artifact
+            | report_export | interview_answer | person_document | other
+
+-- Положение файла в хранилище (`v2/34` §3.1, §4): ось, отдельная от `media_assets.status`
+-- (uploading | processing | ready | failed — техническая готовность объекта). Файл бывает
+-- status='ready' и lifecycle='orphaned' одновременно. purged терминально: строка
+-- media_assets не удаляется никогда, на неё ссылаются audit_log и workshop_submissions.files
+media_lifecycle: active | orphaned | pending_delete | purged
 ```
 
 ## Что проверяет тест схемы

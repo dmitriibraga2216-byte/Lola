@@ -43,28 +43,45 @@
 
 ### 3.2 `alter table media_assets`
 
+`[исполнено: PR-11 + PR-12, миграции 0062_v2_media_rename и 0063_v2_media_origin]` Ниже — редакция
+после решений фазы 1, а не первоначальный список. Три поправки: `created_at` и `original_name`
+уже были в таблице и вычеркнуты; `owner_user_id` и `checksum_sha256` **переименованы** из
+`uploaded_by` и `checksum`, а не добавлены рядом (В-4) — факт «кто загрузил» переезжает в
+`audit_log` событием `media.upload`, у домиграционных файлов владелец = загрузивший;
+`category_id` заменён на `stage_code` (В-10). Перечень `origin` — в редакции `40` §4.2,
+пятнадцать значений, и он один на всю базу (В-6).
+
 ```sql
 alter table media_assets
-  add column created_at timestamptz not null default now(), add column origin text not null default 'other',
-  add column owner_user_id uuid references users(id) on delete set null,   -- чей файл по смыслу, §7.1
+  rename column uploaded_by to owner_user_id;   -- чей файл по смыслу, §7.1 (В-4)
+alter table media_assets
+  rename column checksum to checksum_sha256;    -- была мёртвой колонкой, теперь под дедупликацию
+alter table media_assets
+  add column origin text not null default 'other',
   add column course_id uuid references courses(id) on delete set null,
-  add column category_id uuid references course_categories(id) on delete set null,
+  add column stage_code text,                   -- ключ разбивки = код этапа (В-10), снимок при создании
   add column enrollment_id uuid references enrollments(id) on delete set null,
   add column source_entity text, add column source_id uuid,  -- полиморфная мягкая ссылка, без FK
   add column lifecycle text not null default 'active', add column is_evidence boolean not null default false,
   add column retention_until timestamptz, add column orphaned_at timestamptz, add column purge_after timestamptz,
-  add column deleted_at timestamptz, add column deleted_by uuid references users(id), add column delete_reason text,
-  add column checksum_sha256 text, add column last_accessed_at timestamptz, add column original_name text,
-  add constraint media_assets_origin_chk check (origin in (
+  add column deleted_by uuid references users(id) on delete set null, add column delete_reason text,
+  add column last_accessed_at timestamptz,
+  add constraint media_assets_origin_chk check (origin in ( -- перечень `40` §4.2 целиком, 15 значений
     'content_cover','lesson_attachment','workshop_submission','video_answer','candidate_cv','certificate',
-    'import','checklist_photo','avatar','brand_asset','ai_artifact','report_export','other')),
+    'import','checklist_photo','avatar','brand_asset','ai_artifact','report_export',
+    'interview_answer','person_document','other')),
   add constraint media_assets_lifecycle_chk check (lifecycle in ('active','orphaned','pending_delete','purged')),
   add constraint media_assets_purge_chk check (
-    lifecycle <> 'pending_delete' or (deleted_at is not null and purge_after is not null));
+    lifecycle <> 'pending_delete' or (deleted_at is not null and purge_after is not null)),
+  add constraint media_assets_stage_code_chk check (stage_code is null or stage_code in (
+    'recruiting','onboarding','integration','training','attestation','psychological','knowledge','offboarding'));
+-- FK владельца пересоздаётся с `on delete set null`: §13 к. 6 требует, чтобы удаление человека
+-- не упиралось в его файлы, а оставляло видеоответ с пустым owner_user_id
 create index idx_media_assets_tenant on media_assets (tenant_id, lifecycle, origin);
 create index idx_media_assets_tenant_created on media_assets (tenant_id, created_at desc);
 create index idx_media_assets_tenant_owner on media_assets (tenant_id, owner_user_id, created_at desc);
 create index idx_media_assets_tenant_course on media_assets (tenant_id, course_id);
+create index idx_media_assets_tenant_stage on media_assets (tenant_id, stage_code);
 create index idx_media_assets_tenant_checksum on media_assets (tenant_id, checksum_sha256, bytes) where checksum_sha256 is not null;
 create index idx_media_assets_tenant_retention on media_assets (tenant_id, retention_until) where lifecycle = 'active';
 create index idx_media_assets_tenant_purge on media_assets (tenant_id, purge_after) where lifecycle = 'pending_delete';
@@ -172,10 +189,10 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 
 Заголовок «Сховище», справа кнопка **«Збільшити сховище»** (скоуп `storage.addon`). **Сводка:** «Використовується: 12.4 Gb / 100 Gb»
 + полоса (бирюза до 80 %, солнце 80–95 %, коралл выше 95 %), ниже «Оновлено щойно» и мелким «Дані для рахунку зібрано {дата зрізу}»
-(§7.4). **Разбивка** — горизонтальные бары по убыванию, переключатель режима: **«За походженням»** (по умолчанию, 13 значений
+(§7.4). **Разбивка** — горизонтальные бары по убыванию, переключатель режима: **«За походженням»** (по умолчанию, 15 значений
 `origin` из §3.2 с украинскими подписями — «Відео-відповіді», «Вкладення уроків», «Резюме кандидатів» и далее по списку) и **«За
-категорією треку»** (повторяет эталон: Рекрутинг · Онбординг · Інтеграція · Навчання · Атестація · Офбординг · Інше). Первый режим
-существует ровно для того, чтобы «Інше» не было самой большой колонкой (§7.1).
+етапом»** (решение В-10: девять ключей — восемь кодов `lifecycle_stages` + `other`; подписи берутся из `lifecycle_stages.name_uk`,
+тенант правит подписи, но не ключи). Первый режим существует ровно для того, чтобы «Інше» не было самой большой колонкой (§7.1).
 
 **Фильтры:** «Походження» (multi), «Категорія», «Вибрати період» (по `created_at`), «Трек», «Співробітник», «Статус» («Активні» / «У
 кошику» / «Осиротілі»), «Тільки докази» (toggle). **Таблица**, курсор по 50: чекбокс · **Файл** (`original_name`, иначе `kind` +
@@ -223,9 +240,11 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 1. Основная ось — `media_assets.origin`, задаётся **при выдаче presigned URL**, а не вычисляется потом: клиент обязан передать
    `origin`, `source_entity`, `source_id`, сервер валидирует zod-схемой и отказывает `400 origin_required`. `origin='other'`
    допустим только для загрузок через публичный API-токен тенанта; доля `other` выше 5 % объёма — дефект, алерт оператору платформы.
-   `category_id` заполняется производно от `course_id` при создании и **не пересчитывается** при смене категории курса: разбивка
-   должна быть стабильна во времени. Миграция — `storage.classify_backfill`: `origin` выводится обратным поиском по ссылкам,
-   остальное получает `other` и попадает в отчёт «Не вдалося класифікувати: {n} файлів».
+   `stage_code` заполняется производно от `course_id` при создании (`courses.lifecycle_stage_id → code`, решение В-10) и
+   **не пересчитывается** при смене этапа у курса: разбивка должна быть стабильна во времени. Файл вне курса ключа не получает
+   и попадает в девятый ключ `other`. Миграция — `storage.classify_backfill`: `origin` выводится обратным поиском по ссылкам,
+   остальное получает `other` и попадает в отчёт «Не вдалося класифікувати: {n} файлів». `[PR-11/12: origin задаётся на
+   единственном входе загрузки; backfill уже загруженных файлов — PR-36 вместе с экраном и сводкой]`
 2. **Признак доказательства** `is_evidence=true` выставляется автоматически: `video_answer` и `workshop_submission` — при сдаче в
    статусе `accepted` или `rejected` (по файлу принято решение человеком); `checklist_photo` — при завершённом прогоне;
    `certificate` — всегда; `candidate_cv` — при решении о найме или отказе. Снимается, когда исчезает основание: сдача отозвана,
@@ -240,8 +259,9 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 3. Любое удаление — **soft-delete**: `lifecycle='pending_delete'`, `deleted_at=now()`, `purge_after=now()+30 days`, объект в S3
    остаётся, восстановление в один клик. Физическое удаление выполняет только `storage.purge`. Счётчик уменьшается **в момент
    soft-delete**, а не при purge: тенант платит за то, чем распоряжается, корзина не должна держать квоту заложником.
-4. В `audit_log` пишутся `storage.file.delete` (before — вся строка `media_assets`, after — `{lifecycle, deleted_at,
-   delete_reason}`), `storage.file.restore`, `storage.file.purge`, `storage.bulk_delete` (entity — `storage_deletion_requests`,
+4. В `audit_log` пишутся `media.delete` (before — вся строка `media_assets`, after — `{lifecycle, deleted_at,
+   delete_reason}`; имя события — по решению В-17, вместе с именем ручки `DELETE /media/:id`, а не `storage.file.delete`:
+   у одного действия одно имя), `storage.file.restore`, `storage.file.purge`, `storage.bulk_delete` (entity — `storage_deletion_requests`,
    after — счётчики и пропущенные), `storage.policy.update`, `storage.addon.activate`, `storage.counter_drift`; массовое удаление —
    одна запись на заявку, пофайловый состав лежит в самой заявке. Удаление файла **никогда не меняет запись прохождения**: сдача
    остаётся, оценка остаётся, вместо превью — «Файл видалено {дата}».
@@ -336,8 +356,9 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 доступу · Розмір (bytes) · Доказ · Статус · Дата видалення · Хто видалив · Причина; фильтры повторяют экран, больше 50 000 строк —
 фоновой задачей (`25` §10). **«Динаміка сховища»** из `storage_usage_daily`: день · происхождение · объём · число файлов, график за
 30/90/365 дней стопкой, колонка `drift_bytes` видна только `admin` и оператору. **«Журнал видалень»** из `audit_log` по действиям
-`storage.*`: дата · кто · действие · число файлов · объём · причина · заявка — это и есть ответ на вопрос «кто снёс доказательства
-за прошлый квартал».
+`media.delete`, `media.download` и `storage.*`: дата · кто · действие · число файлов · объём · причина · заявка — это и есть ответ
+на вопрос «кто снёс доказательства за прошлый квартал». Выдача ссылки на файл-доказательство пишется событием `media.download`
+(В-19) — **только** для `is_evidence = true`: обложка курса скачивается при каждом открытии урока и утопила бы журнал в шуме.
 
 ## 10. API
 
@@ -345,9 +366,9 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 | --- | --- | --- | --- | --- |
 | GET | `/storage/summary` | `groupBy=origin\|category` | `{usedBytes, limitBytes, graceBytes, breakdown[], collectedAt, driftBytes}` | 403 |
 | GET | `/storage/files`, `/storage/trash`, `/storage/pending-uploads` | фильтры, `cursor`, `limit≤100` | `{data[], nextCursor}` | 403 |
-| GET | `/storage/files/:id`, `…/download` | | карточка + ссылки на источник; 302 на presigned URL, 5 минут | 404, 403, 410 `file_purged` |
-| POST | `/storage/upload-intent` | `{origin, sourceEntity, sourceId, bytes, mime}` | `{uploadUrl, mediaId}` либо `{deferred:true, pendingId}` | 400 `origin_required`, 413 `media.too_big` |
-| DELETE | `/storage/files/:id` | `{reason?}` | `{lifecycle, purgeAfter}` | 403 `file_not_deletable`, 409 `under_review` |
+| GET | `/storage/files/:id`, `…/download` | | карточка + ссылки на источник; 302 на presigned URL, 10 минут (доказательство — 120 с, В-19) | 404, 403, 410 `file_purged` |
+| POST | `/media/upload-url` | `{origin, sourceEntity?, sourceId?, courseId?, enrollmentId?, bytes, mime, filename}` | `{uploadUrl, mediaId}` | 400 `origin_required`, 400 `media.too_big`, 400 `media.storage_limit` |
+| DELETE | `/media/:id` | `{reason?, confirmPhrase?}` | `{lifecycle, purgeAfter}` | 403 `file_not_deletable`, 409 `evidence_locked`, 409 `already_deleted` |
 | POST | `/storage/files/:id/restore` | | `{lifecycle:'active'}` | 409 `already_purged` |
 | POST | `/storage/deletions` \| `/:id/confirm` \| `/:id/cancel` | `{mode, filter?, mediaIds?}` \| `{reason, confirmPhrase}` | `{id, plannedFiles, plannedBytes, evidenceCount}` \| `{status}` | 400, 409, 422 `confirm_phrase_mismatch` |
 | GET/PUT | `/storage/retention-policies`, `…/dry-run` | массив политик \| `{origin}` | то же \| `{files, bytes, evidenceCount}` | 422 |

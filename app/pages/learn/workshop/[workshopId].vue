@@ -71,7 +71,9 @@ async function addFile(e: Event) {
   uploading.value = true
   error.value = ''
   try {
-    const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename: file.name, mime: file.type, bytes: file.size } })
+    // origin обязателен (docs/v2/34 §7.1): файл сдачи практикума — кандидат в доказательства,
+    // признак is_evidence ставится сервером при принятом решении по сдаче (§7.1 п. 2)
+    const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename: file.name, mime: file.type, bytes: file.size, origin: 'workshop_submission', sourceEntity: 'workshops', sourceId: w.value.id, ...(enrollmentId ? { enrollmentId } : {}) } })
     await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     await api(`/media/${mediaId}/complete`, { method: 'POST' })
     files.value.push({ mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: file.size })

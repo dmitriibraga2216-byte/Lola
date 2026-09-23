@@ -177,7 +177,7 @@ async function onFile(e: Event) {
   uploading.value = t('resource.uploading')
   error.value = ''
   try {
-    form.mediaId = await upload(file, file.name, id.value || undefined)
+    form.mediaId = await upload(file, file.name, 'lesson_attachment', { resourceId: id.value || undefined, sourceEntity: 'resources', sourceId: id.value || undefined })
     mediaName.value = file.name
     uploading.value = t('resource.uploadDone')
   }
@@ -196,7 +196,7 @@ async function onCover(e: Event, field: 'coverKey' | 'cardImageKey') {
   if (!file) return
   error.value = ''
   try {
-    form[field] = await upload(file, file.name, id.value || undefined)
+    form[field] = await upload(file, file.name, 'content_cover', { resourceId: id.value || undefined, sourceEntity: 'resources', sourceId: id.value || undefined })
   }
   catch (err) {
     error.value = apiErrorOf(err).message

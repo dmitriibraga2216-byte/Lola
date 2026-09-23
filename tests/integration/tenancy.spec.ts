@@ -148,7 +148,7 @@ describe('docs/25 §14 — критерии приёмки', () => {
   })
 
   it('6. Дано файл тенанта А, коли пользователь тенанта Б запрашивает его по прямому ключу, тоді 404 (сервис отдаёт null)', async () => {
-    const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${tenantA.id}, ${`t/${tenantA.id}/tenancy-${stamp}.png`}, 'a.png', 'image', 'image/png', 10, 'ready', ${tenantA.adminUserId}) returning id`
+    const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id) values (${tenantA.id}, ${`t/${tenantA.id}/tenancy-${stamp}.png`}, 'a.png', 'image', 'image/png', 10, 'ready', ${tenantA.adminUserId}) returning id`
     expect(await getMedia({ tenantId: tenantA.id, actorId: tenantA.adminUserId }, m!.id as string)).not.toBeNull()
     expect(await getMedia({ tenantId: tenantB.id, actorId: tenantB.adminUserId }, m!.id as string)).toBeNull()
   })
@@ -374,7 +374,7 @@ describe('docs/25 §8 — purge через 30 дней с подтвержден
     await admin`update tenants set archived_at = now() - interval '31 days' where id = ${tenantB.id}`
     // немного данных в разных таблицах
     await withTenant(tenantB.id, tenantB.adminUserId, tx => tx.insert(tags).values({ tenantId: tenantB.id, name: `purge-${stamp}`, scope: 'user' }))
-    await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${tenantB.id}, ${`t/${tenantB.id}/purge-${stamp}.png`}, 'b.png', 'image', 'image/png', 10, 'ready', ${tenantB.adminUserId})`
+    await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id) values (${tenantB.id}, ${`t/${tenantB.id}/purge-${stamp}.png`}, 'b.png', 'image', 'image/png', 10, 'ready', ${tenantB.adminUserId})`
     const before = await rowsOf(tenantB.id)
     expect(Object.keys(before)).toEqual(expect.arrayContaining(['users', 'roles', 'locations', 'tags', 'media_assets', 'audit_log']))
 

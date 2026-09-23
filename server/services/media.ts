@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { mediaAssets, resources } from '../db/schema'
+import { courses, mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
+import type { MediaOrigin } from '../../shared/enums'
 import { GIB, effectiveLimits } from './tenantLimits'
 import { recordUsage, syncCounter } from './usageCounters'
+import { recordAudit } from './audit'
 
 /**
  * Медиа (docs/11 §3.4, Г-11.4, docs/04 §4.15): presigned PUT в S3, ключ — uuid
@@ -116,12 +118,45 @@ export async function resourceBytes(ctx: Ctx, resourceId: string): Promise<numbe
   })
 }
 
+/**
+ * Классификация файла, обязательная на единственном входе загрузки (docs/v2/34 §7.1,
+ * решение В-17): происхождение задаётся клиентом **при выдаче presigned URL**, а не
+ * вычисляется потом. Иначе остаётся путь загрузки без `origin`, контрактный тест №4 зелёный,
+ * а неклассифицированные файлы копятся — ровно то, из-за чего на эталоне «Інше» 90 % объёма.
+ */
+export interface UploadClassification {
+  origin: MediaOrigin
+  sourceEntity?: string
+  sourceId?: string
+  courseId?: string
+  enrollmentId?: string
+  isEvidence?: boolean
+}
+
+/**
+ * Ключ разбивки хранилища — код этапа курса (решение В-10): денормализованный снимок
+ * `courses.lifecycle_stage_id → code` на момент создания файла. При смене этапа у курса
+ * **не пересчитывается**: разбивка обязана быть сравнимой во времени, иначе годовой график
+ * потребления переписывается задним числом. Файл вне курса ключа не получает — он попадает
+ * в девятый ключ `other` уже на стороне сводки.
+ */
+async function stageCodeOfCourse(ctx: Ctx, courseId: string | undefined): Promise<string | null> {
+  if (!courseId) return null
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [row] = await tx.execute(sql`
+      select s.code from ${courses} c join lifecycle_stages s on s.id = c.lifecycle_stage_id
+       where c.id = ${courseId}::uuid
+    `) as unknown as { code: string }[]
+    return row?.code ?? null
+  })
+}
+
 export async function createUploadUrl(ctx: Ctx, input: {
   filename: string
   mime: string
   bytes: number
   resourceId?: string
-}): Promise<UploadUrlResult> {
+} & UploadClassification): Promise<UploadUrlResult> {
   const used = input.resourceId ? await resourceBytes(ctx, input.resourceId) : 0
   const check = checkFileLimits(input.mime, input.bytes, used)
   if (!check.ok) return check
@@ -145,6 +180,8 @@ export async function createUploadUrl(ctx: Ctx, input: {
   const now = new Date()
   const key = `t/${ctx.tenantId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${randomUUID()}.${ALLOWED[input.mime]!.ext}`
 
+  const stageCode = await stageCodeOfCourse(ctx, input.courseId)
+
   const mediaId = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [row] = await tx.insert(mediaAssets).values({
       tenantId: ctx.tenantId,
@@ -154,8 +191,31 @@ export async function createUploadUrl(ctx: Ctx, input: {
       mime: input.mime,
       bytes: input.bytes,
       status: 'uploading',
-      uploadedBy: ctx.actorId,
+      // Владелец — субъект файла (docs/v2/34 §7.1). Сегодня это загрузивший; как только
+      // рекрутер загрузит резюме кандидата, владельцем станет кандидат, а «кто загрузил»
+      // останется в audit_log ниже — колонки под второй факт больше нет (В-4).
+      ownerUserId: ctx.actorId,
+      origin: input.origin,
+      sourceEntity: input.sourceEntity ?? null,
+      sourceId: input.sourceId ?? null,
+      courseId: input.courseId ?? null,
+      stageCode,
+      enrollmentId: input.enrollmentId ?? null,
+      isEvidence: input.isEvidence ?? false,
     }).returning({ id: mediaAssets.id })
+
+    // Событие `media.upload` — тот самый второй факт, ради которого переименование колонки
+    // безопасно (В-4). До этого PR `media.ts` не писал аудит ни разу: файл появлялся
+    // в тенанте без следа. `request_context` (ip, geo, user_agent) recordAudit пишет сам —
+    // CLAUDE.md п. 14 выполняется без отдельной работы.
+    await recordAudit(tx, {
+      tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
+      action: 'media.upload',
+      entity: 'media_assets',
+      entityId: row!.id,
+      after: { origin: input.origin, bytes: input.bytes, mime: input.mime, ownerUserId: ctx.actorId, stageCode },
+    })
     return row!.id
   })
 
@@ -198,12 +258,118 @@ export async function getMedia(ctx: Ctx, mediaId: string) {
  * Подписанная ссылка на чтение, 10 минут (docs/06 §6.2). SVG (D-011) отдаётся как вложение
  * с явным типом: файл уже очищен при обработке, а `attachment` не даёт открыть его как страницу
  * по прямой ссылке; в `<img src>` вложение показывается как обычно.
+ *
+ * Для файла-доказательства срок — **120 секунд** (решение В-19): журнал фиксирует не
+ * скачивание, а выдачу ссылки, и короткий срок нужен ровно затем, чтобы расхождение между
+ * «выдана» и «скачана» было минимальным. Больше от журнала честно требовать нельзя.
  */
-export async function signedReadUrl(key: string): Promise<string> {
+export const EVIDENCE_URL_TTL_SEC = 120
+export const DEFAULT_URL_TTL_SEC = 600
+
+export async function signedReadUrl(key: string, isEvidence = false): Promise<string> {
   const svg = /\.svg$/i.test(key)
   return getSignedUrl(s3(), new GetObjectCommand({
     Bucket: S3_BUCKET(),
     Key: key,
     ...(svg ? { ResponseContentType: 'image/svg+xml', ResponseContentDisposition: 'attachment' } : {}),
-  }), { expiresIn: 600 })
+  }), { expiresIn: isEvidence ? EVIDENCE_URL_TTL_SEC : DEFAULT_URL_TTL_SEC })
+}
+
+/**
+ * Журнал обращения к файлу-доказательству (решение В-19, `34` §9).
+ *
+ * Пишется **только** для `is_evidence = true`. Обложка курса и вложение урока скачиваются
+ * при каждом открытии урока: журналировать их — значит удвоить `audit_log` и утопить в шуме
+ * то, ради чего журнал заводится («кто снёс доказательства за прошлый квартал»). Файл же,
+ * на который опирается кадровое решение, обязан иметь след обращения — того же класса, что
+ * `GET /people/:id/notes`.
+ *
+ * Заодно обновляется `last_accessed_at`: политика хранения для неклассифицированного файла
+ * отсчитывается именно от него (`34` §7.3).
+ */
+export async function noteMediaAccess(ctx: Ctx, media: { id: string, origin: string, isEvidence: boolean }): Promise<void> {
+  await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    await tx.update(mediaAssets).set({ lastAccessedAt: new Date() }).where(eq(mediaAssets.id, media.id))
+    if (!media.isEvidence) return
+    await recordAudit(tx, {
+      tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
+      action: 'media.download',
+      entity: 'media_assets',
+      entityId: media.id,
+      after: { origin: media.origin, isEvidence: media.isEvidence },
+    })
+  })
+}
+
+/** Срок корзины (`34` §4, §7.2.3). Строкой `storage_retention_policies` станет в PR-36. */
+export const PURGE_AFTER_DAYS = 30
+
+/** Слово подтверждения удаления доказательства (`34` §6.1) — украинский интерфейс. */
+export const CONFIRM_DELETE_PHRASE = 'ВИДАЛИТИ'
+
+export type DeleteMediaResult
+  = | { ok: true, lifecycle: 'pending_delete', purgeAfter: Date }
+    | { ok: false, code: 'not_found' }
+    | { ok: false, code: 'file_not_deletable' | 'evidence_locked' | 'already_deleted', message: string }
+
+/**
+ * Мягкое удаление файла — `DELETE /media/:id`, **единственная** одиночная ручка удаления
+ * (решение В-17: `DELETE /storage/files/:id` из `34` §10 отменён как второе имя того же,
+ * массовое удаление — только заявкой с подсчётом доказательств).
+ *
+ * Объект в S3 **не трогается**: ставится `lifecycle='pending_delete'`, `deleted_at`,
+ * `deleted_by`, `delete_reason` и `purge_after = now() + 30 дней`, восстановление — в один
+ * клик. Физическое удаление выполняет только задача `storage.purge` (`34` §11, PR-36);
+ * до ответа владельца продукта срок корзины — предварительно 30 дней (`44` §8).
+ *
+ * Счётчик уменьшается **в момент мягкого удаления**, а не при purge (`34` §7.2.3): тенант
+ * платит за то, чем распоряжается, корзина не держит квоту заложником. Второй формулы
+ * квоты здесь нет — ось `storage_bytes` считает `tenantStorageBytes()`, как и при загрузке.
+ */
+export async function softDeleteMedia(ctx: Ctx, mediaId: string, input: { reason?: string, confirmPhrase?: string } = {}): Promise<DeleteMediaResult> {
+  const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<DeleteMediaResult> => {
+    const [row] = await tx.select().from(mediaAssets).where(eq(mediaAssets.id, mediaId))
+    if (!row) return { ok: false, code: 'not_found' } // чужой тенант — 404, не 403 (CLAUDE.md п. 15)
+    if (row.deletedAt) return { ok: false, code: 'already_deleted', message: 'Файл вже видалено' }
+
+    // Запрещено вовсе (`34` §7.2.1): сертификат — выданный документ, он не удаляется никогда.
+    if (row.origin === 'certificate') {
+      return { ok: false, code: 'file_not_deletable', message: 'Сертифікат видалити не можна' }
+    }
+    // Доказательство — только с причиной и словом «ВИДАЛИТИ» (`34` §6.1, §7.2.2). Поднять
+    // ограничение может только заявка на массовое удаление, у которой есть свой подсчёт.
+    if (row.isEvidence && (!input.reason?.trim() || input.confirmPhrase !== CONFIRM_DELETE_PHRASE)) {
+      return { ok: false, code: 'evidence_locked', message: `Це доказ проходження. Вкажіть причину та введіть «${CONFIRM_DELETE_PHRASE}»` }
+    }
+
+    const deletedAt = new Date()
+    const purgeAfter = new Date(deletedAt.getTime() + PURGE_AFTER_DAYS * 24 * 60 * 60 * 1000)
+    await tx.update(mediaAssets).set({
+      lifecycle: 'pending_delete',
+      deletedAt,
+      deletedBy: ctx.actorId,
+      deleteReason: input.reason?.trim() || null,
+      purgeAfter,
+      updatedAt: deletedAt,
+    }).where(eq(mediaAssets.id, mediaId))
+
+    // `34` §9: журнал удалений — ответ на вопрос «кто снёс доказательства за прошлый
+    // квартал», поэтому before — вся строка, после — что стало (В-17: запись обязательна).
+    await recordAudit(tx, {
+      tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
+      action: 'media.delete',
+      entity: 'media_assets',
+      entityId: mediaId,
+      before: row,
+      after: { lifecycle: 'pending_delete', deletedAt, deleteReason: input.reason?.trim() || null, purgeAfter, isEvidence: row.isEvidence },
+    })
+    return { ok: true, lifecycle: 'pending_delete', purgeAfter }
+  })
+
+  if (result.ok) {
+    await syncCounter(ctx.tenantId, 'storage_bytes', await tenantStorageBytes(ctx)).catch(() => null)
+  }
+  return result
 }

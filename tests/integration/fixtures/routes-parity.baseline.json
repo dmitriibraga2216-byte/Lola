@@ -4,6 +4,7 @@
   "DELETE /cities/:id",
   "DELETE /course-categories/:id",
   "DELETE /locations/:id",
+  "DELETE /media/:id",
   "DELETE /meetup-sessions/:id/register",
   "DELETE /notices/:id",
   "DELETE /org-units/:id",

@@ -136,7 +136,7 @@ describe('scoring_method, grader_hint и вложения к free', () => {
       answer: { placements: [{ itemId: 'pizza', groupId: 'hot' }, { itemId: 'soup', groupId: 'hot' }, { itemId: 'salad', groupId: 'cold' }, { itemId: 'ice', groupId: 'cold' }] },
       ...baseQ, points: 4,
     })).id
-    const [media] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${tenantId}, ${`t/${tenantId}/s12-${stamp}.png`}, 'plan.png', 'image', 'image/png', 10, 'ready', ${authorId}) returning id`
+    const [media] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id) values (${tenantId}, ${`t/${tenantId}/s12-${stamp}.png`}, 'plan.png', 'image', 'image/png', 10, 'ready', ${authorId}) returning id`
     mediaId = media!.id as string
     qMap = (await createQuestion(author(), {
       bankId, kind: 'answer_by_map', stem: stem('Де зона видачі?'),

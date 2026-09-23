@@ -20,7 +20,7 @@ async function addCategory() {
 async function addCover(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]
   if (!f) return
-  try { form.coverKey = await upload(f, f.name) } catch (err) { error.value = apiErrorOf(err).message }
+  try { form.coverKey = await upload(f, f.name, 'content_cover') } catch (err) { error.value = apiErrorOf(err).message }
 }
 async function save() {
   busy.value = true; error.value = ''

@@ -188,7 +188,7 @@ async function pickImage(e: Event) {
   if (!file) return
   busy.value = true
   try {
-    f.imageMediaId = await upload(file, file.name)
+    f.imageMediaId = await upload(file, file.name, 'lesson_attachment')
     await loadImage()
   }
   catch (err) {

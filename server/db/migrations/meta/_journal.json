@@ -435,6 +435,20 @@
       "when": 1790120623875,
       "tag": "0061_v2_billing_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790120683875,
+      "tag": "0062_v2_media_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1790120743875,
+      "tag": "0063_v2_media_origin",
+      "breakpoints": true
     }
   ]
 }

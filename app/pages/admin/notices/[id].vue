@@ -31,7 +31,7 @@ onMounted(async () => {
 async function addFile(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]
   if (!f) return
-  try { const mediaId = await upload(f, f.name); form.attachments.push({ mediaId, name: f.name, bytes: f.size }) } catch (err) { error.value = apiErrorOf(err).message }
+  try { const mediaId = await upload(f, f.name, 'lesson_attachment'); form.attachments.push({ mediaId, name: f.name, bytes: f.size }) } catch (err) { error.value = apiErrorOf(err).message }
 }
 async function save() {
   busy.value = true; error.value = ''

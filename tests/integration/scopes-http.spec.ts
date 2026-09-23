@@ -374,7 +374,7 @@ describe.skipIf(!BUILT)('скоупы по HTTP: employee не проходит 
       const state = await (await fetch(`${BASE}/api/v1/attempts/${att.attemptId}`, { headers: empHeaders })).json() as { data: unknown }
       expect(JSON.stringify(state)).not.toContain('Достатньо двох') // grader_hint ученику не отдаётся
       expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/answers/${question.id}`, { method: 'PUT', headers: empHeaders, body: JSON.stringify({ answer: { text: 'Скласти акт' } }) })).status).toBe(200)
-      const [media] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${t!.id}, ${`t/${t!.id}/http-${stamp}.png`}, 'photo.png', 'image', 'image/png', 10, 'ready', ${emp!.id}) returning id`
+      const [media] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id) values (${t!.id}, ${`t/${t!.id}/http-${stamp}.png`}, 'photo.png', 'image', 'image/png', 10, 'ready', ${emp!.id}) returning id`
       expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/answers/${question.id}/files`, { method: 'POST', headers: empHeaders, body: JSON.stringify({ mediaId: media!.id, name: 'photo.png', kind: 'photo', bytes: 10 }) })).status).toBe(200)
       expect((await fetch(`${BASE}/api/v1/attempts/${att.attemptId}/submit`, { method: 'POST', headers: empHeaders })).status).toBe(200)
       expect((await fetch(`${BASE}/api/v1/tests/${quiz.data.id}/attempt-requests`, { method: 'POST', headers: empHeaders, body: JSON.stringify({ reason: 'коротко' }) })).status).toBe(400)

@@ -293,14 +293,24 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| POST | `/media/upload-url` | `{filename, mime, bytes, resourceId?}` → presigned PUT, `mediaId`; отказ 400 `media.too_big \| media.mime_not_allowed \| media.resource_too_big` до передачи |
+| POST | `/media/upload-url` | `{filename, mime, bytes, origin, sourceEntity?, sourceId?, courseId?, enrollmentId?, resourceId?}` → presigned PUT, `mediaId`; **единственный** вход загрузки (`v2/44` В-17); отказ 400 `origin_required \| media.too_big \| media.mime_not_allowed \| media.resource_too_big \| media.storage_limit` до передачи |
 | POST | `/media/:id/complete` | подтверждение загрузки, запуск обработки |
-| GET | `/media/:id` | статус и подписанная ссылка на чтение (10 минут); оригинал SVG — только после санитизации (`ready`), до этого `?redirect=1` → 409 `not_ready` (D-011) |
-| DELETE | `/media/:id` | мягкое удаление |
+| GET | `/media/:id` | статус и подписанная ссылка на чтение: 10 минут обычному файлу, **120 секунд** доказательству (`v2/44` В-19); оригинал SVG — только после санитизации (`ready`), до этого `?redirect=1` → 409 `not_ready` (D-011) |
+| DELETE | `/media/:id` | мягкое удаление, скоуп `storage.delete`; тело `{reason?, confirmPhrase?}` → `{lifecycle:'pending_delete', purgeAfter}`; 403 `file_not_deletable` (сертификат), 409 `evidence_locked` (доказательство — нужны причина и слово «ВИДАЛИТИ»), 409 `already_deleted` |
 
 Ограничения (`11` Г-11.4): изображение ≤ 10 МБ, документ ≤ 50 МБ, аудио ≤ 100 МБ,
 видео ≤ 500 МБ, на ресурс суммарно ≤ 1 ГБ; mime — allowlist; ключ — uuid,
 оригинальное имя хранится в БД. Файл чужого тенанта — **404, не 403** (`25` §10).
+
+Происхождение (`origin`) — одно из пятнадцати значений `media_origin` (`02` «Перечисления»,
+`v2/40` §4.2) и задаётся **при выдаче presigned URL**, а не вычисляется потом (`v2/34` §7.1):
+второго пути загрузки нет, иначе копятся неклассифицированные файлы. Удаление всегда мягкое:
+строка получает `lifecycle='pending_delete'`, `deleted_at`, `deleted_by`, `delete_reason` и
+`purge_after = now() + 30 днів`, **объект в S3 остаётся** до задачи `storage.purge`
+(`v2/34` §11); квота освобождается сразу. Загрузка пишет в `audit_log` событие `media.upload`,
+удаление — `media.delete`, выдача ссылки на доказательство — `media.download`.
+Массовое удаление одиночной ручкой не делается: только заявкой `POST /storage/deletions`
+с подсчётом доказательств и подтверждением фразой (`v2/34` §10).
 
 ## 4.16 Настройки
 

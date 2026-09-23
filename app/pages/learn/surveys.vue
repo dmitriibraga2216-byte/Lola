@@ -45,7 +45,7 @@ async function attachFile(e: Event) {
   error.value = ''
   try {
     const blob = await compressImage(file)
-    const mediaId = await upload(blob, file.name)
+    const mediaId = await upload(blob, file.name, 'workshop_submission')
     fileIds.value.push(mediaId)
     fileNames.value.push(file.name)
   }

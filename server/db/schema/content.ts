@@ -5,6 +5,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { lifecycleStages } from './lifecycle'
+import { enrollments } from './learning'
 import { users } from './people'
 
 /**
@@ -243,11 +244,34 @@ export const mediaAssets = pgTable('media_assets', {
   durationSec: integer('duration_sec'),
   posterKey: text('poster_key'),
   variants: jsonb('variants').notNull().default('{}'), // {"320": key, "768": key, "1600": key}
-  checksum: text('checksum'),
-  status: text('status').notNull().default('uploading'), // uploading | processing | ready | failed
+  checksum256: text('checksum_sha256'), // sha256, дедупликация в тенанте (docs/11 §7 п. 7); переименована из `checksum` (docs/v2/44 В-4)
+  status: text('status').notNull().default('uploading'), // uploading | processing | ready | failed — техническая готовность объекта
   error: text('error'),
-  uploadedBy: uuid('uploaded_by').references(() => users.id),
+  // Чей файл по смыслу (docs/v2/34 §7.1). Кто загрузил — событие `media.upload` в audit_log
+  // (В-4): у домиграционных файлов это одно лицо, у резюме кандидата — разные.
+  ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
+  // Классификация файла (docs/v2/34 §3.2, §7.1): задаётся при выдаче presigned URL
+  origin: text('origin').notNull().default('other'), // shared/enums.ts MEDIA_ORIGINS, 15 значений docs/v2/40 §4.2
+  courseId: uuid('course_id').references(() => courses.id, { onDelete: 'set null' }),
+  stageCode: text('stage_code'), // ключ разбивки хранилища = код этапа (docs/v2/44 В-10), снимок на момент создания
+  enrollmentId: uuid('enrollment_id').references(() => enrollments.id, { onDelete: 'set null' }),
+  sourceEntity: text('source_entity'), // мягкая полиморфная ссылка (В-11), без FK
+  sourceId: uuid('source_id'),
+  // Положение в хранилище — ось, отдельная от `status` (docs/v2/34 §3.1, §4)
+  lifecycle: text('lifecycle').notNull().default('active'), // active | orphaned | pending_delete | purged
+  isEvidence: boolean('is_evidence').notNull().default(false),
+  retentionUntil: timestamp('retention_until', { withTimezone: true }),
+  orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
+  purgeAfter: timestamp('purge_after', { withTimezone: true }),
+  lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  deletedBy: uuid('deleted_by').references(() => users.id, { onDelete: 'set null' }),
+  deleteReason: text('delete_reason'),
 }, t => [
   unique().on(t.tenantId, t.key),
+  index('idx_media_assets_tenant').on(t.tenantId, t.lifecycle, t.origin),
+  index('idx_media_assets_tenant_created').on(t.tenantId, t.createdAt.desc()),
+  index('idx_media_assets_tenant_owner').on(t.tenantId, t.ownerUserId, t.createdAt.desc()),
+  index('idx_media_assets_tenant_course').on(t.tenantId, t.courseId),
+  index('idx_media_assets_tenant_stage').on(t.tenantId, t.stageCode),
 ])

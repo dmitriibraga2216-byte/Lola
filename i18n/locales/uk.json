@@ -149,9 +149,23 @@
       "learning": "Навчання",
       "content": "Контент",
       "people": "Люди",
+      "development": "Розвиток",
       "reports": "Звіти",
       "settings": "Налаштування",
-      "info": "Інформація"
+      "info": "Інформація",
+      "knowledge": "База знань"
+    },
+    "group": {
+      "assignments": "Призначення",
+      "review": "Перевірка",
+      "catalogAccess": "Доступ до каталогу",
+      "assessment": "Оцінювання",
+      "devProfiles": "Профілі та плани",
+      "devGoals": "Цілі та заявки",
+      "coreReports": "Основні звіти",
+      "moduleReports": "Звіти по модулях",
+      "notifications": "Сповіщення та інтеграції",
+      "platform": "Платформа"
     },
     "menu": {
       "learner": "Мій кабінет",

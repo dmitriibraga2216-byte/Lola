@@ -266,9 +266,17 @@ describe('D-054 — ліміти tenant_limits: диск, SMS, попередж�
     await admin`delete from notifications where tenant_id = ${tenantId} and code in ('limit_warning', 'limit_exceeded') and created_at > now() - interval '1 minute'`
 
     await collectUsage(tenantId)
-    const exceeded = await admin`select payload from notifications where user_id = ${adminId} and code = 'limit_exceeded' order by created_at desc limit 1`
+    // PR-09: сбор проходит по всем одиннадцати осям сразу, поэтому уведомление ищется по оси,
+    // а не «последнее». Рядом с человекочитаемым `resource` в payload появилась машинная ось
+    // (докс/v2/44 В-16), а сама подпись переехала из строки в коде в словарь
+    // (`billing.axis.users_active`): одиннадцать ключей подписей завёл PR-08, и риск, которым
+    // В-16 обосновывал отсрочку, к этому моменту уже снят (docs/28 §28.12).
+    const exceeded = await admin`
+      select payload from notifications
+      where user_id = ${adminId} and code = 'limit_exceeded' and payload->>'axis' = 'users_active'
+      order by created_at desc limit 1`
     expect(exceeded.length).toBe(1)
-    expect(exceeded[0]!.payload).toMatchObject({ resource: 'активних людей' })
+    expect(exceeded[0]!.payload).toMatchObject({ axis: 'users_active', resource: 'Співробітників' })
     const auditRow = await admin`select 1 from platform_audit where subject_tenant_id = ${tenantId} and action = 'tenant.limit_exceeded' order by created_at desc limit 1`
     expect(auditRow.length).toBe(1)
 

@@ -91,6 +91,15 @@ alter table tenant_usage
 create index tenant_usage_recent_idx on tenant_usage (tenant_id, collected_at desc);
 ```
 
+> [исправлено фазой 3, `44` В-5, реализовано PR-09 — миграция `0061_v2_billing_usage.sql`]
+> Ранее: `plan_id uuid references plans(id)`. Колонки `id` у тарифа нет (PK по `code`), поэтому
+> колонка называется `plan_code text references plans(code)` — то же исправление, что уже
+> внесено в §3.4 для `plan_prices` и в §3.5 для `tenant_payments`. Индекс
+> `tenant_usage_recent_idx` не создаётся: полный эквивалент `(tenant_id, collected_at desc)`
+> существует с базовой схемы под именем drizzle. Разбивку `storage_by_category` до появления
+> `media_assets.stage_code` (PR-12) заполняет единственный определённый ключ `other`
+> (`docs/28` §28.12) — выдуманных категорий не заводится.
+
 `axes` — расширение без миграции: новая ось живёт здесь и получает колонку, только когда признана тарифной.
 `storage_by_category` — разбивка по 10 категориям треков из `05-tracks.md` плюс `other` (снято с `/storage`
 эталона).
@@ -176,6 +185,15 @@ create table limit_notices (
   raised_at timestamptz not null default now(), dismissed_until timestamptz);
 create unique index limit_notices_open_uidx on limit_notices (tenant_id, axis, level) where resolved_at is null;
 ```
+
+> [дополнено фазой 3, реализовано PR-09] `usage_events` получает **`request_context jsonb`** —
+> правило «все журналы пишут технический контекст одинаково» (`CLAUDE.md` п. 14) сильнее
+> краткости DDL. Перечень `ref_kind` остаётся шестизначным: журнал ведут только измеряемые
+> операции, а моментальные оси (`users_active`, `candidates_active`, `integrations_active`)
+> строки расхода не создают — их счётчик сходится **пересчётом факта** (§7.1, §7.5), и именно
+> это проверяет сквозная проверка 15 (`42` §5). Рядом с частичным уникальным индексом
+> `limit_notices` заведён полный `(tenant_id, raised_at desc)` — без него частичный не
+> покрывает список баннера (контрактный тест `v2-contract-02`).
 
 ### 3.6 RLS
 
@@ -376,6 +394,12 @@ downgrade, ошибка «Підтвердьте, що ознайомились 
    окончания, а не от даты оплаты: иначе пропуск платежа стал бы бесплатной отсрочкой.
 
 ### 7.9 Баннер: порог, повтор, закрытие
+
+> [уточнено фазой 3, реализовано PR-09] Таблицы `platform_settings` в схеме нет ни одной
+> строки: параметры платформы (`limit_warn_pct`, `grace_days`, `annual_discount_pct`) пока
+> живут константами. Порог 80 % — `LIMIT_WARN_PCT` в `server/services/usageCounters.ts`, одно
+> место на баннер, уведомление и экран потребления. Заводить таблицу ради одного числа PR-09
+> не стал — решение и условие переноса в `docs/28` §28.12.
 
 1. Порог — 80 % эффективного лимита (`platform_settings.limit_warn_pct`); в баннер попадают только жёсткие оси
    плюс `users_active` и `candidates_active`; при нескольких сработавших осях — одна полоса с наиболее тяжёлым

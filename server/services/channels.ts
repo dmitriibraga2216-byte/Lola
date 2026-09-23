@@ -2,15 +2,19 @@ import { eq, sql } from 'drizzle-orm'
 import { smsUsage, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { getSecret, markSecretResult, SECRET_KEYS } from './secrets'
-import { effectiveLimits } from './tenantLimits'
+import { meterOrDegrade, recordUsage, type AxisDegradation } from './usageCounters'
 
 /**
  * SMS и e-mail (docs/06 §6.4): провайдер по API из секретов тенанта.
  * SMS — только OTP и критичное; учёт отправок на тенанта с лимитом тарифа.
  * Без настроенного провайдера — skipped с понятной причиной (docs/09 §9.3).
+ *
+ * Исчерпание оси `sms_out` (docs/v2/35 §7.1) — не ошибка доставки, а **деградация канала**:
+ * в ответе появляется `degradation: 'channel_fallback'`, и вызывающий уходит в Telegram и
+ * in-app (`23` §6). Уведомление не теряется никогда (правило `25` §10).
  */
 
-export type ChannelResult = { ok: true } | { ok: false, skipped: boolean, error: string }
+export type ChannelResult = { ok: true } | { ok: false, skipped: boolean, error: string, degradation?: AxisDegradation | null }
 
 export async function sendViaChannel(tenantId: string, channel: 'sms' | 'email' | 'push', msg: { userId: string, text: string, subject?: string, html?: string }): Promise<ChannelResult> {
   if (channel === 'push') {
@@ -38,16 +42,20 @@ export async function sendSms(tenantId: string, phone: string, text: string): Pr
   const apiKey = await getSecret(tenantId, 'sms', SECRET_KEYS.sms.API_KEY)
   if (!provider || !apiKey) return { ok: false, skipped: true, error: 'sms not configured' }
 
-  // Лимит SMS в месяц: переопределение тенанта (`tenant_limits.smsPerMonth`), иначе — тариф (docs/25 §10, докс/33 D-054/D-055)
+  // Ось `sms_out` (docs/v2/35 §7.1): счётчик периода, проверка в момент операции. Решение
+  // «пройдёт или нет» принимает общая `meterOrDegrade()` поверх `checkLimit()` из PR-08 —
+  // второй формулы квоты здесь нет. При исчерпании канал SMS отключается, доставка идёт
+  // Telegram и in-app (`23` §6): уведомление не теряется, обучение не останавливается.
+  const gate = await meterOrDegrade(tenantId, 'sms_out')
+  if (!gate.allowed) return { ok: false, skipped: true, error: `sms limit ${gate.state.limit}/period`, degradation: gate.degradation }
+  // Прежний помесячный счётчик `sms_usage` остаётся: он показывает календарный месяц на
+  // экране «Статистика використання», тогда как ось считает биллинговый период (docs/28).
   const month = new Date().toISOString().slice(0, 7)
-  const lim = (await effectiveLimits(tenantId)).smsPerMonth
-  const used = await withTenant(tenantId, null, async (tx) => {
-    const [r] = await tx.insert(smsUsage).values({ tenantId, month, count: 1 })
+  await withTenant(tenantId, null, async (tx) => {
+    await tx.insert(smsUsage).values({ tenantId, month, count: 1 })
       .onConflictDoUpdate({ target: [smsUsage.tenantId, smsUsage.month], set: { count: sql`${smsUsage.count} + 1` } })
-      .returning({ count: smsUsage.count })
-    return r!.count
   })
-  if (lim != null && used > lim) return { ok: false, skipped: true, error: `sms limit ${lim}/month` }
+  await recordUsage(tenantId, 'sms_out', 1, { refKind: 'sms', meta: { month } }).catch(() => null)
 
   try {
     if (provider === 'turbosms') {

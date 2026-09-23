@@ -1,11 +1,12 @@
 import { desc, eq, sql } from 'drizzle-orm'
-import { platformAudit, plans, tenantUsage, tenants } from '../db/schema'
+import { plans, tenantUsage, tenants } from '../db/schema'
 import { db } from '../db/client'
 import { withTenant } from '../utils/withTenant'
-import { GIB, effectiveLimits } from './tenantLimits'
+import { effectiveLimits } from './tenantLimits'
 import type { LimitAxis } from '../../shared/enums'
-import { enqueueNotification } from './notifications'
 import { EMPLOYEES_ONLY } from './repo/people'
+import type { AxisUsage } from './usageCounters'
+import type { NoticeRow } from './limitNotices'
 
 /**
  * Потребление тенанта (docs/24 §4.4.1, экран «Статистика» / мокап TenantStats).
@@ -28,10 +29,31 @@ export interface UsageSnapshot {
   coursesCount: number
   assignmentsCount: number
   attemptsMonth: number
+  /** Восемь колонок среза пакета (docs/v2/35 §3.3), PR-09. */
+  planCode: string | null
+  candidatesActive: number
+  storageByCategory: Record<string, number>
+  aiOps: Record<string, number>
+  smsOut: number
+  telegramOut: number
+  integrationsActive: number
+  axes: Record<string, number>
 }
 
-/** Один сбор: считает всё внутри тенанта и пишет строку. Возвращает снимок. */
+/**
+ * Один сбор: считает всё внутри тенанта и пишет строку. Возвращает снимок.
+ *
+ * Срез — для графиков и панели оператора (docs/v2/35 §7.5); числа осей берутся из тех же
+ * счётчиков реального времени, по которым операция и блокируется, — двух подсчётов у одной
+ * оси нет. Моментальные оси перед записью приводятся к факту (`syncLiveAxes`), поэтому
+ * `usage_counters.used` сходится с прямым пересчётом (сквозная проверка 15 `42` §5).
+ */
 export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
+  const { syncLiveAxes, usageByAxis } = await import('./usageCounters')
+  await syncLiveAxes(tenantId)
+  const axes = await usageByAxis(tenantId)
+  const axisUsed = (axis: LimitAxis) => axes.find(a => a.axis === axis)?.used ?? 0
+  const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId))
   return withTenant(tenantId, null, async (tx) => {
     const [m] = await tx.execute(sql`
       select
@@ -44,54 +66,45 @@ export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
         (select count(*)::int from assignments where status = 'active') as assignments_count,
         (select count(*)::int from attempts where started_at >= date_trunc('month', now())) as attempts_month
     `) as unknown as Record<string, number | string>[]
+    // Разбивка хранилища по категориям треков плюс `other` (docs/v2/35 §3.3, экран §5.4).
+    // Колонка категории у файла (`media_assets.stage_code`) появляется в PR-12 — до неё
+    // весь объём честно ложится в `other`, единственное значение разбивки, которое уже
+    // определено (docs/28 §28.12). Выдуманной категории здесь не появляется.
+    const cats = await tx.execute(sql`
+      select 'other' as category, coalesce(sum(bytes), 0)::bigint as bytes
+        from media_assets where deleted_at is null
+    `) as unknown as { category: string, bytes: string | number }[]
+    const storageByCategory: Record<string, number> = {}
+    for (const c of cats) storageByCategory[c.category] = Number(c.bytes)
     const values = {
       tenantId,
       activeUsers: Number(m!.active_users), blockedUsers: Number(m!.blocked_users), archivedUsers: Number(m!.archived_users),
       storageBytes: Number(m!.storage_bytes), smsMonth: Number(m!.sms_month),
       coursesCount: Number(m!.courses_count), assignmentsCount: Number(m!.assignments_count), attemptsMonth: Number(m!.attempts_month),
+      planCode: t?.plan ?? null,
+      candidatesActive: axisUsed('candidates_active'),
+      storageByCategory,
+      aiOps: {
+        ai_generate_ops: axisUsed('ai_generate_ops'),
+        ai_review_ops: axisUsed('ai_review_ops'),
+        ai_interview_ops: axisUsed('ai_interview_ops'),
+      },
+      smsOut: axisUsed('sms_out'),
+      telegramOut: axisUsed('telegram_out'),
+      integrationsActive: axisUsed('integrations_active'),
+      // Нетарифные оси без своей колонки (docs/v2/35 §3.3): пока это только telegram_out
+      axes: { telegram_out: axisUsed('telegram_out') },
     }
     const [row] = await tx.insert(tenantUsage).values(values).returning({ collectedAt: tenantUsage.collectedAt })
     return { collectedAt: row!.collectedAt.toISOString(), ...values, tenantId: undefined } as unknown as UsageSnapshot
   }).then(async (snap) => {
-    await checkLimitsAndNotify(tenantId, snap)
+    // Предупреждения и деградация — одним механизмом на все одиннадцать осей (docs/v2/35 §7.9,
+    // решение В-16). Прежний `checkLimitsAndNotify` на три оси с ключом дедупликации по
+    // локализуемой подписи заменён на `limitScan` (docs/28 §28.12).
+    const { limitScan } = await import('./limitNotices')
+    await limitScan(tenantId).catch(() => null)
     return snap
   })
-}
-
-/**
- * `limit_warning` (80% ліміту) і `limit_exceeded` (докс/33 D-054, docs/24 §8, docs/25 §10):
- * адміністраторам тенанта — через звичайні `notifications`, оператору платформи — записом
- * `platform_audit` (він і так дивиться журнал тенанта на панелі, окремої розсилки операторам
- * ще нема). Дедуп на добу: `usage.collect` і так раз на добу, повторний виклик у той самий день
- * (ручний запуск, тести) не спамить.
- */
-async function checkLimitsAndNotify(tenantId: string, snap: UsageSnapshot): Promise<void> {
-  const limits = await effectiveLimits(tenantId)
-  // Лимит каждой оси — из общей функции и **в единице оси** (docs/v2/35 §7.1, docs/v2/44 В-5):
-  // хранилище в байтах, остальные счётчиками. Ось как параметр уведомления — PR-09 (П-25.2).
-  const checks: { resource: 'users' | 'storage' | 'sms', used: number, limit: number | null, label: string }[] = [
-    { resource: 'users', used: snap.activeUsers, limit: limits.axes.users_active, label: 'активних людей' },
-    { resource: 'storage', used: snap.storageBytes, limit: limits.axes.storage_bytes, label: 'дискового простору' },
-    { resource: 'sms', used: snap.smsMonth, limit: limits.axes.sms_out, label: 'SMS за місяць' },
-  ]
-  const day = snap.collectedAt.slice(0, 10)
-  for (const c of checks) {
-    if (c.limit == null || c.limit <= 0) continue
-    const ratio = c.used / c.limit
-    if (ratio < 0.8) continue
-    const code = ratio >= 1 ? 'limit_exceeded' : 'limit_warning'
-    // Диск — у ГБ для читабельності листа, решта — цілими лічильниками
-    const toDisplay = (n: number) => c.resource === 'storage' ? `${(n / GIB).toFixed(1)} ГБ` : String(n)
-    const payload = { resource: c.label, used: toDisplay(c.used), limit: toDisplay(c.limit), pct: Math.round(ratio * 100) }
-    await withTenant(tenantId, null, async (tx) => {
-      const admins = await tx.execute(sql`
-        select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
-        where r.code = 'admin' and (ur.valid_until is null or ur.valid_until > now()) and a.status = 'active' and not a.is_blocked ${EMPLOYEES_ONLY('a')}
-      `) as unknown as { user_id: string }[]
-      for (const a of admins) await enqueueNotification(tx, { tenantId, userId: a.user_id, code, payload, dedupKey: `${code}:${c.resource}:${tenantId}:${day}:${a.user_id}` })
-    })
-    await db.insert(platformAudit).values({ adminId: null, adminEmail: 'system', action: `tenant.${code}`, subjectTenantId: tenantId, entity: 'tenant_limits', entityId: tenantId, after: payload })
-  }
 }
 
 /** Ежедневный проход по всем активным тенантам (ручной запуск, тесты). */
@@ -137,6 +150,10 @@ export interface UsageView {
   limits: { users: number | null, storageGb: number | null, smsPerMonth: number | null }
   /** Эффективный лимит по каждой из одиннадцати осей, в единицах оси (docs/v2/35 §7.1, §7.3). */
   axes: Record<LimitAxis, number | null>
+  /** Потребление по осям: факт, лимит, процент, источник и что перестаёт работать (PR-09). */
+  consumption: AxisUsage[]
+  /** Открытые предупреждения для баннера (docs/v2/35 §5.5, §7.9). */
+  notices: NoticeRow[]
   history: { collectedAt: string, activeUsers: number, storageBytes: number }[]
 }
 
@@ -151,17 +168,29 @@ export async function usageView(ctx: { tenantId: string, actorId: string }): Pro
   const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, ctx.tenantId))
   const [p] = t ? await db.select().from(plans).where(eq(plans.code, t.plan)) : []
   const limits = await effectiveLimits(ctx.tenantId)
+  // Потребление и предупреждения — из тех же счётчиков, по которым операция блокируется
+  // (docs/v2/35 §7.3: одно число в баннере, в проверке и в счёте).
+  const { usageByAxis } = await import('./usageCounters')
+  const { activeNotices } = await import('./limitNotices')
+  const consumption = await usageByAxis(ctx.tenantId)
+  const notices = await activeNotices(ctx.tenantId)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select().from(tenantUsage).orderBy(desc(tenantUsage.collectedAt)).limit(30)
     const toSnap = (r: typeof tenantUsage.$inferSelect): UsageSnapshot => ({
       collectedAt: r.collectedAt.toISOString(), activeUsers: r.activeUsers, blockedUsers: r.blockedUsers, archivedUsers: r.archivedUsers,
       storageBytes: r.storageBytes, smsMonth: r.smsMonth, coursesCount: r.coursesCount, assignmentsCount: r.assignmentsCount, attemptsMonth: r.attemptsMonth,
+      planCode: r.planCode, candidatesActive: r.candidatesActive,
+      storageByCategory: r.storageByCategory as Record<string, number>, aiOps: r.aiOps as Record<string, number>,
+      smsOut: r.smsOut, telegramOut: r.telegramOut, integrationsActive: r.integrationsActive,
+      axes: r.axes as Record<string, number>,
     })
     return {
       last: rows[0] ? toSnap(rows[0]) : null,
       plan: p ? { code: p.code, name: p.name } : t ? { code: t.plan, name: t.plan } : null,
       limits: { users: limits.users, storageGb: limits.storageGb, smsPerMonth: limits.smsPerMonth },
       axes: limits.axes,
+      consumption,
+      notices,
       history: rows.map(r => ({ collectedAt: r.collectedAt.toISOString(), activeUsers: r.activeUsers, storageBytes: r.storageBytes })).reverse(),
     }
   })

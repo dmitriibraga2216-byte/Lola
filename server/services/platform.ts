@@ -266,6 +266,13 @@ export async function checkPlanLimit(tenantId: string, what: 'users' | 'candidat
     ? await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}`) as unknown as { n: number }[]
     : await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status <> 'archived' ${CANDIDATES_ONLY('')}`) as unknown as { n: number }[]
   const current = rows[0]?.n ?? 0
-  const check = await checkLimit(tenantId, what === 'users' ? 'users_active' : 'candidates_active', current)
+  const axis = what === 'users' ? 'users_active' : 'candidates_active'
+  const check = await checkLimit(tenantId, axis, current)
+  // Счётчик пополняется в той же точке, где ось проверена (docs/v2/45 PR-09): значение
+  // `usage_counters.used` обязано совпадать с прямым пересчётом по определению оси
+  // (сквозная проверка 15 `42` §5). Второго подсчёта здесь не появляется — в счётчик
+  // кладётся ровно то число, по которому только что принято решение.
+  const { syncCounter } = await import('./usageCounters')
+  await syncCounter(tenantId, axis, current).catch(() => null)
   return { ok: check.ok, limit: check.limit, current }
 }

@@ -228,6 +228,23 @@ export const OFFBOARDING_REASONS = [
 ] as const
 export type OffboardingReason = typeof OFFBOARDING_REASONS[number]
 
+/**
+ * Вид операции, породившей строку журнала расхода `usage_events.ref_kind`
+ * (docs/v2/35-billing-limits.md §3.5). Шесть измеряемых операций — и ни одной сверх:
+ * моментальные оси (`users_active`, `candidates_active`, `integrations_active`) расхода не
+ * порождают, их счётчик сходится пересчётом факта (§7.1, §7.5), а не суммой журнала.
+ */
+export const USAGE_REF_KINDS = ['ai_generation', 'ai_review', 'ai_interview', 'sms', 'upload', 'export'] as const
+export type UsageRefKind = typeof USAGE_REF_KINDS[number]
+
+/**
+ * Уровень предупреждения по оси (`limit_notices.level`, docs/v2/35 §3.5, §4 «Баннер», §7.9):
+ * `warn` — достигнуто 80 % эффективного лимита, `exceeded` — 100 %. Третьего уровня нет:
+ * ниже 80 % запись закрывается (`resolved_at`), а не понижается.
+ */
+export const LIMIT_NOTICE_LEVELS = ['warn', 'exceeded'] as const
+export type LimitNoticeLevel = typeof LIMIT_NOTICE_LEVELS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -255,4 +272,6 @@ export const ENUMS: Record<string, readonly string[]> = {
   offboarding_state: OFFBOARDING_STATES,
   offboarding_reason: OFFBOARDING_REASONS,
   limit_axis: LIMIT_AXES,
+  usage_ref_kind: USAGE_REF_KINDS,
+  limit_notice_level: LIMIT_NOTICE_LEVELS,
 }

@@ -70,7 +70,16 @@ export async function sendTelegram(tenantId: string | null, chatId: bigint, text
       signal: AbortSignal.timeout(10_000),
     })
     const json = await res.json() as { ok: boolean, error_code?: number, description?: string }
-    if (json.ok) return { ok: true }
+    if (json.ok) {
+      // Ось `telegram_out` (docs/v2/35 §7.1) — мягкая: канал бесплатный, лимита у неё нет ни
+      // в тарифе, ни у тенанта, и доставка не останавливается никогда. Счётчик ведётся только
+      // ради наблюдения: всплеск — признак ошибки в правилах рассылки.
+      if (tenantId) {
+        const { recordUsage } = await import('./usageCounters')
+        await recordUsage(tenantId, 'telegram_out', 1).catch(() => null)
+      }
+      return { ok: true }
+    }
     if (json.error_code === 403) return { ok: false, blocked: true, error: json.description }
     if (json.error_code === 400 && /chat not found/i.test(json.description ?? '')) return { ok: false, blocked: true, error: json.description } // §7: сброс привязки
     if (json.error_code === 429) return { ok: false, error: `rate_limited retry_after=${(json as { parameters?: { retry_after?: number } }).parameters?.retry_after ?? 5}` }

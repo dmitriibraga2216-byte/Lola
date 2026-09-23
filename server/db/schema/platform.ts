@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigint, bigserial, boolean, char, customType, date, index, integer, jsonb, pgTable, smallint,
-  text, timestamp, unique, uuid,
+  bigint, bigserial, boolean, char, customType, date, index, integer, jsonb, pgTable, primaryKey,
+  smallint, text, timestamp, unique, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
@@ -114,6 +114,72 @@ export const tenantAddons = pgTable('tenant_addons', {
   createdBy: uuid('created_by'),
 }, t => [
   index().on(t.tenantId, t.addonCode, t.validUntil),
+])
+
+/**
+ * Счётчик потребления за биллинговый период (docs/v2/35 §3.5, §7.5). Реальное время: строка
+ * пополняется в той же точке, где ось проверяется на лимит, — второй формулы квоты нет
+ * (docs/v2/44 В-5; лимит считает только `effectiveLimits()` из `tenantLimits.ts`).
+ *
+ * `limitSnapshot` — снимок эффективного лимита на момент **открытия** периода (§7.3): смена
+ * тарифа в середине месяца не переписывает задним числом уже потраченное; `null` = «без
+ * обмежень». Моментальные оси (люди, кандидаты, хранилище, интеграции) держат в `used`
+ * текущий факт и сходятся пересчётом, накопительные (ИИ, SMS, Telegram, выгрузки) — сумму
+ * расхода за период.
+ */
+export const usageCounters = pgTable('usage_counters', {
+  tenantId: tenantId(),
+  axis: text('axis').notNull(), // LimitAxis (docs/v2/35 §7.1)
+  periodStart: date('period_start').notNull(),
+  periodEnd: date('period_end').notNull(),
+  used: bigint('used', { mode: 'number' }).notNull().default(0),
+  limitSnapshot: bigint('limit_snapshot', { mode: 'number' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.tenantId, t.axis, t.periodStart] }),
+  index('usage_counters_axis_idx').on(t.tenantId, t.axis, t.periodEnd.desc()),
+])
+
+/**
+ * Журнал расхода (docs/v2/35 §3.5, §9 «Журнал ШІ-операцій»; хранение 400 дней, задача
+ * `usage.prune`). Пишется только измеряемыми операциями — шесть `ref_kind` документа;
+ * моментальные оси строки расхода не создают, их счётчик сходится пересчётом (§7.1, §7.5).
+ * `request_context` — сверх §3.5, по правилу CLAUDE.md п. 14 «все журналы пишут одинаково».
+ */
+export const usageEvents = pgTable('usage_events', {
+  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+  tenantId: tenantId(),
+  axis: text('axis').notNull(),
+  delta: bigint('delta', { mode: 'number' }).notNull(),
+  refKind: text('ref_kind').notNull(), // ai_generation | ai_review | ai_interview | sms | upload | export
+  refId: uuid('ref_id'),
+  actorUserId: uuid('actor_user_id'),
+  meta: jsonb('meta').notNull().default(sql`'{}'::jsonb`),
+  requestContext: jsonb('request_context'), // CLAUDE.md п. 14
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  index('usage_events_axis_idx').on(t.tenantId, t.axis, t.occurredAt.desc()),
+])
+
+/**
+ * Открытое предупреждение по оси (docs/v2/35 §3.5, §7.9): состояние баннера, а не журнал.
+ * Частичный уникальный индекс держит инвариант «одно открытое предупреждение на ось и
+ * уровень»; `resolvedAt` закрывает запись, когда потребление вернулось ниже порога.
+ */
+export const limitNotices = pgTable('limit_notices', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: tenantId(),
+  axis: text('axis').notNull(),
+  level: text('level').notNull(), // warn | exceeded
+  valueAtRaise: bigint('value_at_raise', { mode: 'number' }).notNull(),
+  limitAtRaise: bigint('limit_at_raise', { mode: 'number' }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  dismissedBy: uuid('dismissed_by'),
+  dismissedUntil: timestamp('dismissed_until', { withTimezone: true }),
+  raisedAt: timestamp('raised_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('limit_notices_open_uidx').on(t.tenantId, t.axis, t.level).where(sql`resolved_at is null`),
+  index().on(t.tenantId, t.raisedAt.desc()),
 ])
 
 /**

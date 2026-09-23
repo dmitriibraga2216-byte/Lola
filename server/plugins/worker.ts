@@ -72,6 +72,13 @@ export default defineNitroPlugin(async () => {
       const n = await collectUsageDue()
       if (n) console.log(`[usage.collect] собрано: ${n}`)
     })
+    // docs/v2/35 §11: ежечасно поднимает и гасит limit_notices по всем одиннадцати осям —
+    // в том числе гасит те, где место освободилось и операциями оси никто не трогает
+    await work('billing.limit_scan', async () => {
+      const { limitScanAll } = await import('../services/limitNotices')
+      const n = await limitScanAll()
+      if (n) console.log(`[billing.limit_scan] поднято предупреждений: ${n}`)
+    })
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

@@ -1,6 +1,8 @@
-import { bigint, boolean, index, integer, numeric, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import { bigint, boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
+import { plans } from './platform'
 
 /**
  * Настройки простору (docs/24): шкалы, переводы, потребление. Сами настройки и модули —
@@ -46,19 +48,35 @@ export const translations = pgTable('translations', {
   unique().on(t.tenantId, t.locale, t.key),
 ])
 
-/** Потребление тенанта (docs/24 §4.4.1, docs/30): собирается раз в сутки задачей `usage.collect`, строка на сбор. */
+/**
+ * Потребление тенанта (docs/24 §4.4.1, docs/v2/35 §3.3): суточный срез, строка на сбор задачей
+ * `usage.collect`. Срез — для графиков и панели оператора; жёсткие лимиты проверяются в момент
+ * операции по счётчику реального времени (`usage_counters`, docs/v2/35 §7.5), а не по нему.
+ *
+ * Восемь колонок пакета (PR-09): `plan_code` (а не `plan_id` — у `plans` нет колонки `id`,
+ * решение docs/v2/44 В-5), `candidates_active`, `storage_by_category`, `ai_ops`, `sms_out`,
+ * `telegram_out`, `integrations_active` и `axes` — расширение без миграции для нетарифной оси.
+ */
 export const tenantUsage = pgTable('tenant_usage', {
   ...baseColumns,
   tenantId: tenantId(),
   collectedAt: timestamp('collected_at', { withTimezone: true }).notNull().defaultNow(),
-  activeUsers: integer('active_users').notNull().default(0), // лимит считается по ним
+  activeUsers: integer('active_users').notNull().default(0), // ось users_active: сотрудники, kind = employee
   blockedUsers: integer('blocked_users').notNull().default(0),
   archivedUsers: integer('archived_users').notNull().default(0),
   storageBytes: bigint('storage_bytes', { mode: 'number' }).notNull().default(0),
-  smsMonth: integer('sms_month').notNull().default(0), // отправлено SMS с начала месяца
+  smsMonth: integer('sms_month').notNull().default(0), // отправлено SMS с начала календарного месяца (docs/24 §4.4.1)
   coursesCount: integer('courses_count').notNull().default(0),
   assignmentsCount: integer('assignments_count').notNull().default(0),
   attemptsMonth: integer('attempts_month').notNull().default(0),
+  planCode: text('plan_code').references(() => plans.code, { onDelete: 'set null', onUpdate: 'cascade' }),
+  candidatesActive: integer('candidates_active').notNull().default(0), // ось candidates_active
+  storageByCategory: jsonb('storage_by_category').notNull().default(sql`'{}'::jsonb`), // 10 категорий треков + other
+  aiOps: jsonb('ai_ops').notNull().default(sql`'{}'::jsonb`), // {ai_generate_ops, ai_review_ops, ai_interview_ops}
+  smsOut: integer('sms_out').notNull().default(0), // ось sms_out за биллинговый период
+  telegramOut: integer('telegram_out').notNull().default(0), // мягкая ось: только наблюдение
+  integrationsActive: integer('integrations_active').notNull().default(0),
+  axes: jsonb('axes').notNull().default(sql`'{}'::jsonb`), // нетарифные оси без своей колонки (docs/v2/35 §3.3)
 }, t => [
   index().on(t.tenantId, t.collectedAt.desc()),
 ])

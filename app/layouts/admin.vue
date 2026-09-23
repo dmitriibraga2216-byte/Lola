@@ -202,6 +202,8 @@ async function pickRole(id: string) {
       </div>
     </aside>
     <main class="content">
+      <!-- Баннер лимита — полоса под шапкой на каждом экране тенанта (docs/v2/35 §5.5) -->
+      <LimitBanner />
       <slot />
     </main>
   </div>

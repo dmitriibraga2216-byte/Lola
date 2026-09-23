@@ -54,6 +54,9 @@ export default defineEventHandler(async (event) => {
     timezone: tenants.timezone,
     branding: tenants.branding,
     settings: tenants.settings,
+    // Рекрутинг — колонка-флаг, а не модуль настроек (docs/v2/28, миграция 0056): меню и
+    // клиентский guard смотрят на него так же, как на `modules`.
+    candidatesEnabled: tenants.candidatesEnabled,
   }).from(tenants).where(eq(tenants.id, auth.tenantId))
   // Модули и акцент нужны клиенту для меню и CSS-переменной (docs/24 §3.1, §3.2); политики наружу не отдаём
   const modules = await tenantModules(auth.tenantId)
@@ -68,7 +71,7 @@ export default defineEventHandler(async (event) => {
 
   return apiData({
     user: { ...profile, roles: access.roles },
-    tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, localesEnabled: space.localesEnabled, passwordMinLength } : null,
+    tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, candidatesEnabled: tenant.candidatesEnabled, localesEnabled: space.localesEnabled, passwordMinLength } : null,
     scopes,
     activeRole: access.activeRole,
     roles: access.roles,

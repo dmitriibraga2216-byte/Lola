@@ -340,6 +340,20 @@ export const SYSTEM_CANDIDATE_STATUSES: {
   { code: 'rejected', nameUk: 'Відхилені', nameEn: 'Rejected', color: 'coral', mapsTo: 'rejected' },
 ]
 
+/**
+ * Два значения, текстуально совпадающие с кодами этапов жизненного цикла, — и потому живущие
+ * здесь константами, а не литералами в коде (та же причина, что у `LIFECYCLE_REASON_CODES`,
+ * см. `docs/28-implementation-notes.md` §28.13 п. 8): сквозная проверка 1
+ * (`scripts/v2-crosschecks.sh`) не может отличить ключ группы настроек и область наставника
+ * от ветвления по коду этапа, а инвариант 16 запрещает именно ветвление.
+ *
+ * `SETTINGS_GROUP_RECRUITING` — группа `tenants.settings.recruiting` (сроки воронки, docs/v2/28
+ * §7.5, §7.9). `MENTOR_SCOPE_ONBOARDING` — область функционального руководителя, которым
+ * записывается наставник при найме (`functional_chiefs.scope`, docs/v2/28 §5.5).
+ */
+export const SETTINGS_GROUP_RECRUITING = 'recruiting'
+export const MENTOR_SCOPE_ONBOARDING = 'onboarding'
+
 /** Срок согласия на обработку ПД по умолчанию — 6 месяцев (docs/v2/28 §7.9, диапазон 1–24). */
 export const CANDIDATE_CONSENT_MONTHS = 6
 

@@ -260,6 +260,9 @@ create table users (
   converted_from_candidate_at timestamptz,    -- факт прихода сотрудника через воронку
   consent_given_at timestamptz,               -- согласие на обработку ПД (`v2/28` §7.9)
   consent_expires_at date,                    -- дата, после которой ПД подлежат стиранию
+  -- Воронка (`v2/28` §7.5, §7.9; миграция 0068_v2_candidates_funnel)
+  candidate_state_at timestamptz,             -- когда состояние менялось в последний раз: от него считает auto_archive
+  anonymized_at timestamptz,                  -- отметка необратимого стирания ПД по истёкшему согласию
   unique (tenant_id, phone),
   unique (tenant_id, email)
 );
@@ -267,6 +270,9 @@ create table users (
 -- Полный (tenant_id, status) остаётся — по нему идут выборки кандидатов и платформенные счётчики.
 -- Рекрутинг добавляет idx_users_tenant_kind и два частичных where kind = 'candidate':
 -- idx_users_tenant_candidate_status и idx_users_tenant_recruiter (`v2/28` §3.2).
+-- Воронка (0068) добавляет ещё три частичных: idx_users_candidate_board
+-- (tenant_id, candidate_status_id, created_at desc, id) — страница колонки канбана по 50 карточек;
+-- idx_users_candidate_state_at и idx_users_candidate_consent — два ночных прохода `v2/28` §11.
 
 -- Рекрутинг: воронка кандидата (`v2/28` §3.3–§3.6, миграция 0064_v2_candidates).
 -- Записи самого кандидата здесь нет — он живёт в users с kind='candidate'.

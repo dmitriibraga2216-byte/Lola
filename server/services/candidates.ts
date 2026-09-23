@@ -180,7 +180,7 @@ export function maskEmail(email: string | null): string | null {
 
 // ── Выборки ───────────────────────────────────────────────────────────────────────────────
 
-const COLUMNS = {
+export const COLUMNS = {
   id: users.id,
   fullName: users.fullName,
   lastName: users.lastName,
@@ -217,7 +217,7 @@ const COLUMNS = {
  * Ограничение области: областная роль видит только своих кандидатов (см. `Viewer`).
  * Пустой массив точек — не видит ничего вовсе.
  */
-function scopeCond(v: Viewer) {
+export function scopeCond(v: Viewer) {
   // Наставник (§2 «только назначенную ему проверку») видит кандидата ровно тогда, когда есть
   // что проверять: работа, взятая им, или несобранная очередь, из которой он берёт (docs/14
   // §5.2, `workshop_submissions.reviewer_id`). Не «любой кандидат без контактов» — иначе
@@ -255,7 +255,7 @@ export async function listCandidates(v: Viewer, filter: CandidateListFilter): Pr
   })
 }
 
-function maskRow<T extends { phone: string | null, email: string | null }>(v: Viewer, row: T): T {
+export function maskRow<T extends { phone: string | null, email: string | null }>(v: Viewer, row: T): T {
   if (v.fullPd) return row
   return { ...row, phone: maskPhone(row.phone), email: maskEmail(row.email) }
 }

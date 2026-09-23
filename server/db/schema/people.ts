@@ -31,6 +31,17 @@ export const users = pgTable('users', {
   convertedFromCandidateAt: timestamp('converted_from_candidate_at', { withTimezone: true }), // факт прихода через воронку
   consentGivenAt: timestamp('consent_given_at', { withTimezone: true }), // согласие на обработку ПД (§7.9)
   consentExpiresAt: date('consent_expires_at'), // дата, после которой ПД подлежат стиранию
+  /**
+   * Воронка, миграция 0068_v2_candidates_funnel (docs/v2/28 §7.5, §7.9).
+   * `candidate_state_at` — момент последней смены состояния: по нему считает срок
+   * `candidate.auto_archive` («N дней с момента отказа») и «днів у стані» на карточке.
+   * История колонок канбана этот момент не знает: состояние меняют и решения без смены
+   * колонки (отзыв, повторное открытие, фоновая задача).
+   * `anonymized_at` — отметка необратимого стирания ПД по истёкшему согласию (§7.9):
+   * по ней задача идемпотентна, а карточка объясняет, почему поля пусты.
+   */
+  candidateStateAt: timestamp('candidate_state_at', { withTimezone: true }),
+  anonymizedAt: timestamp('anonymized_at', { withTimezone: true }),
   phone: text('phone'), // E.164, уникален в тенанте — ключ входа
   email: text('email'),
   fullName: text('full_name').notNull(), // «Прізвище Імʼя По батькові» — собирается из частей
@@ -73,6 +84,11 @@ export const users = pgTable('users', {
   index('idx_users_tenant_kind').on(t.tenantId, t.kind),
   index('idx_users_tenant_candidate_status').on(t.tenantId, t.candidateStatusId).where(sql`kind = 'candidate'`),
   index('idx_users_tenant_recruiter').on(t.tenantId, t.recruiterId).where(sql`kind = 'candidate'`),
+  // Воронка (0068): страница колонки канбана по 50 карточек с курсором (§5.2, критерий §13 к. 12)
+  // и два прохода ночных задач — архивация отказанных и стирание по истёкшему согласию (§11).
+  index('idx_users_candidate_board').on(t.tenantId, t.candidateStatusId, t.createdAt.desc(), t.id).where(sql`kind = 'candidate'`),
+  index('idx_users_candidate_state_at').on(t.tenantId, t.candidateState, t.candidateStateAt).where(sql`kind = 'candidate'`),
+  index('idx_users_candidate_consent').on(t.tenantId, t.consentExpiresAt).where(sql`kind = 'candidate' and anonymized_at is null`),
   check('users_candidate_state_chk', sql`${t.candidateState} is null or ${t.candidateState} in ('active', 'hired', 'rejected', 'archived', 'withdrawn')`),
   check('users_candidate_coherence_chk', sql`(${t.kind} = 'candidate' and ${t.candidateState} is not null) or (${t.kind} = 'employee' and ${t.candidateState} is null)`),
   check('users_candidate_source_chk', sql`${t.source} is null or ${t.source} in ('manual', 'vacancy_link', 'job_board', 'referral', 'import', 'api')`),

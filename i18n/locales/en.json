@@ -139,7 +139,10 @@
       "orgConflicts": "Org structure conflicts",
       "assessForms": "Assessment forms",
       "lifecycle": "Lifecycle stages",
-      "offboarding": "Offboarding"
+      "offboarding": "Offboarding",
+      "candidates": "Candidates",
+      "funnelReport": "Funnel report",
+      "recruitingSettings": "Recruiting"
     },
     "section": {
       "learning": "Learning",
@@ -3298,7 +3301,14 @@
       "notice_assigned": "New notice",
       "notice_not_acknowledged": "Notice reminder",
       "birthday_upcoming": "Colleague birthday soon",
-      "birthday_today": "Birthday today"
+      "birthday_today": "Birthday today",
+      "candidate_hired": "Candidate hired",
+      "candidate_hired_manager": "New employee starts",
+      "candidate_rejected": "Candidate rejected",
+      "candidate_completed": "Candidate finished the selection",
+      "candidate_review_needed": "Candidate needs a decision",
+      "candidate_consent_expiring": "Candidate consent expires",
+      "candidate_stale": "Candidates with no movement"
     }
   },
   "ntpl": {
@@ -4765,7 +4775,14 @@
     "moveTo": "Move to column",
     "move": "Move",
     "moved": "Status changed",
-    "reason": "Reason",
+    "reason": {
+      "skills": "Skills",
+      "experience": "Experience",
+      "no_contact": "Unreachable",
+      "conditions": "Terms did not fit",
+      "vacancy_closed": "Vacancy closed",
+      "other": "Other"
+    },
     "scoreKindLabel": "Score kind",
     "scoreValue": "Value",
     "scoreComment": "Score comment",
@@ -4775,6 +4792,75 @@
     "newComment": "New comment",
     "commentsHint": "Comments are visible to staff only — the candidate never sees them",
     "automatic": "automatic",
-    "noHistory": "History is empty"
+    "noHistory": "History is empty",
+    "hire": "Hire",
+    "hireTitle": "Hire the candidate",
+    "hired": "Candidate hired",
+    "reject": "Reject",
+    "rejectTitle": "Rejecting the candidate",
+    "rejected": "Rejection saved",
+    "archive": "Archive",
+    "archived": "Candidate archived",
+    "location": "Location",
+    "position": "Position",
+    "startDate": "Start date",
+    "welcomeLetter": "Send a welcome letter",
+    "reasonCode": "Reason",
+    "notifyRejected": "Notify the candidate"
+  },
+  "candidates": {
+    "title": "Candidates",
+    "hint": "Hiring funnel: board, registry and a decision on every candidate",
+    "counter": "Candidates: {n} of {m}",
+    "apply": "Apply",
+    "board": "Board",
+    "list": "List",
+    "empty": "No candidates yet",
+    "emptyColumn": "Empty",
+    "noRecruiter": "No owner",
+    "col": {
+      "name": "Full name",
+      "phone": "Phone",
+      "state": "State",
+      "recruiter": "Recruiter",
+      "added": "Added"
+    }
+  },
+  "recruitingSettings": {
+    "title": "Recruiting",
+    "hint": "Turn the candidate funnel on and set the terms the system acts on by itself",
+    "enabled": "Enable recruiting in this space",
+    "enabledHint": "While it is off, the Candidates section is hidden and its data stays untouched",
+    "autoArchive": "Archive rejected candidates automatically",
+    "archiveAfterDays": "Archive after, days (7–365)",
+    "consentMonths": "Consent term, months (1–24)",
+    "consentHint": "When the term ends, name, contacts, CV and comments are anonymised; progress and scores remain",
+    "notifyRejected": "Email the candidate about a rejection",
+    "saved": "Saved"
+  },
+  "funnelReport": {
+    "title": "Funnel report",
+    "hint": "Where candidates are lost and who is going through the selection",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply",
+    "entered": "Entered the funnel",
+    "active": "In progress",
+    "hired": "Hired",
+    "rejected": "Rejected",
+    "medianDays": "Median days to hire",
+    "stage": "Column",
+    "enteredCol": "Entered",
+    "currentCol": "Now",
+    "shareCol": "Share",
+    "avgDaysCol": "Days in column",
+    "toNextCol": "Conversion",
+    "people": "Candidates",
+    "statusCol": "Column",
+    "stateCol": "State",
+    "recruiterCol": "Recruiter",
+    "addedCol": "Added",
+    "hiredCol": "Hired",
+    "empty": "No data for this period"
   }
 }

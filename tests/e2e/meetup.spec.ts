@@ -22,7 +22,11 @@ test('10. Занятие создаётся, человек записывает
   await loginViaUi(page, EMPLOYEE_PHONE)
   await page.goto(`/learn/meetups/${m.id}`)
   await page.getByTestId('mt-register').click()
-  await expect(page.getByText('Ви записані')).toBeVisible()
+  // Найдено в PR-14: «Ви записані» на экране два раза — плашка-уведомление (`mt.registeredOk`)
+  // и бейдж состояния (`mt.registered`), и `getByText` падал strict mode violation всякий раз,
+  // когда плашка ещё не исчезла. Проверяем бейдж: он показывает сохранённое состояние записи,
+  // а не факт того, что запрос только что прошёл.
+  await expect(page.locator('.badge', { hasText: 'Ви записані' })).toBeVisible()
 
   // Занятие «началось» (сдвигаем), тренер показывает QR — берём токен через API и отмечаемся кодом
   await admin`update meetups set starts_at = now() - interval '5 minutes' where id = ${m.id}`

@@ -189,6 +189,19 @@ export const tenantSettingsSchema = z.object({
     externalTrainingThreshold: z.number().min(0).default(5000),
     careerAssessmentFormId: z.string().uuid().nullable().default(null),
   }).default({}),
+  /**
+   * Рекрутинг (docs/v2/28 §7.5, §7.9; план docs/v2/45 PR-14). Сам тумблер модуля здесь **не
+   * живёт**: «включён ли рекрутинг» — это колонка `tenants.candidates_enabled` (миграция 0056,
+   * решение docs/v2/44 В-14), и второй копии у флага быть не должно. Здесь — только то, что
+   * настраивает тенант внутри включённого модуля: срок авто-архивации отказанных и срок
+   * согласия на обработку ПД, от которого считается стирание.
+   */
+  recruiting: z.object({
+    autoArchiveRejected: z.boolean().default(true),
+    archiveAfterDays: z.number().int().min(7).max(365).default(30), // §7.5, диапазон из документа
+    consentMonths: z.number().int().min(1).max(24).default(6), // §7.9, по умолчанию 6 месяцев
+    notifyRejected: z.boolean().default(false), // §6.2: «Повідомити кандидата» выключено по умолчанию
+  }).default({}),
   guestPage: z.record(z.unknown()).default({}), // форма — guestBlocksSchema (hub)
   importPresets: z.record(z.unknown()).default({}),
 })
@@ -213,6 +226,18 @@ export const policiesPatchSchema = z.object({
 export type PoliciesPatch = z.infer<typeof policiesPatchSchema>
 
 export const modulesPatchSchema = modulesSchema.partial().strict()
+
+/**
+ * PATCH /settings/recruiting (docs/v2/28 §7.5, §7.9). `enabled` — не ключ настроек, а колонка
+ * `tenants.candidates_enabled`: один патч включает модуль и задаёт его сроки, но пишет их в
+ * два разных места, каждое из которых остаётся единственным источником своей правды.
+ */
+export const recruitingPatchSchema = tenantSettingsSchema.shape.recruiting
+  .removeDefault()
+  .partial()
+  .extend({ enabled: z.boolean().optional() })
+  .strict()
+export type RecruitingPatch = z.infer<typeof recruitingPatchSchema>
 
 /** PATCH /settings/tenant — простір, бренд, slug (docs/24 §3.1, §6) */
 export const tenantPatchSchema = z.object({

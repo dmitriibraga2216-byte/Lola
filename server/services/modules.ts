@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { ModuleCode } from '../../shared/schemas/settings'
 import { db } from '../db/client'
 import { plans, tenants } from '../db/schema'
@@ -126,4 +126,47 @@ export async function moduleLock(tenantId: string, module: ModuleCode): Promise<
   if (!current || planAllows(current, module)) return null
   const cheapest = rows.find(p => planAllows(p, module))
   return cheapest ? { planCode: cheapest.code, planName: cheapest.name } : null
+}
+
+// ── Рекрутинг: флаг тенанта, а не модуль настроек (docs/v2/28, миграция 0056) ──
+
+/**
+ * Рекрутинг включается **колонкой** `tenants.candidates_enabled`, а не ключом в
+ * `settings.modules` (решение docs/v2/44 В-14, план docs/v2/45 PR-14): флаг заведён
+ * миграцией 0056 до появления кандидатов и по нему же считается ось `candidates_active`.
+ * Второй копии у него быть не должно, поэтому в перечень `MODULES` он не добавляется, а
+ * маршруты гасятся здесь — той же механикой, что и выключенный модуль.
+ *
+ * Пути перечислены явно, без «всё, что начинается на /candidate»: публичный контур откликов
+ * (PR-16) живёт под `/public/j/*` и флагом тенанта не гасится — он про приём отклика, а не
+ * про работу с воронкой.
+ */
+export const RECRUITING_ROUTES = ['/api/v1/candidates', '/api/v1/candidate-statuses', '/api/v1/reports/recruiting-funnel']
+
+export function isRecruitingRoute(path: string): boolean {
+  const clean = path.split('?')[0]!
+  return RECRUITING_ROUTES.some(p => clean === p || clean.startsWith(`${p}/`))
+}
+
+const recruitingCache = new Map<string, { at: number, on: boolean }>()
+
+/** Флаг тенанта с тем же кешем на минуту, что и модули; запись флага сбрасывает его. */
+export async function isRecruitingEnabled(tenantId: string): Promise<boolean> {
+  const hit = recruitingCache.get(tenantId)
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.on
+  const [t] = await db.select({ on: tenants.candidatesEnabled }).from(tenants).where(eq(tenants.id, tenantId))
+  const on = t?.on ?? false
+  recruitingCache.set(tenantId, { at: Date.now(), on })
+  return on
+}
+
+export function invalidateRecruiting(tenantId?: string): void {
+  if (tenantId) recruitingCache.delete(tenantId)
+  else recruitingCache.clear()
+}
+
+/** Тенанты с включённым рекрутингом — круг ночных задач воронки (docs/v2/28 §11). */
+export async function recruitingTenantIds(): Promise<string[]> {
+  const rows = await db.execute(sql`select id from tenants where status = 'active' and candidates_enabled order by created_at`) as unknown as { id: string }[]
+  return rows.map(r => r.id)
 }

@@ -227,7 +227,7 @@ export class LimitExceededError extends Error {
   readonly statusCode = 409
   readonly code = 'limit_exceeded'
   readonly details: { axis: LimitAxis, used: number, limit: number | null }
-  constructor(check: LimitCheck, locale: 'uk' | 'en' = 'uk') {
+  constructor(check: LimitCheck, locale: 'uk' | 'en' | 'ru' = 'uk') {
     super(limitMessage(check, locale))
     this.name = 'LimitExceededError'
     this.details = { axis: check.axis, used: check.used, limit: check.limit }
@@ -235,7 +235,7 @@ export class LimitExceededError extends Error {
 }
 
 /** «Ліміт вичерпано: {ось} — {використано} із {ліміт}. {наслідок}» (§5.5, §8). */
-export function limitMessage(check: LimitCheck, locale: 'uk' | 'en' = 'uk'): string {
+export function limitMessage(check: LimitCheck, locale: 'uk' | 'en' | 'ru' = 'uk'): string {
   const dict = defaultDictionary(locale)
   const label = dict[`billing.axis.${check.axis}`] ?? check.axis
   const consequence = dict[`billing.limitConsequence.${check.axis}`] ?? ''

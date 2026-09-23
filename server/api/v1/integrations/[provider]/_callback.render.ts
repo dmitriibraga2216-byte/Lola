@@ -17,6 +17,7 @@ export function pickLocale(acceptLanguage?: string | null): Locale {
     if (!lang) continue
     if (lang.startsWith('en')) return 'en'
     if (lang.startsWith('uk')) return 'uk'
+    if (lang.startsWith('ru')) return 'ru'
   }
   return 'uk'
 }

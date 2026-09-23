@@ -16,7 +16,7 @@ const search = ref('')
 const onlyChanged = ref(false)
 const editing = ref<string | null>(null) // code
 const editorTab = ref<'global' | 'custom'>('custom')
-const form = reactive({ code: '', channel: 'telegram' as 'telegram' | 'sms' | 'email', locale: 'uk' as 'uk' | 'en', subject: '', body: '', bodyMjml: '', imageKey: '', telegramImageKey: '', isEnabled: true, isMandatory: false, maxPerDay: 0, escalateAfterHours: 0, ignoreQuietHours: false, buttons: [] as { text: string, action: string }[] })
+const form = reactive({ code: '', channel: 'telegram' as 'telegram' | 'sms' | 'email', locale: 'uk' as 'uk' | 'en' | 'ru', subject: '', body: '', bodyMjml: '', imageKey: '', telegramImageKey: '', isEnabled: true, isMandatory: false, maxPerDay: 0, escalateAfterHours: 0, ignoreQuietHours: false, buttons: [] as { text: string, action: string }[] })
 const preview = ref('')
 const previewHtml = ref<string | null>(null)
 const variables = ref<string[]>([])
@@ -209,7 +209,7 @@ watch(tab, (v) => { if (v === 'schedule') loadSchedule() })
           <div class="sub label">{{ t('ntpl.channels') }}</div>
           <div class="row">
             <select v-model="form.channel" class="field"><option value="telegram">Telegram</option><option value="sms">SMS</option><option value="email">E-mail</option></select>
-            <select v-model="form.locale" class="field"><option value="uk">uk</option><option value="en">en</option></select>
+            <select v-model="form.locale" class="field"><option value="uk">uk</option><option value="en">en</option><option value="ru">ru</option></select>
           </div>
           <input v-if="form.channel === 'email'" v-model="form.subject" class="field" :placeholder="t('ntpl.subject')">
           <span class="sub">{{ t('ntpl.bodyHint') }}</span>

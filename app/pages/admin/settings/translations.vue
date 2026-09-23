@@ -8,7 +8,7 @@ const { t, locale: uiLocale } = useI18n()
 const { api } = useApi()
 
 interface Row { key: string, standard: string | null, custom: string | null, updatedBy: string | null, updatedAt: string | null }
-const locale = ref<'uk' | 'en'>('uk')
+const locale = ref<'uk' | 'en' | 'ru'>('uk')
 const changedOnly = ref(false)
 const q = ref('')
 const page = ref(1)
@@ -84,7 +84,7 @@ const pages = computed(() => Math.max(1, Math.ceil(total.value / PER)))
 
     <div class="filters">
       <label class="label" for="tr-locale">{{ t('settings.translations.locale') }}</label>
-      <select id="tr-locale" v-model="locale" class="field short"><option value="uk">Українська</option><option value="en">English</option></select>
+      <select id="tr-locale" v-model="locale" class="field short"><option value="uk">Українська</option><option value="en">English</option><option value="ru">Русский</option></select>
       <label class="toggle"><input v-model="changedOnly" type="checkbox"><span>{{ t('settings.translations.changedOnly') }} · {{ changed }}</span></label>
       <input v-model="q" class="field grow" type="search" :placeholder="t('common.search')" :aria-label="t('common.search')">
       <button class="btn ghost small" type="button" :disabled="!changed" @click="resetAll">{{ t('settings.translations.resetAll') }}</button>

@@ -121,7 +121,7 @@ export async function getTenantCard(id: string): Promise<Record<string, unknown>
 export interface CreateTenantInput {
   slug: string
   name: string
-  locale?: 'uk' | 'en'
+  locale?: 'uk' | 'en' | 'ru'
   timezone?: string
   plan?: string
   trialDays?: number

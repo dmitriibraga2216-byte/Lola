@@ -126,7 +126,7 @@ const otpEmailEnabled = computed({
           </div>
           <p class="help">{{ t('settings.space.accentHint') }}</p>
           <label class="label top" for="sp-locale">{{ t('settings.space.locale') }}</label>
-          <select id="sp-locale" v-model="spaceForm.locale" class="field"><option value="uk">Українська</option><option value="en">English</option></select>
+          <select id="sp-locale" v-model="spaceForm.locale" class="field"><option value="uk">Українська</option><option value="en">English</option><option value="ru">Русский</option></select>
           <label class="label top" for="sp-tz">{{ t('settings.space.timezone') }}</label><input id="sp-tz" v-model="spaceForm.timezone" class="field" maxlength="60">
           <p class="help">{{ t('settings.space.plan') }}: <b>{{ space.plan }}</b></p>
         </template>

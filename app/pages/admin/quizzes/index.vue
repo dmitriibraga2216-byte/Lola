@@ -38,7 +38,7 @@ const filtered = computed(() => items.value.filter(q =>
 ))
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString(locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return new Date(iso).toLocaleDateString(locale.value === 'ru' ? 'ru-RU' : locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 async function create() {

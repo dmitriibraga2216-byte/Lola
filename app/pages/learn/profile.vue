@@ -57,6 +57,17 @@ async function setBirthdayConsent(v: boolean) {
   try { birthdayConsent.value = (await api<{ birthdayConsent: boolean }>('/me/birthday-consent', { method: 'PATCH', body: { birthdayConsent: v } })).birthdayConsent }
   catch (err) { error.value = apiErrorOf(err).message }
 }
+// Мова інтерфейсу (docs/24 §3.1, §3.6): порожньо — успадкувати мову простору; fetchMe() підхопить
+// нове значення users.locale, а app.vue сам перемкне активну локаль useI18n() (watch на me.user.locale).
+const myLocale = ref((me.value?.user as { locale?: string | null } | undefined)?.locale ?? '')
+async function setMyLocale(v: string) {
+  try {
+    await api('/me/locale', { method: 'PATCH', body: { locale: v || null } })
+    myLocale.value = v
+    await fetchMe()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
 // Пароль (docs/16 §14.5 «Безпека → Зміна пароля»): два поля; форма раскрыта сразу, если политика требует смены после первого входа
 const route = useRoute()
 const meUser = computed(() => me.value?.user as { hasPassword?: boolean, mustChangePassword?: boolean, canRecoverPassword?: boolean } | undefined)
@@ -129,6 +140,14 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
       <NuxtLink to="/learn/notices" class="row-link">{{ t('notices.title') }}</NuxtLink>
       <NuxtLink to="/learn/events" class="row-link">{{ t('events.title') }}</NuxtLink>
       <label class="toggle row-link"><input type="checkbox" :checked="birthdayConsent" @change="setBirthdayConsent(($event.target as HTMLInputElement).checked)"><span>{{ t('profile.birthdayConsent') }}<span class="hint">{{ t('profile.birthdayConsentHint') }}</span></span></label>
+      <label class="language row-link"><span>{{ t('profile.language') }}<span class="hint">{{ t('profile.languageHint') }}</span></span>
+        <select :value="myLocale" class="field" @change="setMyLocale(($event.target as HTMLSelectElement).value)">
+          <option value="">—</option>
+          <option value="uk">Українська</option>
+          <option value="en">English</option>
+          <option value="ru">Русский</option>
+        </select>
+      </label>
       <NuxtLink to="/learn/development" class="row-link">{{ t('dev.short') }}</NuxtLink>
       <NuxtLink to="/learn/profile/study-history" class="row-link">{{ t('studyHistory.title') }}</NuxtLink>
       <NuxtLink to="/learn/surveys" class="row-link">{{ t('survey.title') }}</NuxtLink>
@@ -173,6 +192,8 @@ const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk')
 .day .bar.on { background: var(--color-teal); }
 .day span { font-size: 11px; font-weight: 700; color: var(--color-ink-muted); }
 .links { display: grid; gap: var(--space-1); }
+.language { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); cursor: default; }
+.language .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); }
 .role { color: var(--color-teal-ink); font-weight: 800; }
 .roles { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .chip[disabled] { opacity: .6; cursor: progress; }

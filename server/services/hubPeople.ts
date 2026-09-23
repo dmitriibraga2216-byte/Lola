@@ -71,6 +71,15 @@ export async function setBirthdayConsent(ctx: Ctx, consent: boolean) {
   })
 }
 
+/** Мова інтерфейсу людини (docs/24 §3.6, «Профіль»): `null` — успадкувати мову тенанта, а не uk напряму. */
+export async function setLocale(ctx: Ctx, locale: 'uk' | 'en' | 'ru' | null) {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [u] = await tx.update(users).set({ locale, updatedAt: new Date() }).where(eq(users.id, ctx.actorId)).returning({ locale: users.locale })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'profile.locale', entity: 'user', entityId: ctx.actorId, after: { locale } })
+    return u!
+  })
+}
+
 /**
  * Контакты (docs/21 §14.8 [решение]): имя, должность, точка, город, подразделение, рабочий телефон и рабочая почта — всем;
  * личный телефон, почта и дата рождения — тем, кто видит карточку человека (`people.view`), остальным — по настройке тенанта

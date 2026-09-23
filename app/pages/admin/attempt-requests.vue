@@ -42,7 +42,7 @@ async function load() {
 onMounted(load)
 watch(tab, load)
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale.value === 'ru' ? 'ru-RU' : locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
 async function decide(r: Row, approved: boolean) {
   busy.value = r.id

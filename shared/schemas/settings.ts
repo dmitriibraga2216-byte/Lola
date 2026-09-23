@@ -153,7 +153,7 @@ export const emailLayoutPatchSchema = emailLayoutShape.partial().strict()
 export const tenantSettingsSchema = z.object({
   /** Простір (docs/24 §3.1; name/slug/locale/timezone — колонки tenants, акцент — branding) */
   space: z.object({
-    localesEnabled: z.array(z.enum(['uk', 'en'])).min(1).default(['uk']),
+    localesEnabled: z.array(z.enum(['uk', 'en', 'ru'])).min(1).default(['uk']),
     weekStart: z.enum(['monday', 'sunday']).default('monday'),
     supportContact: z.object({ name: z.string().max(120).optional(), phone: z.string().max(30).optional(), email: z.string().email().max(120).optional(), telegram: z.string().max(60).optional() }).default({}),
   }).default({}),
@@ -243,7 +243,7 @@ export type RecruitingPatch = z.infer<typeof recruitingPatchSchema>
 export const tenantPatchSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   slug: slugSchema.optional(),
-  locale: z.enum(['uk', 'en']).optional(),
+  locale: z.enum(['uk', 'en', 'ru']).optional(),
   timezone: z.string().min(3).max(60).optional(),
   accent: accentSchema.optional(),
   space: tenantSettingsSchema.shape.space.removeDefault().partial().optional(),
@@ -307,12 +307,12 @@ export type ScaleInput = z.infer<typeof scaleSchema>
  * через цю саму таблицю (docs/28 «Spec 23» — рішення без нової таблиці).
  */
 export const translationSchema = z.object({
-  locale: z.enum(['uk', 'en']),
+  locale: z.enum(['uk', 'en', 'ru']),
   key: z.string().trim().min(1).max(300),
   value: z.string().min(1).max(2000),
 })
 export const translationsImportSchema = z.object({
-  locale: z.enum(['uk', 'en']),
+  locale: z.enum(['uk', 'en', 'ru']),
   items: z.record(z.string().min(1).max(2000)).refine(o => Object.keys(o).length <= 5000, 'Не більше 5000 ключів за раз'),
 })
 

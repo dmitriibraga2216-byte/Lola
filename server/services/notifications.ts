@@ -9,6 +9,7 @@ import { sendTelegram } from './telegram'
 import { readSettings } from './settings'
 import type { NotificationSchedule } from '../../shared/schemas/settings'
 import { tenantOverrides } from './translations'
+import type { Locale } from './translations'
 import { buildEmailHtml } from './emailRender'
 import { EMPLOYEES_ONLY } from './repo/people'
 
@@ -357,6 +358,9 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
   await withTenant(tenantId, null, async (tx) => {
     const tenantSettings = await readSettings(tx, tenantId)
     const virtualDomains = tenantSettings.policies.notifications.virtualEmailDomains
+    // Локаль отримувача (docs/23 §3.4, §13.4): своя — з `users.locale`, інакше локаль тенанта, інакше uk
+    const [tenantRow] = await tx.select({ locale: tenants.locale }).from(tenants).where(eq(tenants.id, tenantId))
+    const tenantLocale = (tenantRow?.locale ?? 'uk') as Locale
     const due = await tx.select({
       n: notifications,
       user: { telegramChatId: users.telegramChatId, telegramBlocked: users.telegramBlocked, locale: users.locale, fullName: users.fullName, phone: users.phone, email: users.email },
@@ -389,7 +393,7 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
     }
 
     for (const { n, user } of due) {
-      const locale = user.locale ?? 'uk'
+      const locale = (user.locale ?? tenantLocale) as Locale
       const tpl = await templateFor(tx, tenantId, n.code, n.channel, locale)
       if (!tpl) { await skip(n.id, 'template_disabled'); continue }
 
@@ -411,7 +415,7 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
 
       const vars = { ...(await commonVars(tx, tenantId, n.userId)), ...(n.payload as Record<string, unknown>) }
       // {{#_tr}} (docs/23 §13.4): переклад фрази по локалі отримувача через ту саму таблицю `translations`
-      const trMap = await tenantOverrides(tenantId, locale === 'en' ? 'en' : 'uk')
+      const trMap = await tenantOverrides(tenantId, locale)
       const tr = (phrase: string) => trMap[phrase] ?? phrase
       const text = renderTemplate(tpl.body, vars, tr)
 

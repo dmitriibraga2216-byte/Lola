@@ -3,7 +3,7 @@
  * Оболочка: плашка «Ви увійшли як …» при входе «от имени» (docs/24 §4.5), акцент бренда тенанта
  * CSS-переменной из токенов (docs/29 Б.14) и переводы тенанта поверх словаря (docs/24 §3.6).
  */
-const { t, locale, mergeLocaleMessage } = useI18n()
+const { t, locale, mergeLocaleMessage, setLocale } = useI18n()
 const { me, stopImpersonation, stopPreview } = useAuth()
 const { api } = useApi()
 const route = useRoute()
@@ -30,6 +30,20 @@ function unflatten(flat: Record<string, string>): Record<string, unknown> {
   }
   return out
 }
+// Мова інтерфейсу (docs/24 §3.1, §3.6): своя людини → мова тенанта → uk. Людина ще може
+// перемкнути мову вручну на екрані профілю/налаштувань — це просто інший запис у users.locale/
+// tenants.locale, який прилетить сюди тим самим шляхом при наступному fetchMe(). Перемикати
+// через setLocale() модуля, не через пряме присвоєння locale.value: з увімкненим
+// bundle.optimizeTranslationDirective (nuxt.config.ts не вимикає цю дефолтну, але «баговану»
+// за словами самого модуля опцію) пряме присвоєння не оновлює вже змонтовані v-t-директиви —
+// текст лишається сирим ключем («profile.tiles.rating») доти, доки не перемкнути саме так.
+const SUPPORTED_LOCALES = ['uk', 'en', 'ru'] as const
+watch(() => me.value ? { user: me.value.user.locale, tenant: me.value.tenant?.locale } : null, (resolved) => {
+  if (!resolved) return
+  const next = resolved.user ?? resolved.tenant ?? 'uk'
+  if ((SUPPORTED_LOCALES as readonly string[]).includes(next) && locale.value !== next) setLocale(next as typeof SUPPORTED_LOCALES[number])
+}, { immediate: true })
+
 const loadedFor = ref('')
 watch([() => me.value?.tenant?.id, locale], async ([tenantId, loc]) => {
   if (!tenantId || loadedFor.value === `${tenantId}:${loc}`) return

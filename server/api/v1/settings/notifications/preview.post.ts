@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
     bodyMjml: z.string().max(20_000).optional(),
     userId: z.string().uuid().optional(),
     code: z.string().max(60).optional(),
-    locale: z.enum(['uk', 'en']).default('uk'),
+    locale: z.enum(['uk', 'en', 'ru']).default('uk'),
   }).safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Перевірте шаблон')
   const userId = p.data.userId ?? a.userId

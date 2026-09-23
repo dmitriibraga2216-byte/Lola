@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import ukDict from '../../i18n/locales/uk.json'
 import enDict from '../../i18n/locales/en.json'
+import ruDict from '../../i18n/locales/ru.json'
 import { translations, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -14,7 +15,7 @@ import { recordAudit } from './audit'
  */
 
 export interface Ctx { tenantId: string, actorId: string }
-export type Locale = 'uk' | 'en'
+export type Locale = 'uk' | 'en' | 'ru'
 
 // ── Стандартный словарь ──
 
@@ -33,7 +34,7 @@ export function defaultDictionary(locale: Locale): Record<string, string> {
   const hit = dictCache.get(locale)
   if (hit) return hit
   // Словари вшиты в сборку (json-импорт), поэтому не зависят от cwd процесса
-  const dict = flatten((locale === 'en' ? enDict : ukDict) as Record<string, unknown>)
+  const dict = flatten((locale === 'en' ? enDict : locale === 'ru' ? ruDict : ukDict) as Record<string, unknown>)
   dictCache.set(locale, dict)
   return dict
 }

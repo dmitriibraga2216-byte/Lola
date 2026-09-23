@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(__dirname, '../..')
 const uk = JSON.parse(readFileSync(join(root, 'i18n/locales/uk.json'), 'utf8')) as Record<string, unknown>
 const en = JSON.parse(readFileSync(join(root, 'i18n/locales/en.json'), 'utf8')) as Record<string, unknown>
+const ru = JSON.parse(readFileSync(join(root, 'i18n/locales/ru.json'), 'utf8')) as Record<string, unknown>
 
 function has(dict: Record<string, unknown>, key: string): boolean {
   let cur: unknown = dict
@@ -51,6 +52,11 @@ describe('i18n: ключи компонентов есть в словарях',
   it('все статические ключи есть в en.json', () => {
     const missing = [...staticKeys].filter(k => !has(en, k)).sort()
     expect(missing, `нет в en.json: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('все статические ключи есть в ru.json', () => {
+    const missing = [...staticKeys].filter(k => !has(ru, k)).sort()
+    expect(missing, `нет в ru.json: ${missing.join(', ')}`).toEqual([])
   })
 
   it('корни динамических ключей существуют', () => {

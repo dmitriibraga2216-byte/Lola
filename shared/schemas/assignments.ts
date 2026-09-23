@@ -304,7 +304,7 @@ export const ruleSchema = z.object({
 export const templateSchema = z.object({
   code: z.string().min(2).max(60),
   channel: z.enum(['telegram', 'sms', 'email']),
-  locale: z.enum(['uk', 'en']).default('uk'),
+  locale: z.enum(['uk', 'en', 'ru']).default('uk'),
   subject: z.string().max(200).optional(),
   body: z.string().min(1).max(2000),
   isEnabled: z.boolean().default(true),

@@ -149,9 +149,23 @@
       "learning": "Learning",
       "content": "Content",
       "people": "People",
+      "development": "Development",
       "reports": "Reports",
       "settings": "Settings",
-      "info": "Information"
+      "info": "Information",
+      "knowledge": "Knowledge base"
+    },
+    "group": {
+      "assignments": "Assignments",
+      "review": "Review",
+      "catalogAccess": "Catalog access",
+      "assessment": "Assessment",
+      "devProfiles": "Profiles & plans",
+      "devGoals": "Goals & requests",
+      "coreReports": "Core reports",
+      "moduleReports": "Module reports",
+      "notifications": "Notifications & integrations",
+      "platform": "Platform"
     },
     "menu": {
       "learner": "My cabinet",

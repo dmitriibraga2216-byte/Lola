@@ -1873,7 +1873,12 @@
       "smsPerMonth": "SMS per month",
       "apiPerMinute": "API requests per minute",
       "webhooks": "Webhooks",
-      "activeJobs": "Jobs per worker round"
+      "activeJobs": "Jobs per worker round",
+      "candidates": "Active candidates",
+      "aiGenerateOps": "AI generations per period",
+      "aiReviewOps": "AI reviews per period",
+      "aiInterviewOps": "AI interviews per period",
+      "exportRows": "Rows per export"
     }
   },
   "integrations": {
@@ -4605,6 +4610,36 @@
       "failed": "failed",
       "in_progress": "in progress",
       "not_started": "not started"
+    }
+  },
+  "billing": {
+    "limitExceeded": "Limit reached: {axis} — {used} of {limit}.",
+    "limitWarning": "Limit is close: {axis} — {used} of {limit}.",
+    "axis": {
+      "users_active": "Employees",
+      "candidates_active": "Candidates",
+      "storage_bytes": "Storage",
+      "ai_generate_ops": "AI generations",
+      "ai_review_ops": "AI reviews",
+      "ai_interview_ops": "AI interviews",
+      "sms_out": "SMS per period",
+      "telegram_out": "Telegram messages",
+      "integrations_active": "Active integrations",
+      "api_rate_rpm": "API requests per minute",
+      "export_rows": "Rows per export"
+    },
+    "limitConsequence": {
+      "users_active": "Activating and inviting an employee is rejected. Block another one or change the plan.",
+      "candidates_active": "New candidates are not created. Archive some or change the plan.",
+      "storage_bytes": "New uploads are rejected, uploaded files stay available.",
+      "ai_generate_ops": "Content generation is off until the next period.",
+      "ai_review_ops": "AI check is skipped, the task goes to the regular manual review queue.",
+      "ai_interview_ops": "New AI interviews are not started, ongoing ones are finished.",
+      "sms_out": "The SMS channel is off, delivery goes via Telegram and in-app.",
+      "telegram_out": "The channel is free - observation only, delivery is not stopped.",
+      "integrations_active": "A new connection is not created. Turn off unused ones or change the plan.",
+      "api_rate_rpm": "Requests over the rate get 429 with Retry-After.",
+      "export_rows": "The export goes to a background job with a link to the file."
     }
   }
 }

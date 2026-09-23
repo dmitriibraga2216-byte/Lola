@@ -1,10 +1,10 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { mediaAssets, platformAudit, tenantLimits, tenantSecrets, tenants } from '../db/schema'
+import { mediaAssets, planAddons, platformAudit, plans, tenantAddons, tenantLimits, tenantSecrets, tenants } from '../db/schema'
 import { currentRequestContext } from '../utils/requestContext'
 import { platformDb, type PlatformAuth } from './platform'
 import { invalidateTenant } from './tenantResolve'
-import { invalidateLimits } from './tenantLimits'
+import { effectiveLimits, invalidateLimits } from './tenantLimits'
 import { enqueueForTenant } from './tenantQueue'
 import { enqueueMediaProcess } from './queue'
 import type { TenantLimitsInput } from '../../shared/schemas/platform'
@@ -149,25 +149,81 @@ export async function cancelPurge(id: string, actor: PlatformAuth): Promise<Tena
 
 // ── Лимиты ────────────────────────────────────────────────────────────
 
+/**
+ * Экран «Ліміти» панели оператора (docs/v2/35 §5.6, §6.3): лимит тарифа, переопределение и
+ * **эффективное** значение по каждой из одиннадцати осей (docs/v2/35 §7.1).
+ *
+ * Эффективное значение берётся общей функцией `effectiveLimits` (docs/v2/44 В-5), а не
+ * пересчитывается здесь: до PR-08 экран читал `max_users, max_storage_gb, max_sms_per_month`
+ * сырым SQL и не знал ни про доплаты, ни про остальные восемь осей.
+ */
 export async function getTenantLimits(id: string) {
   const db = platformDb()
   const t = await loadTenant(id)
   if (!t) return null
   const [o] = await db.select().from(tenantLimits).where(eq(tenantLimits.tenantId, id))
-  const [p] = await db.execute(sql`select max_users, max_storage_gb, max_sms_per_month from plans where code = ${t.plan}`) as unknown as { max_users: number | null, max_storage_gb: number | null, max_sms_per_month: number | null }[]
+  const [p] = await db.select().from(plans).where(eq(plans.code, t.plan))
+  const effective = await effectiveLimits(id)
   return {
-    plan: { code: t.plan, users: p?.max_users ?? null, storageGb: p?.max_storage_gb ?? null, smsPerMonth: p?.max_sms_per_month ?? null },
-    overrides: { users: o?.users ?? null, storageGb: o?.storageGb ?? null, smsPerMonth: o?.smsPerMonth ?? null, apiPerMinute: o?.apiPerMinute ?? null, webhooks: o?.webhooks ?? null, activeJobs: o?.activeJobs ?? null },
+    plan: {
+      code: t.plan,
+      users: p?.maxUsers ?? null,
+      storageGb: p?.maxStorageGb ?? null,
+      smsPerMonth: p?.maxSmsPerMonth ?? null,
+      candidates: p?.maxCandidates ?? null,
+      aiGenerateOps: p?.maxAiGenerateOps ?? null,
+      aiReviewOps: p?.maxAiReviewOps ?? null,
+      aiInterviewOps: p?.maxAiInterviewOps ?? null,
+      exportRows: p?.maxExportRows ?? null,
+    },
+    overrides: {
+      users: o?.users ?? null,
+      storageGb: o?.storageGb ?? null,
+      smsPerMonth: o?.smsPerMonth ?? null,
+      apiPerMinute: o?.apiPerMinute ?? null,
+      webhooks: o?.webhooks ?? null,
+      activeJobs: o?.activeJobs ?? null,
+      candidates: o?.candidates ?? null,
+      aiGenerateOps: o?.aiGenerateOps ?? null,
+      aiReviewOps: o?.aiReviewOps ?? null,
+      aiInterviewOps: o?.aiInterviewOps ?? null,
+      exportRows: o?.exportRows ?? null,
+    },
+    /** Тариф + переопределение + доплаты, по осям и в единицах оси (docs/v2/35 §7.3). */
+    effective: effective.axes,
+    addons: effective.addons,
+    subscription: effective.subscription,
   }
 }
 
-/** Переопределение лимитов (docs/24 §4.4): null — вернуться к тарифу; все null — строка удаляется. */
+/**
+ * Переопределение лимитов (docs/24 §4.4, docs/v2/35 §6.3): null — вернуться к тарифу.
+ *
+ * Строка `tenant_limits` с PR-08 держит ещё и состояние подписки (`status`, `paid_until`,
+ * `ai_until` — docs/v2/35 §3.2), поэтому сброс всех переопределений удаляет её только тогда,
+ * когда подписке нечего терять: статус `trial` и все три даты пусты. Иначе переопределения
+ * обнуляются на месте — иначе «очистить лимиты» стирало бы оплаченный срок (docs/28 §v2-08).
+ */
 export async function setTenantLimits(id: string, input: TenantLimitsInput, actor: PlatformAuth) {
   const before = await getTenantLimits(id)
   if (!before) return null
   const db = platformDb()
-  const values = { users: input.users ?? null, storageGb: input.storageGb ?? null, smsPerMonth: input.smsPerMonth ?? null, apiPerMinute: input.apiPerMinute ?? null, webhooks: input.webhooks ?? null, activeJobs: input.activeJobs ?? null }
-  if (Object.values(values).every(v => v === null)) {
+  const values = {
+    users: input.users ?? null,
+    storageGb: input.storageGb ?? null,
+    smsPerMonth: input.smsPerMonth ?? null,
+    apiPerMinute: input.apiPerMinute ?? null,
+    webhooks: input.webhooks ?? null,
+    activeJobs: input.activeJobs ?? null,
+    candidates: input.candidates ?? null,
+    aiGenerateOps: input.aiGenerateOps ?? null,
+    aiReviewOps: input.aiReviewOps ?? null,
+    aiInterviewOps: input.aiInterviewOps ?? null,
+    exportRows: input.exportRows ?? null,
+  }
+  const [row] = await db.select().from(tenantLimits).where(eq(tenantLimits.tenantId, id))
+  const subscriptionIsEmpty = !row || (row.status === 'trial' && !row.paidUntil && !row.graceUntil && !row.aiUntil)
+  if (Object.values(values).every(v => v === null) && subscriptionIsEmpty) {
     await db.delete(tenantLimits).where(eq(tenantLimits.tenantId, id))
   }
   else {
@@ -177,6 +233,43 @@ export async function setTenantLimits(id: string, input: TenantLimitsInput, acto
   await recordPlatformAudit(actor, { action: 'tenant.limits', tenantId: id, entity: 'tenant_limits', entityId: id, before: before.overrides, after: values })
   invalidateLimits(id)
   return getTenantLimits(id)
+}
+
+/**
+ * Доплата тенанту (docs/v2/35 §3.5, §7.8 п. 1, §7.10): оператор подключает опцию из каталога
+ * `plan_addons` — покупкой, подарком (`grant`, «Видати пакет операцій») или компенсацией.
+ * `unit_step` пишется **снимком** каталога на момент подключения, чтобы пересмотр цен и шагов
+ * не переписывал задним числом уже оплаченное. Приём денег остаётся ручным (`35` §10,
+ * `44` §8): внешний платёжный провайдер в фазе 1 не подключается.
+ *
+ * Эффективный лимит пересчитывать не нужно — он считается одной функцией `effectiveLimits`,
+ * которой достаточно сбросить кеш.
+ */
+export async function grantTenantAddon(
+  tenantId: string,
+  input: { addonCode: string, qty: number, validUntil?: string | null, source?: 'purchase' | 'grant' | 'compensation' },
+  actor: PlatformAuth,
+): Promise<{ ok: true, id: string } | { ok: false, code: 'not_found' | 'addon_unknown' | 'addon_not_allowed' }> {
+  const db = platformDb()
+  const t = await loadTenant(tenantId)
+  if (!t) return { ok: false, code: 'not_found' }
+  const [addon] = await db.select().from(planAddons).where(eq(planAddons.code, input.addonCode))
+  if (!addon) return { ok: false, code: 'addon_unknown' }
+  // Каталог тарифа (`35` §6.2): опция вне `plans.addons_allowed` недоступна. Пустой список —
+  // тариф ограничений не задаёт, доступны все публичные опции.
+  const [plan] = await db.select().from(plans).where(eq(plans.code, t.plan))
+  if (plan && plan.addonsAllowed.length > 0 && !plan.addonsAllowed.includes(addon.code)) return { ok: false, code: 'addon_not_allowed' }
+  const [row] = await db.insert(tenantAddons).values({
+    tenantId,
+    addonCode: addon.code,
+    qty: input.qty,
+    unitStep: addon.unitStep,
+    validUntil: input.validUntil ?? null,
+    source: input.source ?? 'purchase',
+  }).returning({ id: tenantAddons.id })
+  await recordPlatformAudit(actor, { action: 'tenant.addon_grant', tenantId, entity: 'tenant_addons', entityId: row!.id, after: { addonCode: addon.code, qty: input.qty, unitStep: addon.unitStep, axis: addon.axis, source: input.source ?? 'purchase' } })
+  invalidateLimits(tenantId)
+  return { ok: true, id: row!.id }
 }
 
 /**

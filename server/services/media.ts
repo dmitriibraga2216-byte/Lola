@@ -5,7 +5,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
-import { effectiveLimits } from './tenantLimits'
+import { GIB, effectiveLimits } from './tenantLimits'
 
 /**
  * Медиа (docs/11 §3.4, Г-11.4, docs/04 §4.15): presigned PUT в S3, ключ — uuid
@@ -128,11 +128,13 @@ export async function createUploadUrl(ctx: Ctx, input: {
   // Жорсткий ліміт диска тенанта (docs/25 §10, docs/24 §4.4; докс/33 D-054): перевіряється в момент
   // операції по поточному об'єму, а не по нічному знімку `tenant_usage`. Навчання не зупиняється —
   // блокується лише нове завантаження.
-  const storageGb = (await effectiveLimits(ctx.tenantId)).storageGb
-  if (storageGb != null) {
+  // Лимит оси `storage_bytes` — в байтах и с доплатами (docs/v2/35 §7.1, §7.3, docs/v2/44 В-5):
+  // «+100 ГБ» опцией видна здесь так же, как в баннере и в расчёте счёта — функция одна.
+  const limitBytes = (await effectiveLimits(ctx.tenantId)).axes.storage_bytes
+  if (limitBytes != null) {
     const used2 = await tenantStorageBytes(ctx)
-    if (used2 + input.bytes > storageGb * 1024 * 1024 * 1024) {
-      return { ok: false, code: 'storage_limit', message: `Ліміт дискового простору (${storageGb} ГБ) вичерпано. Зверніться до адміністратора` }
+    if (used2 + input.bytes > limitBytes) {
+      return { ok: false, code: 'storage_limit', message: `Ліміт дискового простору (${(limitBytes / GIB).toFixed(0)} ГБ) вичерпано. Зверніться до адміністратора` }
     }
   }
 

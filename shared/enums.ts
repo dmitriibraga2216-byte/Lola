@@ -158,6 +158,25 @@ export type StageCapability = typeof STAGE_CAPABILITIES[number]
 /** Карта возможностей этапа: отсутствующий ключ = `false` (`33` §3.3). */
 export type StageCapabilityMap = Partial<Record<StageCapability, boolean>>
 
+/**
+ * Оси лимитов тарифа (docs/v2/35-billing-limits.md §7.1, решение docs/v2/44 В-5, патч П-25.1
+ * в редакции «шесть осей → одиннадцать»). Одиннадцать значений — не шесть, как в схеме до
+ * PR-08, и не три, как считал П-25.1 до сверки.
+ *
+ * Десять осей тарифицируются и потому имеют **явную колонку** лимита в `tenant_limits`
+ * (`users`, `candidates`, `storage_gb`, `ai_generate_ops`, `ai_review_ops`, `ai_interview_ops`,
+ * `sms_per_month`, `webhooks` = `integrations_active`, `api_per_minute` = `api_rate_rpm`,
+ * `export_rows`). Мягкая `telegram_out` колонки не получает: канал бесплатный, ось только
+ * наблюдается — её место в `tenant_usage.axes jsonb` (В-5: «ось, по которой выставляется
+ * счёт, обязана иметь имя в схеме; ось, которую мы только наблюдаем, — не заслуживает»).
+ */
+export const LIMIT_AXES = [
+  'users_active', 'candidates_active', 'storage_bytes', 'ai_generate_ops', 'ai_review_ops',
+  'ai_interview_ops', 'sms_out', 'telegram_out', 'integrations_active', 'api_rate_rpm',
+  'export_rows',
+] as const
+export type LimitAxis = typeof LIMIT_AXES[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -181,4 +200,5 @@ export const ENUMS: Record<string, readonly string[]> = {
   user_kind: USER_KINDS,
   lifecycle_stage_code: LIFECYCLE_STAGE_CODES,
   stage_capability: STAGE_CAPABILITIES,
+  limit_axis: LIMIT_AXES,
 }

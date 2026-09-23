@@ -17,9 +17,14 @@
 export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // 33. Жизненный цикл (PR-05, миграция 0057_v2_lifecycle_stages)
   'lifecycle_stages',
+  // 35. Тарифы и лимиты (PR-08, миграция 0059_v2_billing_plans)
+  'tenant_addons',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */
 export const V2_PACKAGE_PLATFORM_TABLES: string[] = [
-  // пусто — появится вместе с PR-08 (docs/v2/45-plan.md)
+  // 35. Тарифы и лимиты (PR-08, миграция 0059_v2_billing_plans): без tenant_id и вне RLS —
+  // справочники платформы, общие для всех тенантов (docs/v2/35 §3.6, docs/25 §3.1)
+  'plan_prices',
+  'plan_addons',
 ]

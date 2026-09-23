@@ -48,8 +48,14 @@ alter table plans
   add column valid_from date not null default current_date, add column valid_to date;
 ```
 
-`plans.limits` — карта осей §7.1 (`{"users_active":50,"candidates_active":100,"storage_bytes":107374182400,…}`);
-оси нет в карте — лимит не задан. `plans` **вне RLS**: нет `tenant_id`, таблица общая (`25` §3.1); приложению
+> [исправлено фазой 1, `44` В-5, реализовано PR-08 — миграция `0059_v2_billing_plans.sql`]
+> Ранее: `plans.limits jsonb` — карта осей §7.1. Фактически `plans` — **явные колонки**
+> `max_*`, PK по `code`, колонки `id` нет. Лимиты новых осей добавлены пятью колонками
+> (`max_candidates`, `max_ai_generate_ops`, `max_ai_review_ops`, `max_ai_interview_ops`,
+> `max_export_rows`) рядом с прежними `max_users`, `max_storage_gb`, `max_sms_per_month`.
+> Колонка `sort` уже существовала — в `alter` вошли восемь колонок, а не девять.
+
+`plans` **вне RLS**: нет `tenant_id`, таблица общая (`25` §3.1); приложению
 `grant select` с фильтром `is_public and is_active`, запись — роль `platform_admin`.
 
 ### 3.2 `tenant_limits` — состояние подписки тенанта
@@ -64,8 +70,15 @@ alter table tenant_limits
   add column updated_at timestamptz not null default now(), add column updated_by uuid;
 ```
 
-`tenant_limits.overrides` — переопределения осей оператором (`{"users_active":175,"ai_generate_ops":null}`,
-`null` = снять лимит), читаются поверх `plans.limits` (§7.3).
+> [исправлено фазой 1, `44` В-5, реализовано PR-08] Ранее: `tenant_limits.overrides jsonb`.
+> Фактически переопределение — **явная колонка на ось**: шесть прежних (`users`, `storage_gb`,
+> `sms_per_month`, `api_per_minute`, `webhooks`, `active_jobs`) плюс пять новых (`candidates`,
+> `ai_generate_ops`, `ai_review_ops`, `ai_interview_ops`, `export_rows`); `null` = лимит тарифа.
+> «Снять лимит» оператор делает переопределением в `null` **при пустой колонке тарифа**:
+> отсутствие значения в обеих колонках и есть «без обмежень» (§7.3).
+>
+> Строка `tenant_limits` с PR-08 держит и состояние подписки (колонки ниже), поэтому сброс
+> всех переопределений больше не удаляет её, если в ней есть оплаченный срок (`docs/28`).
 
 ### 3.3 `tenant_usage` — суточный срез
 
@@ -84,13 +97,18 @@ create index tenant_usage_recent_idx on tenant_usage (tenant_id, collected_at de
 
 ### 3.4 `plan_prices` и `plan_addons` — цены и каталог опций (платформенные, вне RLS)
 
+> [исправлено фазой 1, `44` В-5, реализовано PR-08] `plan_id uuid references plans(id)` →
+> `plan_code text references plans(code)`: колонки `id` у тарифа нет, на `code` уже ссылается
+> `tenants.plan`. То же — в `tenant_payments` и `plan_change_requests` §3.5 (их создаёт PR-10).
+
 ```sql
 create table plan_prices (  -- цена за месяц; за год списывается ×12
-  id uuid primary key default gen_random_uuid(), plan_id uuid not null references plans(id),
+  id uuid primary key default gen_random_uuid(),
+  plan_code text not null references plans(code) on delete cascade on update cascade,
   billing_period text not null check (billing_period in ('month','year')),
   currency char(3) not null default 'EUR', amount_minor bigint not null check (amount_minor >= 0),
   valid_from date not null default current_date, valid_to date,
-  unique (plan_id, billing_period, currency, valid_from));
+  unique (plan_code, billing_period, currency, valid_from));
 
 create table plan_addons (  -- каталог опций; unit_step: 100 ГБ, 1000 операций, 90 дней
   code text primary key, name text not null, axis text not null, unit_step bigint not null,
@@ -100,6 +118,9 @@ create table plan_addons (  -- каталог опций; unit_step: 100 ГБ, 1
 
 Обе таблицы — платформенные, без `tenant_id` и вне RLS. У `plan_addons.code` значения `storage_pack`,
 `ai_ops_pack`, `sms_pack`, `candidates_pack`, `ai_term` (у `ai_term` увеличивается срок ИИ, а не ось).
+`axis` ограничен CHECK'ом: одиннадцать значений `limit_axis` плюс служебное `ai_term`; `unit_step` —
+**в единице своей оси** (байты для `storage_bytes`, операции для ИИ-осей, дни для `ai_term`), иначе
+«+100 ГБ» и лимит тарифа складывались бы в разных шкалах (PR-08).
 
 Структура сетки `[решение]`: **9 тиров**, шаг по оси «співробітники» возрастающий (50 → 75 → 100 → 150 → 200 →
 350 → 500 → 750 → 1000), «кандидати» ровно ×2 от сотрудников на каждом тире, «сховище» одинаковое на всех тирах,
@@ -276,6 +297,13 @@ downgrade, ошибка «Підтвердьте, що ознайомились 
 обмежень». Значение фиксируется в `usage_counters.limit_snapshot` при открытии периода, чтобы
 смена тарифа в середине месяца не переписывала задним числом уже потраченное. Точный состав
 колонок и миграция — `docs/v2/45-plan.md` PR-08.
+
+**Формула живёт в одном месте** — `effectiveLimits()` / `effectiveLimit(tenantId, axis)` в
+`server/services/tenantLimits.ts` (PR-08). Баннер лимита, проверка при операции и расчёт счёта
+обязаны звать её, а не считать `coalesce(tl.*, p.max_*)` у себя: до PR-08 так считали в пяти
+местах, и панель оператора уже показывала число, не знавшее ни про доплаты, ни про умолчания.
+Результат возвращается **в единице оси** (§7.1): хранилище — в байтах, хотя колонка лимита
+хранит гигабайты.
 
 ### 7.4 Жёсткие и мягкие лимиты: поимённо
 

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigserial, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
+  bigint, bigserial, boolean, char, customType, date, index, integer, jsonb, pgTable, smallint,
+  text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
@@ -29,13 +30,31 @@ export const platformSessions = pgTable('platform_sessions', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 })
 
-/** Тарифы и лимиты (docs/02 §2.1 plan; docs/03 §3.12). Платформенная таблица. */
+/**
+ * Тарифы и лимиты (docs/02 §2.1 plan; docs/03 §3.12; docs/v2/35 §3.1). Платформенная таблица.
+ * PK по `code` — колонки `id` у тарифа нет и не заводится (docs/v2/44 В-5): на `code` уже
+ * ссылается `tenants.plan`, а второй идентификатор означал бы два способа сослаться на тариф.
+ */
 export const plans = pgTable('plans', {
   code: text('code').primaryKey(), // trial | point | network | custom
   name: text('name').notNull(),
-  maxUsers: integer('max_users'), // null = без лимита
-  maxStorageGb: integer('max_storage_gb'),
-  maxSmsPerMonth: integer('max_sms_per_month'),
+  titleUk: text('title_uk'), // витрина тарифной сетки (docs/v2/35 §5.2)
+  tier: smallint('tier').notNull().default(0), // 9 тиров сетки (docs/v2/35 §3.4)
+  maxUsers: integer('max_users'), // ось users_active; null = без лимита
+  maxStorageGb: integer('max_storage_gb'), // ось storage_bytes: лимит в ГБ, потребление в байтах (В-5)
+  maxSmsPerMonth: integer('max_sms_per_month'), // ось sms_out
+  // Пять новых осей тарифа (docs/v2/44 В-5): явные колонки рядом с прежними max_*.
+  maxCandidates: integer('max_candidates'), // ось candidates_active
+  maxAiGenerateOps: integer('max_ai_generate_ops'),
+  maxAiReviewOps: integer('max_ai_review_ops'),
+  maxAiInterviewOps: integer('max_ai_interview_ops'),
+  maxExportRows: integer('max_export_rows'),
+  aiIncluded: boolean('ai_included').notNull().default(true), // ИИ входит в план, а не продаётся подпиской (§7.7 п. 1)
+  aiTermDays: integer('ai_term_days'), // собственный срок ИИ от даты подключения (§7.7 п. 2)
+  addonsAllowed: text('addons_allowed').array().notNull().default(sql`'{}'`), // коды plan_addons, доступные на тарифе (§6.2)
+  isActive: boolean('is_active').notNull().default(true),
+  validFrom: date('valid_from').notNull().default(sql`current_date`),
+  validTo: date('valid_to'),
   features: jsonb('features').notNull().default(sql`'{}'::jsonb`), // {knowledge, workshops, surveys, api, webhooks}
   // Замок модуля по тарифу (docs/24 §3.2, §4.4; докс/33 D-053): null — без обмежень (усі модулі),
   // масив — лише перелічені `ModuleCode` доступні на цьому тарифі, решта — 403 `module.plan_locked`.
@@ -45,18 +64,88 @@ export const plans = pgTable('plans', {
 })
 
 /**
- * Переопределение лимитов конкретному тенанту (docs/24 §4.4, docs/25 §10): null — лимит из тарифа `plans`.
- * `active_jobs` — сколько задач одного тенанта воркер берёт за один круг round-robin и держит одновременно (docs/25 §5).
+ * Цена тарифа за месяц (docs/v2/35 §3.4); за год списывается ×12 по строке с `billing_period='year'`.
+ * Платформенная таблица, вне RLS. FK — на `plan_code`, а не `plan_id uuid` (docs/v2/44 В-5).
+ */
+export const planPrices = pgTable('plan_prices', {
+  ...baseColumns,
+  planCode: text('plan_code').notNull().references(() => plans.code, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  billingPeriod: text('billing_period').notNull(), // month | year
+  currency: char('currency', { length: 3 }).notNull().default('EUR'),
+  amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(), // деньги целым числом
+  validFrom: date('valid_from').notNull().default(sql`current_date`),
+  validTo: date('valid_to'),
+}, t => [
+  unique().on(t.planCode, t.billingPeriod, t.currency, t.validFrom),
+  index().on(t.planCode, t.validFrom.desc()),
+])
+
+/**
+ * Каталог докупаемых опций (docs/v2/35 §3.4). Платформенная таблица, вне RLS.
+ * `unit_step` — в единице своей оси: байты для `storage_bytes`, операции для ИИ-осей,
+ * дни для служебной `ai_term` (у неё растёт срок ИИ, а не ось лимита — §7.7 п. 6).
+ */
+export const planAddons = pgTable('plan_addons', {
+  code: text('code').primaryKey(), // storage_pack | ai_ops_pack | sms_pack | candidates_pack | ai_term
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  name: text('name').notNull(),
+  axis: text('axis').notNull(), // LimitAxis | 'ai_term'
+  unitStep: bigint('unit_step', { mode: 'number' }).notNull(),
+  term: text('term').notNull(), // period | perpetual
+  isPublic: boolean('is_public').notNull().default(true),
+  sort: integer('sort').notNull().default(0),
+})
+
+/**
+ * Докупленные опции тенанта (docs/v2/35 §3.5): `unit_step` — снимок на момент покупки, чтобы
+ * пересмотр каталога не переписывал задним числом уже оплаченное. Тенантная таблица под RLS.
+ */
+export const tenantAddons = pgTable('tenant_addons', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  addonCode: text('addon_code').notNull().references(() => planAddons.code, { onDelete: 'restrict', onUpdate: 'cascade' }),
+  qty: integer('qty').notNull(),
+  unitStep: bigint('unit_step', { mode: 'number' }).notNull(),
+  validFrom: date('valid_from').notNull().default(sql`current_date`),
+  validUntil: date('valid_until'), // null = до отключения оператором
+  source: text('source').notNull().default('purchase'), // purchase | grant | compensation
+  paymentId: uuid('payment_id'), // FK на tenant_payments — PR-10
+  createdBy: uuid('created_by'),
+}, t => [
+  index().on(t.tenantId, t.addonCode, t.validUntil),
+])
+
+/**
+ * Состояние подписки тенанта и переопределение лимитов (docs/24 §4.4, docs/25 §10,
+ * docs/v2/35 §3.2): в колонках лимита null — значение берётся из тарифа `plans`.
+ * Одиннадцать осей (docs/v2/35 §7.1) — **явными колонками** (docs/v2/44 В-5): шесть прежних
+ * под своими именами плюс пять новых; `telegram_out` колонки не получает, это мягкая ось.
+ * `active_jobs` — квота задач тенанта на круг round-robin (docs/25 §5), ось вне пакета.
  */
 export const tenantLimits = pgTable('tenant_limits', {
   ...baseColumns,
   tenantId: tenantId(),
-  users: integer('users'), // активных людей (docs/25 §10 п. 1 — считается по status = 'active')
-  storageGb: integer('storage_gb'),
-  smsPerMonth: integer('sms_per_month'),
-  apiPerMinute: integer('api_per_minute'),
-  webhooks: integer('webhooks'),
-  activeJobs: integer('active_jobs'),
+  users: integer('users'), // ось users_active (считается по status = 'active', kind = 'employee')
+  storageGb: integer('storage_gb'), // ось storage_bytes, лимит в ГБ
+  smsPerMonth: integer('sms_per_month'), // ось sms_out
+  apiPerMinute: integer('api_per_minute'), // ось api_rate_rpm
+  webhooks: integer('webhooks'), // ось integrations_active: вебхуки и коннекторы
+  activeJobs: integer('active_jobs'), // ось вне пакета (docs/25 §5)
+  candidates: integer('candidates'), // ось candidates_active
+  aiGenerateOps: integer('ai_generate_ops'),
+  aiReviewOps: integer('ai_review_ops'),
+  aiInterviewOps: integer('ai_interview_ops'),
+  exportRows: integer('export_rows'),
+  // Подписка (docs/v2/35 §3.2, §4): таймер ИИ не зависит от таймера тарифа
+  billingPeriod: text('billing_period').notNull().default('month'), // month | year
+  status: text('status').notNull().default('trial'), // trial | active | grace | readonly | suspended
+  paidUntil: date('paid_until'),
+  graceUntil: date('grace_until'),
+  aiUntil: date('ai_until'),
+  autorenew: boolean('autorenew').notNull().default(true),
+  currency: char('currency', { length: 3 }).notNull().default('EUR'),
+  aiStatus: text('ai_status').notNull().default('active'), // active | expired | off
   updatedBy: uuid('updated_by').references(() => platformAdmins.id, { onDelete: 'set null' }),
 }, t => [
   index().on(t.tenantId),

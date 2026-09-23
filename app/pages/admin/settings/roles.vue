@@ -50,6 +50,13 @@ function toggleGroup(g: Group) {
  * Останнє слово все одно за сервером (`server/services/roles.ts`), тут — лише чесний екран.
  */
 const scopesLocked = computed(() => selected.value?.code === 'admin' || selected.value?.code === 'owner')
+/**
+ * «Переглянути систему як роль» работает только для роли, все права которой есть у смотрящего
+ * (Г-24.1). С появлением владельца это стало заметно: у администратора нет `billing.manage`,
+ * значит и посмотреть его глазами он не может. Кнопка гасится заранее — сервер всё равно
+ * ответит 403, но объяснять это отказом после клика невежливо.
+ */
+const canPreview = computed(() => !!selected.value && selected.value.scopes.every(s => hasScope(s)))
 const lockedNote = computed(() => (selected.value?.code === 'owner' ? t('settings.roles.ownerReadonly') : t('settings.roles.adminReadonly')))
 
 // ── Блок «Власник простору» (docs/01 §1.9.4, docs/24 §3.5) ──
@@ -200,7 +207,7 @@ async function previewAs(r: Role) {
       <aside v-if="selected || creating" class="card editor">
         <div class="ehead">
           <h2 class="panel-title">{{ creating ? t('settings.roles.newRole') : form.name }}</h2>
-          <button v-if="selected" class="btn ghost small" type="button" @click="previewAs(selected)">{{ t('settings.roles.previewAs') }}</button>
+          <button v-if="selected" class="btn ghost small" type="button" :disabled="!canPreview" :title="canPreview ? undefined : t('settings.roles.previewAsUnavailable')" @click="previewAs(selected)">{{ t('settings.roles.previewAs') }}</button>
         </div>
         <p v-if="selected" class="help">{{ t('settings.roles.scopeLine', { scope: t(`settings.scopeTypes.${selected.defaultScopeType}`), n: selected.peopleCount }) }}</p>
         <div class="two">

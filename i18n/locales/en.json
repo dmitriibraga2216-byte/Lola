@@ -4480,7 +4480,8 @@
         "claimed": "You are now the owner of this workspace",
         "empty": "Nobody found",
         "cancel": "Cancel"
-      }
+      },
+      "previewAsUnavailable": "You can't view a role that has permissions you don't have yourself"
     },
     "positionRoleMap": {
       "title": "Position-to-role mapping",

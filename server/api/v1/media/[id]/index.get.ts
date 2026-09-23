@@ -1,14 +1,18 @@
 import { requireScope } from '../../../../services/access'
-import { getMedia, signedReadUrl } from '../../../../services/media'
+import { getMedia, noteMediaAccess, signedReadUrl } from '../../../../services/media'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 
-/** Статус и подписанные ссылки на 10 минут (docs/04 §4.9). */
+/**
+ * Статус и подписанные ссылки (docs/04 §4.9): 10 минут обычному файлу и **120 секунд**
+ * файлу-доказательству (решение docs/v2/44 В-19). Выдача ссылки на доказательство пишется
+ * в `audit_log` событием `media.download` — только для `is_evidence = true`: обложка курса
+ * скачивается при каждом открытии урока, журналировать её значит утопить в шуме ответ на
+ * вопрос «кто снёс доказательства за прошлый квартал» (`34` §9).
+ */
 export default defineEventHandler(async (event) => {
   const access = await requireScope(event, 'learn.view')
-  const media = await getMedia(
-    { tenantId: access.tenantId, actorId: access.userId },
-    getRouterParam(event, 'id')!,
-  )
+  const ctx = { tenantId: access.tenantId, actorId: access.userId }
+  const media = await getMedia(ctx, getRouterParam(event, 'id')!)
   if (!media || media.deletedAt) return apiError(event, 404, 'not_found', 'Файл не знайдено')
 
   const variants = media.variants as Record<string, string>
@@ -18,11 +22,13 @@ export default defineEventHandler(async (event) => {
   if (getQuery(event).redirect) {
     const key = (getQuery(event).variant && variants[String(getQuery(event).variant)]) || (originalReady ? media.key : null)
     if (!key) return apiError(event, 409, 'not_ready', 'Файл ще обробляється')
-    return sendRedirect(event, await signedReadUrl(key), 302)
+    await noteMediaAccess(ctx, media)
+    return sendRedirect(event, await signedReadUrl(key, media.isEvidence), 302)
   }
-  const urls: Record<string, string> = originalReady ? { original: await signedReadUrl(media.key) } : {}
-  for (const [w, key] of Object.entries(variants)) if (typeof key === 'string') urls[w] = await signedReadUrl(key)
-  if (media.posterKey) urls.poster = await signedReadUrl(media.posterKey)
+  await noteMediaAccess(ctx, media)
+  const urls: Record<string, string> = originalReady ? { original: await signedReadUrl(media.key, media.isEvidence) } : {}
+  for (const [w, key] of Object.entries(variants)) if (typeof key === 'string') urls[w] = await signedReadUrl(key, media.isEvidence)
+  if (media.posterKey) urls.poster = await signedReadUrl(media.posterKey, media.isEvidence)
 
   return apiData({
     id: media.id,

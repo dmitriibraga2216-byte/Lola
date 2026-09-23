@@ -148,7 +148,7 @@ async function attach(e: Event) {
   error.value = ''
   try {
     const blob = await compressImage(file)
-    const mediaId = await upload(blob, file.name)
+    const mediaId = await upload(blob, file.name, 'workshop_submission', { sourceEntity: 'attempts', sourceId: state.value.id })
     const r = await api<{ files: { name: string }[] }>(`/attempts/${state.value.id}/answers/${current.value.id}/files`, {
       method: 'POST',
       body: { mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: blob.size },

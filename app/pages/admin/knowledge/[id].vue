@@ -9,7 +9,7 @@ const article = ref<A | null>(null)
 const draft = reactive({ title: '', summary: '', body: [] as ContentBlock[], tags: '', ownerId: '', reviewAt: '', relatedCourses: [] as string[], relatedArticles: [] as string[], attachments: [] as { mediaId: string, name: string }[], scope: 'tenant' as 'tenant' | 'audience', positionIds: [] as string[], locationIds: [] as string[] })
 const refs = reactive<{ people: { id: string, fullName: string }[], courses: { id: string, title: string }[], articles: { id: string, title: string }[], positions: { id: string, name: string }[], locations: { id: string, name: string }[] }>({ people: [], courses: [], articles: [], positions: [], locations: [] })
 const { upload } = useMediaUpload()
-async function attach(e: Event) { const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return; try { const mediaId = await upload(f, f.name); draft.attachments.push({ mediaId, name: f.name }) } catch (err) { error.value = apiErrorOf(err).message } }
+async function attach(e: Event) { const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return; try { const mediaId = await upload(f, f.name, 'lesson_attachment'); draft.attachments.push({ mediaId, name: f.name }) } catch (err) { error.value = apiErrorOf(err).message } }
 const revisions = ref<{ version: number, comment: string | null, createdAt: string }[]>([])
 const savedAt = ref('')
 const error = ref('')

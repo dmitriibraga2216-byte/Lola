@@ -235,7 +235,7 @@ describe('D-054 — ліміти tenant_limits: диск, SMS, попередж�
     mediaIds.push(existing!.id as string)
     expect(await tenantStorageBytes(ctx())).toBeGreaterThan(1_000_000_000)
 
-    const r = await createUploadUrl(ctx(), { filename: 'ще.pdf', mime: 'application/pdf', bytes: 1000 })
+    const r = await createUploadUrl(ctx(), { filename: 'ще.pdf', mime: 'application/pdf', bytes: 1000, origin: 'lesson_attachment' })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.code).toBe('storage_limit')
 

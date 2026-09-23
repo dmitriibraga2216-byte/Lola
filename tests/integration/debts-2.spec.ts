@@ -47,7 +47,7 @@ async function putMedia(mime: string, ext: string, body: Buffer) {
   const key = `t/${tenantId}/test/${crypto.randomUUID()}.${ext}`
   await s3().send(new PutObjectCommand({ Bucket: S3_BUCKET(), Key: key, Body: body, ContentType: mime }))
   const kind = mime.startsWith('image/') ? 'image' : 'file'
-  const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by)
+  const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id)
     values (${tenantId}, ${key}, ${`f.${ext}`}, ${kind}, ${mime}, ${body.length}, 'processing', ${authorId}) returning id`
   mediaIds.push(m!.id as string)
   return { id: m!.id as string, key }

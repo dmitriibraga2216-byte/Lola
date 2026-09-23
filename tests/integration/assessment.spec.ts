@@ -229,7 +229,7 @@ describe('этап 8: чек-листы (docs/20 §13.3–13.5)', () => {
     checklistIds.push(c.id)
     const run = await cl.startRun(ctx(), c.id, { locationId: lazarevaId })
     expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 's', value: 5 }] })).toMatchObject({ ok: false, code: 'signature_required' })
-    const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, uploaded_by) values (${tenantId}, ${`sig-${Date.now()}.png`}, 'signature.png', 'image', 'image/png', 100, 'ready', ${adminId}) returning id`
+    const [m] = await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id) values (${tenantId}, ${`sig-${Date.now()}.png`}, 'signature.png', 'image', 'image/png', 100, 'ready', ${adminId}) returning id`
     try {
       expect(await cl.finishRun(ctx(), run!.id, { answers: [{ itemId: 's', value: 5 }], signatureMediaId: m!.id as string })).toMatchObject({ ok: true })
       const r = await cl.getRun(ctx(), run!.id)

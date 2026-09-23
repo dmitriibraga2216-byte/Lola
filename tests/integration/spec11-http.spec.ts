@@ -129,14 +129,15 @@ describe.skipIf(!BUILT)('Spec 11 по HTTP', () => {
 
   it('лимиты файлов: отказ до начала передачи с понятным текстом', async () => {
     const cookie = await login(ADMIN_PHONE)
-    const big = await fetch(`${BASE}/api/v1/media/upload-url`, json(cookie, 'POST', { filename: 'movie.mp4', mime: 'video/mp4', bytes: 600 * 1024 * 1024 }))
+    const origin = 'lesson_attachment' // обязателен с v2 PR-12 (docs/v2/34 §7.1, решение В-17)
+    const big = await fetch(`${BASE}/api/v1/media/upload-url`, json(cookie, 'POST', { filename: 'movie.mp4', mime: 'video/mp4', bytes: 600 * 1024 * 1024, origin }))
     expect(big.status).toBe(400)
     const err = ((await big.json()) as { error: { code: string, message: string } }).error
     expect(err.code).toBe('media.too_big')
     expect(err.message).toBe('Файл завеликий. Максимум для відео — 500 МБ')
-    const exe = await fetch(`${BASE}/api/v1/media/upload-url`, json(cookie, 'POST', { filename: 'x.exe', mime: 'application/x-msdownload', bytes: 10 }))
+    const exe = await fetch(`${BASE}/api/v1/media/upload-url`, json(cookie, 'POST', { filename: 'x.exe', mime: 'application/x-msdownload', bytes: 10, origin }))
     expect(((await exe.json()) as { error: { code: string } }).error.code).toBe('media.mime_not_allowed')
-    const img = await fetch(`${BASE}/api/v1/media/upload-url`, json(cookie, 'POST', { filename: 'cover.png', mime: 'image/png', bytes: 11 * 1024 * 1024 }))
+    const img = await fetch(`${BASE}/api/v1/media/upload-url`, json(cookie, 'POST', { filename: 'cover.png', mime: 'image/png', bytes: 11 * 1024 * 1024, origin }))
     expect(((await img.json()) as { error: { message: string } }).error.message).toContain('10 МБ')
   })
 

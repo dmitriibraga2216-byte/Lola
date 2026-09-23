@@ -62,7 +62,8 @@ async function upload(index: number, e: Event) {
   try {
     const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', {
       method: 'POST',
-      body: { filename: file.name, mime: file.type, bytes: file.size },
+      // origin обязателен на единственном входе загрузки (docs/v2/34 §7.1, решение В-17)
+      body: { filename: file.name, mime: file.type, bytes: file.size, origin: 'lesson_attachment' },
     })
     const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
     if (!put.ok) throw new Error('upload failed')

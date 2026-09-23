@@ -245,6 +245,36 @@ export type UsageRefKind = typeof USAGE_REF_KINDS[number]
 export const LIMIT_NOTICE_LEVELS = ['warn', 'exceeded'] as const
 export type LimitNoticeLevel = typeof LIMIT_NOTICE_LEVELS[number]
 
+/**
+ * Происхождение файла (`media_assets.origin`, docs/v2/34 §3.2 и §7.1, итоговая редакция
+ * docs/v2/40 §4.2, решение В-6) — **пятнадцать** значений и **один** check-констрейнт.
+ *
+ * Перечень описан тремя документами пакета по-разному (`34` — 13 значений, `30` добавляет
+ * `interview_answer`, `38` пересоздаёт констрейнт целиком и `interview_answer` в его версии
+ * нет). Собирается один раз: иначе запись авто-собеседования становится невставляемой.
+ * Здесь, в `docs/02` «Перечисления» и в миграции `0063_v2_media_origin` — три копии одного
+ * списка, расхождение любой валит CI (`schema-parity.spec.ts` и контрактный тест №4).
+ *
+ * Значение задаёт клиент при выдаче presigned URL (`34` §7.1): без него
+ * `POST /media/upload-url` отвечает `400 origin_required`. `other` — не «по умолчанию»,
+ * а «не отнесено»: доля выше 5 % объёма считается дефектом классификации.
+ */
+export const MEDIA_ORIGINS = [
+  'content_cover', 'lesson_attachment', 'workshop_submission', 'video_answer', 'candidate_cv',
+  'certificate', 'import', 'checklist_photo', 'avatar', 'brand_asset', 'ai_artifact',
+  'report_export', 'interview_answer', 'person_document', 'other',
+] as const
+export type MediaOrigin = typeof MEDIA_ORIGINS[number]
+
+/**
+ * Положение файла в хранилище (`media_assets.lifecycle`, docs/v2/34 §3.1, §4) — ось,
+ * отдельная от `status`: `status` — техническая готовность объекта, `lifecycle` — место
+ * в хранилище. Файл бывает `status='ready'` и `lifecycle='orphaned'` одновременно.
+ * `purged` терминально: строка `media_assets` не удаляется никогда.
+ */
+export const MEDIA_LIFECYCLES = ['active', 'orphaned', 'pending_delete', 'purged'] as const
+export type MediaLifecycle = typeof MEDIA_LIFECYCLES[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -274,4 +304,6 @@ export const ENUMS: Record<string, readonly string[]> = {
   limit_axis: LIMIT_AXES,
   usage_ref_kind: USAGE_REF_KINDS,
   limit_notice_level: LIMIT_NOTICE_LEVELS,
+  media_origin: MEDIA_ORIGINS,
+  media_lifecycle: MEDIA_LIFECYCLES,
 }

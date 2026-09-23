@@ -47,10 +47,10 @@ export function useOfflineRuns() {
     }
     for (const a of Object.values(run.answers)) {
       for (const p of a.photos) {
-        if (!p.mediaId) { p.mediaId = await upload(await dataUrlToBlob(p.dataUrl), 'photo.jpg'); save(run) }
+        if (!p.mediaId) { p.mediaId = await upload(await dataUrlToBlob(p.dataUrl), 'photo.jpg', 'checklist_photo', { sourceEntity: 'checklist_runs', sourceId: run.runId }); save(run) }
       }
     }
-    if (run.signature && !run.signature.mediaId) { run.signature.mediaId = await upload(await dataUrlToBlob(run.signature.dataUrl), 'signature.png'); save(run) }
+    if (run.signature && !run.signature.mediaId) { run.signature.mediaId = await upload(await dataUrlToBlob(run.signature.dataUrl), 'signature.png', 'checklist_photo', { sourceEntity: 'checklist_runs', sourceId: run.runId }); save(run) }
     const answers = Object.entries(run.answers).map(([itemId, a]) => ({ itemId, value: a.value, comment: a.comment || null, isNa: a.isNa, photoMediaIds: a.photos.map(p => p.mediaId!).filter(Boolean) }))
     if (!run.pendingFinish) {
       await api(`/checklist-runs/${run.runId}`, { method: 'PUT', body: { answers, startedAt: run.startedAt, actionPlan: run.actionPlan } })

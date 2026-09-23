@@ -10,6 +10,8 @@ export default defineEventHandler(async (event) => {
   const r = await createAssignment({ tenantId: a.tenantId, actorId: a.userId }, p.data)
   if (!r.ok) {
     if (r.code === 'subject_not_found') return apiError(event, 422, 'assignment.subject', 'Оберіть опублікований курс')
+    // docs/v2/33 §7.9, критерий §13 п. 5: этап курса не для кандидатов
+    if (r.code === 'not_for_candidate') return apiError(event, 422, 'lifecycle.not_for_candidate', 'Цей етап не можна призначати кандидату')
     return apiError(event, 422, 'assignment.empty_audience', 'Під умову не підпадає жодна людина')
   }
   return apiData(r)

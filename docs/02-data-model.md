@@ -1426,6 +1426,42 @@ lifecycle_stages(
 -- возможностей, `v2/33` §7.3), stage_locked boolean not null default false (запирается после
 -- первого завершённого прохождения, §7.4; смена без подтверждения — `409 course.stage_locked`).
 
+-- Где человек находится в цикле (`v2/33` §3.5, `v2/40` 0021; PR-07 пакета, миграция 0060).
+-- Этап человека и этап курса — разные вещи и друг из друга не выводятся: человек «на
+-- онбординге» параллельно проходит курс этапа «база знань». Текущая запись ровно одна —
+-- частичным уникальным индексом, а не проверкой в коде.
+employee_lifecycle_state(
+  id, tenant_id, created_at, updated_at,
+  user_id uuid not null,          -- FK users on delete cascade
+  stage_id uuid not null,         -- FK lifecycle_stages
+  entered_at timestamptz not null default now(),
+  left_at timestamptz,            -- заполняется при переходе дальше
+  entered_by uuid,                -- кто перевёл; null — автоматический переход
+  reason_code text,               -- hire | rehire | advance | offboarding | manual | backfill
+  is_current boolean not null default true
+)
+-- unique (tenant_id, user_id) where is_current; index (tenant_id, user_id, entered_at desc).
+-- Переход вперёд автоматический, когда закрыты ВСЕ обязательные назначения этапа (`v2/33` §7.6);
+-- граф переходов — LIFECYCLE_STAGE_FLOW в shared/enums.ts (кодов этапов в логике нет).
+
+-- Процесс увольнения (`v2/33` §3.6, §4.2, §7.7; PR-07 пакета, миграция 0060).
+offboarding_cases(
+  id, tenant_id, created_at, updated_at,
+  user_id uuid not null,          -- FK users on delete cascade
+  state text not null default 'started',   -- offboarding_state (см. перечисления), CHECK
+  reason_code text not null,      -- offboarding_reason (см. перечисления), CHECK
+  reason_text text,               -- обязателен при reason_code = 'other' (форма §6.2)
+  last_working_day date not null, -- не раньше чем сегодня − 30 дней (`v2/33` §12.7)
+  initiated_by uuid, responsible_id uuid,  -- инициатор и ответственный — разные люди
+  exit_interview_enrollment_id uuid,       -- FK enrollments; null — интервью не назначалось
+  handover_done_at timestamptz, access_revoked_at timestamptz, completed_at timestamptz,
+  cancelled_at timestamptz, cancel_reason text
+)
+-- unique (tenant_id, user_id) where state not in ('done','cancelled') — `409 offboarding.active_exists`;
+-- index (tenant_id, state). Завершение транзакционно: сессии закрыты, незавершённые назначения
+-- переведены в `not_assigned` с пометкой «звільнення», человек вышел из лимита активных
+-- (`status = 'archived'`), запись и вся история обучения сохранены, сертификаты НЕ отозваны (П-14).
+
 -- Единая лента комментариев (`10` §14.2)
 comments(
   id, tenant_id, author_id, body text,
@@ -1513,6 +1549,20 @@ lifecycle_stage_code: recruiting | onboarding | integration | training
 -- неизвестный ключ отвергается 422, отсутствующий читается как false (`v2/44` В-3)
 stage_capability: progress | deadline | grading | attempts | review | certificate | graph
                 | ai_generate | applies_to_candidate | applies_to_employee | counts_in_rating
+
+-- Почему человек оказался на этапе — `employee_lifecycle_state.reason_code` (`v2/33` §3.5).
+-- `backfill` — догоняющее состояние миграции 0060 для уже работавших сотрудников
+lifecycle_reason_code: hire | rehire | advance | manual | backfill | offboarding
+                     | offboarding_cancelled
+
+-- Состояния случая увольнения (`v2/33` §3.6, §4.2): отмена возможна до `done`, после —
+-- только повторный найм (правило `v2/33` §7.8)
+offboarding_state: started | handover | interview | done | cancelled
+
+-- Причины увольнения (`v2/33` §3.6, форма §6.2): свободный текст обязателен только при `other`;
+-- разрез отчёта «Офбординг» (`v2/33` §9 п. 3) строится по этим кодам
+offboarding_reason: own_wish | probation_failed | performance | redundancy
+                  | no_show | end_of_contract | transfer_out | other
 
 -- Матеріал, який можна оцінити читачем («Оцінок: N», `21` §14.1); докс/33 D-042, своє
 content_rating_target: resource | knowledge_article

@@ -421,6 +421,13 @@
       "when": 1790120503875,
       "tag": "0059_v2_billing_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790120563875,
+      "tag": "0060_v2_offboarding",
+      "breakpoints": true
     }
   ]
 }

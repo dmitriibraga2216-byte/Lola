@@ -10,7 +10,9 @@
  * до тех пор он есть только у `admin` (через `[...SCOPES]` ниже). Первое исключение —
  * `lifecycle.view` у `mentor`, `manager` и `author` (PR-05: справочник этапов и экран
  * `/admin/settings/lifecycle` уже работают, `docs/v2/33` §2 даёт им право видеть этап);
- * `lifecycle.manage` остаётся только у `admin`. Распределение по будущим ролям `recruiter`,
+ * `lifecycle.manage` остаётся только у `admin`. Второе — `offboarding.start` у `manager`
+ * (PR-07: экран `/admin/offboarding` работает, `docs/v2/33` §2 — «Запустить офбординг:
+ * керівник точки ✓ своей точки»); `offboarding.complete` остаётся только у `admin`. Распределение по будущим ролям `recruiter`,
  * `hr`, `owner` — в PR, которые добавят соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
  * (`plans.manage`, `limits.override`, `ai.grant`, `payments.manage`) сюда не включены: доступ
  * оператора платформы работает отдельным механизмом (`platform_admin`, BYPASSRLS,
@@ -103,6 +105,9 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'report.own', 'report.team', 'report.export', 'development.own', 'development.team', 'request.decide',
       'assessment.own', 'assessment.team', 'assessment.run', 'checklist.run',
       'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'lifecycle.view',
+      // PR-07: «Запустить офбординг» — керівник точки своей точки (`docs/v2/33` §2);
+      // завершает офбординг только администратор (`offboarding.complete` остаётся у него).
+      'offboarding.start',
     ],
   },
   author: {

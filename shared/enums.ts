@@ -177,6 +177,57 @@ export const LIMIT_AXES = [
 ] as const
 export type LimitAxis = typeof LIMIT_AXES[number]
 
+/**
+ * Куда человек переходит, закрыв все обязательные назначения этапа (docs/v2/33 §4.1, §7.6).
+ *
+ * Граф переходов — такая же платформенная данность, как сам перечень кодов, и живёт здесь
+ * по той же причине: в `server/` и `app/` ветвления по коду этапа нет ни одного (`33` §7.1,
+ * сквозная проверка 1). Перехода из `training` нет намеренно — это рабочее состояние по
+ * умолчанию (`33` §4.1: «иначе пришлось бы придумывать девятый этап „работает“»); из
+ * `attestation` человек возвращается в него же. `recruiting` — только для кандидата,
+ * `knowledge` и `psychological` этапами человека не бывают, `offboarding` закрывается
+ * завершением случая увольнения, а не переходом.
+ */
+export const LIFECYCLE_STAGE_FLOW: Partial<Record<LifecycleStageCode, LifecycleStageCode>> = {
+  onboarding: 'integration',
+  integration: 'training',
+  attestation: 'training',
+}
+
+/** Этап, который человек получает при найме и при повторном найме (`33` §4.1, §7.8). */
+export const STAGE_ON_HIRE: LifecycleStageCode = 'onboarding'
+/** Этап уходящего человека (`33` §4.2). */
+export const STAGE_ON_OFFBOARDING: LifecycleStageCode = 'offboarding'
+/** Рабочее состояние по умолчанию (`33` §4.1). */
+export const STAGE_WORKING: LifecycleStageCode = 'training'
+
+/**
+ * Почему человек оказался на этапе — `employee_lifecycle_state.reason_code` (docs/v2/33 §3.5).
+ *
+ * Перечень живёт здесь, рядом с кодами этапов, и по той же причине: значение `offboarding`
+ * текстуально совпадает с кодом этапа, и в коде оно обязано быть именем константы, а не
+ * литералом — иначе сквозная проверка 1 не отличит причину перехода от ветвления по этапу.
+ */
+export const LIFECYCLE_REASON_CODES = [
+  'hire', 'rehire', 'advance', 'manual', 'backfill', 'offboarding', 'offboarding_cancelled',
+] as const
+export type LifecycleReasonCode = typeof LIFECYCLE_REASON_CODES[number]
+
+/** Причина перехода при запуске офбординга и снятия его назначений при отмене. */
+export const REASON_OFFBOARDING: LifecycleReasonCode = 'offboarding'
+export const REASON_OFFBOARDING_CANCELLED: LifecycleReasonCode = 'offboarding_cancelled'
+
+/** Состояния случая увольнения (docs/v2/33 §3.6, §4.2). */
+export const OFFBOARDING_STATES = ['started', 'handover', 'interview', 'done', 'cancelled'] as const
+export type OffboardingState = typeof OFFBOARDING_STATES[number]
+
+/** Причины увольнения (docs/v2/33 §3.6, форма §6.2): свободный текст обязателен только при `other`. */
+export const OFFBOARDING_REASONS = [
+  'own_wish', 'probation_failed', 'performance', 'redundancy',
+  'no_show', 'end_of_contract', 'transfer_out', 'other',
+] as const
+export type OffboardingReason = typeof OFFBOARDING_REASONS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -200,5 +251,8 @@ export const ENUMS: Record<string, readonly string[]> = {
   user_kind: USER_KINDS,
   lifecycle_stage_code: LIFECYCLE_STAGE_CODES,
   stage_capability: STAGE_CAPABILITIES,
+  lifecycle_reason_code: LIFECYCLE_REASON_CODES,
+  offboarding_state: OFFBOARDING_STATES,
+  offboarding_reason: OFFBOARDING_REASONS,
   limit_axis: LIMIT_AXES,
 }

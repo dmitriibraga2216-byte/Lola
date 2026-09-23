@@ -27,7 +27,7 @@ async function nextNumber(tx: Parameters<Parameters<typeof withTenant>[2]>[0], t
 
 export type IssueResult
   = | { ok: true, certificateId: string, number: string, created: boolean }
-    | { ok: false, code: 'not_found' | 'not_completed' }
+    | { ok: false, code: 'not_found' | 'not_completed' | 'stage_no_certificate' }
 
 /** Выдача по завершённой записи. Повторный вызов возвращает существующий сертификат. */
 export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attemptId?: string | null): Promise<IssueResult> {
@@ -35,6 +35,12 @@ export async function issueForEnrollment(ctx: Ctx, enrollmentId: string, attempt
     const [enr] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId))
     if (!enr) return { ok: false as const, code: 'not_found' as const }
     if (enr.status !== 'done') return { ok: false as const, code: 'not_completed' as const }
+    // П-14 (docs/v2/39-patches.md, docs/v2/33 §3.3): по курсам этапа с выключенной
+    // возможностью `certificate` сертификат не выдаётся вовсе. Курс без этапа — полный набор
+    // возможностей, то есть поведение базового ТЗ не меняется. Решение принимает stageCan()
+    // (§7.1) — ветвления по коду этапа здесь нет.
+    const { courseStageCan } = await import('./lifecycle')
+    if (!await courseStageCan(tx, enr.subjectId, 'certificate')) return { ok: false as const, code: 'stage_no_certificate' as const }
 
     // Отозванный (D-013: откат зачёта при пересчёте) не считается — повторное завершение выдаёт новый номер (docs/14 §12)
     const existing = await tx.select({ id: certificates.id, number: certificates.number }).from(certificates)

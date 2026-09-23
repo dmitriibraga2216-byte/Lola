@@ -17,6 +17,9 @@
 export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // 33. Жизненный цикл (PR-05, миграция 0057_v2_lifecycle_stages)
   'lifecycle_stages',
+  // 33. Офбординг и состояние человека (PR-07, миграция 0060_v2_offboarding)
+  'employee_lifecycle_state',
+  'offboarding_cases',
   // 35. Тарифы и лимиты (PR-08, миграция 0059_v2_billing_plans)
   'tenant_addons',
 ]

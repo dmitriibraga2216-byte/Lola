@@ -408,6 +408,24 @@
 > одиннадцати модулей пакета — `docs/v2/41-api-delta.md`; здесь — только то, что касается
 > основного контракта API.
 
+### Жизненный цикл и офбординг (`docs/v2/33-lifecycle.md` §10, PR-07)
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/lifecycle/state/:userId` | текущий этап человека, история и прошлые периоды работы (`lifecycle.view`); `404` — человека нет |
+| POST | `/lifecycle/state/:userId` | ручной перевод HR: `{stageId, reasonCode, reasonText?}` (`lifecycle.manage`); `422 lifecycle.disabled`, `409 lifecycle.same_stage` |
+| GET | `/offboarding` | список случаев: фильтры `state`, `active`, `reasonCode`, `locationId`, `from`, `to` (`offboarding.start`) |
+| POST | `/offboarding` | запуск по форме `33` §6.2 (`offboarding.start`); `409 offboarding.active_exists`, `409 people.last_admin`, `422 validation_failed` («Дата надто давня» — дальше 30 дней назад) |
+| GET | `/offboarding/stage` | этап «Офбординг» и его курсы — предзаполнение поля «Курси офбордингу» |
+| GET | `/offboarding/:id` | карточка случая; чужой тенант — `404` |
+| POST | `/offboarding/:id/handover` | передача дел закрыта: `{done: true}` → переход `handover → interview` |
+| POST | `/offboarding/:id/complete` | завершение: `{confirm: true}` (`offboarding.complete`); `409 offboarding.before_last_day` |
+| POST | `/offboarding/:id/cancel` | отмена: `{reasonText}`; после `done` — `409 offboarding.completed` |
+| POST | `/people/hire` | найм и **повторный** найм одним путём (`people.invite`): человек ищется по `userId`/`phone`/`externalId` и второй записи `users` не получает (`33` §7.8) |
+
+Назначение курса этапа, у которого выключен `applies_to_candidate`, кандидату — `422
+lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7.9).
+
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом
 `server/api/v1/public/` → `/api/v1/public/*` (префикс задаёт дерево каталогов Nitro, а не

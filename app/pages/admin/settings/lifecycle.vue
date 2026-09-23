@@ -25,6 +25,7 @@ interface Stage {
   expectedDays: number | null
   capabilities: Partial<Record<StageCapability, boolean>>
   coursesCount: number
+  peopleCount: number
 }
 
 const stages = ref<Stage[]>([])
@@ -71,6 +72,7 @@ const capsOf = (s: Stage) => STAGE_CAPABILITIES.filter(c => s.capabilities[c] ==
           <b v-if="!s.isEnabled" class="badge muted">{{ t('settings.lifecycle.disabledBadge') }}</b>
           <span class="spacer" />
           <span class="muted">{{ t('settings.lifecycle.coursesCount') }}: {{ s.coursesCount }}</span>
+          <span class="muted">{{ t('settings.lifecycle.peopleCount') }}: {{ s.peopleCount }}</span>
         </header>
 
         <div class="fields">

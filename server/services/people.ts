@@ -17,6 +17,7 @@ import { levelLabel } from './development'
 import type { CompetencyLevel } from './development'
 import { studyHistory } from './reportsExtra'
 import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
+import { STAGE_ON_HIRE } from '../../shared/enums'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
 
@@ -233,6 +234,12 @@ export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
       externalId: input.externalId ?? null,
       locale: input.locale ?? null,
     }).returning()
+
+    // docs/v2/33 §4.1: ручное заведение человека — тот же вход в цикл, что и найм из воронки,
+    // и даёт этап «Онбординг». Без этого состояние человека появлялось бы только у тех, кого
+    // нанимают через `POST /people/hire`, а счётчик людей в этапе врал бы (§5.2).
+    const { enterStageByCodeTx } = await import('./lifecycleState')
+    await enterStageByCodeTx(tx, { tenantId: ctx.tenantId, userId: person!.id, code: STAGE_ON_HIRE, reasonCode: 'hire', enteredBy: ctx.actorId })
 
     await recordAudit(tx, {
       tenantId: ctx.tenantId,

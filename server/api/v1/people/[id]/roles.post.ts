@@ -1,6 +1,6 @@
 import { roleAssignSchema } from '../../../../../shared/schemas/people'
 import { requireScope } from '../../../../services/access'
-import { assignRole } from '../../../../services/people'
+import { assignRole, OWNER_NOT_ASSIGNABLE } from '../../../../services/people'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 
 export default defineEventHandler(async (event) => {
@@ -14,6 +14,7 @@ export default defineEventHandler(async (event) => {
     getRouterParam(event, 'id')!,
     parsed.data,
   )
+  if (assigned === OWNER_NOT_ASSIGNABLE) return apiError(event, 409, 'owner_role', 'Володіння не призначають роллю — його передає чинний власник на екрані «Ролі та права»')
   if (!assigned) return apiError(event, 404, 'not_found', 'Роль не знайдено')
   return apiData(assigned)
 })

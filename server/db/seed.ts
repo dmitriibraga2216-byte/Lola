@@ -58,18 +58,21 @@ if (SEED_MODE === 'prod') {
     const roles = await tx.insert(schema.roles).values(
       Object.entries(SYSTEM_ROLES).map(([code, r]) => ({
         tenantId, code, name: r.name, scopes: [...r.scopes], isSystem: true,
+        ...(r.defaultScopeType ? { defaultScopeType: r.defaultScopeType } : {}),
       })),
     ).returning()
     const adminRole = roles.find(r => r.code === 'admin')!
+    const ownerRole = roles.find(r => r.code === 'owner')!
     await ensureTenantDefaults(tx, tenantId)
 
     const [admin] = await tx.insert(schema.users).values({
       tenantId, phone: adminPhone, fullName: 'Адміністратор', status: 'active',
     }).returning()
 
-    await tx.insert(schema.userRoles).values({
-      tenantId, userId: admin!.id, roleId: adminRole.id, scopeType: 'tenant',
-    })
+    await tx.insert(schema.userRoles).values([
+      { tenantId, userId: admin!.id, roleId: adminRole.id, scopeType: 'tenant' as const },
+      { tenantId, userId: admin!.id, roleId: ownerRole.id, scopeType: 'tenant' as const },
+    ])
   })
 
   console.log(`Сід застосовано (prod): тенант «${name}» (${slug}), системні ролі, адмін ${adminPhone}`)
@@ -116,6 +119,7 @@ await db.transaction(async (tx) => {
   const roles = await tx.insert(schema.roles).values(
     Object.entries(SYSTEM_ROLES).map(([code, r]) => ({
       tenantId, code, name: r.name, scopes: [...r.scopes], isSystem: true,
+      ...(r.defaultScopeType ? { defaultScopeType: r.defaultScopeType } : {}),
     })),
   ).returning()
   const role = Object.fromEntries(roles.map(r => [r.code, r]))
@@ -177,6 +181,9 @@ await db.transaction(async (tx) => {
 
   await tx.insert(schema.userRoles).values([
     { tenantId, userId: adminU!.id, roleId: role['admin']!.id, scopeType: 'tenant' },
+    // Админ демо-тенанта он же владелец (docs/01 §1.9.4): две роли на одном человеке —
+    // и рабочий пример переключателя ролей, и единственный владелец «Каппі».
+    { tenantId, userId: adminU!.id, roleId: role['owner']!.id, scopeType: 'tenant' },
     { tenantId, userId: hr!.id, roleId: role['author']!.id, scopeType: 'tenant' },
     { tenantId, userId: chef!.id, roleId: role['mentor']!.id, scopeType: 'location', scopeId: lazareva!.id },
     { tenantId, userId: chef!.id, roleId: role['employee']!.id, scopeType: 'location', scopeId: lazareva!.id },
@@ -707,7 +714,7 @@ await db.transaction(async (tx) => {
   ])
 })
 
-console.log('Сид применён: тенант «Каппі», 2 точки, 5 позиций, 5 системных ролей, 5 людей'
+console.log('Сид применён: тенант «Каппі», 2 точки, 5 позиций, 6 системных ролей, 5 людей'
   + ' и 3 канареечных кандидата (П-16.1, слой 3);'
   + ' учебный контент — 4 курса (12 уроков, 9 материалов), 3 теста (12 вопросов),'
   + ' 1 программа, 1 траектория')

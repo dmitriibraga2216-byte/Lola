@@ -11,6 +11,8 @@ export default defineEventHandler(async (event) => {
   const r = await removeRole({ tenantId: access.tenantId, actorId: access.userId }, getRouterParam(event, 'id')!, getRouterParam(event, 'code')!, parsed.data.reason)
   if (!r.ok) {
     if (r.code === 'not_found') return apiError(event, 404, 'not_found', 'Роль у цієї людини не знайдено')
+    // docs/01 §1.9.4: володіння не знімають — його передають (`POST /settings/owner/transfer`)
+    if (r.code === 'owner_role') return apiError(event, 409, 'owner_role', 'Володіння не можна зняти — його передають іншій людині на екрані «Ролі та права»')
     return apiError(event, 409, 'last_admin', 'Це останній адміністратор — спочатку призначте іншого')
   }
   return apiData({ ok: true })

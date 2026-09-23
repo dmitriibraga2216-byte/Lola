@@ -61,7 +61,8 @@ describe('действующие роли и роль по умолчанию', 
     const list = await withTenant(tenantId, adminId, tx => effectiveRoles(tx, userId))
     expect(list.map(r => r.code).sort()).toEqual(['admin', 'employee'])
     expect(defaultRoleOf(list)?.code).toBe('admin')
-    expect([rankRole('admin'), rankRole('author'), rankRole('manager'), rankRole('mentor'), rankRole('custom_x'), rankRole('employee')]).toEqual([0, 1, 2, 3, 4, 5])
+    // `owner` вклинился после `admin` (docs/01 §1.9.4): по широте рабочего интерфейса, а не по старшинству
+    expect([rankRole('admin'), rankRole('owner'), rankRole('author'), rankRole('manager'), rankRole('mentor'), rankRole('custom_x'), rankRole('employee')]).toEqual([0, 1, 2, 3, 4, 5, 6])
     expect(defaultRoleOf([])).toBeNull()
   })
 

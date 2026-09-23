@@ -3,7 +3,7 @@
  * Статистика використання (мокап TenantStats, docs/24 §4.4.1): плитки «Активні · Диск · SMS» с лимитами тарифа,
  * «Що не входить у ліміт» (заблоковані, архівні), «Останній збір», тариф. Всё считает сервер раз в сутки.
  */
-definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
+definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'billing.usage.view' })
 const { t } = useI18n()
 const { api } = useApi()
 

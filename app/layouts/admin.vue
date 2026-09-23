@@ -106,7 +106,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/lifecycle', label: t('admin.nav.lifecycle'), show: hasScope('lifecycle.view') },
     { to: '/admin/settings/recruiting', label: t('admin.nav.recruitingSettings'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant') },
-    { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('settings.tenant') },
+    // Тариф і ліміти (docs/v2/35 §2): лічильники бачать `admin` і `owner` — скоуп, а не «налаштування простору»
+    { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('billing.usage.view') },
     { to: '/admin/certificates', label: t('admin.nav.certificates'), show: hasScope('report.team') },
   ] },
 ].map(s => ({ ...s, items: s.items.filter((i) => {

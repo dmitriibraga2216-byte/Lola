@@ -3,6 +3,7 @@ import { and, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import {
   cities, enrollments, functionalChiefs, invitations, locations, orgUnits, positionLevels, positions, roles, sessions, userNotes, userPlacements, userRoles, users,
 } from '../db/schema'
+import { OWNER_ROLE_CODE } from '../../shared/domain/roles'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
@@ -202,6 +203,18 @@ export function splitName(input: { fullName?: string, lastName?: string | null, 
   return { lastName: parts[0] ?? null, firstName: parts[1] ?? null, middleName: parts.slice(2).join(' ') || null, fullName: (input.fullName ?? '').trim() }
 }
 
+/**
+ * Единственного владельца нельзя заблокировать, архивировать и лишить роли (docs/01 §1.9.4).
+ * Отличие от «последнего администратора» принципиальное: администраторов можно назначить
+ * ещё, а владелец в тенанте ровно один — значит выход у него один, передать владение
+ * (`server/services/owner.ts`, `POST /settings/owner/transfer`). Поэтому здесь нет условия
+ * «и он единственный»: владелец всегда единственный.
+ */
+export async function isLastOwner(tx: TenantTx, userId: string): Promise<boolean> {
+  const { isSoleOwner } = await import('./owner')
+  return isSoleOwner(tx, userId)
+}
+
 /** Последнего администратора нельзя заблокировать, архивировать или лишить роли (docs/16 §7.6). */
 export async function isLastAdmin(tx: TenantTx, userId: string): Promise<boolean> {
   const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users u on u.id = ur.user_id where r.code = 'admin' and ur.scope_type = 'tenant' and (ur.valid_until is null or ur.valid_until > now()) and u.status in ('active','invited') and not u.is_blocked ${EMPLOYEES_ONLY()}`) as unknown as { user_id: string }[]
@@ -263,6 +276,7 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
 
     if (input.status === 'archived' || input.status === 'suspended' || input.isBlocked) {
       if (await isLastAdmin(tx, id)) return { lastAdmin: true as const }
+      if (await isLastOwner(tx, id)) return { lastOwner: true as const }
     }
     const nameParts = (input.lastName !== undefined || input.firstName !== undefined || input.middleName !== undefined || input.fullName !== undefined)
       ? splitName({ fullName: input.fullName, lastName: input.lastName ?? before.lastName ?? undefined, firstName: input.firstName ?? before.firstName ?? undefined, middleName: input.middleName === undefined ? before.middleName : input.middleName })
@@ -420,6 +434,8 @@ export async function addPlacement(ctx: Ctx, userId: string, input: {
  * Повторное назначение той же роли в той же области — редактирование срока и причины
  * (роль, выданная правилом «должность → роль», при этом становится ручной).
  */
+export const OWNER_NOT_ASSIGNABLE = 'owner_role' as const
+
 export async function assignRole(ctx: Ctx, userId: string, input: {
   roleCode: string
   scopeType: 'tenant' | 'org_unit' | 'location'
@@ -427,6 +443,11 @@ export async function assignRole(ctx: Ctx, userId: string, input: {
   validUntil?: string | null
   reason?: string | null
 }) {
+  // Владение не раздают через карточку человека (docs/01 §1.9.4): у роли `owner` свой путь —
+  // «Стати власником» в пустом тенанте и «Передати володіння» от действующего владельца.
+  // Иначе `role.assign` (есть у администратора) обходил бы `tenant.transfer` (его нет ни у кого,
+  // кроме владельца), а частичный уникальный индекс отвечал бы на это голым 23505.
+  if (input.roleCode === OWNER_ROLE_CODE) return OWNER_NOT_ASSIGNABLE
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [role] = await tx.select().from(roles).where(eq(roles.code, input.roleCode))
     if (!role) return null
@@ -470,7 +491,7 @@ export async function assignRole(ctx: Ctx, userId: string, input: {
 
 // ── docs/16: блокировка, архивирование, сессии, слияние, GDPR, экспорт ──
 
-export type BlockResult = { ok: true } | { ok: false, code: 'not_found' | 'last_admin' }
+export type BlockResult = { ok: true } | { ok: false, code: 'not_found' | 'last_admin' | 'last_owner' }
 
 /** Блокировка запрещает вход, обучение не снимает (docs/16 §7.4). */
 export async function setBlocked(ctx: Ctx, userId: string, blocked: boolean): Promise<BlockResult> {
@@ -478,6 +499,7 @@ export async function setBlocked(ctx: Ctx, userId: string, blocked: boolean): Pr
     const [u] = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.id, userId))
     if (!u) return { ok: false as const, code: 'not_found' as const }
     if (blocked && await isLastAdmin(tx, userId)) return { ok: false as const, code: 'last_admin' as const }
+    if (blocked && await isLastOwner(tx, userId)) return { ok: false as const, code: 'last_owner' as const }
     await tx.update(users).set({ isBlocked: blocked, status: blocked ? 'suspended' : 'active', updatedAt: new Date() }).where(eq(users.id, userId))
     if (blocked) await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: blocked ? 'people.block' : 'people.unblock', entity: 'user', entityId: userId })
@@ -497,6 +519,7 @@ export async function archivePerson(ctx: Ctx, userId: string, input: { reason: '
     const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId))
     if (!u) return { ok: false as const, code: 'not_found' as const }
     if (await isLastAdmin(tx, userId)) return { ok: false as const, code: 'last_admin' as const }
+    if (await isLastOwner(tx, userId)) return { ok: false as const, code: 'last_owner' as const }
     const at = input.date ? new Date(input.date) : new Date()
     await tx.update(users).set({ status: 'archived', archivedAt: at, updatedAt: new Date() }).where(eq(users.id, userId))
     await tx.update(userPlacements).set({ endedAt: sql`${at.toISOString().slice(0, 10)}::date` }).where(and(eq(userPlacements.userId, userId), isNull(userPlacements.endedAt)))
@@ -628,10 +651,13 @@ export async function inactiveScan(tenantId: string): Promise<number> {
 }
 
 /** Снятие роли (docs/16 §6.2): последнего администратора не лишить. */
-export async function removeRole(ctx: Ctx, userId: string, roleCode: string, reason?: string | null): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'last_admin' }> {
+export async function removeRole(ctx: Ctx, userId: string, roleCode: string, reason?: string | null): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'last_admin' | 'owner_role' }> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [role] = await tx.select({ id: roles.id }).from(roles).where(eq(roles.code, roleCode))
     if (!role) return { ok: false as const, code: 'not_found' as const }
+    // Владение не снимают, его передают (docs/01 §1.9.4): иначе у пространства не осталось бы
+    // ни подписанта договора, ни того, кто может сменить тариф, — и вернуть это было бы нечем.
+    if (roleCode === OWNER_ROLE_CODE) return { ok: false as const, code: 'owner_role' as const }
     if (roleCode === 'admin' && await isLastAdmin(tx, userId)) return { ok: false as const, code: 'last_admin' as const }
     const rows = await tx.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.roleId, role.id)))
       .returning({ scopeType: userRoles.scopeType, scopeId: userRoles.scopeId, validUntil: userRoles.validUntil, reason: userRoles.reason, isOrgDerived: userRoles.isOrgDerived })

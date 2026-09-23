@@ -3,10 +3,15 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
- * Владелец продукта: раздел «Навчання» в `app/layouts/admin.vue::sections` разросся до
- * 22 пунктов подряд (нечитаемо, не помещается на экран). Правка регруппировала все 74 пункта
- * меню в восемь разделов (было пять) с подзаголовками там, где в разделе больше 8–10 пунктов —
+ * Владелец продукта: раздел «Навчання» в `app/layouts/admin.vue::sections» разросся до
+ * 22 пунктов подряд (нечитаемо, не помещается на экран). Правка регруппировала меню в
+ * восемь разделов (было пять) с подзаголовками там, где в разделе больше 8–10 пунктов —
  * но НЕ должна терять ни одного пункта и НЕ должна менять его `show` (право доступа).
+ *
+ * Число пунктов в снимке `ORIGINAL_SHOW` — не цель теста, а фактический учёт: после ребейза
+ * на main (#104 «Власник», #106 «Вакансія») меню приросло пунктом `/admin/vacancies`, снимок
+ * обновлён. Смысл теста — что множество пунктов и их `show`-условия не теряются и не меняются
+ * молча при последующих правках, а не конкретное число 74/75/…
  *
  * Тест разбирает исходник статически, без монтирования компонента и без Nuxt-контекста
  * (`useI18n`/`useAuth`/`useRoute` — автоимпорты Nuxt, для юнит-теста их поднимать избыточно) —
@@ -39,7 +44,11 @@ function parseSections(text: string): Entry[] {
   return out
 }
 
-/** Снимок меню ДО разбивки (правка «раздели меню») — 74 пункта, путь → точное show-выражение. */
+/**
+ * Снимок ожидаемого состава меню — путь → точное show-выражение. Изначально (правка
+ * «раздели меню») — 74 пункта до разбивки; после ребейза на main добавлен `/admin/vacancies`
+ * (#106 «Вакансія», рекрутинг) — 75.
+ */
 const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/assignments': "hasScope('assignment.create')",
   '/admin/tasks/parameters': "hasScope('assignment.create')",
@@ -75,6 +84,7 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/resources/categories': "hasScope('course.edit')",
   '/admin/people': "hasScope('people.view')",
   '/admin/candidates': "recruitingOn() && hasScope('candidate.view')",
+  '/admin/vacancies': "recruitingOn() && hasScope('vacancy.view')",
   '/admin/people/groups': "hasScope('people.view')",
   '/admin/org': "hasScope('people.view')",
   '/admin/refs': "hasScope('people.view')",
@@ -113,7 +123,8 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/settings/lifecycle': "hasScope('lifecycle.view')",
   '/admin/settings/recruiting': "hasScope('settings.tenant')",
   '/admin/settings/translations': "hasScope('settings.tenant')",
-  '/admin/settings/usage': "hasScope('settings.tenant')",
+  // #104 «Власник»: тариф і ліміти бачать `admin` і `owner` — окремий скоуп, не «налаштування простору».
+  '/admin/settings/usage': "hasScope('billing.usage.view')",
   '/admin/certificates': "hasScope('report.team')",
 }
 
@@ -133,8 +144,8 @@ function bucketsOf(items: Entry[]): Entry[][] {
 describe('admin.vue: разбивка бокового меню сохранила все пункты и права', () => {
   const entries = parseSections(src)
 
-  it('нашла все 74 пункта меню в исходнике', () => {
-    expect(entries.length).toBe(74)
+  it('нашла все пункты меню в исходнике (столько же, сколько в снимке ожидаемого состава)', () => {
+    expect(entries.length).toBe(Object.keys(ORIGINAL_SHOW).length)
   })
 
   it('каждый пункт исходного меню присутствует ровно один раз', () => {

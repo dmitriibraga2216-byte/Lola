@@ -55,15 +55,25 @@ export function stageCan(stage: StageLike | null | undefined, capability: StageC
   return stage.capabilities[capability] === true
 }
 
-/** `stageCan()` для курса: читает этап курса и спрашивает у него возможность. */
-export async function courseStageCan(tx: TenantTx, courseId: string, capability: StageCapability): Promise<boolean> {
+/**
+ * Носитель возможностей курса: `null` — у курса нет этапа либо самого курса нет (тогда
+ * действует полный набор, `33` §7.3). Возвращает карту целиком — для тех мест, где ключей
+ * спрашивают много (фильтр `params` назначения, `taskParams.ts`); решение по каждому ключу
+ * всё равно принимает `stageCan()`.
+ */
+export async function courseStage(tx: TenantTx, courseId: string): Promise<StageLike | null> {
   const [row] = await tx
     .select({ capabilities: lifecycleStages.capabilities })
     .from(courses)
     .leftJoin(lifecycleStages, eq(lifecycleStages.id, courses.lifecycleStageId))
     .where(eq(courses.id, courseId))
-  if (!row) return true // курса нет — решать нечего, поведение по умолчанию базового ТЗ
-  return stageCan({ capabilities: row.capabilities ?? null }, capability)
+  if (!row?.capabilities) return null
+  return { capabilities: row.capabilities }
+}
+
+/** `stageCan()` для курса: читает этап курса и спрашивает у него возможность. */
+export async function courseStageCan(tx: TenantTx, courseId: string, capability: StageCapability): Promise<boolean> {
+  return stageCan(await courseStage(tx, courseId), capability)
 }
 
 const toRow = (s: typeof lifecycleStages.$inferSelect, coursesCount: number): StageRow => ({

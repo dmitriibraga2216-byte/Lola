@@ -5,7 +5,9 @@ import type { ContentType } from '#shared/enums'
 /**
  * Параметры назначения по мокапу TaskParams (docs/15 §14.3): боковое меню из пяти групп —
  * Загальне · Термін виконання · Результат · Нагороди · Метод призначення, плюс «Нагадування» (Г-15.1).
- * Набор полей группы «Загальне» зависит от типа контента: показываем только ключи PARAM_KEYS_BY_CONTENT_TYPE.
+ * Набор полей зависит от типа контента И от возможностей этапа курса (docs/v2/33 §7.5, П-15):
+ * состав считает сервер и отдаёт списком `paramKeys` — клиент только показывает (CLAUDE.md п. 3).
+ * Скрытое поле не просто не видно: его ключ не сохраняется в `params` вовсе.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
 
@@ -16,9 +18,15 @@ const id = route.params.id as string
 
 type Group = 'general' | 'deadline' | 'result' | 'rewards' | 'method' | 'reminders'
 const GROUPS: Group[] = ['general', 'deadline', 'result', 'rewards', 'method', 'reminders']
+/** Ключи групп docs/15 §14.3, которые может отключить этап: пустая группа не показывается вовсе. */
+const GROUP_KEYS: Partial<Record<Group, string[]>> = {
+  deadline: ['deadlineMode', 'timeLimitSec'],
+  result: ['resultSource', 'passScore', 'fixResult', 'scaleId'],
+  rewards: ['badgeId', 'certificateId', 'points', 'bonuses'],
+}
 const group = ref<Group>('general')
 
-interface ParamsData { contentType: ContentType, params: Record<string, unknown>, method: { viaCatalog: boolean, automationRuleId: string | null, useInDevPlans: boolean } }
+interface ParamsData { contentType: ContentType, params: Record<string, unknown>, paramKeys: string[], method: { viaCatalog: boolean, automationRuleId: string | null, useInDevPlans: boolean } }
 interface Reminders { enabled: boolean, beforeDueDays: number[], onDueDate: boolean, afterDueEveryDays: number | null, afterDueMaxCount: number, escalateToManagerAfterDays: number | null, channel: string | null, notifyOnAssign: boolean }
 
 const contentType = ref<ContentType>('course')
@@ -38,8 +46,12 @@ const timeLimited = ref(false)
 const timeMin = ref(30)
 const attemptsN = ref(3)
 
-const has = (key: string) => (PARAM_KEYS_BY_CONTENT_TYPE[contentType.value] as readonly string[]).includes(key)
+const paramKeys = ref<string[]>([])
+const has = (key: string) => paramKeys.value.includes(key)
 const isTest = computed(() => contentType.value === 'test')
+const visibleGroups = computed(() => GROUPS.filter(g => !GROUP_KEYS[g] || GROUP_KEYS[g]!.some(has)))
+/** Этап курса сузил набор полей — подсказка, почему их не видно (`33` §5.2: набор задаёт платформа). */
+const stageLimited = computed(() => paramKeys.value.length < (PARAM_KEYS_BY_CONTENT_TYPE[contentType.value] as readonly string[]).length)
 
 async function load() {
   try {
@@ -48,6 +60,7 @@ async function load() {
       api<{ id: string, name: string }[]>('/automation-rules').catch(() => []), api<{ id: string, name: string }[]>('/scales').catch(() => []),
     ])
     contentType.value = d.contentType
+    paramKeys.value = d.paramKeys
     title.value = card.title
     Object.assign(p, d.params)
     Object.assign(method, d.method)
@@ -72,7 +85,7 @@ async function save() {
   notice.value = ''
   try {
     const body: Record<string, unknown> = {}
-    for (const k of PARAM_KEYS_BY_CONTENT_TYPE[contentType.value]) if (p[k] !== undefined && p[k] !== '') body[k] = p[k]
+    for (const k of paramKeys.value) if (p[k] !== undefined && p[k] !== '') body[k] = p[k]
     if (has('attemptsAllowed')) body.attemptsAllowed = attemptsLimited.value ? attemptsN.value : 0
     if (has('timeLimitSec')) body.timeLimitSec = timeLimited.value ? timeMin.value * 60 : null
     if (has('questionsMode') && p.questionsMode !== 'limited') body.questionsCount = null
@@ -103,11 +116,12 @@ async function save() {
 
     <div class="layout">
       <nav class="side" role="tablist" aria-orientation="vertical">
-        <button v-for="g in GROUPS" :key="g" role="tab" :aria-selected="group === g" :class="['side-item', { on: group === g }]" @click="group = g">{{ t(`assign.p.${g}`) }}</button>
+        <button v-for="g in visibleGroups" :key="g" role="tab" :aria-selected="group === g" :class="['side-item', { on: group === g }]" @click="group = g">{{ t(`assign.p.${g}`) }}</button>
       </nav>
 
       <div class="content">
         <p class="note sun">{{ t('assign.p.note') }}</p>
+        <p v-if="stageLimited" class="note teal">{{ t('assign.p.stageLimited') }}</p>
 
         <!-- Загальне -->
         <section v-show="group === 'general'" class="group">
@@ -128,7 +142,7 @@ async function save() {
             </div>
             <input v-if="attemptsLimited" v-model.number="attemptsN" class="field short" type="number" min="1" max="10" :aria-label="t('assign.p.attempts')">
           </div>
-          <div v-if="isTest" class="field-row">
+          <div v-if="isTest && has('timeLimitSec')" class="field-row">
             <span class="label">{{ t('assign.p.timeLimit') }}</span>
             <div class="segmented" role="radiogroup">
               <button type="button" :class="{ on: !timeLimited }" @click="timeLimited = false">{{ t('assign.p.unlimited') }}</button>
@@ -158,13 +172,13 @@ async function save() {
 
         <!-- Термін виконання -->
         <section v-show="group === 'deadline'" class="group">
-          <div class="field-row">
+          <div v-if="has('deadlineMode')" class="field-row">
             <span class="label">{{ t('assign.p.deadlineMode') }}</span>
             <div class="segmented" role="radiogroup">
               <button v-for="m in ['unlimited', 'days_from_assign', 'calendar']" :key="m" type="button" :class="{ on: (p.deadlineMode ?? 'unlimited') === m }" @click="p.deadlineMode = m">{{ t(`assign.p.${m === 'unlimited' ? 'dmUnlimited' : m === 'days_from_assign' ? 'dmDays' : 'dmCalendar'}`) }}</button>
             </div>
           </div>
-          <div v-if="!isTest" class="field-row">
+          <div v-if="!isTest && has('timeLimitSec')" class="field-row">
             <span class="label">{{ t('assign.p.timeLimit') }}</span>
             <div class="segmented" role="radiogroup">
               <button type="button" :class="{ on: !timeLimited }" @click="timeLimited = false">{{ t('assign.p.unlimited') }}</button>
@@ -176,26 +190,26 @@ async function save() {
 
         <!-- Результат -->
         <section v-show="group === 'result'" class="group">
-          <div class="field-row">
+          <div v-if="has('resultSource')" class="field-row">
             <span class="label">{{ t('assign.p.resultSource') }}</span>
             <div class="segmented" role="radiogroup">
               <button type="button" :class="{ on: (p.resultSource ?? 'last') === 'last' }" @click="p.resultSource = 'last'">{{ t('assign.p.rsLast') }}</button>
               <button type="button" :class="{ on: p.resultSource === 'best' }" @click="p.resultSource = 'best'">{{ t('assign.p.rsBest') }}</button>
             </div>
           </div>
-          <label class="inline"><span class="label">{{ t('assign.p.passScore') }}</span><input v-model.number="p.passScore" class="field short" type="number" min="1" max="100"><span class="help">{{ t('assign.p.passScoreHint') }}</span></label>
-          <label class="toggle"><input v-model="flags.fixResult!.value" type="checkbox"><span>{{ t('assign.p.fixResult') }}</span></label>
-          <label class="inline"><span class="label">{{ t('assign.p.scale') }}</span>
+          <label v-if="has('passScore')" class="inline"><span class="label">{{ t('assign.p.passScore') }}</span><input v-model.number="p.passScore" class="field short" type="number" min="1" max="100"><span class="help">{{ t('assign.p.passScoreHint') }}</span></label>
+          <label v-if="has('fixResult')" class="toggle"><input v-model="flags.fixResult!.value" type="checkbox"><span>{{ t('assign.p.fixResult') }}</span></label>
+          <label v-if="has('scaleId')" class="inline"><span class="label">{{ t('assign.p.scale') }}</span>
             <select v-model="p.scaleId" class="field"><option :value="null">{{ t('assign.p.noScale') }}</option><option v-for="s in scales" :key="s.id" :value="s.id">{{ s.name }}</option></select>
           </label>
         </section>
 
         <!-- Нагороди -->
         <section v-show="group === 'rewards'" class="group">
-          <label class="inline"><span class="label">{{ t('assign.p.badge') }}</span><input v-model="p.badgeId" class="field" :placeholder="t('assign.p.none')"></label>
-          <label class="inline"><span class="label">{{ t('assign.p.certificate') }}</span><input v-model="p.certificateId" class="field" :placeholder="t('assign.p.none')"></label>
-          <label class="inline"><span class="label">{{ t('assign.p.points') }}</span><input v-model.number="p.points" class="field short" type="number" min="0" max="10000"><span class="help">{{ t('assign.p.pointsHint') }}</span></label>
-          <label class="inline"><span class="label">{{ t('assign.p.bonuses') }}</span><input v-model.number="p.bonuses" class="field short" type="number" min="0" max="10000"><span class="help">{{ t('assign.p.bonusesHint') }}</span></label>
+          <label v-if="has('badgeId')" class="inline"><span class="label">{{ t('assign.p.badge') }}</span><input v-model="p.badgeId" class="field" :placeholder="t('assign.p.none')"></label>
+          <label v-if="has('certificateId')" class="inline"><span class="label">{{ t('assign.p.certificate') }}</span><input v-model="p.certificateId" class="field" :placeholder="t('assign.p.none')"></label>
+          <label v-if="has('points')" class="inline"><span class="label">{{ t('assign.p.points') }}</span><input v-model.number="p.points" class="field short" type="number" min="0" max="10000"><span class="help">{{ t('assign.p.pointsHint') }}</span></label>
+          <label v-if="has('bonuses')" class="inline"><span class="label">{{ t('assign.p.bonuses') }}</span><input v-model.number="p.bonuses" class="field short" type="number" min="0" max="10000"><span class="help">{{ t('assign.p.bonusesHint') }}</span></label>
         </section>
 
         <!-- Метод призначення -->

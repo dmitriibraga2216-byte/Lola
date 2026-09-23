@@ -8,6 +8,7 @@ import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS, paramsFor } from '../../shared/schemas/assignments'
+import { stageParamsFor } from './taskParams'
 import { deriveTaskState, overdueSql } from './enrollmentStatus'
 import { findContent } from './taskContent'
 import { employeeOnly } from './repo/people'
@@ -127,7 +128,8 @@ export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, 
     dueDays: input.dueMode === 'relative' ? input.dueDays : null,
     isMandatory: input.isMandatory,
     recurrence: input.recurrence ?? null,
-    params: paramsFor(input.subjectType, input.params ?? {}),
+    // П-15: состав ключей режет тип контента и возможности этапа курса — одна точка, taskParams.ts
+    params: await stageParamsFor(tx, input.subjectType, input.subjectId, input.params),
     reminders: { ...DEFAULT_REMINDERS, ...(input.reminders ?? {}) },
     autoSync: input.autoSync,
     tags: input.tags,
@@ -303,11 +305,19 @@ export async function updateAssignment(ctx: Ctx, id: string, input: z.infer<type
   const updated = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [before] = await tx.select().from(assignments).where(eq(assignments.id, id))
     if (!before) return null
+    // П-15 + §7.4: новые ключи режутся возможностями этапа **на момент правки**, а уже
+    // сохранённые остаются как есть — смена этапа курса не переписывает созданные назначения.
+    const patched = input.params === undefined
+      ? undefined
+      : paramsFor(before.subjectType as ContentType, {
+          ...(before.params as object),
+          ...await stageParamsFor(tx, before.subjectType as ContentType, before.subjectId, input.params),
+        })
     const [after] = await tx.update(assignments).set({
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.reminders !== undefined ? { reminders: { ...(before.reminders as object), ...input.reminders } } : {}),
-      ...(input.params !== undefined ? { params: paramsFor(before.subjectType as ContentType, { ...(before.params as object), ...input.params }) } : {}),
+      ...(patched !== undefined ? { params: patched } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
       ...(input.autoSync !== undefined ? { autoSync: input.autoSync } : {}),
       ...(input.onLeaveCondition !== undefined ? { onLeaveCondition: input.onLeaveCondition } : {}),

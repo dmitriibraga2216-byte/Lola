@@ -14,12 +14,21 @@ interface Tenant {
   custom_domain: string | null
 }
 interface Plan { code: string, name: string, maxUsers: number | null, priceUah: number | null }
+/**
+ * Одиннадцать осей лимита (docs/v2/35 §7.1, решение docs/v2/44 В-5): десять тарифицируемых
+ * плюс `activeJobs` — квота задач воркера (docs/25 §5), ось вне пакета. Мягкая `telegram_out`
+ * поля не имеет: лимита у неё нет. Эффективное значение (тариф + переопределение + доплаты)
+ * считает сервер одной функцией — экран его показывает, а не пересчитывает.
+ */
 interface Limits {
-  plan: { code: string, users: number | null, storageGb: number | null, smsPerMonth: number | null }
-  overrides: { users: number | null, storageGb: number | null, smsPerMonth: number | null, apiPerMinute: number | null, webhooks: number | null, activeJobs: number | null }
+  plan: { code: string, users: number | null, storageGb: number | null, smsPerMonth: number | null, candidates: number | null, aiGenerateOps: number | null, aiReviewOps: number | null, aiInterviewOps: number | null, exportRows: number | null }
+  overrides: { users: number | null, storageGb: number | null, smsPerMonth: number | null, apiPerMinute: number | null, webhooks: number | null, activeJobs: number | null, candidates: number | null, aiGenerateOps: number | null, aiReviewOps: number | null, aiInterviewOps: number | null, exportRows: number | null }
 }
 type LimitKey = keyof Limits['overrides']
-const LIMIT_KEYS: LimitKey[] = ['users', 'storageGb', 'smsPerMonth', 'apiPerMinute', 'webhooks', 'activeJobs']
+type PlanLimitKey = keyof Limits['plan']
+const LIMIT_KEYS: LimitKey[] = ['users', 'candidates', 'storageGb', 'smsPerMonth', 'aiGenerateOps', 'aiReviewOps', 'aiInterviewOps', 'exportRows', 'apiPerMinute', 'webhooks', 'activeJobs']
+/** У каких осей лимит задаётся и тарифом — рядом с полем показываем значение тарифа. */
+const PLAN_LIMIT_KEYS = new Set<LimitKey>(['users', 'candidates', 'storageGb', 'smsPerMonth', 'aiGenerateOps', 'aiReviewOps', 'aiInterviewOps', 'exportRows'])
 const PURGE_DAYS = 30
 
 const me = ref<Me | null>(null)
@@ -40,7 +49,7 @@ const action = ref<{ kind: 'suspend' | 'resume' | 'purge' | 'cancelPurge', tenan
 const actionForm = reactive({ reason: '', confirmSlug: '' })
 const limitsFor = ref<Tenant | null>(null)
 const limits = ref<Limits | null>(null)
-const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: '', smsPerMonth: '', apiPerMinute: '', webhooks: '', activeJobs: '' })
+const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: '', smsPerMonth: '', apiPerMinute: '', webhooks: '', activeJobs: '', candidates: '', aiGenerateOps: '', aiReviewOps: '', aiInterviewOps: '', exportRows: '' })
 /** Собственный домен клиента (докс/33 D-059): CNAME на платформу, сертификат — вручную, docs/27. */
 const domainFor = ref<Tenant | null>(null)
 const domainForm = reactive({ value: '' })
@@ -263,7 +272,7 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
         <p class="sub">{{ t('ops.limits.hint', { plan: planName(limits.plan.code) }) }}</p>
         <div class="grid two">
           <label v-for="k in LIMIT_KEYS" :key="k" class="field">
-            <span>{{ t(`ops.limits.${k}`) }}<em v-if="k === 'users' || k === 'storageGb' || k === 'smsPerMonth'" class="sub"> · {{ t('ops.limits.plan') }}: {{ limits.plan[k] ?? '∞' }}</em></span>
+            <span>{{ t(`ops.limits.${k}`) }}<em v-if="PLAN_LIMIT_KEYS.has(k)" class="sub"> · {{ t('ops.limits.plan') }}: {{ limits.plan[k as PlanLimitKey] ?? '∞' }}</em></span>
             <input v-model="limitsForm[k]" type="number" min="0" inputmode="numeric" :placeholder="t('ops.limits.fromPlan')">
           </label>
         </div>

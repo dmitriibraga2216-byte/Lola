@@ -280,7 +280,12 @@ Sonnet — документы, i18n, вёрстка по готовому мок
 
 #### PR-08 · `v2-billing-08` · Платформенный слой тарифа и одиннадцать осей (В-5)
 
-- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0058_v2_billing_plans.sql`.
+**Статус: выполнено** (2026-09-23, ветка `v2-billing-08`; миграция — `0059`, а не `0058`:
+`0058` занята параллельным PR-06. Пять мест сырого SQL, переведённых на общую
+функцию, перечислены в `docs/v2/46-progress.md`; отступления — `docs/28-implementation-notes.md`
+§28.11).
+
+- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0059_v2_billing_plans.sql`.
 - **Входит:** `alter plans` +8 колонок (`title_uk`, `tier`, `ai_included`, `ai_term_days`,
   `addons_allowed`, `is_active`, `valid_from`, `valid_to`) — PK остаётся `code`;
   `plan_prices` (FK `plan_code`, не `plan_id`), `plan_addons`, `tenant_addons`;

@@ -7,14 +7,23 @@ export type TenantStatus = typeof TENANT_STATUSES[number]
 
 const limit = z.number().int().min(0).max(1_000_000_000).nullable().optional()
 
-/** Переопределение лимитов тенанта (`tenant_limits`): null/пропуск — лимит тарифа. */
+/**
+ * Переопределение лимитов тенанта (`tenant_limits`): null/пропуск — лимит тарифа.
+ * Одиннадцать осей (`docs/v2/35` §7.1) — явными полями (`docs/v2/44` В-5): шесть прежних плюс
+ * пять новых. Мягкая `telegram_out` поля не имеет: лимита у неё нет ни здесь, ни в тарифе.
+ */
 export const tenantLimitsSchema = z.object({
-  users: limit,
-  storageGb: limit,
-  smsPerMonth: limit,
-  apiPerMinute: limit,
-  webhooks: limit,
-  activeJobs: z.number().int().min(1).max(10_000).nullable().optional(),
+  users: limit, // ось users_active
+  storageGb: limit, // ось storage_bytes, в ГБ
+  smsPerMonth: limit, // ось sms_out
+  apiPerMinute: limit, // ось api_rate_rpm
+  webhooks: limit, // ось integrations_active
+  activeJobs: z.number().int().min(1).max(10_000).nullable().optional(), // ось вне пакета (docs/25 §5)
+  candidates: limit, // ось candidates_active
+  aiGenerateOps: limit,
+  aiReviewOps: limit,
+  aiInterviewOps: limit,
+  exportRows: limit,
 })
 export type TenantLimitsInput = z.infer<typeof tenantLimitsSchema>
 

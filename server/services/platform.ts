@@ -7,7 +7,7 @@ import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
 import { SYSTEM_ROLES } from '../../shared/domain/roles'
 import { ensureTenantDefaults } from '../db/tenantDefaults'
-import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
+import { CANDIDATES_ONLY, EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
 /**
  * Панель оператора платформы (docs/03 §3.12, docs/01 §1.5 impersonation).
@@ -63,25 +63,42 @@ export async function validatePlatformSession(token: string): Promise<PlatformAu
 
 // ── Тенанты ────────────────────────────────────────────────────────────
 
+/**
+ * Лимиты строки тенанта в панели оператора. Считаются **общей функцией** `effectiveLimits`
+ * (docs/v2/44 В-5, план PR-08), а не `coalesce(tl.*, p.max_*)` в этом же запросе: сырой SQL
+ * не знал ни про доплаты `tenant_addons` (§7.3), ни про умолчания, и число в панели
+ * расходилось с числом проверки при операции и с расчётом счёта.
+ */
+async function limitColumnsOf(tenantId: string): Promise<Record<string, unknown>> {
+  const { effectiveLimits } = await import('./tenantLimits')
+  const l = await effectiveLimits(tenantId)
+  return {
+    users_limit: l.users,
+    storage_gb_limit: l.storageGb,
+    sms_limit: l.smsPerMonth,
+    candidates_limit: l.candidates,
+    ai_generate_ops_limit: l.aiGenerateOps,
+    ai_review_ops_limit: l.aiReviewOps,
+    ai_interview_ops_limit: l.aiInterviewOps,
+    export_rows_limit: l.exportRows,
+    active_jobs_limit: l.overridden.includes('activeJobs') ? l.activeJobs : null,
+    has_overrides: l.overridden.length > 0,
+  }
+}
+
 export async function listTenants() {
   const db = platformDb()
-  return db.execute(sql`
+  const rows = await db.execute(sql`
     select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at, t.custom_domain,
-           coalesce(tl.users, p.max_users) as users_limit,
-           coalesce(tl.storage_gb, p.max_storage_gb) as storage_gb_limit,
-           coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
-           tl.active_jobs as active_jobs_limit,
-           (tl.id is not null) as has_overrides,
            (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
            (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
            (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
     from tenants t
-    left join plans p on p.code = t.plan
-    left join tenant_limits tl on tl.tenant_id = t.id
     order by t.created_at desc
-  `) as unknown as Promise<Record<string, unknown>[]>
+  `) as unknown as Record<string, unknown>[]
+  return Promise.all(rows.map(async r => ({ ...r, ...await limitColumnsOf(r.id as string) })))
 }
 
 /** Карточка одного тенанта (docs/33 D-064: `GET /platform/tenants/:id` из `04` не было — только список и PATCH). */
@@ -89,22 +106,16 @@ export async function getTenantCard(id: string): Promise<Record<string, unknown>
   const db = platformDb()
   const rows = await db.execute(sql`
     select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at,
-           coalesce(tl.users, p.max_users) as users_limit,
-           coalesce(tl.storage_gb, p.max_storage_gb) as storage_gb_limit,
-           coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
-           tl.active_jobs as active_jobs_limit,
-           (tl.id is not null) as has_overrides,
            (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
            (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
            (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
     from tenants t
-    left join plans p on p.code = t.plan
-    left join tenant_limits tl on tl.tenant_id = t.id
     where t.id = ${id}::uuid
   `) as unknown as Record<string, unknown>[]
-  return rows[0] ?? null
+  // Лимиты — из той же общей функции, что и у списка (В-5): карточка и список не расходятся
+  return rows[0] ? { ...rows[0], ...await limitColumnsOf(id) } : null
 }
 
 export interface CreateTenantInput {
@@ -240,17 +251,21 @@ export async function tenantUsers(tenantId: string) {
 }
 
 /**
- * Лимит людей (docs/25 §10 п. 1, docs/24 §4.4.1): считается по активным (`status = 'active'`, не заблокированным),
- * переопределение — `tenant_limits.users`, иначе тариф. Блокировка человека сразу освобождает место.
+ * Жёсткая проверка оси в момент операции (docs/25 §10 п. 1, docs/24 §4.4.1, docs/v2/35 §7.5):
+ * потребление считается **сейчас**, а не по ночному снимку `tenant_usage`, а лимит берётся
+ * общей функцией `checkLimit` (docs/v2/44 В-5) — той же, что у баннера и расчёта счёта.
+ *
+ * `users` — активные сотрудники (`status = 'active'`, не заблокированные, `kind = 'employee'`):
+ * блокировка человека сразу освобождает место. `candidates` — кандидаты не в архиве
+ * (`35` §7.1); ось включается вместе с рекрутингом (`tenants.candidates_enabled`).
  */
-export async function checkPlanLimit(tenantId: string, what: 'users'): Promise<{ ok: boolean, limit: number | null, current: number }> {
-  const { effectiveLimits } = await import('./tenantLimits')
-  const limits = await effectiveLimits(tenantId)
-  if (what === 'users') {
-    const rows = await platformDb().execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}`) as unknown as { n: number }[]
-    const n = rows[0]?.n ?? 0
-    const limit = limits.users
-    return { ok: limit === null || n < limit, limit, current: n }
-  }
-  return { ok: true, limit: null, current: 0 }
+export async function checkPlanLimit(tenantId: string, what: 'users' | 'candidates' = 'users'): Promise<{ ok: boolean, limit: number | null, current: number }> {
+  const { checkLimit } = await import('./tenantLimits')
+  const db = platformDb()
+  const rows = what === 'users'
+    ? await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}`) as unknown as { n: number }[]
+    : await db.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status <> 'archived' ${CANDIDATES_ONLY('')}`) as unknown as { n: number }[]
+  const current = rows[0]?.n ?? 0
+  const check = await checkLimit(tenantId, what === 'users' ? 'users_active' : 'candidates_active', current)
+  return { ok: check.ok, limit: check.limit, current }
 }

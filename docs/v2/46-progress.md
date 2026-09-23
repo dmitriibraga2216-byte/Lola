@@ -5,6 +5,79 @@
 
 ---
 
+## 2026-09-23 · Фаза 3, PR-08 — платформенный слой тарифа, одиннадцать осей лимита (В-5, П-25.1)
+
+**Ветка:** `v2-billing-08` от `origin/main` (`530d011`). **Результат:** миграция
+`0059_v2_billing_plans.sql`, одна функция эффективного лимита в
+`server/services/tenantLimits.ts`, **пять мест сырого SQL переведены на неё**, перечисление
+`LIMIT_AXES` (11 осей) в `shared/enums.ts` и `docs/02`, спека
+`tests/integration/v2-billing-limits.spec.ts` (26 тестов).
+
+### Что сделано
+
+- **Миграция `0059_v2_billing_plans.sql`** (номер `0059`, а не `0058`: `0058` зарезервирована
+  за параллельным PR-06). `alter plans` — восемь колонок пакета (`title_uk`, `tier`,
+  `ai_included`, `ai_term_days`, `addons_allowed`, `is_active`, `valid_from`, `valid_to`; `sort`
+  уже был) плюс пять колонок новых осей (`max_candidates`, `max_ai_generate_ops`,
+  `max_ai_review_ops`, `max_ai_interview_ops`, `max_export_rows`); **PK остался `code`**.
+  Новые `plan_prices` (FK `plan_code → plans(code)`, не `plan_id uuid`), `plan_addons` (каталог
+  засеян пятью кодами `35` §3.4), `tenant_addons` — тенантная, с RLS `enable + force`, политикой
+  `tenant_isolation` (`using` и `with check`), FK на `tenants(id) on delete cascade` и
+  непартиальным индексом с `tenant_id` первым. `alter tenant_limits` — восемь колонок подписки
+  (`billing_period`, `status`, `paid_until`, `grace_until`, `ai_until`, `autorenew`, `currency`,
+  `ai_status`) с CHECK'ами плюс пять колонок лимита: оси доведены с **шести до одиннадцати
+  явными колонками**, `telegram_out` колонки не получает (мягкая ось, `tenant_usage.axes`, PR-09).
+- **Одна функция эффективного лимита.** `effectiveLimits(tenantId)` считает формулу `35` §7.3
+  один раз по всем одиннадцати осям и отдаёт `axes` **в единицах оси**; `effectiveLimit(t, axis)`,
+  `checkLimit(t, axis, used, delta)`, `assertWithinLimit()` и `LimitExceededError` (409
+  `limit_exceeded` с `details.axis`, текст — из словаря `billing.*`) — тонкие обёртки над ней.
+  Доплаты `tenant_addons`, действующие на дату, складываются там же; доплата к «без обмежень»
+  остаётся «без обмежень».
+- **Пять мест сырого SQL переведены на общую функцию** (условие входа PR-08; после PR-04
+  номера строк сдвинулись, актуальные — ниже):
+
+  | Было | Где | Стало |
+  |---|---|---|
+  | `coalesce(tl.users, p.max_users)` и ещё две оси в запросе списка | `platform.ts:70-72`, `listTenants` | `limitColumnsOf()` → `effectiveLimits()` |
+  | тот же `coalesce` в карточке тенанта | `platform.ts:92-94`, `getTenantCard` | та же `limitColumnsOf()` |
+  | `select max_users, max_storage_gb, max_sms_per_month from plans` | `platformTenants.ts:157`, `getTenantLimits` | `plans` через drizzle + `effectiveLimits()` в поле `effective` |
+  | `limits: { users: p?.maxUsers … }` — числа баннера | `usage.ts:151`, `usageView` | `effectiveLimits()`, плюс поле `axes` |
+  | счёт активных против `limits.users` | `platform.ts:250`, `checkPlanLimit` | `checkLimit(tenantId, 'users_active', current)` |
+
+  Побочно на ту же функцию переведён `media.ts:131` (ось `storage_bytes` в байтах, а не
+  `storageGb × 1024³` на месте) и пороги `usage.checkLimitsAndNotify`.
+- **Одиннадцать осей читаются и пишутся** везде: `tenantLimitsSchema` (zod), `getTenantLimits` /
+  `setTenantLimits`, экран лимитов панели оператора (`app/pages/ops/index.vue`, `LIMIT_KEYS` — 11
+  ключей) и подписи `ops.limits.*` в обеих локалях. Сброс всех переопределений больше не удаляет
+  строку, если в ней оплаченный срок.
+- **Доплата оператором** — `grantTenantAddon()` в `platformTenants.ts`: проверка каталога и
+  `plans.addons_allowed`, снимок `unit_step`, запись в `platform_audit`, сброс кеша лимитов.
+  Приём денег остаётся ручным (`35` §10, `44` §8) — провайдер не подключался, ключей нет.
+- **Контрактные тесты PR-01 стали содержательнее**: `tenant_addons` добавлена в тенантные
+  таблицы `tests/integration/v2-package-tables.ts`, `plan_prices` и `plan_addons` — в
+  платформенные (RLS у них нет и быть не должно, `35` §3.6).
+
+### Условия выхода
+
+- `storage_quota_addons` не существует (сквозная проверка 23 `42` §5) — проверено тестом.
+- Число в баннере лимита и число в расчёте по осям берутся из одной функции — проверено тестом
+  «баннер экрана потребления и расчёт по осям дают одно число», включая случай с «+100 ГБ».
+- `jsonb` для лимита не заведён нигде: единственная нетарифная ось `telegram_out` живёт в
+  `tenant_usage.axes` (создаётся в PR-09).
+
+### Приёмка
+
+`35` §13: к. 7 (расчётная часть — эффективный лимит тира против факта), к. 9 (первая половина —
+аддон «+100 ГБ» даёт 200 ГБ), к. 10 (переопределение оператора действует немедленно и
+пишется в `platform_audit`). Остальные критерии §13 — за PR-09 и PR-10.
+
+### Что дальше
+
+PR-08 — условие входа для **PR-09** (`usage_counters`, `usage_events`, `limit_notices`,
+`details.axis`) и, через него, для **PR-10** (оплата, смена тарифа, экраны). `tenant_payments`
+и `plan_change_requests` ссылаются на тариф так же по `plan_code`, а не `plan_id` — исправление
+внесено в `35` §3.4 заранее, чтобы PR-10 не наступил на ту же посылку пакета.
+
 ## 2026-09-23 · Фаза 3, PR-06 — возможности этапа фильтруют параметры назначения (П-15)
 
 **Ветка:** `v2-lifecycle-06` от `origin/main` (`530d011`). **Миграция:** `0058_v2_lifecycle_params.sql`

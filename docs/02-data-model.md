@@ -33,12 +33,83 @@ create table tenants (
 -- status: CHECK на active | suspended | archived (Spec 25). suspended — вход закрыт (403 tenant_suspended),
 -- задачи стоят, данные целы; archived — команда оператора на удаление, исполняется задачей tenant.purge.
 
--- Переопределение лимитов тенанту (`24` §4.4, `25` §10); null — лимит тарифа plans. С RLS. Spec 25
+-- Тариф (`24` §4.4, `v2/35` §3.1). Платформенная, без tenant_id и RLS. PK по code:
+-- колонки id у тарифа нет и не заводится (`v2/44` В-5) — на code ссылается tenants.plan
+create table plans (
+  code text primary key,                     -- trial | point | network | custom
+  name text not null, title_uk text,
+  tier smallint not null default 0,          -- 9 тиров сетки (`v2/35` §3.4)
+  max_users int, max_storage_gb int, max_sms_per_month int,        -- оси users_active, storage_bytes, sms_out
+  max_candidates int, max_ai_generate_ops int, max_ai_review_ops int,
+  max_ai_interview_ops int, max_export_rows int,                   -- пять новых осей (`v2/44` В-5)
+  ai_included boolean not null default true, -- ИИ входит в план, а не продаётся подпиской (`v2/35` §7.7)
+  ai_term_days int,                          -- собственный срок ИИ от даты подключения
+  addons_allowed text[] not null default '{}', -- коды plan_addons, доступные на тарифе
+  is_active boolean not null default true,
+  valid_from date not null default current_date, valid_to date,
+  features jsonb not null default '{}', modules text[], price_uah int, sort int not null default 0
+);
+
+-- Цена тарифа за месяц; за год списывается ×12 (`v2/35` §3.4). Платформенная, вне RLS.
+-- FK на plan_code, а не plan_id uuid: у plans нет колонки id (`v2/44` В-5)
+create table plan_prices (
+  id uuid primary key default gen_random_uuid(),
+  plan_code text not null references plans(code) on delete cascade on update cascade,
+  billing_period text not null,              -- month | year
+  currency char(3) not null default 'EUR',
+  amount_minor bigint not null check (amount_minor >= 0),  -- деньги целым числом
+  valid_from date not null default current_date, valid_to date,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (plan_code, billing_period, currency, valid_from)
+);
+
+-- Каталог докупаемых опций (`v2/35` §3.4). Платформенная, вне RLS.
+-- unit_step — в единице своей оси: байты для storage_bytes, операции для ИИ-осей, дни для ai_term
+create table plan_addons (
+  code text primary key,                     -- storage_pack | ai_ops_pack | sms_pack | candidates_pack | ai_term
+  name text not null,
+  axis text not null,                        -- limit_axis либо служебное ai_term (растёт срок ИИ, а не ось)
+  unit_step bigint not null check (unit_step > 0),
+  term text not null,                        -- period | perpetual
+  is_public boolean not null default true, sort int not null default 0,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+
+-- Докупленные опции тенанта (`v2/35` §3.5). С RLS
+create table tenant_addons (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  addon_code text not null references plan_addons(code) on delete restrict on update cascade,
+  qty int not null check (qty > 0),
+  unit_step bigint not null check (unit_step > 0), -- снимок шага на момент покупки
+  valid_from date not null default current_date,
+  valid_until date,                          -- null = до отключения оператором
+  source text not null default 'purchase',   -- purchase | grant | compensation
+  payment_id uuid,                           -- FK на tenant_payments — этап PR-10
+  created_by uuid,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create index on tenant_addons (tenant_id, addon_code, valid_until);
+
+-- Подписка тенанта и переопределение лимитов (`24` §4.4, `25` §10, `v2/35` §3.2); в колонках
+-- лимита null — значение берётся из тарифа plans. Одиннадцать осей `limit_axis` — ЯВНЫМИ
+-- колонками (`v2/44` В-5): шесть прежних под своими именами плюс пять новых; telegram_out
+-- колонки не получает (мягкая ось, только наблюдение). С RLS. Spec 25, `v2/45` PR-08
 create table tenant_limits (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null unique,
   users int, storage_gb int, sms_per_month int, api_per_minute int, webhooks int,
-  active_jobs int,                           -- квота задач тенанта на круг воркера (`25` §5), по умолчанию 100
+  -- users = users_active · storage_gb = storage_bytes (лимит в ГБ, потребление в байтах) ·
+  -- sms_per_month = sms_out · api_per_minute = api_rate_rpm · webhooks = integrations_active
+  -- (смысл расширен на коннекторы, колонка не переименовывается)
+  candidates int, ai_generate_ops int, ai_review_ops int, ai_interview_ops int, export_rows int,
+  active_jobs int,                           -- квота задач тенанта на круг воркера (`25` §5), по умолчанию 100; ось вне пакета
+  billing_period text not null default 'month',  -- month | year
+  status text not null default 'trial',      -- trial | active | grace | readonly | suspended (`v2/35` §4)
+  paid_until date, grace_until date, ai_until date,  -- таймер ИИ не зависит от таймера тарифа
+  autorenew boolean not null default true,
+  currency char(3) not null default 'EUR',
+  ai_status text not null default 'active',  -- active | expired | off
   updated_by uuid references platform_admins(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -1450,6 +1521,13 @@ content_rating_target: resource | knowledge_article
 -- с разным `kind`, а не две таблицы. Перевод кандидата в штат меняет `kind`, а не создаёт
 -- вторую строку: история откликов, оценок и обучения остаётся на том же `users.id`.
 user_kind: employee | candidate
+
+-- Оси лимитов тарифа (`v2/35` §7.1, `v2/44` В-5, патч П-25.1 «шесть осей → одиннадцать»).
+-- Десять осей тарифицируются и имеют явную колонку лимита в tenant_limits; telegram_out —
+-- мягкая: канал бесплатный, ось только наблюдается и живёт в tenant_usage.axes jsonb
+limit_axis: users_active | candidates_active | storage_bytes | ai_generate_ops | ai_review_ops
+          | ai_interview_ops | sms_out | telegram_out | integrations_active | api_rate_rpm
+          | export_rows
 ```
 
 ## Что проверяет тест схемы

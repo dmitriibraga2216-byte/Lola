@@ -2,7 +2,8 @@ import { desc, eq, sql } from 'drizzle-orm'
 import { platformAudit, plans, tenantUsage, tenants } from '../db/schema'
 import { db } from '../db/client'
 import { withTenant } from '../utils/withTenant'
-import { effectiveLimits } from './tenantLimits'
+import { GIB, effectiveLimits } from './tenantLimits'
+import type { LimitAxis } from '../../shared/enums'
 import { enqueueNotification } from './notifications'
 import { EMPLOYEES_ONLY } from './repo/people'
 
@@ -66,10 +67,12 @@ export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
  */
 async function checkLimitsAndNotify(tenantId: string, snap: UsageSnapshot): Promise<void> {
   const limits = await effectiveLimits(tenantId)
+  // Лимит каждой оси — из общей функции и **в единице оси** (docs/v2/35 §7.1, docs/v2/44 В-5):
+  // хранилище в байтах, остальные счётчиками. Ось как параметр уведомления — PR-09 (П-25.2).
   const checks: { resource: 'users' | 'storage' | 'sms', used: number, limit: number | null, label: string }[] = [
-    { resource: 'users', used: snap.activeUsers, limit: limits.users, label: 'активних людей' },
-    { resource: 'storage', used: snap.storageBytes, limit: limits.storageGb != null ? limits.storageGb * 1024 * 1024 * 1024 : null, label: 'дискового простору' },
-    { resource: 'sms', used: snap.smsMonth, limit: limits.smsPerMonth, label: 'SMS за місяць' },
+    { resource: 'users', used: snap.activeUsers, limit: limits.axes.users_active, label: 'активних людей' },
+    { resource: 'storage', used: snap.storageBytes, limit: limits.axes.storage_bytes, label: 'дискового простору' },
+    { resource: 'sms', used: snap.smsMonth, limit: limits.axes.sms_out, label: 'SMS за місяць' },
   ]
   const day = snap.collectedAt.slice(0, 10)
   for (const c of checks) {
@@ -78,7 +81,7 @@ async function checkLimitsAndNotify(tenantId: string, snap: UsageSnapshot): Prom
     if (ratio < 0.8) continue
     const code = ratio >= 1 ? 'limit_exceeded' : 'limit_warning'
     // Диск — у ГБ для читабельності листа, решта — цілими лічильниками
-    const toDisplay = (n: number) => c.resource === 'storage' ? `${(n / (1024 * 1024 * 1024)).toFixed(1)} ГБ` : String(n)
+    const toDisplay = (n: number) => c.resource === 'storage' ? `${(n / GIB).toFixed(1)} ГБ` : String(n)
     const payload = { resource: c.label, used: toDisplay(c.used), limit: toDisplay(c.limit), pct: Math.round(ratio * 100) }
     await withTenant(tenantId, null, async (tx) => {
       const admins = await tx.execute(sql`
@@ -132,13 +135,22 @@ export interface UsageView {
   last: UsageSnapshot | null
   plan: { code: string, name: string } | null
   limits: { users: number | null, storageGb: number | null, smsPerMonth: number | null }
+  /** Эффективный лимит по каждой из одиннадцати осей, в единицах оси (docs/v2/35 §7.1, §7.3). */
+  axes: Record<LimitAxis, number | null>
   history: { collectedAt: string, activeUsers: number, storageBytes: number }[]
 }
 
-/** Для экрана: последний сбор, тариф и лимиты плана, короткая история (30 дней). */
+/**
+ * Для экрана: последний сбор, тариф, **эффективные** лимиты и короткая история (30 дней).
+ *
+ * Лимиты берутся общей функцией `effectiveLimits` (docs/v2/44 В-5), а не колонками тарифа:
+ * до PR-08 экран показывал `plans.max_*` и не знал ни про переопределение оператора, ни про
+ * доплаты — то есть число в баннере расходилось с числом, по которому операцию блокировали.
+ */
 export async function usageView(ctx: { tenantId: string, actorId: string }): Promise<UsageView> {
   const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, ctx.tenantId))
   const [p] = t ? await db.select().from(plans).where(eq(plans.code, t.plan)) : []
+  const limits = await effectiveLimits(ctx.tenantId)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select().from(tenantUsage).orderBy(desc(tenantUsage.collectedAt)).limit(30)
     const toSnap = (r: typeof tenantUsage.$inferSelect): UsageSnapshot => ({
@@ -148,7 +160,8 @@ export async function usageView(ctx: { tenantId: string, actorId: string }): Pro
     return {
       last: rows[0] ? toSnap(rows[0]) : null,
       plan: p ? { code: p.code, name: p.name } : t ? { code: t.plan, name: t.plan } : null,
-      limits: { users: p?.maxUsers ?? null, storageGb: p?.maxStorageGb ?? null, smsPerMonth: p?.maxSmsPerMonth ?? null },
+      limits: { users: limits.users, storageGb: limits.storageGb, smsPerMonth: limits.smsPerMonth },
+      axes: limits.axes,
       history: rows.map(r => ({ collectedAt: r.collectedAt.toISOString(), activeUsers: r.activeUsers, storageBytes: r.storageBytes })).reverse(),
     }
   })

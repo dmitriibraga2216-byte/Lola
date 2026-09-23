@@ -414,6 +414,13 @@
       "when": 1790120383875,
       "tag": "0058_v2_lifecycle_params",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790120503875,
+      "tag": "0059_v2_billing_plans",
+      "breakpoints": true
     }
   ]
 }

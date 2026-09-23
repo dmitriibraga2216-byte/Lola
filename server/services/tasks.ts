@@ -13,6 +13,7 @@ import { enqueueNotification } from './notifications'
 import { parseImportFile } from './importPeople'
 import { matchesConditions, ruleConditions } from './automation'
 import { logPassEvent } from './passEvents'
+import { stageParamKeys, stageParamsFor, subjectStage } from './taskParams'
 import {
   DEFAULT_REMINDERS, METHOD_KEYS, paramsFor, parseTaskParams, remindersSchema,
 } from '../../shared/schemas/assignments'
@@ -45,14 +46,27 @@ export async function getTaskParams(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const a = await loadTask(tx, id)
     if (!a) return null
-    return serializeParams(a)
+    return serializeParams(a, await allowedKeys(tx, a))
   })
 }
 
-function serializeParams(a: AssignmentRow) {
+/**
+ * Состав полей формы (`33` §7.5, П-15): тип контента ∩ возможности этапа курса. Считается на
+ * сервере и отдаётся клиенту списком — «сервер считает, клиент показывает» (CLAUDE.md п. 3) и
+ * ветка по этапу остаётся единственной (`stageCan()` внутри `stageParamKeys()`).
+ */
+async function allowedKeys(tx: Tx, a: AssignmentRow): Promise<readonly string[]> {
+  const type = a.subjectType as ContentType
+  return stageParamKeys(type, await subjectStage(tx, type, a.subjectId))
+}
+
+function serializeParams(a: AssignmentRow, paramKeys: readonly string[]) {
   return {
     contentType: a.subjectType as ContentType,
+    // Хранимые params отдаются как есть (минус чужие типу ключи): уже созданное назначение
+    // не пересчитывается при смене этапа курса (`33` §7.4, инвариант 1) — режется только запись.
     params: paramsFor(a.subjectType as ContentType, a.params as Record<string, unknown>),
+    paramKeys,
     method: { viaCatalog: a.viaCatalog, automationRuleId: a.automationRuleId, useInDevPlans: a.useInDevPlans },
     dueMode: a.dueMode, dueDays: a.dueDays, dueAt: a.dueAt,
   }
@@ -75,14 +89,15 @@ export async function putTaskParams(ctx: Ctx, id: string, body: unknown): Promis
       if (!rule) return { ok: false, code: 'validation_failed', issues: [{ code: 'custom', path: ['automationRuleId'], message: 'Правило автоматизації не знайдено' }] }
     }
     const [after] = await tx.update(assignments).set({
-      params: paramsFor(a.subjectType as ContentType, rest),
+      // П-15: ключи выключенных возможностей этапа не сохраняются вовсе (не со значением по умолчанию)
+      params: await stageParamsFor(tx, a.subjectType as ContentType, a.subjectId, rest),
       ...(viaCatalog !== undefined ? { viaCatalog } : {}),
       ...(automationRuleId !== undefined ? { automationRuleId } : {}),
       ...(useInDevPlans !== undefined ? { useInDevPlans } : {}),
       updatedAt: new Date(),
     }).where(eq(assignments.id, id)).returning()
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assignment.params', entity: 'assignment', entityId: id, before: { params: a.params }, after: { params: after!.params, method: Object.fromEntries(METHOD_KEYS.map(k => [k, (after as Record<string, unknown>)[k]])) } })
-    return { ok: true, data: serializeParams(after!) }
+    return { ok: true, data: serializeParams(after!, await allowedKeys(tx, after!)) }
   })
 }
 

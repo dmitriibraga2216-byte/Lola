@@ -407,6 +407,13 @@
       "when": 1790120323875,
       "tag": "0057_v2_lifecycle_stages",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1790120383875,
+      "tag": "0058_v2_lifecycle_params",
+      "breakpoints": true
     }
   ]
 }

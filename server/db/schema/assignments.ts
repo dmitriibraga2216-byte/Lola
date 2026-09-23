@@ -49,6 +49,9 @@ export const assignments = pgTable('assignments', {
 }, t => [
   index().on(t.tenantId, t.status),
   index().on(t.tenantId, t.subjectId),
+  // 0058 (PR-06): вход «все назначения курсов тенанта» — чтение этапа при записи params
+  // и сквозная проверка 14 (docs/v2/42 §5) начинаются с типа носителя, а не с subject_id
+  index().on(t.tenantId, t.subjectType, t.subjectId),
 ])
 
 /** Компетенции назначения (Г-15.3, «Обрати компетенції» в шапке карточки): многие-ко-многим. */

@@ -185,6 +185,8 @@ export const courses = pgTable('courses', {
 }, t => [
   unique().on(t.tenantId, t.slug),
   index().on(t.tenantId, t.lifecycleStageId),
+  // 0058 (PR-06): соединение со стороны справочника этапов, где tenant_id в условии не ведущий
+  index().on(t.lifecycleStageId).where(sql`lifecycle_stage_id is not null`),
 ])
 
 export const courseVersions = pgTable('course_versions', {

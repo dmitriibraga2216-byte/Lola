@@ -170,7 +170,7 @@
 | --- | --- | --- |
 | GET/POST | `/tasks` | список / создание; `?type=manual\|auto\|catalog\|trajectory\|archive` |
 | GET/PATCH | `/tasks/:id` | карточка |
-| GET/PUT | `/tasks/:id/params` | правила прохождения (`assignments.params`, `02` §2.7) |
+| GET/PUT | `/tasks/:id/params` | правила прохождения (`assignments.params`, `02` §2.7); `GET` отдаёт `paramKeys` — состав полей формы после фильтра по типу контента и возможностям этапа курса (`docs/v2/33` §7.5, П-15), `PUT` молча отбрасывает ключ выключенной возможности |
 | GET/PUT | `/tasks/:id/reminders` | расписание напоминаний (`15` Г-15.1) |
 | GET | `/tasks/:id/audience` | список людей: назначенные, не назначенные, все; фильтры как в эталоне |
 | POST | `/tasks/:id/audience/assign` | `{userIds[]}` или `{filter}` |

@@ -1179,6 +1179,7 @@
     "p": {
       "title": "Task settings",
       "note": "These rules apply to this assignment only. The content itself holds no rules — only material.",
+      "stageLimited": "Some fields are hidden: the course lifecycle stage does not provide them. The set of stage capabilities is defined by the platform — contact support to change it.",
       "general": "General",
       "deadline": "Deadline",
       "result": "Result",

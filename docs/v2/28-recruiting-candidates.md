@@ -94,8 +94,9 @@ alter table users
   add column comm_language      text not null default 'uk',
   add column resume_asset_id    uuid references media_assets(id),
   add column converted_from_candidate_at timestamptz,
-  -- `hired_at date` уже объявлено в базовом ТЗ (`02` §2.3). Новую колонку не добавляем;
-  -- если нужна точность до времени — меняем тип: alter column hired_at type timestamptz.
+  -- [исправлено фазой 1, `43` §5 Р-2] Ранее: «если нужна точность до времени — меняем тип
+  -- alter column hired_at type timestamptz». `hired_at date` уже объявлено в базовом ТЗ
+  -- (`02` §2.3) и остаётся `date` — тип не меняется, новую колонку не добавляем.
   add column consent_given_at   timestamptz,
   add column consent_expires_at date,
   add constraint users_kind_chk check (kind in ('employee','candidate')),

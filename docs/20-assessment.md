@@ -41,6 +41,17 @@
 | `pass_threshold` | numeric | с какого значения считается «норма» |
 | `allow_na` | boolean | можно ли «не застосовно» |
 
+> Патч `docs/v2/39-patches.md` П-20. Реестр шкал (`scales` / `scale_levels`,
+> `server/db/schema/settings.ts`) обслуживает не только оценку персонала и чек-листи, но и
+> рекрутинг: `candidate_scores` (`docs/v2/28-recruiting-candidates.md` §3.4) и
+> `vacancy_criteria` (`docs/v2/29-vacancies.md` §3) ссылаются на те же `scales` / `scale_levels`,
+> отдельного реестра для рекрутинга пакет не заводит.
+>
+> [исправлено фазой 1, `43` §5] Ранее в `docs/v2/39-patches.md` П-20: «`scales` в базовом ТЗ
+> отнесены к R2–R3, а рекрутинг нужен раньше» и требование перенести минимальный срез
+> `scales`/`scale_levels` в тот же этап, что и рекрутинг. Фактически обе таблицы **уже
+> существуют и наполняются** в `main`, переносить нечего — вопрос порядка этапов снят.
+
 ### 3.2 `criteria_groups` и `criteria`
 
 `criteria_groups`: `name`, `description`, `sort`, `weight`.

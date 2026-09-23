@@ -143,6 +143,10 @@ create index idx_interview_consents_tenant on interview_consents (tenant_id, use
 
 ### 3.4 Сессия и реплики
 
+> [исправлено фазой 1, `45-plan.md` PR-02] Ранее: колонка `media_purge_after`. Переименована в
+> `purge_after` — то же имя, что и у одноимённого поля `media_assets` (`34` §3.2, `44` В-17),
+> единое соглашение по всему пакету.
+
 ```sql
 create table interview_sessions (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id) on delete cascade,
@@ -155,7 +159,7 @@ create table interview_sessions (
   ai_score numeric(6,2), ai_confidence numeric(4,3), ai_verdict_text text,
   candidate_score_id uuid references candidate_scores(id) on delete set null,
   degraded_reason text, needs_human_reason text, flags jsonb not null default '[]'::jsonb,   -- антифрод, §7.17
-  media_purge_after timestamptz, started_at timestamptz, last_activity_at timestamptz, finished_at timestamptz,
+  purge_after timestamptz, started_at timestamptz, last_activity_at timestamptz, finished_at timestamptz,
   created_at timestamptz not null default now(),
   constraint interview_sessions_state_chk check (state in ('created','consent_pending','in_progress','paused','submitted',
     'transcribing','scoring','scored','needs_human','abandoned','expired','failed')),
@@ -163,7 +167,7 @@ create table interview_sessions (
     'transcribe_failed','low_confidence','consent_withdrawn','timeout')), unique (tenant_id, attempt_id));
 create index idx_interview_sessions_tenant on interview_sessions (tenant_id, state, created_at desc);
 create index idx_interview_sessions_tenant_cand on interview_sessions (tenant_id, candidate_id, created_at desc);
-create index idx_interview_sessions_tenant_purge on interview_sessions (tenant_id, media_purge_after) where media_purge_after is not null;
+create index idx_interview_sessions_tenant_purge on interview_sessions (tenant_id, purge_after) where purge_after is not null;
 
 create table interview_turns (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id) on delete cascade,
@@ -353,7 +357,7 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 4. **Согласие до начала.** Экран §5.1 показывается до создания `attempts`, всегда, на языке `users.comm_language`. Фиксируется строкой `interview_consents` с `text_version`, `text_hash`, `scopes`, IP и user-agent; без строки `decision='accepted'` сессия не переходит в `in_progress` — проверка на сервере, не в интерфейсе. Согласие на обработку ПД (`28` §3.2, `consent_given_at`) **не заменяет** это согласие: там обработка анкеты, здесь запись голоса.
 5. **Отказ не закрывает отбор.** При `declined` сессия не создаётся, назначение остаётся активным и переключается на `alternative_path`: `human_interview` — рекрутеру уходит `interview.declined` с пометкой «потрібна жива співбесіда», кандидат в статусе `on_review`; `text_form` — те же вопросы сценария открываются обычным тестом с ручной проверкой (`12` §3.3 `text_long`, очередь `13` §5.2). Сценарий без альтернативы не публикуется: `422 scenario.alternative_required`. Отказ **не пишется в оценки** и не виден в Підсумку как минус; в истории кандидата — нейтральная строка «Обрав альтернативний формат співбесіди».
 6. **Отзыв согласия.** «Припинити співбесіду» доступна на каждом шаге. При отзыве: `decision='withdrawn'`, сессия → `abandoned`, аудио всех реплик немедленно в `lifecycle='pending_delete'`, расшифровки удаляются, оценка не формируется, попытка не считается проваленной, рекрутер уведомлён. Отзыв после завершения (по ссылке из письма) делает то же и дополнительно отзывает Підсумок.
-7. **Что хранится и сколько.** Аудио реплики — `media_assets`, `origin='interview_answer'`, `is_evidence=false`, `media_purge_after = finished_at + 90 днів`, но не позже `users.consent_expires_at`; действие `purge`, не `soft_delete`. Видео — только при `record_video=true` и отдельном `scopes.video`, по умолчанию выключено. Расшифровка и оценки живут до обезличивания кандидата (`28` §7.9). Вход ИИ-вызова в S3 — 90 дней. PDF Підсумку — `origin='ai_artifact'`, 12 мес. (`34` §7.3), но стирается раньше при обезличивании. [решение] Аудио живёт заметно меньше расшифровки: для решения о найме и его разбора достаточно текста, а голос — самые чувствительные данные в продукте. Провайдер с `provider_retention='unknown'` не допускается для `transcribe`: нельзя отдавать голос туда, где неизвестен срок хранения.
+7. **Что хранится и сколько.** Аудио реплики — `media_assets`, `origin='interview_answer'`, `is_evidence=false`, `purge_after = finished_at + 90 днів`, но не позже `users.consent_expires_at`; действие `purge`, не `soft_delete`. Видео — только при `record_video=true` и отдельном `scopes.video`, по умолчанию выключено. Расшифровка и оценки живут до обезличивания кандидата (`28` §7.9). Вход ИИ-вызова в S3 — 90 дней. PDF Підсумку — `origin='ai_artifact'`, 12 мес. (`34` §7.3), но стирается раньше при обезличивании. [решение] Аудио живёт заметно меньше расшифровки: для решения о найме и его разбора достаточно текста, а голос — самые чувствительные данные в продукте. Провайдер с `provider_retention='unknown'` не допускается для `transcribe`: нельзя отдавать голос туда, где неизвестен срок хранения.
 8. **Доступ к записи.** Аудио отдаётся предподписанной ссылкой на 15 минут, только `interview.listen`, каждое прослушивание пишется в `audit_log` (`interview.media.listen`: кто, когда, чья запись). Скачивание файла запрещено всем ролям: доступ есть, выноса нет.
 9. **Обезличивание.** При `28` §7.9 или отзыве согласия: аудио и видео — `purge` немедленно; `interview_turns.transcript`, `prompt_text`, `interview_criterion_scores.rationale` и `evidence`, `candidate_summaries.body` и PDF — удаляются; остаются баллы, `confidence`, `agreement`, метрики сессии и строки `ai_calls` без `input_ref` — то, что нужно статистике и не идентифицирует человека. Необратимо, пишется в `audit_log`.
 10. **Расшифровка.** Язык из сценария; при расхождении языка ответа ставится флаг, но расшифровка выполняется. `transcript_confidence < min_confidence` → `low_confidence`: реплика помечается «Розшифровка ненадійна» и исключается из `evidence`. Два повтора (через 5 и 30 минут), затем `failed`.
@@ -420,22 +424,22 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 | GET | `/interviews/:sessionId` | — | состояние, текущая реплика | `404`, `409 interview_consent.required` |
 | POST | `/interviews/:sessionId/consent` | `{decision, scopes, text_version, alternative?}` | сессия либо альтернатива | `422 consent.invalid`, `409 interview_consent.already_decided` |
 | POST | `/interviews/:sessionId/start` | `{answer_mode}` | первая реплика | `409 limit.ai_interview_exhausted`, `409 interview_consent.required` |
-| POST | `/interviews/:sessionId/turns/:ordinal/upload` | multipart audio ≤25 МБ | `{media_id, duration_ms}` | `413 file.too_large`, `422 turn.closed` |
+| POST | `/interviews/:sessionId/turns/:ordinal/upload` | multipart audio ≤25 МБ | `{media_id, duration_ms}` | `413 media.too_big`, `422 turn.closed` |
 | POST | `/interviews/:sessionId/turns/:ordinal/answer` | `{mode, media_id?, text?}` | следующая реплика | `422 answer.empty`, `409 retake.limit` |
 | POST | `/interviews/:sessionId/finish` \| `/withdraw` | — \| `{reason?}` | `{state}` \| `204` | `409 no_answers`, `404` |
-| GET | `/candidates/:id/interview` | — | сессия, критерии, расшифровка, флаги | `403 scope`, `404` |
-| GET | `/candidates/:id/interview/media/:turnId` | — | `{url, expires_at}` | `403 interview.listen`, `410 media.purged` |
+| GET | `/candidates/:id/interview` | — | сессия, критерии, расшифровка, флаги | `403 forbidden`, `404` |
+| GET | `/candidates/:id/interview/media/:turnId` | — | `{url, expires_at}` | `403 forbidden`, `410 media.purged` |
 | POST | `/candidates/:id/interview/criteria/:criterionId/override` | `{human_value, human_comment, major?}` | оценка | `422`, `409 session.not_scored` |
 | POST | `/candidates/:id/interview/rescore` | `{reason}` | `{ai_call_id}` | `409 limit`, `403` |
 | GET \| POST | `/candidate-summaries` | фильтры \| `{candidate_id, sections?}` | список \| Підсумок | `409 summary.no_data` |
 | PATCH | `/candidate-summaries/:id` | `{body, sections}` | Підсумок, `generated_by='ai_edited'` | `409 summary.sent` |
 | POST | `/candidate-summaries/:id/send` \| `/revoke` | `{channel, expires_days}` \| `{reason}` | `{sent_at, share_token}` \| `204` | `422 contact.missing`, `409 consent.withdrawn` |
-| GET | `/public/candidate-summaries/:token` | — | документ без ПД третьих лиц | `410 expired`, `404` |
+| GET | `/api/v1/public/candidate-summaries/[token]` | — | документ без ПД третьих лиц | `410 expired`, `404` |
 | GET | `/review-hints/:targetKind/:targetId` | — | подсказка, ставит `shown_at` | `404 hint.absent`, `409 hint.degraded` |
 | GET \| PUT | `/interview-scenarios[/:id]` | форма §6.1 | сценарий | `422 scenario.alternative_required` |
 | GET \| POST | `/interview-scenarios/:id/criteria` | форма §6.2 | критерии | `422 criteria.required` |
 | POST | `/interview-scenarios/:id/criteria/generate` | `{count}` | предложенные, `source='ai_suggested'` | `409 limit.ai_generate_exhausted` |
-| GET | `/ai/calls` | фильтры, `cursor` | журнал | `403 ai.audit` |
+| GET | `/ai/calls` | фильтры, `cursor` | журнал | `403 forbidden` |
 | GET \| PUT | `/ai/providers[/:id]` | форма §3.2 | профили | `422 provider.retention_unknown` |
 | GET \| POST | `/ai/quality-reviews[/:id]` | `{verdict, notes}` | перепроверки | `403` |
 
@@ -450,7 +454,7 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 | `interview.transcribe` | по событию | расшифровка реплики, 2 повтора (5 и 30 мин) |
 | `interview.score` | по событию | оценка сессии по критериям, запись `candidate_scores.kind='ai'` |
 | `interview.reap` | каждые 15 мин | `in_progress`/`paused` без активности 24 ч → `abandoned` + уведомление |
-| `interview.media_purge` | ежедневно 03:40 | `media_purge_after < now()` → `purge` (после `storage.retention_scan`) |
+| `interview.media_purge` | ежедневно 03:40 | `purge_after < now()` → `purge` (после `storage.retention_scan`) |
 | `summary.build` \| `summary.auto_send` \| `summary.expire` | по событию \| каждые 10 мин \| 03:50 | сборка Підсумку и PDF \| отправка по `auto_send_due_at` с проверками §7.15 \| `share_expires_at < now()` → `expired` |
 | `ai.review_hint` | по событию | подсказка на новую сдачу и развёрнутый ответ |
 | `ai.quality_sample` | ежедневно 06:00 | выборка 5 % + все `major` + все `confidence < 0.5` |

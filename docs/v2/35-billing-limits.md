@@ -259,10 +259,23 @@ downgrade, ошибка «Підтвердьте, що ознайомились 
 
 ### 7.3 Эффективный лимит оси
 
-`effective = coalesce(overrides[axis], plans.limits[axis]) + Σ(tenant_addons.qty × unit_step по этой оси,
-действующих на дату)`; отсутствие ключа и явный `null` означают «без обмежень». Значение фиксируется в
-`usage_counters.limit_snapshot` при открытии периода, чтобы смена тарифа в середине месяца не переписывала
-задним числом уже потраченное.
+> [исправлено фазой 1, `43` §5 и `44` В-5] Ранее: `effective = coalesce(overrides[axis],
+> plans.limits[axis]) + Σ(tenant_addons.qty × unit_step…)`, то есть `plans.limits jsonb` и
+> `tenant_limits.overrides jsonb`. Фактически `plans` — явные колонки с PK по `code` (колонки
+> `id` нет), а `tenant_limits` уже имеет шесть явных колонок лимита (`users, storage_gb,
+> sms_per_month, api_per_minute, webhooks, active_jobs`); пять мест сырого SQL сравнивают
+> потребление с лимитом (`usage.ts:33-35`, `platform.ts:74-75, 96-97, 198, 234`) — опечатка в
+> ключе `jsonb` там означала бы «без обмежень», то есть тихо сняла бы лимит и исказила счёт
+> клиенту. Решение: `tenant_limits` доводится до **одиннадцати явных колонок** (пять новых:
+> `candidates`, `ai_generate_ops`, `ai_review_ops`, `ai_interview_ops`, `export_rows`); `jsonb`
+> остаётся только для нетарифной оси `telegram_out`, в `tenant_usage.axes` — она наблюдается,
+> но не тарифицируется.
+
+`effective(axis) = coalesce(tenant_limits[axis], plans[axis]) + Σ(tenant_addons.qty × unit_step
+по этой оси, действующих на дату)`; отсутствие значения в обеих колонках означает «без
+обмежень». Значение фиксируется в `usage_counters.limit_snapshot` при открытии периода, чтобы
+смена тарифа в середине месяца не переписывала задним числом уже потраченное. Точный состав
+колонок и миграция — `docs/v2/45-plan.md` PR-08.
 
 ### 7.4 Жёсткие и мягкие лимиты: поимённо
 
@@ -390,17 +403,22 @@ downgrade, ошибка «Підтвердьте, що ознайомились 
 
 ## 10. API
 
+> [исправлено фазой 1, `43` §5, `44` В-16, В-17] Ранее: пути с приписанным префиксом
+> `/api/v1/billing/…`. Nitro добавляет префикс каталога сам — с ним в тексте вышло бы
+> `/api/v1/api/v1/…`. Ниже пути без префикса, как и в остальных документах пакета. Строки
+> `GET/DELETE /storage/files` (массовое освобождение места) вычёркиваются как второе имя
+> `DELETE /media/:id` — см. `docs/v2/34-storage.md` §10.
+
 | Метод | Путь | Вход / выход | Ошибки |
 | --- | --- | --- | --- |
-| GET | `/api/v1/billing/summary` | план, период, даты, статус, ИИ-блок, аддоны | `403` без `billing.view` |
-| GET | `/api/v1/billing/usage` | `?period=` → `axis, used, limit, pct, source(live\|daily), collected_at` | |
-| GET | `/api/v1/billing/plans` | публичные планы с ценами обоих периодов | |
-| POST | `/api/v1/billing/plan-change/preflight` | `{plan_id, billing_period}` → `{allowed, blockers[]}` | `404` на непубличный план |
-| POST/DELETE | `/api/v1/billing/plan-change`, `/:id` | `{plan_id, billing_period, confirm}` → заявка; отмена | `409 limit_exceeded` с `details.blockers`; `409` если `applied` |
-| GET/POST | `/api/v1/billing/addons` | `{addon_code, qty}` | `422 addon_not_allowed` |
-| GET | `/api/v1/billing/payments` | курсор, фильтры | `403` без `billing.payments.view` |
-| GET/POST | `/api/v1/billing/notices`, `/notices/:id/dismiss` | активные записи; закрытие → `dismissed_until` | `409` при `level=exceeded` |
-| GET/DELETE | `/api/v1/storage/files` | фильтры / `{ids[]}` → освобождённые байты | |
+| GET | `/billing/summary` | план, период, даты, статус, ИИ-блок, аддоны | `403` без `billing.view` |
+| GET | `/billing/usage` | `?period=` → `axis, used, limit, pct, source(live\|daily), collected_at` | |
+| GET | `/billing/plans` | публичные планы с ценами обоих периодов | |
+| POST | `/billing/plan-change/preflight` | `{plan_id, billing_period}` → `{allowed, blockers[]}` | `404` на непубличный план |
+| POST/DELETE | `/billing/plan-change`, `/:id` | `{plan_id, billing_period, confirm}` → заявка; отмена | `409 limit_exceeded` с `details.blockers`; `409` если `applied` |
+| GET/POST | `/billing/addons` | `{addon_code, qty}` | `422 addon_not_allowed` |
+| GET | `/billing/payments` | курсор, фильтры | `403` без `billing.payments.view` |
+| GET/POST | `/billing/notices`, `/notices/:id/dismiss` | активные записи; закрытие → `dismissed_until` | `409` при `level=exceeded` |
 | GET/PUT | `/platform/plans/:id` | тарифная сетка и цены | только `platform_admin` |
 | GET/PUT | `/platform/tenants/:id/limits` | `{overrides, reason}` | `422` без причины |
 | POST | `/platform/tenants/:id/extend` \| `/ai` \| `/payments` | `{paid_until\|ai_until, ops_grant, reason}`, платёж вручную | `422` без причины |
@@ -473,7 +491,7 @@ downgrade, ошибка «Підтвердьте, що ознайомились 
    лимит хранилища остался 200 Гб; **дано** ИИ-генерация упала с ошибкой провайдера, **тоді**
    `usage_counters.used` не изменился и строки в `usage_events` нет.
 10. **Дано** оператор переопределил `users_active` в 175 с причиной, **тоді** значение действует немедленно и
-    есть запись в `platform_audit`; **дано** запрос `/api/v1/billing/summary` от роли `employee`, **тоді** `403`,
+    есть запись в `platform_audit`; **дано** запрос `/billing/summary` от роли `employee`, **тоді** `403`,
     а не частичные данные.
 
 ## 14. Сверено с эталоном

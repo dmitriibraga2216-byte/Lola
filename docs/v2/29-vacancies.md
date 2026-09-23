@@ -650,18 +650,28 @@ draft ──archive──→ archived
 | POST | `/vacancies/:id/applications/:aid/reject` | `{reason}` | отклик | `422` |
 | POST | `/vacancies/:id/applications/:aid/spam` | — | отклик | `404` |
 
-**Публичный контур** — префикс `/api/public/v1`, без авторизации, свои лимиты и свой лог:
+> [исправлено фазой 1, `43` §5 и `44` В-9] Ранее: «Публичный контур — префикс `/api/public/v1`».
+> Фактически в `main` уже работает `/api/v1/public/*` (`guest-page.get.ts`, `signup.post.ts`,
+> `mystery/[token]/`): префикс задаётся деревом каталогов Nitro, а не строкой в коде, и
+> переносить три работающие ручки под другой путь нет смысла. Ниже путь `/j/:token` и его
+> производные читаются как `/api/v1/public/j/:token` и т. д.
+
+**Публичный контур** — префикс `/api/v1/public/*`, без авторизации, свои лимиты и свой лог:
 
 | Метод | Путь | Вход | Выход | Ошибки |
 |---|---|---|---|---|
 | GET | `/j/:token` | — | публичная карточка + `form_nonce` | `404 vacancy.not_found`, `410 vacancy.paused`, `429 rate.too_many` |
 | POST | `/j/:token/apply` | `{full_name, phone?, email?, comment?, consent, form_nonce, website}` | `202 {application_id, otp_required}` | `422 consent.required`, `422 contact.required`, `429 rate.too_many`, `410` |
 | POST | `/j/:token/apply/:aid/confirm` | `{code}` | `200 {status:"accepted"}` | `400 otp.invalid`, `429 otp.too_many` |
-| POST | `/j/:token/apply/:aid/resume` | multipart | `{asset_id}` | `413 file.too_large`, `415 file.type` |
+| POST | `/j/:token/apply/:aid/resume` | multipart | `{asset_id}` | `413 media.too_big`, `415 file.type` |
 | POST | `/j/:token/subscribe` | `{email}` | `202` | `429` |
 
-[решение] Публичный контур вынесен в отдельный префикс, а не спрятан под `/api/v1`: здесь нет сессии,
-`tenant_id` выводится из токена, действуют отдельные лимиты и запрещены любые операции чтения списков.
+[решение] Публичный контур живёт в собственном каталоге `server/api/v1/public/`, а не спрятан
+за обычными скоупами: здесь нет сессии, `tenant_id` выводится из токена, действуют отдельные
+лимиты и запрещены любые операции чтения списков. Правило контура, обязательное для каждой
+новой ручки под `public/` — вывод тенанта из токена или хоста, вход в `withTenant`,
+`hitRateLimit`, ответ `404` на несуществующий токен, выровненный по времени, — записано в
+`docs/v2/39-patches.md` П-04.
 
 ---
 

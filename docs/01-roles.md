@@ -197,3 +197,39 @@ tenant
 2. Добавляется `position_role_map` — правило «должность → роль», применяемое при импорте
    и при смене должности.
 3. `sessions.active_role_id` и переключатель в шапке.
+
+## 1.10 Скоупы пакета `docs/v2`
+
+Патч `docs/v2/39-patches.md` П-01. Одиннадцать модулей пакета (рекрутинг, ИИ-собеседование,
+библиотека контента, оргструктура, жизненный цикл и офбординг, хранилище, тариф, обратная
+связь по контенту, делегирование проверки, расширения карточки человека) добавляют скоупы в
+`SCOPES` (`shared/domain/roles.ts`) и группы редактора ролей `SCOPE_GROUPS`
+(`server/services/roles.ts`). Состав взят из §2 «Роли и скоупы» **каждого модульного
+документа** — при расхождении с обзорной таблицей патча побеждает модульный документ (правило
+самого П-01).
+
+Скоупы только объявлены: под ними ещё нет эндпоинтов (`docs/v2/45-plan.md`, дорожка PR-03 —
+эндпоинты появятся в PR своего модуля). Ни один не назначен ролям `employee`, `mentor`,
+`manager`, `author` по умолчанию — их получает только `admin` (в силу `[...SCOPES]` в матрице
+системных ролей); распределение по новым ролям (`recruiter`, `hr`) — решение того PR, который
+добавит соответствующие эндпоинты и экраны.
+
+| Группа | Скоупы | Документ |
+| --- | --- | --- |
+| Кандидати | `candidate.view`, `candidate.edit`, `candidate.assign`, `candidate.decide`, `candidate.hire`, `candidate.delete`, `candidate.status.manage` | `docs/v2/28` |
+| Вакансії | `vacancy.view`, `vacancy.edit`, `vacancy.publish`, `vacancy.close`, `vacancy.template.manage`, `vacancy.criteria.manage`, `vacancy.ai.use`, `jobboard.connect`, `jobboard.publish` | `docs/v2/29` |
+| ІІ-співбесіда | `interview.configure`, `interview.view`, `interview.listen`, `interview.override`, `summary.view`, `summary.edit`, `summary.send`, `ai.review.use`, `ai.audit` | `docs/v2/30` |
+| Бібліотека модулів | `library.view`, `library.use`, `library.publish`, `library.manage` | `docs/v2/31` |
+| Оргструктура | `org.structure.view`, `org.structure.edit`, `org.structure.import` | `docs/v2/32` |
+| Етапи життєвого циклу | `lifecycle.view`, `lifecycle.manage`, `offboarding.start`, `offboarding.complete` | `docs/v2/33` |
+| Сховище | `storage.view`, `storage.delete`, `storage.policy`, `storage.addon` | `docs/v2/34` |
+| Тариф і ліміти | `billing.view`, `billing.usage.view`, `billing.payments.view`, `billing.manage` | `docs/v2/35` |
+| Звіт про помилки | `content_issue.report`, `content_issue.view`, `content_issue.triage`, `content_issue.assign`, `content_issue.rescore`, `content_issue.mute` | `docs/v2/36` |
+| Делегування перевірки | `review.delegate`, `review.delegate.any`, `review.routing.manage`, `review.workload.view`, `review.absence.manage`, `time.metrics.view` | `docs/v2/37` |
+| Картка людини | `person.activity.view_others`, `person.note.read`, `person.note.write`, `person.document.view_others`, `person.document.manage`, `person.absence.manage`, `person.rating.view_others` | `docs/v2/38` |
+
+**Отдельно.** Скоупы `platform.plans.manage`, `platform.limits.override`, `platform.ai.grant`,
+`platform.payments.manage` из `docs/v2/35-billing-limits.md` §2 в `SCOPES` не включены: доступ
+оператора платформы — отдельный механизм (`platform_admin`, BYPASSRLS-подключение,
+`server/services/platform.ts`), не скоупы тенантной роли. Их реализация — решение того PR,
+который заведёт панель оператора для тарифов и лимитов.

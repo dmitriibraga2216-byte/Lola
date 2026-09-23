@@ -56,10 +56,12 @@
 Базовое ТЗ (`02` §2.3) уже содержит `birth_date`, `hired_at`, `position_since`, `comment`, `last_seen_at` — «Дата народження»
 и «Дата працевлаштування» с эталона ложатся в существующие колонки, добавлять нечего.
 
-`[решение]` Конфликт, который надо развести на уровне миграции, а не здесь: `hired_at` объявлен в `02` §2.3 как `date` и повторно
-добавляется в `28` §3.2 как `timestamptz`. Верное поведение миграции `28` — **не добавлять колонку, а менять тип существующей**
-(`alter column hired_at type timestamptz using hired_at::timestamptz`). Фиксируется правкой в `28`; здесь отмечено, чтобы третий
-документ не добавил её в третий раз.
+> [исправлено фазой 1, `43` §5 Р-2] Ранее: «Конфликт, который надо развести на уровне миграции…
+> Верное поведение миграции `28` — не добавлять колонку, а менять тип существующей (`alter
+> column hired_at type timestamptz using hired_at::timestamptz`). Фиксируется правкой в `28`».
+> Правка в `28` уже сделана до пакета: `users.hired_at` в `main` имеет тип `date`, и `28`
+> **не переопределяет** его. Ниже — только констатация, чтобы третий документ не добавил
+> колонку в третий раз: `hired_at` остаётся `date`, менять тип не нужно.
 
 ```sql
 alter table users
@@ -616,12 +618,16 @@ API отклоняет фильтр `{rating_pct:{lt:N}}` без второго 
 
 ## 10. API
 
+> [исправлено фазой 1, `43` §5, `44` В-16 §8.2.7] Ранее: коды `activity_forbidden`,
+> `rating_forbidden`, `note_forbidden` для отказа по скоупу. В `server/api` для «нет скоупа»
+> действует одно написание — `forbidden`; три уточняющих кода заменены им.
+
 | Метод | Путь | Вход | Выход | Ошибки |
 |---|---|---|---|---|
-| GET | `/people/:id/activity?year=` | — | `{days:[{date,count,seconds,level,kinds}],year,timezone}` | `403 activity_forbidden`, `404` |
-| GET | `/people/:id/rating` | — | `{total,base,bonuses:{…},breakdown,window,updatedAt}` | `403 rating_forbidden` |
+| GET | `/people/:id/activity?year=` | — | `{days:[{date,count,seconds,level,kinds}],year,timezone}` | `403 forbidden`, `404` |
+| GET | `/people/:id/rating` | — | `{total,base,bonuses:{…},breakdown,window,updatedAt}` | `403 forbidden` |
 | POST | `/people/:id/rating/recalc` | — | `{jobId}` | `403`, `429 recalc_too_often` (1 раз в час) |
-| GET/POST | `/people/:id/notes` | `{body,visibility,category,isPinned}` | список / объект | `403 note_forbidden`, `422 note_body_invalid`, `409 pinned_limit` |
+| GET/POST | `/people/:id/notes` | `{body,visibility,category,isPinned}` | список / объект | `403 forbidden`, `422 note_body_invalid`, `409 pinned_limit` |
 | PATCH/DELETE | `/people/:id/notes/:noteId` | `{body?,visibility?}` | объект | `403`, `409 visibility_narrowing_forbidden` |
 | GET/POST | `/people/:id/documents` | `{typeId,mediaId?,number?,issuedAt,expiresAt?,title?,note?}` | список / объект | `422 document_file_not_allowed`, `422 document_file_required`, `422 document_dates_invalid` |
 | PATCH/DELETE | `/people/:id/documents/:docId` | `{expiresAt?,status?,note?}` | объект | `403`, `409 document_is_evidence` |

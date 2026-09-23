@@ -27,26 +27,38 @@
 документом прав прав модульный документ, а этот патч пересобирается.
 
 [решение] Имена скоупов приводятся к одному виду `домен.действие` (нижний регистр, точка).
-Сводка `41` §8.5 зафиксировала шесть имён, которые названы в этом патче, но отсутствуют в
-модульных документах (`vacancy.integration.manage`, `interview.scenario.edit`,
-`storage.manage`, `review.capacity.manage`, `person.note.view`, `absence.manage`), и
-расхождение количеств. Это расхождение закрывается при реализации так: **побеждает имя из
-модульного документа**, а недостающие права добавляются туда, где описан соответствующий
-экран. Отдельного скоупа не заводится там, где хватает существующего.
 
-| Скоуп | Документ | Кому по умолчанию |
-|---|---|---|
-| `candidate.view`, `candidate.edit`, `candidate.assign`, `candidate.decide`, `candidate.hire`, `candidate.delete`, `candidate.status.manage` | 28 | рекрутер, HR, админ |
-| `vacancy.view`, `vacancy.edit`, `vacancy.publish`, `vacancy.integration.manage` | 29 | рекрутер, HR, админ |
-| `interview.listen`, `interview.scenario.edit`, `summary.send` | 30 | HR, админ; `interview.listen` — не наставнику |
-| `library.use`, `library.publish` | 31 | автор, админ |
-| `org.structure.view`, `org.structure.edit`, `org.structure.import` | 32 | все / HR / админ |
-| `lifecycle.view`, `lifecycle.manage`, `offboarding.start`, `offboarding.complete` | 33 | все / админ / керівник точки / HR |
-| `storage.manage` | 34 | админ |
-| `billing.view`, `billing.manage` | 35 | владелец тенанта |
-| `content_issue.view`, `content_issue.triage`, `content_issue.rescore` | 36 | автор, методист / админ |
-| `review.delegate`, `review.capacity.manage` | 37 | наставник / HR |
-| `person.note.view`, `person.note.write`, `person.document.manage`, `absence.manage` | 38 | HR, керівник точки |
+> [исправлено при реализации PR-03, `docs/v2/45-plan.md`] Ранее таблица ниже была обзорной и
+> называла шесть имён, отсутствующих в модульных документах (`vacancy.integration.manage`,
+> `interview.scenario.edit`, `storage.manage`, `review.capacity.manage`, `person.note.view`,
+> `absence.manage`). Патч пересобран по правилу, сформулированному здесь же: **побеждает
+> состав модульного документа** (§2 «Роли и скоупы» каждого из 28–38). Таблица ниже — точный
+> состав, добавленный в `SCOPES` (`shared/domain/roles.ts`) и `SCOPE_GROUPS`
+> (`server/services/roles.ts`); полная роспись — `docs/01-roles.md` §1.10.
+
+| Скоуп | Документ |
+|---|---|
+| `candidate.view`, `candidate.edit`, `candidate.assign`, `candidate.decide`, `candidate.hire`, `candidate.delete`, `candidate.status.manage` | 28 |
+| `vacancy.view`, `vacancy.edit`, `vacancy.publish`, `vacancy.close`, `vacancy.template.manage`, `vacancy.criteria.manage`, `vacancy.ai.use`, `jobboard.connect`, `jobboard.publish` | 29 |
+| `interview.configure`, `interview.view`, `interview.listen`, `interview.override`, `summary.view`, `summary.edit`, `summary.send`, `ai.review.use`, `ai.audit` | 30 |
+| `library.view`, `library.use`, `library.publish`, `library.manage` | 31 |
+| `org.structure.view`, `org.structure.edit`, `org.structure.import` | 32 |
+| `lifecycle.view`, `lifecycle.manage`, `offboarding.start`, `offboarding.complete` | 33 |
+| `storage.view`, `storage.delete`, `storage.policy`, `storage.addon` | 34 |
+| `billing.view`, `billing.usage.view`, `billing.payments.view`, `billing.manage` | 35 |
+| `content_issue.report`, `content_issue.view`, `content_issue.triage`, `content_issue.assign`, `content_issue.rescore`, `content_issue.mute` | 36 |
+| `review.delegate`, `review.delegate.any`, `review.routing.manage`, `review.workload.view`, `review.absence.manage`, `time.metrics.view` | 37 |
+| `person.activity.view_others`, `person.note.read`, `person.note.write`, `person.document.view_others`, `person.document.manage`, `person.absence.manage`, `person.rating.view_others` | 38 |
+
+Скоупы `platform.plans.manage`, `platform.limits.override`, `platform.ai.grant`,
+`platform.payments.manage` из `35` §2 в `SCOPES` не входят — доступ оператора платформы
+устроен отдельным механизмом (`platform_admin`, BYPASSRLS), не скоупами тенантной роли
+(`docs/01-roles.md` §1.10).
+
+Распределение по умолчанию: новые скоупы объявлены, но ни один эндпоинт под них пока не
+реализован, поэтому по умолчанию их получает только `admin` (через `[...SCOPES]` в
+`SYSTEM_ROLES`). Кому именно из будущих ролей (`recruiter`, `hr`) достанутся какие скоупы —
+решает PR, добавляющий соответствующий экран и эндпоинты.
 
 **Почему блокирующий:** без регистрации скоупов роли пакета не назначаются, и любой новый
 экран доступен либо всем, либо никому.
@@ -82,8 +94,19 @@
 ## П-04. `04-api.md` — ссылка на дельту API
 
 **Приоритет:** обязательный.
-**Что:** добавить раздел со ссылкой на `docs/v2/41-api-delta.md` и упоминанием нового публичного
-контура `/api/public/v1` (`29` §10), который не проходит через `withTenant()` в обычном виде.
+
+> [исправлено фазой 1, `43` §5 и `44` В-9] Ранее: «упоминанием нового публичного контура
+> `/api/public/v1`». Фактически публичный контур **уже работает** под `/api/v1/public/*`
+> (`guest-page.get.ts`, `signup.post.ts`, `mystery/[token]/`), просто не описан в основном
+> документе по API. Переносить работающие ручки под другой путь не нужно — нужно описать
+> существующий механизм.
+
+**Что:** добавить раздел со ссылкой на `docs/v2/41-api-delta.md` и с описанием уже работающего
+публичного контура `/api/v1/public/*` (`29` §10), который не проходит через `withTenant()` в
+обычном виде: тенант выводится из токена ссылки (`hash(token)` → `mystery_link_lookup` на
+admin-подключении → `withTenant(l.tenant_id, l.created_by, …)`), а не из сессии.
+`GET /public/candidate-summaries/:token` (коллизия `41` §8.3.2) переезжает в тот же контур —
+`/api/v1/public/candidate-summaries/[token]`.
 **Почему:** публичный контур — единственное место в продукте, где запрос приходит без сессии;
 он обязан быть виден в основном документе по API, а не только в модульном.
 
@@ -249,9 +272,11 @@ tenant_id = …` были корректны. После миграции, вв�
 **Что:** `candidate_scores` (`28` §3.4) и `vacancy_criteria` (`29` §3) используют существующие
 `scales` / `scale_levels`. Зафиксировать в `20`, что реестр шкал обслуживает и рекрутинг.
 
-**Замечание о порядке этапов:** `scales` в базовом ТЗ отнесены к R2–R3, а рекрутинг нужен
-раньше. [решение] Минимальный срез `scales` / `scale_levels` (без процедур оценки персонала)
-переносится в тот же этап, что и рекрутинг. Отражено в `42`.
+> [исправлено, `43` §5] Ранее: «Замечание о порядке этапов: `scales` в базовом ТЗ отнесены к
+> R2–R3, а рекрутинг нужен раньше. [решение] Минимальный срез `scales` / `scale_levels` (без
+> процедур оценки персонала) переносится в тот же этап, что и рекрутинг». Фактически `scales` и
+> `scale_levels` **уже существуют в `main` и уже наполняются** — переносить нечего, вопрос
+> порядка этапов снят сверкой фазы 0.
 
 ---
 
@@ -344,14 +369,24 @@ tenant_id = …` были корректны. После миграции, вв�
 ## П-25. `25-multitenancy.md` — лимиты и публичный контур
 
 **Приоритет:** обязательный.
+
+> [исправлено, `43` §5] Ранее в п. 1: «одиннадцать осей вместо трёх». Фактически
+> `tenant_limits` уже имеет **шесть** явных колонок (`users, storage_gb, sms_per_month,
+> api_per_minute, webhooks, active_jobs`), а не три; `jsonb`-хранилище лимитов пакет не
+> находит в БД. Решение `44` В-5 доводит их до одиннадцати явными колонками (пять новых:
+> `candidates`, `ai_generate_ops`, `ai_review_ops`, `ai_interview_ops`, `export_rows`), с
+> `jsonb` только для нетарифной оси `telegram_out`.
+
 **Что:**
-1. Оси лимитов заменяются перечнем из `35` §7.1 (одиннадцать осей вместо трёх).
+1. Оси лимитов заменяются перечнем из `35` §7.1 — **одиннадцать осей вместо шести**, явными
+   колонками `tenant_limits` (см. `44` В-5), а не `jsonb`.
 2. Правило «обучение никогда не останавливается лимитами» сохраняется дословно и
    распространяется на новые оси: при исчерпании ИИ-лимита проверка деградирует в ручную,
    при исчерпании хранилища сдача видеоответа сохраняется на устройстве и досылается (`34` §7).
-3. Добавляется раздел о публичном контуре `/api/public/v1` (`29` §10): как он проходит
-   изоляцию тенанта, если сессии нет. Тенант определяется по `public_token` вакансии, и
-   дальше запрос идёт через `withTenant()` с системной ролью минимальных прав.
+3. Добавляется раздел о публичном контуре `/api/v1/public/*` (`29` §10, уже работает —
+   `43` §5): как он проходит изоляцию тенанта, если сессии нет. Тенант определяется по токену
+   ссылки (вакансии, тайного гостя и т. д.), и дальше запрос идёт через `withTenant()` с ролью
+   минимальных прав, взятой из строки токена, а не из тела запроса.
 
 ---
 

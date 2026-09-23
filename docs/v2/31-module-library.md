@@ -444,12 +444,17 @@ mentor и manager видят таблицу только на чтение, бе
 Все пути под `/api/v1`, ответы `{data}` / `{error:{code,message,details}}`, курсорная пагинация,
 мутации идемпотентны по `Idempotency-Key`, чужой тенант — `404`.
 
+> [исправлено фазой 1, `43` §5, `44` В-16 §8.2.7] Ранее: коды `library.forbidden`,
+> `library.not_author`, `library.manage_required` для отказа по скоупу. В `server/api` для
+> «нет скоупа» действует одно написание — `forbidden` (25 файлов); три уточняющих кода
+> заменены им, различие в причине отказа передаётся телом ответа.
+
 | Метод | Путь | Вход | Выход | Ошибки |
 | --- | --- | --- | --- | --- |
-| GET | `/library/modules` | `q`, `kind`, `categoryId`, `tag`, `ownerId`, `status`, `onlyUnused`, `onlyStale`, `cursor`, `limit` | карточки + `usageCount` | `403 library.forbidden` |
+| GET | `/library/modules` | `q`, `kind`, `categoryId`, `tag`, `ownerId`, `status`, `onlyUnused`, `onlyStale`, `cursor`, `limit` | карточки + `usageCount` | `403 forbidden` |
 | POST | `/library/modules` | поля §6.1 | карточка `draft` | `403`, `422 validation_failed`, `409 slug_taken` |
 | GET | `/library/modules/:id` | — | карточка + `currentVersion` + `usageCount` | `404` |
-| PATCH | `/library/modules/:id` | поля §6.1 | карточка | `403 library.not_author`, `409 module_archived` |
+| PATCH | `/library/modules/:id` | поля §6.1 | карточка | `403 forbidden`, `409 module_archived` |
 | DELETE | `/library/modules/:id` | — | `204` | `409 library_module.in_use` c `details.usages[]`, `403` |
 | POST | `/library/modules/:id/archive` | `{reason}` | карточка `archived` | `422 reason_required` |
 | POST | `/library/modules/:id/restore` | — | карточка `published` | `409 module_deleted` |
@@ -461,7 +466,7 @@ mentor и manager видят таблицу только на чтение, бе
 | POST | `/library/usages` | `{libraryModuleId, holderType, holderId, containerType, containerId, pinMode}` | место использования | `409 already_attached`, `409 module_archived`, `403 container.forbidden` |
 | POST | `/library/usages/:id/update-version` | `{toVersion}` | место + `{updatedFrom, updatedTo}` | `409 already_latest`, `422 version_retired` |
 | POST | `/library/usages/:id/detach` | `{makeCopy}` | `{lessonId}` при `makeCopy` | `404`, `403` |
-| POST | `/library/modules/:id/update-all-usages` | `{toVersion}` | `{updated, skipped[]}` | `403 library.manage_required` |
+| POST | `/library/modules/:id/update-all-usages` | `{toVersion}` | `{updated, skipped[]}` | `403 forbidden` |
 | GET / POST | `/library/proposals` | фильтры / `{sourceLessonId, proposedTitle, proposedCategoryId, comment}` | список / предложение | `409 proposal_pending` |
 | POST | `/library/proposals/:id/accept` | `{categoryId, ownerId}` | `{libraryModuleId}` | `403`, `409 proposal.already_decided` |
 | POST | `/library/proposals/:id/reject` | `{decisionComment}` | предложение | `422 comment_required` |

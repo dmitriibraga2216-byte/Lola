@@ -1,6 +1,17 @@
 /**
  * Скоупы и системные роли (docs/01-roles.md §1.2–1.4).
  * Единый источник для сида, проверки прав и редактора ролей.
+ *
+ * Скоупы пакета docs/v2 (патч П-01, docs/v2/39-patches.md) только объявлены — эндпоинтов под
+ * них ещё нет (docs/v2/45-plan.md PR-03), это ожидаемо. Состав взят из §2 «Роли и скоупы»
+ * каждого документа пакета (28–38), а не из обзорной таблицы патча — модульный документ
+ * побеждает при расхождении, как и предписывает патч. Ни один новый скоуп не назначен ролям
+ * `employee`, `mentor`, `manager`, `author` по умолчанию — только `admin` (через `[...SCOPES]`
+ * ниже); распределение по будущим ролям `recruiter`, `hr`, `owner` — в PR, которые добавят
+ * соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
+ * (`plans.manage`, `limits.override`, `ai.grant`, `payments.manage`) сюда не включены: доступ
+ * оператора платформы работает отдельным механизмом (`platform_admin`, BYPASSRLS,
+ * `server/services/platform.ts`), а не этим массивом скоупов тенанта.
  */
 
 export const SCOPES = [
@@ -28,6 +39,37 @@ export const SCOPES = [
   'wiki.edit', 'report.builder',
   // Программы и траектории (docs/17 §2)
   'program.manage', 'program.publish', 'program.link_rule',
+
+  // --- Пакет docs/v2 (patch П-01, docs/v2/39-patches.md) ---
+  // Рекрутинг: кандидаты (docs/v2/28 §2)
+  'candidate.view', 'candidate.edit', 'candidate.assign', 'candidate.decide', 'candidate.hire',
+  'candidate.delete', 'candidate.status.manage',
+  // Рекрутинг: вакансии (docs/v2/29 §2)
+  'vacancy.view', 'vacancy.edit', 'vacancy.publish', 'vacancy.close', 'vacancy.template.manage',
+  'vacancy.criteria.manage', 'vacancy.ai.use', 'jobboard.connect', 'jobboard.publish',
+  // ИИ-собеседование (docs/v2/30 §2)
+  'interview.configure', 'interview.view', 'interview.listen', 'interview.override',
+  'summary.view', 'summary.edit', 'summary.send', 'ai.review.use', 'ai.audit',
+  // Библиотека модулей (docs/v2/31 §2)
+  'library.view', 'library.use', 'library.publish', 'library.manage',
+  // Оргструктура (docs/v2/32 §2)
+  'org.structure.view', 'org.structure.edit', 'org.structure.import',
+  // Жизненный цикл и офбординг (docs/v2/33 §2)
+  'lifecycle.view', 'lifecycle.manage', 'offboarding.start', 'offboarding.complete',
+  // Хранилище (docs/v2/34 §2)
+  'storage.view', 'storage.delete', 'storage.policy', 'storage.addon',
+  // Тариф и лимиты (docs/v2/35 §2)
+  'billing.view', 'billing.usage.view', 'billing.payments.view', 'billing.manage',
+  // Обратная связь по контенту (docs/v2/36 §2)
+  'content_issue.report', 'content_issue.view', 'content_issue.triage', 'content_issue.assign',
+  'content_issue.rescore', 'content_issue.mute',
+  // Делегирование проверки (docs/v2/37 §2)
+  'review.delegate', 'review.delegate.any', 'review.routing.manage', 'review.workload.view',
+  'review.absence.manage', 'time.metrics.view',
+  // Расширения карточки человека (docs/v2/38 §2)
+  'person.activity.view_others', 'person.note.read', 'person.note.write',
+  'person.document.view_others', 'person.document.manage', 'person.absence.manage',
+  'person.rating.view_others',
 ] as const
 
 export type Scope = typeof SCOPES[number]

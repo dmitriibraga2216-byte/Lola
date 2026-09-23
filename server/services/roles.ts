@@ -33,6 +33,18 @@ export const SCOPE_GROUPS: { key: string, scopes: string[] }[] = [
   { key: 'meetups', scopes: ['meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'complextest.manage'] },
   { key: 'programs', scopes: ['program.manage', 'program.publish', 'program.link_rule'] },
   { key: 'settings', scopes: ['settings.tenant', 'settings.notifications', 'settings.integrations', 'audit.view'] },
+  // --- Пакет docs/v2 (patch П-01, docs/v2/39-patches.md) ---
+  { key: 'candidates', scopes: ['candidate.view', 'candidate.edit', 'candidate.assign', 'candidate.decide', 'candidate.hire', 'candidate.delete', 'candidate.status.manage'] },
+  { key: 'vacancies', scopes: ['vacancy.view', 'vacancy.edit', 'vacancy.publish', 'vacancy.close', 'vacancy.template.manage', 'vacancy.criteria.manage', 'vacancy.ai.use', 'jobboard.connect', 'jobboard.publish'] },
+  { key: 'interview', scopes: ['interview.configure', 'interview.view', 'interview.listen', 'interview.override', 'summary.view', 'summary.edit', 'summary.send', 'ai.review.use', 'ai.audit'] },
+  { key: 'library', scopes: ['library.view', 'library.use', 'library.publish', 'library.manage'] },
+  { key: 'org_structure', scopes: ['org.structure.view', 'org.structure.edit', 'org.structure.import'] },
+  { key: 'lifecycle', scopes: ['lifecycle.view', 'lifecycle.manage', 'offboarding.start', 'offboarding.complete'] },
+  { key: 'storage', scopes: ['storage.view', 'storage.delete', 'storage.policy', 'storage.addon'] },
+  { key: 'billing', scopes: ['billing.view', 'billing.usage.view', 'billing.payments.view', 'billing.manage'] },
+  { key: 'content_issue', scopes: ['content_issue.report', 'content_issue.view', 'content_issue.triage', 'content_issue.assign', 'content_issue.rescore', 'content_issue.mute'] },
+  { key: 'review_delegation', scopes: ['review.delegate', 'review.delegate.any', 'review.routing.manage', 'review.workload.view', 'review.absence.manage', 'time.metrics.view'] },
+  { key: 'people_extensions', scopes: ['person.activity.view_others', 'person.note.read', 'person.note.write', 'person.document.view_others', 'person.document.manage', 'person.absence.manage', 'person.rating.view_others'] },
 ]
 
 export interface RoleRow {

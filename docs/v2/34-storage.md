@@ -346,7 +346,7 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 | GET | `/storage/summary` | `groupBy=origin\|category` | `{usedBytes, limitBytes, graceBytes, breakdown[], collectedAt, driftBytes}` | 403 |
 | GET | `/storage/files`, `/storage/trash`, `/storage/pending-uploads` | фильтры, `cursor`, `limit≤100` | `{data[], nextCursor}` | 403 |
 | GET | `/storage/files/:id`, `…/download` | | карточка + ссылки на источник; 302 на presigned URL, 5 минут | 404, 403, 410 `file_purged` |
-| POST | `/storage/upload-intent` | `{origin, sourceEntity, sourceId, bytes, mime}` | `{uploadUrl, mediaId}` либо `{deferred:true, pendingId}` | 400 `origin_required`, 413 `file.too_large` |
+| POST | `/storage/upload-intent` | `{origin, sourceEntity, sourceId, bytes, mime}` | `{uploadUrl, mediaId}` либо `{deferred:true, pendingId}` | 400 `origin_required`, 413 `media.too_big` |
 | DELETE | `/storage/files/:id` | `{reason?}` | `{lifecycle, purgeAfter}` | 403 `file_not_deletable`, 409 `under_review` |
 | POST | `/storage/files/:id/restore` | | `{lifecycle:'active'}` | 409 `already_purged` |
 | POST | `/storage/deletions` \| `/:id/confirm` \| `/:id/cancel` | `{mode, filter?, mediaIds?}` \| `{reason, confirmPhrase}` | `{id, plannedFiles, plannedBytes, evidenceCount}` \| `{status}` | 400, 409, 422 `confirm_phrase_mismatch` |

@@ -26,9 +26,15 @@ export interface EffectiveRole {
 /**
  * Приоритет роли по умолчанию: от самой широкой к самой узкой (порядок таблицы docs/01 §1.2
  * наоборот), свои роли тенанта — перед `employee`. Внутри одного ранга — по имени.
+ *
+ * `owner` стоит **после** `admin`, а не перед ним, хотя в таблице §1.2 он выше: речь здесь
+ * о широте рабочего интерфейса, а не о старшинстве. У владельца прав меньше — деньги,
+ * владение и люди, без контента и проверки (docs/01 §1.4). Человек, у которого есть и
+ * `owner`, и `admin`, при входе попадает в рабочую админку, а во владельца переключается
+ * осознанно — переключателем ролей (§1.9.2).
  */
-const PRIORITY: Record<string, number> = { admin: 0, author: 1, manager: 2, mentor: 3, employee: 5 }
-export const rankRole = (code: string): number => PRIORITY[code] ?? 4
+const PRIORITY: Record<string, number> = { admin: 0, owner: 1, author: 2, manager: 3, mentor: 4, employee: 6 }
+export const rankRole = (code: string): number => PRIORITY[code] ?? 5
 
 export function defaultRoleOf(list: EffectiveRole[]): EffectiveRole | null {
   return [...list].sort((a, b) => rankRole(a.code) - rankRole(b.code) || a.name.localeCompare(b.name, 'uk') || a.id.localeCompare(b.id))[0] ?? null

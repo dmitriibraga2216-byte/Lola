@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigint, boolean, check, date, index, inet, jsonb, pgTable, text, timestamp, unique, uuid,
+  bigint, boolean, check, date, index, inet, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
@@ -136,8 +136,19 @@ export const userRoles = pgTable('user_roles', {
   validUntil: timestamp('valid_until', { withTimezone: true }), // docs/16 §6.2, 29 Б.15: бессрочно (null) или до даты; истёкшая роль не даёт прав
   reason: text('reason'), // причина назначения — для аудита (docs/16 §6.2)
   isOrgDerived: boolean('is_org_derived').notNull().default(false), // выдана правилом «должность → роль» (position_role_map), пересобирается при смене должности
+  /**
+   * Признак «это назначение роли `owner`» (docs/01 §1.2, миграция 0070_owner_role).
+   * Значение проставляет триггер `user_roles_is_owner_trg` из кода роли — руками его не пишут:
+   * иначе колонка и роль разошлись бы, а вместе с ними — гарантия БД и права в приложении.
+   * Ради него колонка и существует: на неё повешен частичный уникальный индекс
+   * `user_roles_single_owner_uq` по `(tenant_id) where is_owner`, и это единственное место,
+   * где инвариант «владелец в тенанте ровно один» держится по-настоящему — не в сервисе,
+   * не в UI, а в схеме.
+   */
+  isOwner: boolean('is_owner').notNull().default(false),
 }, t => [
   unique().on(t.tenantId, t.userId, t.roleId, t.scopeType, t.scopeId),
+  uniqueIndex('user_roles_single_owner_uq').on(t.tenantId).where(sql`${t.isOwner}`),
 ])
 
 /**

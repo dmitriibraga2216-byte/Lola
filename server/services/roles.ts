@@ -1,7 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { roles, userRoles } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
-import { SCOPES, SYSTEM_ROLES } from '../../shared/domain/roles'
+import { OWNER_ROLE_CODE, SCOPES, SYSTEM_ROLES } from '../../shared/domain/roles'
 import type { RoleCreate, RolePatch } from '../../shared/schemas/settings'
 import type { Access } from './access'
 import { can } from './access'
@@ -12,14 +12,23 @@ import { logSecurity } from './securityLog'
  * Редактор ролей (docs/24 §3.5, Г-24.1; docs/01 §1.2): свои роли тенанта поверх матрицы системных.
  * Права — скоупы `<объект>.<операция>`, роль — набор скоупов; таблица `roles` (docs/02), `loadAccess`
  * читает скоупы из неё, поэтому своя роль действует сразу.
- * Защиты: системные роли не удаляются; набор `admin` не меняется (docs/01 §1.2 — иначе тенант заблокирует
- * сам себя); нельзя удалить роль, выданную людям; нельзя снять `settings.tenant` у последней роли с этим
- * скоупом (docs/24 §11); нельзя выдать скоуп, которого нет у самого редактора (Г-24.1).
+ * Защиты: системные роли не удаляются; наборы `admin` и `owner` не меняются (docs/01 §1.2 — иначе тенант
+ * заблокирует сам себя, а владение перестанет что-либо значить); нельзя удалить роль, выданную людям;
+ * нельзя снять `settings.tenant` у последней роли с этим скоупом (docs/24 §11); нельзя выдать скоуп,
+ * которого нет у самого редактора (Г-24.1).
  */
 
 export interface Ctx { tenantId: string, actorId: string }
 
-export type RoleError = 'not_found' | 'code_taken' | 'system_role' | 'admin_role' | 'role_in_use' | 'last_settings_role' | 'scope_not_owned'
+export type RoleError = 'not_found' | 'code_taken' | 'system_role' | 'admin_role' | 'owner_role' | 'role_in_use' | 'last_settings_role' | 'scope_not_owned'
+
+/**
+ * Наборы прав, которые редактор ролей не меняет (docs/24 §3.5).
+ * `admin` — иначе тенант заблокирует сам себя; `owner` — иначе владение можно «переписать»
+ * вместо передачи: достаточно было бы дописать владельцу нужный скоуп или снять с него
+ * `tenant.transfer`, и инвариант «владелец один и он распоряжается тарифом» перестаёт держаться.
+ */
+const LOCKED_ROLE_CODES = new Set(['admin', OWNER_ROLE_CODE])
 
 /** Группы скоупов для экрана (docs/01 §1.3): ключ группы — i18n `settings.roles.group.*`. */
 export const SCOPE_GROUPS: { key: string, scopes: string[] }[] = [
@@ -33,6 +42,10 @@ export const SCOPE_GROUPS: { key: string, scopes: string[] }[] = [
   { key: 'meetups', scopes: ['meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'complextest.manage'] },
   { key: 'programs', scopes: ['program.manage', 'program.publish', 'program.link_rule'] },
   { key: 'settings', scopes: ['settings.tenant', 'settings.notifications', 'settings.integrations', 'audit.view'] },
+  // Владение простором (docs/01 §1.3 «Власність»): группа из одного скоупа — он и должен
+  // стоять отдельно, а не теряться среди настроек: это единственное право, которое нельзя
+  // выдать администратору.
+  { key: 'ownership', scopes: ['tenant.transfer'] },
   // --- Пакет docs/v2 (patch П-01, docs/v2/39-patches.md) ---
   { key: 'candidates', scopes: ['candidate.view', 'candidate.edit', 'candidate.assign', 'candidate.decide', 'candidate.hire', 'candidate.delete', 'candidate.status.manage'] },
   { key: 'vacancies', scopes: ['vacancy.view', 'vacancy.edit', 'vacancy.publish', 'vacancy.close', 'vacancy.template.manage', 'vacancy.criteria.manage', 'vacancy.ai.use', 'jobboard.connect', 'jobboard.publish'] },
@@ -97,7 +110,7 @@ export async function updateRole(ctx: Ctx, access: Access, id: string, patch: Ro
     const [before] = await tx.select().from(roles).where(eq(roles.id, id))
     if (!before) return { ok: false as const, code: 'not_found' as const }
     if (patch.scopes) {
-      if (before.code === 'admin') return { ok: false as const, code: 'admin_role' as const }
+      if (LOCKED_ROLE_CODES.has(before.code)) return { ok: false as const, code: before.code === OWNER_ROLE_CODE ? 'owner_role' as const : 'admin_role' as const }
       const added = patch.scopes.filter(s => !before.scopes.includes(s))
       const missing = notOwned(access, added)
       if (missing.length) return { ok: false as const, code: 'scope_not_owned' as const, details: { scopes: missing } }

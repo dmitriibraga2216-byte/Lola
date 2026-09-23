@@ -97,9 +97,12 @@ describe('панель оператора (docs/03 §3.12)', () => {
     createdTenants.push(r.tenantId)
 
     const [{ roles }] = await admin<[{ roles: number }]>`select count(*)::int as roles from roles where tenant_id = ${r.tenantId} and is_system`
-    expect(roles).toBe(5)
+    expect(roles).toBe(6) // шесть системных ролей: employee … admin и owner (docs/01 §1.2)
     const [adminRole] = await admin`select r.scopes from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = ${r.adminUserId} and r.code = 'admin'`
     expect((adminRole!.scopes as string[]).includes('settings.tenant')).toBe(true)
+    // Создатель тенанта — и администратор, и владелец (docs/01 §1.9.4, docs/24 §4.3)
+    const [ownerRow] = await admin`select ur.is_owner from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = ${r.adminUserId} and r.code = 'owner'`
+    expect(ownerRow!.is_owner).toBe(true)
     const [pl] = await admin`select location_id from user_placements where user_id = ${r.adminUserId}`
     expect(pl).toBeDefined()
     const [loc] = await admin`select manager_id from locations where id = ${pl!.location_id}`

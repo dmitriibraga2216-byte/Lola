@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
   const r = await archivePerson({ tenantId: access.tenantId, actorId: access.userId }, getRouterParam(event, 'id')!, parsed.data)
   if (!r.ok) {
     if (r.code === 'not_found') return apiError(event, 404, 'not_found', 'Людину не знайдено')
+    if (r.code === 'last_owner') return apiError(event, 409, 'last_owner', 'Це власник простору — спочатку передайте володіння іншій людині')
     return apiError(event, 409, 'last_admin', 'Це останній адміністратор — спочатку призначте іншого')
   }
   return apiData({ ok: true, cancelled: r.cancelled ?? 0 })

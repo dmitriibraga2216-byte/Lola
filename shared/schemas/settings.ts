@@ -329,3 +329,11 @@ export const impersonateSchema = z.object({ userId: z.string().uuid(), reason: z
 
 // ── «Переглянути систему як роль» (docs/24 §3.5, §9; докс/33 D-052) ──
 export const previewAsSchema = z.object({ roleId: z.string().uuid() })
+
+/**
+ * Передача володіння (docs/01 §1.9.4, docs/24 §3.5).
+ * Тільки `userId` — область у ролі `owner` завжди весь тенант, а «до якої дати» у володіння
+ * не буває: власник або є, або його немає.
+ */
+export const ownerTransferSchema = z.object({ userId: z.string().uuid() }).strict()
+export type OwnerTransfer = z.infer<typeof ownerTransferSchema>

@@ -21,6 +21,7 @@ export default defineEventHandler(async (event) => {
   )
   if (!person) return apiError(event, 404, 'not_found', 'Людину не знайдено')
   // Останнього адміністратора не заблокувати й не архівувати (docs/16 §6.2)
+  if ('lastOwner' in person) return apiError(event, 409, 'last_owner', 'Це власник простору — спочатку передайте володіння іншій людині')
   if ('lastAdmin' in person) return apiError(event, 409, 'last_admin', 'Це останній адміністратор — спочатку призначте іншого')
   return apiData(person)
 })

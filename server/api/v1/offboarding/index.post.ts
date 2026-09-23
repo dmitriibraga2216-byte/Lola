@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
   const r = await startOffboarding({ tenantId: a.tenantId, actorId: a.userId }, p.data)
   if (r === 'not_found') return apiError(event, 404, 'not_found', 'Людину не знайдено')
   if (r === 'active_exists') return apiError(event, 409, 'offboarding.active_exists', 'Звільнення цієї людини вже розпочато')
+  if (r === 'last_owner') return apiError(event, 409, 'people.last_owner', 'Це власник простору — спершу передайте володіння іншій людині')
   if (r === 'last_admin') return apiError(event, 409, 'people.last_admin', 'Це останній адміністратор простору — спершу призначте іншого')
   if (r === 'stage_missing') return apiError(event, 409, 'lifecycle.disabled', 'Етап «Офбординг» не налаштовано')
   return apiData(r)

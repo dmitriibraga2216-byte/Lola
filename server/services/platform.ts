@@ -5,7 +5,7 @@ import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
-import { SYSTEM_ROLES } from '../../shared/domain/roles'
+import { OWNER_ROLE_CODE, SYSTEM_ROLES } from '../../shared/domain/roles'
 import { ensureTenantDefaults } from '../db/tenantDefaults'
 import { CANDIDATES_ONLY, EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
@@ -161,15 +161,23 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
     const [pos] = await tx.insert(schema.positions).values({ tenantId, name: input.positionName ?? 'Співробітник' }).returning({ id: schema.positions.id })
 
     const roleRows = await tx.insert(schema.roles).values(
-      Object.entries(SYSTEM_ROLES).map(([code, r]) => ({ tenantId, code, name: r.name, scopes: [...r.scopes], isSystem: true })),
+      Object.entries(SYSTEM_ROLES).map(([code, r]) => ({ tenantId, code, name: r.name, scopes: [...r.scopes], isSystem: true, ...(r.defaultScopeType ? { defaultScopeType: r.defaultScopeType } : {}) })),
     ).returning({ id: schema.roles.id, code: schema.roles.code })
     const adminRole = roleRows.find(r => r.code === 'admin')!
+    const ownerRole = roleRows.find(r => r.code === OWNER_ROLE_CODE)!
     await ensureTenantDefaults(tx, tenantId)
 
     const [adminUser] = await tx.insert(schema.users).values({ tenantId, phone: input.adminPhone, fullName: input.adminName, status: 'invited' }).returning({ id: schema.users.id })
     await tx.insert(schema.userPlacements).values({ tenantId, userId: adminUser!.id, locationId: loc!.id, positionId: pos!.id, isPrimary: true })
     await tx.update(schema.locations).set({ managerId: adminUser!.id }).where(eq(schema.locations.id, loc!.id))
-    await tx.insert(schema.userRoles).values({ tenantId, userId: adminUser!.id, roleId: adminRole.id, scopeType: 'tenant' })
+    // Создатель тенанта — и администратор, и владелец (docs/24 §4.3, docs/01 §1.9.4): человек,
+    // чей телефон оператор вписал в форму, и есть подписант договора. Две роли, а не одна
+    // «большая»: владение и управление системой разведены намеренно, а переключатель ролей
+    // даёт ему ходить между ними без выхода (§1.9.2).
+    await tx.insert(schema.userRoles).values([
+      { tenantId, userId: adminUser!.id, roleId: adminRole.id, scopeType: 'tenant' as const },
+      { tenantId, userId: adminUser!.id, roleId: ownerRole.id, scopeType: 'tenant' as const },
+    ])
 
     await tx.insert(schema.auditLog).values({ tenantId, actorId: null, action: 'tenant.create', entity: 'tenant', entityId: tenantId, after: { by: actor.email, plan: planCode } })
     return { ok: true as const, tenantId, adminUserId: adminUser!.id }

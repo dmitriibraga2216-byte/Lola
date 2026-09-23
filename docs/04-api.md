@@ -328,7 +328,12 @@
 | --- | --- | --- |
 | GET/PATCH | `/settings/tenant` | простір: `name`, `slug` (409 `slug_taken` / `slug_locked` — после первого входа сотрудника не меняется, `29` Б.12), `locale`, `timezone`, `accent` только из палитры (`29` Б.14), `space`, `defaults`, `quietHours`; `GET` отдаёт ещё `slugLocked`, `plan`, `modules` |
 | GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
-| CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1): `GET` (people.view, со счётчиками и группами скоупов), `POST`, `PATCH /:id`, `DELETE /:id` (settings.tenant); 409 `code_taken` · `admin_role` · `role_in_use` · `last_settings_role`, 403 `scope_not_owned` |
+| CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1): `GET` (people.view, со счётчиками людей и прав), `POST`, `PATCH /:id`, `DELETE /:id` (settings.tenant); 409 `code_taken` · `admin_role` · `owner_role` · `role_in_use` · `last_settings_role`, 403 `scope_not_owned` |
+| GET | `/settings/roles/scope-groups` | группы прав для редактора ролей (`01` §1.3): `[{key, scopes[]}]` (people.view) |
+| GET | `/settings/owner` | владелец простора (`01` §1.9.4): `{owner: {userId, fullName, email, phone, since} \| null, canClaim}` (people.view) |
+| GET | `/settings/owner/candidates` | кому можно передать владение: `?q=`, действующие сотрудники кроме себя (tenant.transfer) |
+| POST | `/settings/owner/claim` | «Стати власником» в просторе без владельца — одноразово (settings.tenant); 409 `already_owned` · `not_eligible` |
+| POST | `/settings/owner/transfer` | «Передати володіння»: `{userId}` (tenant.transfer); 409 `same_person` · `not_eligible` · `no_owner`, 403 `not_owner`, 404 `not_found` |
 | GET/PUT | `/settings/position-role-map` | правило «должность → роль»: `{items: [{positionId, roleCode, scopeType, scopeId?}]}` целиком; применяется при следующей смене должности или импорте |
 | POST | `/settings/position-role-map/reapply` | «Перезібрати ролі по мережі» (`28` D-001): применяет текущую карту ко всем действующим основным размещениям тенанта сразу |
 | CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` (старый путь: `/settings/notifications`, до конца R1; список и правка целиком — `PUT`, не `POST`/`PATCH`, как и было) |

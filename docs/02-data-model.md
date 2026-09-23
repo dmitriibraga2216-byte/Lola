@@ -351,7 +351,7 @@ create table roles (
   scopes text[] not null,                     -- см. 01-roles.md §1.3
   is_system boolean not null default false,
   description text,                           -- редактор ролей (`24` §3.5); Spec 24
-  default_scope_type text not null default 'location', -- «область по умолчанию» роли: tenant | org_unit | location
+  default_scope_type text not null default 'location', -- «область по умолчанию» роли: tenant | org_unit | location (у `owner` — tenant: владение не бывает «на точке»)
   unique (tenant_id, code)
 );
 
@@ -365,8 +365,13 @@ create table user_roles (
   valid_until timestamptz,                    -- срок действия (`16` §6.2, `29` Б.15): null — бессрочно; истёкшая роль прав не даёт, снимается ежедневно
   reason text,                                -- причина назначения — для аудита
   is_org_derived boolean not null default false, -- выдана правилом position_role_map; пересобирается при смене должности
+  is_owner boolean not null default false,    -- это назначение роли `owner` (`01` §1.9.4); пишет только триггер user_roles_is_owner_trg из roles.code
   unique (tenant_id, user_id, role_id, scope_type, scope_id)
 );
+-- Владелец в тенанте ровно один (`01` §1.2, §1.9.4). Инвариант держится здесь, а не в сервисе:
+-- условие частичного индекса не умеет читать соседнюю таблицу, поэтому код роли денормализован
+-- в `is_owner` триггером, который больше никто не перебивает.
+create unique index user_roles_single_owner_uq on user_roles (tenant_id) where is_owner;
 
 create table sessions (
   id uuid primary key default gen_random_uuid(),

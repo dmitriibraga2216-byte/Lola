@@ -11,7 +11,7 @@ import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
 import { createAssignmentTx, expandAssignment } from './assignments'
 import { enterStageByCodeTx, enterStageTx, stageByCode } from './lifecycleState'
-import { isLastAdmin, splitName } from './people'
+import { isLastAdmin, isLastOwner, splitName } from './people'
 
 /**
  * Офбординг и повторный найм (docs/v2/33-lifecycle.md §3.6, §4.2, §7.7, §7.8).
@@ -125,7 +125,7 @@ export async function getCase(ctx: Ctx, id: string): Promise<CaseRow | null> {
   })
 }
 
-export type StartError = 'not_found' | 'active_exists' | 'last_admin' | 'stage_missing'
+export type StartError = 'not_found' | 'active_exists' | 'last_admin' | 'last_owner' | 'stage_missing'
 
 export interface StartResult { id: string, state: string, assigned: number, exitInterviewEnrollmentId: string | null }
 
@@ -149,6 +149,8 @@ export async function startOffboarding(ctx: Ctx, input: OffboardingStartInput): 
       .where(eq(users.id, input.userId))
     if (!person) return 'not_found' as const
     if (await isLastAdmin(tx, input.userId)) return 'last_admin' as const
+    // Владелец уходит из пространства только передав владение (docs/01 §1.9.4)
+    if (await isLastOwner(tx, input.userId)) return 'last_owner' as const
 
     const [active] = await tx
       .select({ id: offboardingCases.id })
@@ -257,7 +259,7 @@ export async function markHandoverDone(ctx: Ctx, id: string): Promise<{ id: stri
   })
 }
 
-export type CompleteError = 'not_found' | 'bad_state' | 'before_last_day' | 'last_admin'
+export type CompleteError = 'not_found' | 'bad_state' | 'before_last_day' | 'last_admin' | 'last_owner'
 
 export interface CompleteResult {
   id: string
@@ -288,6 +290,7 @@ export async function completeOffboarding(ctx: Ctx, id: string): Promise<Complet
     const [when] = await tx.execute(sql`select (${c.lastWorkingDay}::date > current_date) as too_early`) as unknown as { too_early: boolean }[]
     if (when?.too_early) return 'before_last_day'
     if (await isLastAdmin(tx, c.userId)) return 'last_admin'
+    if (await isLastOwner(tx, c.userId)) return 'last_owner'
 
     const now = new Date()
     const closed = await tx

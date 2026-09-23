@@ -1,12 +1,23 @@
+import type { CallbackResult } from '../../../../services/oauth'
 import { handleCallback } from '../../../../services/oauth'
+import { appOrigin, pickLocale, renderCallbackPage } from './_callback.render'
 import { providerParam } from './status.get'
-/** Колбек провайдера: отдельное окно без cookie — тенант из state; окно закрывается само, панель перечитывает статус (docs/09 §9.2). */
+
+/**
+ * Колбек провайдера: отдельное окно без cookie — тенант из state; окно закрывается само, панель перечитывает
+ * статус (docs/09 §9.2). Фолбэк на случай, когда window.close() не срабатывает (Safari, вкладка вместо
+ * попапа): ссылка возврата в налаштування інтеграцій лежит в разметке сразу (не появляется скриптом),
+ * postMessage идёт на конкретный origin приложения — см. _callback.render.ts (там же тексты через i18n).
+ *
+ * Локали для этой страницы: в проекте нет механизма определения языка для server-rendered HTML (ни cookie,
+ * ни разбора Accept-Language где-либо ещё) — решаем это здесь минимально, через заголовок Accept-Language,
+ * по умолчанию uk (как и defaultLocale в nuxt.config.ts).
+ */
 export default defineEventHandler(async (event) => {
   const p = providerParam(event)
   const q = getQuery(event) as { code?: string, state?: string, error?: string }
-  const r = p ? await handleCallback(p, q) : { ok: false as const, code: 'bad_state' as const, message: 'Невідомий провайдер' }
-  const payload = r.ok ? { ok: true, provider: r.provider, account: r.accountLabel } : { ok: false, code: r.code, message: r.message }
+  const r: CallbackResult = p ? await handleCallback(p, q) : { ok: false, code: 'bad_state', message: 'Невідомий провайдер' }
+  const locale = pickLocale(getHeader(event, 'accept-language'))
   setHeader(event, 'content-type', 'text/html; charset=utf-8')
-  const msg = r.ok ? `Підключено як ${r.accountLabel}. Це вікно закриється.` : r.message
-  return `<!doctype html><html lang="uk"><meta charset="utf-8"><title>Lola</title><body style="font-family:system-ui;padding:24px;text-align:center"><p>${msg.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</p><script>try{window.opener&&window.opener.postMessage(${JSON.stringify({ type: 'lola:oauth', ...payload })},'*')}catch(e){};setTimeout(function(){window.close()},${r.ok ? 800 : 4000})</script></body></html>`
+  return renderCallbackPage(r, locale, appOrigin())
 })

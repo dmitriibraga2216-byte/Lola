@@ -1945,6 +1945,11 @@
     "err401": "Access revoked — connect the account again",
     "err403": "No API access yet (request pending or permission not enabled)",
     "err429": "Quota exhausted — will retry next time",
+    "oauthCallback": {
+      "connected": "Connected as {account}.",
+      "closingHint": "You can close this window.",
+      "backLink": "Back to integration settings"
+    },
     "field": {
       "host": "SMTP server domain or IP",
       "port": "Port",

@@ -429,13 +429,14 @@ export async function addPlacement(ctx: Ctx, userId: string, input: {
   })
 }
 
+/** Роль `owner` через `assignRole` не выдаётся — см. комментарий внутри и docs/01 §1.9.4. */
+export const OWNER_NOT_ASSIGNABLE = 'owner_role' as const
+
 /**
  * Назначение роли (docs/16 §6.2): роль, область, срок (бессрочно или до даты), причина — для аудита.
  * Повторное назначение той же роли в той же области — редактирование срока и причины
  * (роль, выданная правилом «должность → роль», при этом становится ручной).
  */
-export const OWNER_NOT_ASSIGNABLE = 'owner_role' as const
-
 export async function assignRole(ctx: Ctx, userId: string, input: {
   roleCode: string
   scopeType: 'tenant' | 'org_unit' | 'location'
@@ -556,12 +557,15 @@ export async function closeSessions(ctx: Ctx, userId: string, sessionId?: string
 }
 
 /** Слияние дублей (docs/16 §7.7): история, сертификаты, попытки переносятся в основную; дубль архивируется с пометкой. */
-export async function mergePeople(ctx: Ctx, primaryId: string, duplicateId: string): Promise<{ ok: true, moved: Record<string, number> } | { ok: false, code: 'not_found' | 'same' }> {
+export async function mergePeople(ctx: Ctx, primaryId: string, duplicateId: string): Promise<{ ok: true, moved: Record<string, number> } | { ok: false, code: 'not_found' | 'same' | 'last_owner' }> {
   if (primaryId === duplicateId) return { ok: false, code: 'same' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [p] = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.id, primaryId))
     const [d] = await tx.select({ id: users.id, fullName: users.fullName, phone: users.phone, email: users.email }).from(users).where(eq(users.id, duplicateId))
     if (!p || !d) return { ok: false as const, code: 'not_found' as const }
+    // Дубль архивируется — значит владельцем он быть не может (docs/01 §1.9.4): иначе
+    // владение осталось бы на архивной карточке, и передать его стало бы некому.
+    if (await isLastOwner(tx, duplicateId)) return { ok: false as const, code: 'last_owner' as const }
     const moved: Record<string, number> = {}
     for (const [table, col] of [['enrollments', 'user_id'], ['attempts', 'user_id'], ['certificates', 'user_id'], ['workshop_submissions', 'user_id'], ['meetup_registrations', 'user_id'], ['program_enrollments', 'user_id'], ['competency_assessments', 'user_id'], ['development_goals', 'user_id'], ['news_views', 'user_id'], ['notifications', 'user_id']] as const) {
       const r = await tx.execute(sql`update ${sql.identifier(table)} set ${sql.identifier(col)} = ${primaryId}::uuid where ${sql.identifier(col)} = ${duplicateId}::uuid`) as unknown as { count?: number }
@@ -576,10 +580,14 @@ export async function mergePeople(ctx: Ctx, primaryId: string, duplicateId: stri
 }
 
 /** Удаление данных по запросу (docs/16 §7.9): ФИО → «Користувач #id», контакты и фото в null; результаты остаются обезличенно; необратимо. */
-export async function gdprErase(ctx: Ctx, userId: string, reason: string): Promise<boolean> {
+export async function gdprErase(ctx: Ctx, userId: string, reason: string): Promise<boolean | 'last_owner'> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId))
     if (!u) return false
+    // Стирание архивирует карточку, а владелец в архив не уходит (docs/01 §1.9.4).
+    // Владелец, потребовавший забыть его, сперва передаёт владение — иначе простор остаётся
+    // без подписанта договора, и это необратимо.
+    if (await isLastOwner(tx, userId)) return 'last_owner' as const
     const short = userId.slice(0, 8)
     await tx.update(users).set({ fullName: `Користувач #${short}`, lastName: `Користувач`, firstName: `#${short}`, middleName: null, latinName: null, phone: null, email: null, workContacts: {}, birthDate: null, avatarKey: null, comment: null, telegramChatId: null, externalId: null, status: 'archived', archivedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, userId))
     await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))

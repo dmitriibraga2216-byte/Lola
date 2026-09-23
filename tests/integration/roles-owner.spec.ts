@@ -14,7 +14,7 @@ import { OWNER_ROLE_CODE, SYSTEM_ROLES } from '../../shared/domain/roles'
  */
 
 const { claimOwnership, transferOwnership, ownerCard, transferCandidates, ownerIdOf, isSoleOwner } = await import('../../server/services/owner')
-const { assignRole, removeRole, setBlocked, archivePerson, updatePerson, OWNER_NOT_ASSIGNABLE } = await import('../../server/services/people')
+const { assignRole, removeRole, setBlocked, archivePerson, updatePerson, mergePeople, gdprErase, OWNER_NOT_ASSIGNABLE } = await import('../../server/services/people')
 const { updateRole, listRoles } = await import('../../server/services/roles')
 const { effectiveRoles, switchRole, resolveActiveRole } = await import('../../server/services/activeRole')
 const { loadAccess, can } = await import('../../server/services/access')
@@ -196,6 +196,17 @@ describe('владение нельзя снять — ни ролью, ни б�
     // Человек без владения блокируется обычным порядком — запрет не «залип» на всех
     expect(await setBlocked(ctx(), chefId, true)).toEqual({ ok: true })
     await setBlocked(ctx(), chefId, false)
+  })
+
+  it('владельца не «схлопнуть» слиянием дублей и не стереть по GDPR — обе операции архивируют', async () => {
+    await transferOwnership(ctx(), heirId)
+    expect(await mergePeople(ctx(), chefId, heirId)).toEqual({ ok: false, code: 'last_owner' })
+    expect(await gdprErase(ctx(), heirId, 'запит людини')).toBe('last_owner')
+    // Владельцем осталась она же, карточка цела
+    expect(await withTenant(tenantId, adminId, tx => ownerIdOf(tx))).toBe(heirId)
+    const [u] = await admin`select status, full_name from users where id = ${heirId}`
+    expect(u!.status).toBe('active')
+    expect(u!.full_name).toBe('Спадкоємиця Тестова')
   })
 
   it('после передачи прежний владелец блокируется как обычный человек', async () => {

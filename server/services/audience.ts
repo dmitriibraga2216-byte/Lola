@@ -9,19 +9,34 @@ import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
  * match=any — объединение, all — пересечение; exclude вычитается.
  * Учитываются только активные размещения и люди в статусе invited/active.
  *
- * Аудитория — это сотрудники (`kind = 'employee'`, П-16.1): кандидату обучение выдаётся
- * отдельным сценарием (docs/v2/28 §5, PR-13), а не тем, что он случайно попал в правило
- * «посада» или «мітка». Фильтр стоит в `activePeople` — одной точкой на все правила.
+ * Аудитория, собранная **условием**, — это сотрудники (`kind = 'employee'`, П-16.1):
+ * кандидат не должен попадать в назначение потому, что он случайно подошёл под правило
+ * «посада», «мітка» или «точка». Фильтр стоит в `activePeople` — одной точкой на все
+ * правила условий.
+ *
+ * > [исправлено, PR-15: §7.20 `docs/v2/29` и §3.1 `docs/v2/28` требуют назначения кандидату]
+ * > Ранее: «кандидату обучение выдаётся отдельным сценарием (docs/v2/28 §5, PR-13)».
+ *
+ * **Правило `user` — единственное исключение, и оно намеренное.** Здесь людей называют
+ * поимённо: это и есть явный выбор вида человека, которого требует П-16.1, а не случайное
+ * попадание. Без исключения отклик по вакансии не смог бы создать кандидату назначение
+ * (`29` §7.20), хотя весь пакет построен на том, что кандидат проходит **тот же**
+ * `assignments`, что и сотрудник (`28` §3.1, инвариант 1) — иначе правила прохождения
+ * получили бы второго носителя. Кандидат, названный поимённо, всё равно не получит курс
+ * чужого этапа: `stageForbidsCandidates()` проверяет ровно этих людей до раскрытия
+ * аудитории (`33` §7.9) — проверка, написанная PR-13 именно под этот случай.
  */
 
 async function resolveRule(tx: TenantTx, rule: AudienceRule): Promise<Set<string>> {
   // Скрытые (docs/16 §7.5) не попадают в выбор людей при назначении
-  const activePeople = employeeOnly(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false))
+  const available = and(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false))
+  const activePeople = employeeOnly(available)
 
   switch (rule.type) {
     case 'user': {
+      // Выборка по первичному ключу: вид человека назван тем, что его назвали по id.
       const rows = await tx.select({ id: users.id }).from(users)
-        .where(and(inArray(users.id, rule.ids), activePeople))
+        .where(and(inArray(users.id, rule.ids), available))
       return new Set(rows.map(r => r.id))
     }
     case 'position': {

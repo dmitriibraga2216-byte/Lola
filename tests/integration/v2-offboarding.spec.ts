@@ -164,19 +164,38 @@ describe('33 §13 критерий 5: кандидату — только эта
     expect(Number(after)).toBe(Number(before))
   })
 
-  it('отказ приходит именно от этапа, а не от пустой аудитории', async () => {
+  /**
+   * > [исправлено, PR-15: кандидат, названный поимённо, теперь раскрывается в аудиторию]
+   * > Ранее: «отказ приходит именно от этапа, а не от пустой аудитории» — назначение
+   * > кандидату не создавалось никогда, и проверялось лишь, что код отказа **другой**.
+   *
+   * Смысл проверки сохранён и усилен: этап с `applies_to_candidate = true` кандидату курс
+   * отдаёт, а без флага (тест выше) — нет, и отказ приходит именно от этапа. Раскрытие
+   * аудитории по правилу `user` пришло с `docs/v2/29` §7.20: отклик по вакансии обязан
+   * создать кандидату обычную `assignments`, иначе правила прохождения получают второго
+   * носителя. Восстановление этапа курса — в `finally`: падение этой проверки не должно
+   * уносить за собой соседние describe-блоки, которые ждут курс на «Онбордингу».
+   */
+  it('этап с applies_to_candidate кандидату курс отдаёт — отказ выше был именно от этапа', async () => {
     await admin`update courses set lifecycle_stage_id = ${stageIdByCode.psychological!} where id = ${stageCourseId}`
-    const r = await createAssignment(ctx, assignmentCreateSchema.parse({
-      subjectType: 'course',
-      subjectId: stageCourseId,
-      audience: { rules: [{ type: 'user', ids: [candidateId] }], match: 'any' },
-      status: 'active',
-    }))
-    // `applies_to_candidate = true` у «Психологічних тестів» — правило §7.9 молчит; аудитория
-    // кандидатов раскрывается отдельным сценарием (PR-13), поэтому здесь ожидается другой код.
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.code).not.toBe('not_for_candidate')
-    await admin`update courses set lifecycle_stage_id = ${stageIdByCode.onboarding!} where id = ${stageCourseId}`
+    try {
+      const r = await createAssignment(ctx, assignmentCreateSchema.parse({
+        subjectType: 'course',
+        subjectId: stageCourseId,
+        audience: { rules: [{ type: 'user', ids: [candidateId] }], match: 'any' },
+        status: 'active',
+      }))
+      expect(r.ok).toBe(true)
+      if (r.ok) {
+        const [row] = await admin`select id from assignments where id = ${r.assignmentId}`
+        expect(row).toBeDefined()
+        await admin`delete from enrollments where assignment_id = ${r.assignmentId}`
+        await admin`delete from assignments where id = ${r.assignmentId}`
+      }
+    }
+    finally {
+      await admin`update courses set lifecycle_stage_id = ${stageIdByCode.onboarding!} where id = ${stageCourseId}`
+    }
   })
 
   it('сотруднику тот же курс назначается', async () => {

@@ -484,6 +484,20 @@
       "when": 1790233320000,
       "tag": "0070_owner_role",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790233380000,
+      "tag": "0071_v2_vacancies",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1790233440000,
+      "tag": "0072_v2_users_vacancy_fk",
+      "breakpoints": true
     }
   ]
 }

@@ -488,6 +488,33 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 Приглашение кандидата и назначение ему контента отдельной ручкой — PR-16 вместе с публичным
 контуром отклика: назначение кандидату делается обычным `POST /tasks` (инвариант 1).
 
+### Вакансии (`docs/v2/29-vacancies.md` §10, PR-15)
+
+Вакансия **не носитель правил прохождения** (инвариант 1, CLAUDE.md п. 11): она хранит шаблон
+параметров (`assignmentTemplate`), а применяется созданием обычной `assignments`. Ни одна
+ручка ниже не меняет уже созданного назначения — такого пути нет и не будет (`29` §7.12).
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/vacancies` | реестр: фильтры `q`, `state`, `locationId`, `orgUnitId`, `recruiterId`, `categoryId`, `courseId`, `from`, `to`, `limit` (`vacancy.view`); в каждой строке — «кандидати в роботі» |
+| POST | `/vacancies` | создание черновика по форме `29` §6.1 (`vacancy.edit`); состояние и токен телом не задаются — их выдаёт публикация |
+| GET | `/vacancies/:id` | карточка с критериями и языками (`vacancy.view`); чужой тенант и чужая область — `404`, не `403` |
+| PATCH | `/vacancies/:id` | правка (`vacancy.edit`); в ответе `candidatesInProgress` для строки «Зміни вплинуть лише на нові відгуки»; `409 conflict` — блокировка по `updatedAt`; `409 vacancy.archived` |
+| POST | `/vacancies/:id/publish` | публикация и переоткрытие (`vacancy.publish`); `422 vacancy.link_requirements` со списком незаполненного, `409 vacancy.ai_text_unreviewed` с перечнем блоков, `409 vacancy.reopen_expired` (позже 90 дней) |
+| POST | `/vacancies/:id/pause` | приостановка (`vacancy.edit`); токен и внешние публикации сохраняются; `409 vacancy.not_published` |
+| POST | `/vacancies/:id/close` | закрытие с причиной из перечня (`vacancy.close`); в ответе `candidatesInWork` — прохождение не прерывается; `422 reason.required` |
+| POST | `/vacancies/:id/archive` | в архив (`vacancy.close`); `409 vacancy.has_pending_applications` с числом кандидатов в работе |
+| POST | `/vacancies/:id/rotate-token` | «Оновити посилання»: старый токен умирает немедленно (`vacancy.publish`); `409 vacancy.not_published` |
+| GET/POST | `/vacancies/:id/criteria` | критерии оценки кандидата со шкалой и весом (`vacancy.view` / `vacancy.criteria.manage`) |
+| PATCH/DELETE | `/vacancies/:id/criteria/:cid` | правка и удаление критерия (`vacancy.criteria.manage`); `404` на чужой |
+| POST | `/candidates/:id/criterion-scores` | баллы пачкой; ответ — **одна** свёрнутая `candidate_scores` с `kind='recruiter'` и предупреждением по критическим критериям; `422 criterion.out_of_scale` |
+| GET/POST | `/vacancy-templates` | шаблоны вакансий (`vacancy.template.manage`); `409 template.name_exists` |
+| POST | `/vacancy-templates/from-vacancy/:id` | «Зберегти шаблон» из формы: без точки и рекрутера, вместе с критериями и языками |
+| POST | `/vacancies/from-template/:tid` | вакансия-черновик из шаблона: точка и рекрутер приходят телом (`vacancy.edit`) |
+
+Публичный контур отклика (`/public/j/:token` и его производные), AI-генерация текста и
+критериев, площадки и журнал публикаций — PR-16 и PR-17 плана `docs/v2/45-plan.md`.
+
 ### Жалоба на материал (`docs/v2/36-content-feedback.md` §10, PR-23)
 
 | Метод | Путь | Описание |

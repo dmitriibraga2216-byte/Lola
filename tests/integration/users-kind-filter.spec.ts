@@ -117,7 +117,7 @@ const ALLOWLIST: Record<string, string> = {
   // если телефон принадлежит действующему сотруднику. Фильтр по виду сделал бы проверку
   // не безопасной, а неверной: unique (tenant_id, phone) один на кандидатов и сотрудников,
   // и отфильтрованный дубль прошёл бы валидацию и упал на вставке нарушением ключа.
-  'server/services/candidates.ts:376':
+  'server/services/candidates.ts:391':
     'поиск дубликата перед созданием кандидата: ключ (tenant_id, phone/email) общий для обоих видов, §7.2 и §12.1 требуют межвидовой сверки',
 }
 
@@ -300,13 +300,25 @@ describe('слой 3: канареечный кандидат не попада�
     expect(all.counts.all, 'счётчик чипа «Усі» считает кандидатов').toBe(Number(staff!.n))
   })
 
-  it('раскрытие аудитории не возвращает кандидата ни по метке, ни по прямому перечню', async () => {
+  /**
+   * > [исправлено, PR-15: `docs/v2/29` §7.20 создаёт кандидату обычную `assignments`]
+   * > Ранее: «раскрытие аудитории не возвращает кандидата ни по метке, ни по прямому перечню».
+   *
+   * Инвариант П-16.1 не ослаб, а стал точным: кандидат не попадает в аудиторию, собранную
+   * **условием** («мітка», «посада», «точка», сегмент) — там его появление всегда случайно.
+   * Названный поимённо он в неё попадает: иначе отклик по вакансии не смог бы выдать ему
+   * материалы, а правила прохождения получили бы второго носителя (инвариант 1). Курс
+   * чужого этапа кандидату всё равно не назначить — `stageForbidsCandidates()` смотрит
+   * ровно на названных поимённо (`docs/v2/33` §7.9).
+   */
+  it('раскрытие аудитории не возвращает кандидата по условию, но возвращает названного поимённо', async () => {
     const { resolveAudience } = await import('../../server/services/audience')
     const { withTenant } = await import('../../server/utils/withTenant')
     const byTag = await withTenant(tenantId, adminId, tx => resolveAudience(tx, { match: 'any', rules: [{ type: 'tag', values: ['кандидат'] }] } as never))
     expect([...byTag], 'кандидат попал в аудиторию по метке').toEqual([])
-    const byId = await withTenant(tenantId, adminId, tx => resolveAudience(tx, { match: 'any', rules: [{ type: 'user', ids: canaries.map(c => c.id) }] } as never))
-    expect([...byId], 'кандидата выдали по прямому перечню людей').toEqual([])
+    const ids = canaries.map(c => c.id)
+    const byId = await withTenant(tenantId, adminId, tx => resolveAudience(tx, { match: 'any', rules: [{ type: 'user', ids }] } as never))
+    expect([...byId].sort(), 'названный поимённо кандидат обязан попадать в аудиторию (`29` §7.20)').toEqual([...ids].sort())
   })
 
   it('счётчик оплачиваемых мест и жёсткая проверка лимита считают только штат', async () => {

@@ -359,6 +359,66 @@ export const MENTOR_SCOPE_ONBOARDING = 'onboarding'
 /** Срок согласия на обработку ПД по умолчанию — 6 месяцев (docs/v2/28 §7.9, диапазон 1–24). */
 export const CANDIDATE_CONSENT_MONTHS = 6
 
+// ── Вакансии (docs/v2/29-vacancies.md §3) ──────────────────────────────────────────────────
+
+/**
+ * Состояние вакансии (`vacancies.state`, `29` §4). Пять значений, переходы — §4:
+ * `draft → published ⇄ paused`, `published|paused → closed → archived → draft`.
+ * Переоткрытие закрытой выдаёт **новый** токен: старая ссылка расходится по чатам и
+ * агрегаторам, и пришедший через полгода должен видеть «вакансію закрито», а не форму
+ * на позицию с другими условиями.
+ */
+export const VACANCY_STATES = ['draft', 'published', 'paused', 'closed', 'archived'] as const
+export type VacancyState = typeof VACANCY_STATES[number]
+
+/** Тип занятости (`vacancies.employment_type`, `29` §3.1, снято с эталона §14). */
+export const VACANCY_EMPLOYMENT_TYPES = ['full_time', 'part_time', 'shift', 'temporary', 'internship', 'contract'] as const
+export type VacancyEmploymentType = typeof VACANCY_EMPLOYMENT_TYPES[number]
+
+/** Формат работы (`vacancies.work_format`, `29` §3.1). */
+export const VACANCY_WORK_FORMATS = ['on_site', 'hybrid', 'remote'] as const
+export type VacancyWorkFormat = typeof VACANCY_WORK_FORMATS[number]
+
+/** Требуемый опыт (`vacancies.experience_level`, `29` §3.1). */
+export const VACANCY_EXPERIENCE_LEVELS = ['none', 'under_1y', '1_3y', '3_5y', 'over_5y'] as const
+export type VacancyExperienceLevel = typeof VACANCY_EXPERIENCE_LEVELS[number]
+
+/** Требуемое образование (`vacancies.education_level`, `29` §3.1). */
+export const VACANCY_EDUCATION_LEVELS = ['none', 'secondary', 'vocational', 'incomplete_higher', 'higher'] as const
+export type VacancyEducationLevel = typeof VACANCY_EDUCATION_LEVELS[number]
+
+/** Уровень языка (`vacancy_languages.level`, `29` §3.2): шкала CEFR плюс `native`. */
+export const VACANCY_LANGUAGE_LEVELS = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'native'] as const
+export type VacancyLanguageLevel = typeof VACANCY_LANGUAGE_LEVELS[number]
+
+/**
+ * Происхождение критерия оценки (`vacancy_criteria.origin`, `29` §3.3): рука рекрутера,
+ * черновик ИИ, принятый человеком (§7.11), или шаблон вакансии (§3.4).
+ */
+export const VACANCY_CRITERION_ORIGINS = ['manual', 'ai', 'template'] as const
+export type VacancyCriterionOrigin = typeof VACANCY_CRITERION_ORIGINS[number]
+
+/**
+ * Причина закрытия вакансии (`vacancies.close_reason`, `29` §4 «указана причина»).
+ * Перечня в `29` нет — [гипотеза] выведена из причин отказа кандидату (`28` §6.2) и
+ * колонки «Причина закриття» отчёта §9.2; [решение] пять значений плюс `other` с текстом,
+ * потому что свободная строка в отчёте не группируется, а без `other` рекрутер напишет
+ * причину в название вакансии (`docs/28-implementation-notes.md` §28.17 п. 4).
+ */
+export const VACANCY_CLOSE_REASONS = ['filled', 'no_need', 'budget', 'postponed', 'other'] as const
+export type VacancyCloseReason = typeof VACANCY_CLOSE_REASONS[number]
+
+/** Длина публичного токена вакансии: 22 знака base62 ≈ 132 бита (`29` §7.2). */
+export const VACANCY_TOKEN_LENGTH = 22
+
+/** Суточный потолок откликов по умолчанию и его границы (`vacancies.apply_daily_cap`, `29` §3.1). */
+export const VACANCY_APPLY_CAP_DEFAULT = 200
+export const VACANCY_APPLY_CAP_MIN = 10
+export const VACANCY_APPLY_CAP_MAX = 5000
+
+/** Сколько дней после закрытия вакансию ещё можно переоткрыть (`29` §4). */
+export const VACANCY_REOPEN_DAYS = 90
+
 /**
  * Вид работы в очереди проверки (`review_queue_items.task_type`, docs/v2/37 §3.1,
  * решение docs/v2/44 В-2). Он же «Тип завдання» — колонка, фильтр и таб экрана «Черга
@@ -512,4 +572,12 @@ export const ENUMS: Record<string, readonly string[]> = {
   content_issue_rescore_state: CONTENT_ISSUE_RESCORE_STATES,
   content_report_source: CONTENT_REPORT_SOURCES,
   content_issue_event_kind: CONTENT_ISSUE_EVENT_KINDS,
+  vacancy_state: VACANCY_STATES,
+  vacancy_employment_type: VACANCY_EMPLOYMENT_TYPES,
+  vacancy_work_format: VACANCY_WORK_FORMATS,
+  vacancy_experience_level: VACANCY_EXPERIENCE_LEVELS,
+  vacancy_education_level: VACANCY_EDUCATION_LEVELS,
+  vacancy_language_level: VACANCY_LANGUAGE_LEVELS,
+  vacancy_criterion_origin: VACANCY_CRITERION_ORIGINS,
+  vacancy_close_reason: VACANCY_CLOSE_REASONS,
 }

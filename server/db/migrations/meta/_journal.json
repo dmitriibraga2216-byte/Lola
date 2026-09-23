@@ -470,6 +470,13 @@
       "when": 1790146860000,
       "tag": "0068_v2_candidates_funnel",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790146920000,
+      "tag": "0069_v2_content_issues",
+      "breakpoints": true
     }
   ]
 }

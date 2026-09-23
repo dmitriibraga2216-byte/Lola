@@ -15,6 +15,8 @@ import { V2_PACKAGE_PLATFORM_TABLES, V2_PACKAGE_TENANT_TABLES } from './v2-packa
  * (`V2_PACKAGE_TENANT_TABLES` + `V2_PACKAGE_PLATFORM_TABLES`, `./v2-package-tables.ts`).
  * Оба списка пусты до первых миграций пакета — тест зелёный тривиально и наполняется по
  * мере появления таблиц.
+ *
+ * Исключения — только поимённые и только с обоснованием (`PACKAGE_COLUMN_EXCEPTIONS` ниже).
  */
 
 const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
@@ -29,11 +31,23 @@ const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
  *   а не срок прохождения назначения. Колонка с тем же именем и смыслом уже существует в
  *   `workshop_submissions` (она и становится зеркалом этой, docs/v2/44 В-2); очередь — не
  *   контент и не назначение, класть её срок в `assignments.params` некуда и незачем.
+ * - `content_issues.due_at` — срок, к которому **автор чинит дефект** (`36` §7.6: 2 рабочих
+ *   дня blocking, 7 normal, 30 cosmetic). Это SLA очереди правок, а не дедлайн прохождения:
+ *   карточка живёт у методиста, человек, подавший жалобу, этого срока не видит вовсе.
+ * - `content_issues.rescored_attempts` — сколько попыток **уже пересчитано** по карточке
+ *   (`36` §7.8). Счётчик выполненной работы, а не разрешённое число попыток: разрешённое
+ *   по-прежнему только в `assignments.params.attemptsAllowed`.
  *
  * Колонки `attempts_count` из `docs/v2/37` §3.1 здесь нет: она заведена под именем
  * `attempt_no` — как в `workshop_submissions`, где тот же смысл («какая по счёту сдача»).
+ *
+ * Список закрытый: правило прохождения, попавшее в таблицу пакета, по-прежнему красит тест.
  */
-const PACKAGE_COLUMN_EXCEPTIONS = new Set(['review_queue_items.sla_due_at'])
+const PACKAGE_COLUMN_EXCEPTIONS = new Set([
+  'review_queue_items.sla_due_at',
+  'content_issues.due_at',
+  'content_issues.rescored_attempts',
+])
 
 const adminUrl = process.env.DATABASE_ADMIN_URL
 if (!adminUrl) throw new Error('DATABASE_ADMIN_URL должен быть задан (см. .env.example)')

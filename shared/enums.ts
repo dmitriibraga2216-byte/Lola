@@ -34,11 +34,13 @@ export type NoticeKind = typeof NOTICE_KINDS[number]
 
 /**
  * Типы вопросов: семь эталона (docs/12 §14.3) + три Lola (number, text_short, file)
- * + `cloze` — пропуски в тексте (docs/12 §3.3 п. 11, `[решение, R2]`, docs/33 D-015). Коды — из docs/02.
+ * + `cloze` — пропуски в тексте (docs/12 §3.3 п. 11, `[решение, R2]`, docs/33 D-015)
+ * + `scale` — «Лінійна шкала», числовой диапазон с настраиваемыми границами и подписями
+ * концов (патч П-12.1 `docs/v2/39`, снято со второго эталона). Коды — из docs/02.
  */
 export const QUESTION_KINDS = [
   'single', 'multi', 'free', 'ordering', 'classification', 'comparison', 'answer_by_map',
-  'number', 'text_short', 'file', 'cloze',
+  'number', 'text_short', 'file', 'cloze', 'scale',
 ] as const
 export type QuestionKind = typeof QUESTION_KINDS[number]
 
@@ -262,7 +264,7 @@ export type LimitNoticeLevel = typeof LIMIT_NOTICE_LEVELS[number]
 export const MEDIA_ORIGINS = [
   'content_cover', 'lesson_attachment', 'workshop_submission', 'video_answer', 'candidate_cv',
   'certificate', 'import', 'checklist_photo', 'avatar', 'brand_asset', 'ai_artifact',
-  'report_export', 'interview_answer', 'person_document', 'other',
+  'report_export', 'interview_answer', 'person_document', 'issue_screenshot', 'other',
 ] as const
 export type MediaOrigin = typeof MEDIA_ORIGINS[number]
 
@@ -394,6 +396,74 @@ export type ReviewQueueStatus = typeof REVIEW_QUEUE_STATUSES[number]
  */
 export const REVIEW_TIME_CONFIDENCE = ['ok', 'partial', 'unreliable'] as const
 export type ReviewTimeConfidence = typeof REVIEW_TIME_CONFIDENCE[number]
+/** На что жалуются (`v2/36` §3.1): девять видов элементов контента. */
+export const CONTENT_ISSUE_TARGET_TYPES = [
+  'resource', 'lesson', 'block', 'quiz', 'question', 'workshop', 'survey', 'knowledge_article', 'media',
+] as const
+export type ContentIssueTargetType = typeof CONTENT_ISSUE_TARGET_TYPES[number]
+
+/**
+ * Типы проблем (`v2/36` §7.3) — закрытый список, он же фильтр «Тип» очереди. Построен не по
+ * предметности, а по тому, **кто чинит и чем**: три `broken_*` разведены потому, что это три
+ * разные починки, `bad_question`/`wrong_key` — единственные, что тянут пересчёт результатов,
+ * `tech` уходит администратору, а не автору.
+ */
+export const CONTENT_ISSUE_TYPES = [
+  'typo', 'wrong_fact', 'outdated', 'unclear', 'broken_media', 'broken_link', 'broken_file',
+  'bad_question', 'wrong_key', 'tech', 'other',
+] as const
+export type ContentIssueType = typeof CONTENT_ISSUE_TYPES[number]
+
+/** Типы, при которых комментарий обязателен (`v2/36` §3.1, форма §6.1). */
+export const CONTENT_ISSUE_COMMENT_REQUIRED: readonly ContentIssueType[] = ['other', 'wrong_fact', 'bad_question', 'wrong_key']
+
+/** Статус карточки дефекта (`v2/36` §4). */
+export const CONTENT_ISSUE_STATUSES = ['new', 'in_progress', 'fixed', 'rejected', 'deferred', 'closed'] as const
+export type ContentIssueStatus = typeof CONTENT_ISSUE_STATUSES[number]
+
+/** Резолюция разбора (`v2/36` §4, §6.2). */
+export const CONTENT_ISSUE_RESOLUTIONS = ['fixed', 'question_fixed', 'question_void', 'not_an_error', 'duplicate', 'wont_fix', 'spam'] as const
+export type ContentIssueResolution = typeof CONTENT_ISSUE_RESOLUTIONS[number]
+
+/** Важность карточки (`v2/36` §7.4): считает система, не человек. */
+export const CONTENT_ISSUE_SEVERITIES = ['blocking', 'normal', 'cosmetic'] as const
+export type ContentIssueSeverity = typeof CONTENT_ISSUE_SEVERITIES[number]
+
+/** Состояние пересчёта результатов по карточке (`v2/36` §7.8). */
+export const CONTENT_ISSUE_RESCORE_STATES = ['none', 'needed', 'in_progress', 'done', 'skipped'] as const
+export type ContentIssueRescoreState = typeof CONTENT_ISSUE_RESCORE_STATES[number]
+
+/** Откуда подана жалоба (`v2/36` §3.2, §5.1). */
+export const CONTENT_REPORT_SOURCES = ['lesson', 'attempt', 'workshop', 'catalog', 'knowledge', 'review'] as const
+export type ContentReportSource = typeof CONTENT_REPORT_SOURCES[number]
+
+/** Событие журнала карточки (`v2/36` §3). */
+export const CONTENT_ISSUE_EVENT_KINDS = ['created', 'merged', 'status_changed', 'assigned', 'commented', 'rescored', 'reopened'] as const
+export type ContentIssueEventKind = typeof CONTENT_ISSUE_EVENT_KINDS[number]
+
+/**
+ * Защита от злоупотребления (`v2/36` §7.7, §7.10, §7.11) — одни и те же числа для сервера,
+ * формы и тестов. Шестая жалоба за сутки отвергается текстом, а не молча: счётчик и предел
+ * приходят в теле ошибки `content_issue.rate_limited`.
+ */
+export const CONTENT_ISSUE_LIMITS = {
+  /** Жалоб в сутки на человека. */
+  perDay: 5,
+  /** Жалоб за календарный месяц на человека. */
+  perMonth: 20,
+  /** Жалоб за одну попытку теста. */
+  perAttempt: 3,
+  /** Компенсация времени формы, секунд на жалобу (`v2/36` §7.7 б). */
+  deadlineShiftSecPerReport: 60,
+  /** Компенсация времени формы, секунд за всю попытку. */
+  deadlineShiftSecPerAttempt: 180,
+  /** Резолюций `spam` подряд до автоматического mute. */
+  spamStreakToMute: 3,
+  /** Окно, в котором считается серия `spam`, дней. */
+  spamStreakWindowDays: 30,
+  /** Длительность автоматического mute, дней. */
+  muteDays: 14,
+} as const
 
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
@@ -434,4 +504,12 @@ export const ENUMS: Record<string, readonly string[]> = {
   review_task_type: REVIEW_TASK_TYPES,
   review_queue_status: REVIEW_QUEUE_STATUSES,
   review_time_confidence: REVIEW_TIME_CONFIDENCE,
+  content_issue_target_type: CONTENT_ISSUE_TARGET_TYPES,
+  content_issue_type: CONTENT_ISSUE_TYPES,
+  content_issue_status: CONTENT_ISSUE_STATUSES,
+  content_issue_resolution: CONTENT_ISSUE_RESOLUTIONS,
+  content_issue_severity: CONTENT_ISSUE_SEVERITIES,
+  content_issue_rescore_state: CONTENT_ISSUE_RESCORE_STATES,
+  content_report_source: CONTENT_REPORT_SOURCES,
+  content_issue_event_kind: CONTENT_ISSUE_EVENT_KINDS,
 }

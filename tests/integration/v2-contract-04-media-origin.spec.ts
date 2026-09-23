@@ -19,7 +19,7 @@ import { MEDIA_ORIGINS } from '../../shared/enums'
  * замыкают кольцо, и расхождение любой валит CI (решение В-6).
  */
 
-/** Итоговый перечень — docs/v2/40-data-model-delta.md §4.1/§4.2, 15 значений. */
+/** Итоговый перечень — docs/v2/40-data-model-delta.md §4.1/§4.2, 16 значений (PR-23 добавил `issue_screenshot`). */
 const EXPECTED_MEDIA_ORIGINS: string[] = [...MEDIA_ORIGINS]
 
 const adminUrl = process.env.DATABASE_ADMIN_URL
@@ -45,7 +45,7 @@ describe('v2-contract-04: перечень media_assets.origin', () => {
   })
 
   it('перечень в БД совпадает со списком 40 §4.2 в обе стороны', async () => {
-    expect(EXPECTED_MEDIA_ORIGINS).toHaveLength(15)
+    expect(EXPECTED_MEDIA_ORIGINS).toHaveLength(16)
     const def = await admin`
       select pg_get_constraintdef(oid) as def
       from pg_constraint

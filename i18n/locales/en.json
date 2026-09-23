@@ -891,7 +891,8 @@
       "number": "Enter a number",
       "text_short": "Short answer",
       "file": "Photo or file",
-      "cloze": "Fill in the blanks"
+      "cloze": "Fill in the blanks",
+      "scale": "Pick a value on the scale"
     },
     "pointsN": "{n} points",
     "attachFile": "Attach file",
@@ -1696,7 +1697,9 @@
     "questionOf": "Question {n} of {total}",
     "or": "or",
     "freeHint": "Your answer",
-    "attachFile": "Attach file"
+    "attachFile": "Attach file",
+    "answerHint": "Answer hint",
+    "answerHintPh": "What exactly to write in the answer"
   },
   "workshop": {
     "reviewTitle": "Workshop review",
@@ -3425,7 +3428,8 @@
       "number": "Number with tolerance",
       "text_short": "Short text",
       "file": "File or photo",
-      "cloze": "Fill in the blanks"
+      "cloze": "Fill in the blanks",
+      "scale": "Linear scale"
     },
     "placeholders": {
       "single": "Enter a question with one correct answer…",
@@ -3438,7 +3442,8 @@
       "number": "Enter a question with a numeric answer…",
       "text_short": "Enter a question with a short answer…",
       "file": "Enter a question answered with a photo or file…",
-      "cloze": "Text with blanks, e.g.: Rain {'{{'}1{'}}'} falls on {'{{'}2{'}}'}…"
+      "cloze": "Text with blanks, e.g.: Rain {'{{'}1{'}}'} falls on {'{{'}2{'}}'}…",
+      "scale": "Enter the question text with a scale…"
     },
     "text": "Question text",
     "options": "Answer options",
@@ -3482,7 +3487,11 @@
     "shapeRect": "Rectangle",
     "shapeCircle": "Circle",
     "clozeHint": "Mark blanks in the text above as {'{{'}1{'}}'}, {'{{'}2{'}}'} etc. — set accepted answers for each below (one per line)",
-    "clozeNone": "The question text has no blanks yet — add {'{{'}1{'}}'}"
+    "clozeNone": "The question text has no blanks yet — add {'{{'}1{'}}'}",
+    "scaleMin": "From",
+    "scaleMax": "To",
+    "scaleMinLabel": "Left end label",
+    "scaleMaxLabel": "Right end label"
   },
   "attemptRequests": {
     "title": "Test attempt requests",
@@ -4862,5 +4871,36 @@
     "addedCol": "Added",
     "hiredCol": "Hired",
     "empty": "No data for this period"
+  },
+  "issue": {
+    "report": "Report an error",
+    "title": "What is wrong with this material?",
+    "typeLegend": "Problem type",
+    "comment": "What is wrong?",
+    "commentPh": "One sentence is enough",
+    "screenshot": "Attach a screenshot",
+    "send": "Send",
+    "where": "We already know where you are: {where}",
+    "whereQuestion": "question {n}",
+    "sentTitle": "Thank you",
+    "sentHint": "We will look into it and let you know",
+    "errRateLimited": "You have already sent {n} reports today. Try tomorrow",
+    "errMuted": "Reporting is temporarily unavailable. Contact an administrator",
+    "errAlready": "Already reported — we will add your voice",
+    "errScreenshotSize": "File is too large, 5 MB max",
+    "errScreenshot": "Could not upload the screenshot",
+    "type": {
+      "typo": "Typo in the text",
+      "wrong_fact": "Incorrect information",
+      "outdated": "Outdated information",
+      "unclear": "Explained unclearly",
+      "broken_media": "Video or audio does not play",
+      "broken_link": "Link does not work",
+      "broken_file": "File does not open",
+      "bad_question": "Incorrect question",
+      "wrong_key": "Wrong correct answer",
+      "tech": "Technical problem",
+      "other": "Other"
+    }
   }
 }

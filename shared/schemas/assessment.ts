@@ -144,6 +144,12 @@ export const pollQuestionSchema = z.object({
   options: z.array(pollOptionSchema).max(20).optional(),
   allowOwnOption: z.boolean().optional(), // «або Свій варіант відповіді»
   allowFiles: z.boolean().optional(), // «Дозволити прикріпляти файли до відповіді»
+  /**
+   * «Підказка для відповіді» (патч П-12.2, docs/v2/39) — подсказка **отвечающему**
+   * у открытого вопроса, а не проверяющему: у опроса проверяющего нет. Показывается
+   * плейсхолдером поля ответа, в выгрузку не идёт.
+   */
+  answerHint: z.string().trim().max(200).optional(),
   scaleId: z.string().uuid().optional(), // «По шкалі» — шкала уровней из словаря (scales, kind=levels)
   required: z.boolean().optional(),
   next: z.array(pollNextSchema).max(21).optional(), // только для mode=conditional

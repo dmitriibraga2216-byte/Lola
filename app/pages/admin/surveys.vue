@@ -10,7 +10,7 @@ const { t } = useI18n()
 const { api } = useApi()
 interface Opt { id: string, text: string }
 interface Next { optionId?: string, goTo: string }
-interface Q { id: string, type: 'single' | 'multi' | 'free' | 'scale', text: string, options?: Opt[], allowOwnOption?: boolean, allowFiles?: boolean, scaleId?: string, required?: boolean, next?: Next[] }
+interface Q { id: string, type: 'single' | 'multi' | 'free' | 'scale', text: string, options?: Opt[], allowOwnOption?: boolean, allowFiles?: boolean, answerHint?: string, scaleId?: string, required?: boolean, next?: Next[] }
 interface S { id: string, title: string, kind: string, status: string, mode: string, isAnonymous: boolean, isConfidential: boolean, showResults: boolean, isLocked: boolean, tags: string[], questions: number, responses: number, updatedAt: string, triggerCourseId: string | null }
 interface Full extends Omit<S, 'questions'> { description: string | null, questions: Q[] }
 interface Report { title: string, total: number, hidden: boolean, threshold?: number, isOwner: boolean, isConfidential: boolean, isAnonymous: boolean, questions: { id: string, text: string, type: string, answered: number, avg?: number | null, distribution?: Record<string, number>, own?: string[], texts?: string[], scale?: string | null }[], respondents: { id: string, name: string | null, submittedAt: string, answers: Record<string, string[]> }[] | null }
@@ -152,6 +152,10 @@ const privacy = (s: S) => s.isAnonymous ? t('survey.privacy.anonymous') : s.isCo
           </div>
         </template>
         <label v-if="q.type === 'free'" class="check"><input v-model="q.allowFiles" type="checkbox" :disabled="form.isLocked"> {{ t('survey.allowFiles') }}</label>
+        <!-- «Підказка для відповіді» (П-12.2): підказка тому, хто відповідає, — у опитування перевіряючого немає -->
+        <label v-if="q.type === 'free'" class="sub answer-hint">{{ t('survey.answerHint') }}
+          <input v-model="q.answerHint" class="field" maxlength="200" :placeholder="t('survey.answerHintPh')" :disabled="form.isLocked">
+        </label>
         <div v-if="q.type === 'scale'" class="row">
           <label class="sub">{{ t('assess.scaleField') }} <select v-model="q.scaleId" class="field" :disabled="form.isLocked"><option value="">1–5</option><option v-for="s in scales" :key="s.id" :value="s.id">{{ s.name }}</option></select></label>
         </div>

@@ -83,7 +83,7 @@ export type Scope = typeof SCOPES[number]
 export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
   employee: {
     name: 'Співробітник',
-    scopes: ['learn.view', 'learn.catalog', 'learn.attempt', 'report.own', 'development.own', 'assessment.own', 'meetup.view', 'meetup.enroll'],
+    scopes: ['learn.view', 'learn.catalog', 'learn.attempt', 'report.own', 'development.own', 'assessment.own', 'meetup.view', 'meetup.enroll', 'content_issue.report'],
   },
   mentor: {
     name: 'Наставник',
@@ -92,7 +92,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'people.view', 'assignment.create', 'assignment.cancel',
       'review.queue', 'review.grade', 'certification.confirm',
       'report.own', 'report.team', 'development.own', 'development.team', 'assessment.own', 'checklist.run',
-      'meetup.view', 'meetup.enroll', 'meetup.attendance', 'lifecycle.view',
+      'meetup.view', 'meetup.enroll', 'meetup.attendance', 'lifecycle.view', 'content_issue.report',
     ],
   },
   manager: {
@@ -105,6 +105,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'report.own', 'report.team', 'report.export', 'development.own', 'development.team', 'request.decide',
       'assessment.own', 'assessment.team', 'assessment.run', 'checklist.run',
       'meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'lifecycle.view',
+      'content_issue.report',
       // PR-07: «Запустить офбординг» — керівник точки своей точки (`docs/v2/33` §2);
       // завершает офбординг только администратор (`offboarding.complete` остаётся у него).
       'offboarding.start',
@@ -124,6 +125,8 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[] }> = {
       'assessment.own', 'assessment.run', 'assessment.manage', 'checklist.manage',
       'meetup.view', 'meetup.enroll', 'meetup.manage', 'webinar.manage', 'complextest.manage', 'wiki.edit', 'report.builder',
       'program.manage', 'program.publish', 'lifecycle.view',
+      // Автор и сам жалуется на чужой материал (`v2/36` §2); очередь и разбор — PR-24
+      'content_issue.report', 'content_issue.view',
     ],
   },
   admin: {

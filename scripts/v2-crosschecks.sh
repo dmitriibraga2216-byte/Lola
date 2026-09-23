@@ -50,14 +50,21 @@ report() {
 check1_stage_codes() {
   local pattern="'(recruiting|onboarding|integration|training|attestation|psychological|knowledge|offboarding)'"
   local hits
+  # Три места, где код этапа обязан встречаться буквально и потому исключены из поиска
+  # (docs/v2/45-plan.md PR-05, условие выхода: «коды живут только в справочнике, посеве и
+  # миграции»): справочник `shared/enums.ts` (LIFECYCLE_STAGE_CODES — единственный источник
+  # перечня, docs/v2/44 В-3), посев нового тенанта `server/db/tenantDefaults.ts`
+  # (DEFAULT_LIFECYCLE_STAGES, docs/v2/33 §3.3) и миграции (они .sql, под --include='*.ts'
+  # не попадают вовсе). Всё остальное в server/ и app/ обязано ходить через stageCan().
   hits="$(grep -rEn "$pattern" server app shared --include='*.ts' 2>/dev/null \
-    | grep -v 'server/db/seed' | grep -v 'drizzle/sql' | grep -v 'i18n/' || true)"
+    | grep -v 'server/db/seed' | grep -v 'server/db/tenantDefaults.ts' | grep -v 'shared/enums.ts' \
+    | grep -v 'drizzle/sql' | grep -v 'i18n/' || true)"
   # Allowlist: значение 'knowledge' здесь — код модуля «база знань» (контент), а не код этапа
   # жизненного цикла «навчання» (lifecycle_stages.code). Текстовое совпадение случайное —
   # модуль появился в базовом ТЗ задолго до пакета docs/v2 и переименовывать его не входит
   # в план (docs/v2/45-plan.md ничего об этом не говорит).
   local allow=(
-    "server/db/schema/content.ts:101"
+    "server/db/schema/content.ts:102"
     "server/api/v1/access-groups/index.get.ts:7"
     "server/services/comments.ts:29"
     "server/services/comments.ts:89"

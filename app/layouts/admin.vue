@@ -98,6 +98,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/roles', label: t('admin.nav.roles'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/position-role-map', label: t('admin.nav.positionRoleMap'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/scales', label: t('admin.nav.scales'), show: hasScope('settings.tenant') },
+    { to: '/admin/settings/lifecycle', label: t('admin.nav.lifecycle'), show: hasScope('lifecycle.view') },
     { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant') },
     { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('settings.tenant') },
     { to: '/admin/certificates', label: t('admin.nav.certificates'), show: hasScope('report.team') },

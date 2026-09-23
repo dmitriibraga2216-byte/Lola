@@ -4,6 +4,7 @@ import {
   boolean, numeric, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
+import { lifecycleStages } from './lifecycle'
 import { users } from './people'
 
 /**
@@ -175,8 +176,15 @@ export const courses = pgTable('courses', {
   competencyLevel: integer('competency_level'),
   createdBy: uuid('created_by').references(() => users.id),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  // Этап жизненного цикла (docs/v2/33 §3.4) — необязателен: курс без этапа работает с полным
+  // набором возможностей, как обычный курс каталога базового ТЗ (`33` §7.3).
+  lifecycleStageId: uuid('lifecycle_stage_id').references(() => lifecycleStages.id),
+  // Запрещает смену этапа: выставляется после первого завершённого прохождения (`33` §7.4),
+  // снимается оператором. Смена этапа при `true` — `409 course.stage_locked`.
+  stageLocked: boolean('stage_locked').notNull().default(false),
 }, t => [
   unique().on(t.tenantId, t.slug),
+  index().on(t.tenantId, t.lifecycleStageId),
 ])
 
 export const courseVersions = pgTable('course_versions', {

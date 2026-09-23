@@ -400,6 +400,13 @@
       "when": 1790120263875,
       "tag": "0056_v2_users_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1790120323875,
+      "tag": "0057_v2_lifecycle_stages",
+      "breakpoints": true
     }
   ]
 }

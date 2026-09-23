@@ -10,6 +10,7 @@ import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS, paramsFor } from '../../shared/schemas/assignments'
 import { deriveTaskState, overdueSql } from './enrollmentStatus'
 import { findContent } from './taskContent'
+import { employeeOnly } from './repo/people'
 import type { Audience, assignmentCreateSchema, assignmentUpdateSchema } from '../../shared/schemas/assignments'
 import type { ContentType } from '../../shared/enums'
 
@@ -290,7 +291,8 @@ export async function getAssignment(ctx: Ctx, id: string) {
     const content = await findContent(tx, a.subjectType as ContentType, a.subjectId)
     const competencyIds = (await tx.select({ id: assignmentCompetencies.competencyId }).from(assignmentCompetencies).where(eq(assignmentCompetencies.assignmentId, id))).map(r => r.id)
     const audienceCount = (await resolveAudience(tx, a.audience as Audience, a.exclude as Audience)).size
-    const [tot] = await tx.select({ total: sql<number>`count(*)::int` }).from(users).where(and(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false)))
+    // «Призначено N із M»: M — штат тенанта, кандидаты в знаменатель охвата не входят (П-16.1)
+    const [tot] = await tx.select({ total: sql<number>`count(*)::int` }).from(users).where(employeeOnly(inArray(users.status, ['invited', 'active']), eq(users.isHidden, false)))
     const assignedCount = a.subjectType === 'course' || a.subjectType === 'training_program' ? Number((a.stats as { assigned?: number }).assigned ?? people.length) : audienceCount
     const [author] = a.createdBy ? await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, a.createdBy)) : []
     return { ...a, authorName: author?.fullName ?? null, content, competencyIds, assignedCount, audienceCount, peopleTotal: tot?.total ?? 0, people: people.map(p => ({ ...p, ...deriveTaskState(p) })) }

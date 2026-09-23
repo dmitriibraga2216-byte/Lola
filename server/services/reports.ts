@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import { sql } from 'drizzle-orm'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 interface Ctx { tenantId: string, actorId: string }
 /** `scope` — область видимости (docs/22 §2): null — вся сеть, массив — только эти точки; уже сужена фильтром `locationId`. */
@@ -25,7 +26,7 @@ export async function readiness(ctx: Ctx, f: Filter = {}) {
       select u.id as user_id, up.location_id, up.position_id
       from users u
       join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
-      where u.status = 'active'
+      where u.status = 'active' ${EMPLOYEES_ONLY()}
         ${scopeSql(f.scope ?? null, sql`up.location_id`)}
         ${f.positionId ? sql`and up.position_id = ${f.positionId}` : sql``}
     ),
@@ -63,7 +64,7 @@ export async function readinessPeople(ctx: Ctx, locationId: string, positionId: 
     join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
     left join enrollments e on e.user_id = u.id and e.cancelled_at is null
     left join assignments a on a.id = e.assignment_id
-    where u.status = 'active' and up.location_id = ${locationId} and up.position_id = ${positionId}
+    where u.status = 'active' and up.location_id = ${locationId} and up.position_id = ${positionId} ${EMPLOYEES_ONLY()}
     group by u.id, u.full_name order by u.full_name
   `)
 }

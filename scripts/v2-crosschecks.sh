@@ -78,6 +78,13 @@ check1_stage_codes() {
 # обращения к users в текущем коде (В-8, оценка) строгая проверка «нет обращений вне
 # репозитория» гарантированно красит всё сразу и не несёт сигнала. Проверка активируется
 # автоматически, как только появится файл репозитория (условие, а не постоянное исключение).
+#
+# Что именно проверяется здесь, а что — тестом. Полный классификатор (соединения ради ФИО,
+# внешние соединения, выборки по первичному ключу) живёт в
+# tests/integration/users-kind-filter.spec.ts — он и есть слой 2. Скрипт держит более узкий,
+# но самый важный инвариант П-16.1: **там, где `users` — ведущая таблица выборки, вид людей
+# назван явно**. Соединения оставлены тесту намеренно, чтобы два механизма не разошлись в
+# трактовке; поимённый allowlist не дублируется, а читается из самого теста.
 check2_users_kind_filter() {
   local repo_file="server/services/repo/people.ts"
   if [ ! -f "$repo_file" ]; then
@@ -85,8 +92,69 @@ check2_users_kind_filter() {
     return
   fi
   local hits
-  hits="$(grep -rn 'from(users)\|from users\b' server --include='*.ts' 2>/dev/null \
-    | grep -v "$repo_file" | grep -vi 'kind' || true)"
+  hits="$(python3 - <<'PYEOF'
+import re
+import pathlib
+
+REPO = 'server/services/repo/people.ts'
+SPEC = pathlib.Path('tests/integration/users-kind-filter.spec.ts')
+
+# users как ведущая таблица выборки: Drizzle .from(users) и сырое `from users`.
+HIT = re.compile(r'\.from\((?:\w+\.)?users\)|\bfrom\s+users\b', re.I)
+# Вид назван явно: имена репозитория, `frameWhere()` (он подставляет EMPLOYEES_ONLY сам) или сам kind.
+FILTERED = re.compile(r"EMPLOYEES_ONLY|CANDIDATES_ONLY|IS_EMPLOYEE|IS_CANDIDATE|employeeOnly|candidateOnly"
+                      r"|\bemployees\(|\bcandidates\(|frameWhere\(|users\.kind|\b[a-z_]+\.kind\s*=|\bkind\s*=\s*'(?:employee|candidate)'")
+# Выборка одного человека по первичному ключу — фильтровать её по виду бессмысленно (В-8).
+BY_ID = re.compile(r"eq\(users\.id,|inArray\(users\.id,|\$\{users\.id\}\s+in|\b[\w.]*\bid\s*(?:=|in)\s*\(?\$\{", re.I)
+
+allow = set()
+if SPEC.is_file():
+    allow = set(re.findall(r"'((?:server|app)/[^']+:\d+)':", SPEC.read_text(encoding='utf-8')))
+
+def expression(lines, i):
+    ticks = '\n'.join(lines[:i]).count('`')
+    s = e = i
+    if ticks % 2 == 1:
+        while s > 0 and '`' not in lines[s] and i - s < 40:
+            s -= 1
+        while e < len(lines) - 1 and '`' not in lines[e] and e - i < 40:
+            e += 1
+        s = max(0, s - 1)
+    else:
+        bal = sum(lines[i].count(c) for c in '([{') - sum(lines[i].count(c) for c in ')]}')
+        while s > 0 and bal < 0 and i - s < 40:
+            s -= 1
+            bal += sum(lines[s].count(c) for c in '([{') - sum(lines[s].count(c) for c in ')]}')
+        while e < len(lines) - 1 and bal > 0 and e - i < 40:
+            e += 1
+            bal += sum(lines[e].count(c) for c in '([{') - sum(lines[e].count(c) for c in ')]}')
+    while s > 0 and re.match(r'^\s*[.?:]|[([,=]$|sql`$', lines[s - 1].rstrip()):
+        s -= 1
+    while e < len(lines) - 1 and re.match(r'^\s*[.?:)]', lines[e + 1]):
+        e += 1
+    return '\n'.join(lines[s:e + 1])
+
+out = []
+root = pathlib.Path('server')
+if root.is_dir():
+    for f in sorted(root.rglob('*.ts')):
+        rel = f.as_posix()
+        if rel == REPO:
+            continue
+        lines = f.read_text(encoding='utf-8').split('\n')
+        for i, line in enumerate(lines):
+            if not HIT.search(line) or re.match(r'\s*(//|\*)', line):
+                continue
+            key = f'{rel}:{i + 1}'
+            if key in allow:
+                continue
+            expr = expression(lines, i)
+            if FILTERED.search(expr) or BY_ID.search(expr):
+                continue
+            out.append(f'{key}: {line.strip()}')
+print('\n'.join(out))
+PYEOF
+)"
   report "2. выборки users без фильтра kind" "$hits"
 }
 

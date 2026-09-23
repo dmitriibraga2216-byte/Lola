@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { withTenant } from '../utils/withTenant'
 import { effectiveLimits } from './tenantLimits'
 import { enqueueNotification } from './notifications'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Потребление тенанта (docs/24 §4.4.1, экран «Статистика» / мокап TenantStats).
@@ -11,6 +12,9 @@ import { enqueueNotification } from './notifications'
  * в `tenant_usage`; экран показывает последний сбор и время. Лимит активных считается по `users.status = 'active'`
  * и не заблокированным — блокировка сразу освобождает место (docs/24 §4.4.1 п. 1). Жёсткие лимиты (диск, SMS)
  * проверяются в момент операции, а не здесь.
+ *
+ * Считаются только сотрудники (`kind = 'employee'`, docs/v2/35 §7.1, решение docs/v2/44 В-8):
+ * кандидат не занимает оплаченного места в штате, у него своя ось `candidates_active`.
  */
 
 export interface UsageSnapshot {
@@ -30,9 +34,9 @@ export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
   return withTenant(tenantId, null, async (tx) => {
     const [m] = await tx.execute(sql`
       select
-        (select count(*)::int from users where status = 'active' and not is_blocked) as active_users,
-        (select count(*)::int from users where is_blocked or status = 'suspended') as blocked_users,
-        (select count(*)::int from users where status = 'archived') as archived_users,
+        (select count(*)::int from users where status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}) as active_users,
+        (select count(*)::int from users where (is_blocked or status = 'suspended') ${EMPLOYEES_ONLY('')}) as blocked_users,
+        (select count(*)::int from users where status = 'archived' ${EMPLOYEES_ONLY('')}) as archived_users,
         (select coalesce(sum(bytes), 0)::bigint from media_assets where deleted_at is null) as storage_bytes,
         (select count(*)::int from notifications where channel = 'sms' and status = 'sent' and sent_at >= date_trunc('month', now())) as sms_month,
         (select count(*)::int from courses where deleted_at is null) as courses_count,
@@ -79,7 +83,7 @@ async function checkLimitsAndNotify(tenantId: string, snap: UsageSnapshot): Prom
     await withTenant(tenantId, null, async (tx) => {
       const admins = await tx.execute(sql`
         select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
-        where r.code = 'admin' and (ur.valid_until is null or ur.valid_until > now()) and a.status = 'active' and not a.is_blocked
+        where r.code = 'admin' and (ur.valid_until is null or ur.valid_until > now()) and a.status = 'active' and not a.is_blocked ${EMPLOYEES_ONLY('a')}
       `) as unknown as { user_id: string }[]
       for (const a of admins) await enqueueNotification(tx, { tenantId, userId: a.user_id, code, payload, dedupKey: `${code}:${c.resource}:${tenantId}:${day}:${a.user_id}` })
     })

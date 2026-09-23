@@ -16,6 +16,7 @@ import { applyPositionRoles } from './positionRoleMap'
 import { levelLabel } from './development'
 import type { CompetencyLevel } from './development'
 import { studyHistory } from './reportsExtra'
+import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
 
@@ -70,7 +71,7 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
       active: sql<number>`count(*) filter (where ${users.status} in ('invited', 'active'))::int`,
       blocked: sql<number>`count(*) filter (where ${users.status} in ('suspended', 'archived'))::int`,
       all: sql<number>`count(*)::int`,
-    }).from(users).where(and(...baseConditions))
+    }).from(users).where(employeeOnly(...baseConditions))
 
     const rows = await tx.select({
       id: users.id,
@@ -89,7 +90,7 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
     })
       .from(users)
       .leftJoin(cities, eq(cities.id, users.cityId))
-      .where(and(...conditions))
+      .where(employeeOnly(...conditions))
       .orderBy(desc(users.createdAt), desc(users.id))
       .limit(filter.limit + 1)
 
@@ -202,7 +203,7 @@ export function splitName(input: { fullName?: string, lastName?: string | null, 
 
 /** Последнего администратора нельзя заблокировать, архивировать или лишить роли (docs/16 §7.6). */
 export async function isLastAdmin(tx: TenantTx, userId: string): Promise<boolean> {
-  const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users u on u.id = ur.user_id where r.code = 'admin' and ur.scope_type = 'tenant' and (ur.valid_until is null or ur.valid_until > now()) and u.status in ('active','invited') and not u.is_blocked`) as unknown as { user_id: string }[]
+  const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users u on u.id = ur.user_id where r.code = 'admin' and ur.scope_type = 'tenant' and (ur.valid_until is null or ur.valid_until > now()) and u.status in ('active','invited') and not u.is_blocked ${EMPLOYEES_ONLY()}`) as unknown as { user_id: string }[]
   const ids = new Set(admins.map(a => a.user_id))
   return ids.has(userId) && ids.size === 1
 }
@@ -584,7 +585,8 @@ export async function listChiefs(ctx: Ctx, userId?: string) {
   return withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`
     select fc.id, fc.kind, fc.scope, fc.user_id, u.full_name as user_name, fc.chief_id, c.full_name as chief_name
     from functional_chiefs fc join users u on u.id = fc.user_id join users c on c.id = fc.chief_id
-    ${userId ? sql`where fc.user_id = ${userId}::uuid or fc.chief_id = ${userId}::uuid` : sql``} order by c.full_name, u.full_name limit 1000
+    where true ${EMPLOYEES_ONLY()} ${EMPLOYEES_ONLY('c')}
+    ${userId ? sql`and (fc.user_id = ${userId}::uuid or fc.chief_id = ${userId}::uuid)` : sql``} order by c.full_name, u.full_name limit 1000
   `) as unknown as Promise<Record<string, unknown>[]>)
 }
 export async function setChief(ctx: Ctx, input: { userId: string, chiefId: string, kind: 'line' | 'functional', scope?: string }) {
@@ -608,7 +610,7 @@ export async function removeChief(ctx: Ctx, id: string) {
 /** Ежедневно (docs/16 §11): кто не заходил > 30 дней — админам список кандидатов на архив. */
 export async function inactiveScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
-    const rows = await tx.execute(sql`select count(*)::int as n from users where status = 'active' and not is_hidden and coalesce(last_seen_at, created_at) < now() - interval '30 days'`) as unknown as { n: number }[]
+    const rows = await tx.execute(sql`select count(*)::int as n from users where status = 'active' and not is_hidden and coalesce(last_seen_at, created_at) < now() - interval '30 days' ${EMPLOYEES_ONLY('')}`) as unknown as { n: number }[]
     const n = rows[0]?.n ?? 0
     if (!n) return 0
     const admins = await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id where r.code = 'admin' and ur.scope_type = 'tenant'`) as unknown as { user_id: string }[]
@@ -645,7 +647,7 @@ export async function staffingReport(ctx: Ctx, asOf?: string, scope: string[] | 
              round(avg(${d}::date - coalesce(u.hired_at, u.created_at::date)))::int as avg_tenure_days
       from user_placements up join users u on u.id = up.user_id join locations l on l.id = up.location_id join positions p on p.id = up.position_id
       where up.is_primary and up.started_at <= ${d}::date and (up.ended_at is null or up.ended_at > ${d}::date)
-        and u.status <> 'archived' and not u.is_hidden and (u.archived_at is null or u.archived_at > ${d}::date)
+        and u.status <> 'archived' and not u.is_hidden and (u.archived_at is null or u.archived_at > ${d}::date) ${EMPLOYEES_ONLY()}
         ${scopeSql(scope, sql`up.location_id`)}
       group by 1, 2 order by 1, 2
     `) as unknown as Promise<{ location: string, position: string, people: number, newcomers: number, avg_tenure_days: number }[]>
@@ -666,7 +668,7 @@ export async function turnoverReport(ctx: Ctx, from: string, to: string, scope: 
       select l.name as location, p.name as position, count(*)::int as archived
       from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is not null
       join locations l on l.id = up.location_id join positions p on p.id = up.position_id
-      where u.status = 'archived' and u.archived_at >= ${from}::date and u.archived_at < (${to}::date + 1)
+      where u.status = 'archived' and u.archived_at >= ${from}::date and u.archived_at < (${to}::date + 1) ${EMPLOYEES_ONLY()}
         and up.ended_at = (select max(ended_at) from user_placements x where x.user_id = u.id)
         ${scopeSql(scope, sql`up.location_id`)}
       group by 1, 2 order by 3 desc
@@ -680,7 +682,7 @@ export async function inactiveReport(ctx: Ctx, days = 30, scope: string[] | null
       select u.id, u.full_name, u.last_seen_at, l.name as location, p.name as position
       from users u left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
       left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
-      where u.status = 'active' and coalesce(u.last_seen_at, u.created_at) < now() - (${days} || ' days')::interval
+      where u.status = 'active' and coalesce(u.last_seen_at, u.created_at) < now() - (${days} || ' days')::interval ${EMPLOYEES_ONLY()}
         ${scopeSql(scope, sql`up.location_id`)}
       order by u.last_seen_at nulls first limit 500
     `) as unknown as Promise<Record<string, unknown>[]>

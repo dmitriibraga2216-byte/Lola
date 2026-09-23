@@ -7,6 +7,7 @@ import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
 import { SYSTEM_ROLES } from '../../shared/domain/roles'
 import { ensureTenantDefaults } from '../db/tenantDefaults'
+import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
 /**
  * Панель оператора платформы (docs/03 §3.12, docs/01 §1.5 impersonation).
@@ -71,8 +72,8 @@ export async function listTenants() {
            coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
            tl.active_jobs as active_jobs_limit,
            (tl.id is not null) as has_overrides,
-           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked) as active_users,
-           (select count(*)::int from users u where u.tenant_id = t.id) as total_users,
+           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
+           (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
            (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
@@ -93,8 +94,8 @@ export async function getTenantCard(id: string): Promise<Record<string, unknown>
            coalesce(tl.sms_per_month, p.max_sms_per_month) as sms_limit,
            tl.active_jobs as active_jobs_limit,
            (tl.id is not null) as has_overrides,
-           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked) as active_users,
-           (select count(*)::int from users u where u.tenant_id = t.id) as total_users,
+           (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
+           (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
            (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
@@ -210,7 +211,7 @@ export async function platformMetrics() {
     select
       (select count(*)::int from tenants where status = 'active') as tenants_active,
       (select count(*)::int from tenants where plan = 'trial' and trial_ends_at < now() + interval '7 days' and trial_ends_at > now()) as trials_ending,
-      (select count(*)::int from users where status = 'active') as users_active,
+      (select count(*)::int from users where status = 'active' ${EMPLOYEES_ONLY('')}) as users_active,
       (select count(distinct user_id)::int from sessions where created_at >= current_date) as dau,
       (select count(distinct user_id)::int from sessions where created_at >= current_date - 7) as wau,
       (select coalesce(sum(bytes), 0)::bigint from media_assets where deleted_at is null) as media_bytes,
@@ -235,7 +236,7 @@ export async function impersonate(tenantId: string, userId: string, reason: stri
 export async function tenantUsers(tenantId: string) {
   const db = platformDb()
   return db.select({ id: schema.users.id, fullName: schema.users.fullName, phone: schema.users.phone, status: schema.users.status })
-    .from(schema.users).where(eq(schema.users.tenantId, tenantId)).orderBy(desc(schema.users.createdAt)).limit(200)
+    .from(schema.users).where(employeeOnly(eq(schema.users.tenantId, tenantId))).orderBy(desc(schema.users.createdAt)).limit(200)
 }
 
 /**
@@ -246,7 +247,7 @@ export async function checkPlanLimit(tenantId: string, what: 'users'): Promise<{
   const { effectiveLimits } = await import('./tenantLimits')
   const limits = await effectiveLimits(tenantId)
   if (what === 'users') {
-    const rows = await platformDb().execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked`) as unknown as { n: number }[]
+    const rows = await platformDb().execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}`) as unknown as { n: number }[]
     const n = rows[0]?.n ?? 0
     const limit = limits.users
     return { ok: limit === null || n < limit, limit, current: n }

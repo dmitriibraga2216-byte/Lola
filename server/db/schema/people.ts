@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigint, boolean, date, index, inet, jsonb, pgTable, text, timestamp, unique, uuid,
+  bigint, boolean, check, date, index, inet, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
@@ -10,6 +10,10 @@ import { cities, positionLevels } from './refs'
 export const users = pgTable('users', {
   ...baseColumns,
   tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  // Вид человека (docs/02 «Перечисления» user_kind, docs/v2/44 В-8 и В-14): employee | candidate.
+  // Кандидат и сотрудник — одна запись с разным kind; перевод в штат меняет kind, а не заводит
+  // вторую строку. Списочные выборки людей идут только через server/services/repo/people.ts.
+  kind: text('kind').notNull().default('employee'),
   phone: text('phone'), // E.164, уникален в тенанте — ключ входа
   email: text('email'),
   fullName: text('full_name').notNull(), // «Прізвище Імʼя По батькові» — собирается из частей
@@ -44,6 +48,9 @@ export const users = pgTable('users', {
   unique().on(t.tenantId, t.email),
   unique().on(t.tenantId, t.externalId),
   index().on(t.tenantId, t.status),
+  // Списки сотрудников — самый частый запрос; кандидаты в индекс не попадают (docs/v2/44 В-14).
+  index('users_tenant_status_employee_idx').on(t.tenantId, t.status).where(sql`kind = 'employee'`),
+  check('users_kind_chk', sql`${t.kind} in ('employee', 'candidate')`),
 ])
 
 export const userPlacements = pgTable('user_placements', {

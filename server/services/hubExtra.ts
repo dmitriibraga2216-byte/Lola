@@ -11,6 +11,7 @@ import type { Audience } from '../../shared/schemas/assignments'
 import type { ContentBlock } from '../../shared/schemas/content'
 import type { BookmarkType, EventInput, GuestBlocks } from '../../shared/schemas/hub'
 import { guestBlocksSchema } from '../../shared/schemas/hub'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -74,7 +75,7 @@ export async function listEvents(ctx: Ctx, opts: { upcomingOnly?: boolean } = {}
     for (const r of rows) {
       const invited = r.audience
         ? (await resolveAudience(tx, r.audience as Audience)).size
-        : ((await tx.execute(sql`select count(*)::int as n from users where status = 'active'`)) as unknown as { n: number }[])[0]?.n ?? 0
+        : ((await tx.execute(sql`select count(*)::int as n from users where status = 'active' ${EMPLOYEES_ONLY('')}`)) as unknown as { n: number }[])[0]?.n ?? 0
       out.push({ ...r, invited, published: r.status !== 'draft' })
     }
     return out

@@ -228,7 +228,9 @@ describe('шкалы range|levels (docs/24 Г-24.4)', () => {
 describe('usage.collect и «Статистика» (docs/24 §4.4.1)', () => {
   it('сбор считает активных без заблокированных, пишет строку; usageView отдаёт последний сбор и лимиты плана', async () => {
     const snap = await us.collectUsage(tenantId)
-    const n = (await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and status = 'active' and not is_blocked`)[0]!.n as number
+    // kind = 'employee': tenant_usage.active_users — это штат (П-16.1, docs/v2/44 В-8),
+    // а в посеве есть канареечные кандидаты — без фильтра эталон разойдётся со сбором
+    const n = (await admin`select count(*)::int as n from users where tenant_id = ${tenantId} and kind = 'employee' and status = 'active' and not is_blocked`)[0]!.n as number
     expect(snap.activeUsers).toBe(n)
     const view = await us.usageView(ctx())
     expect(view.last?.activeUsers).toBe(n)

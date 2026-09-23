@@ -117,6 +117,16 @@ export const RATER_ROLE_DEFAULTS: Record<RaterKind, RaterRole> = {
   external: { kind: 'external', weight: 1, isAnonymous: false },
 }
 
+/**
+ * Вид человека в `users` (docs/v2/28 §2, docs/v2/44 В-8 и В-14): кандидат и сотрудник —
+ * одна запись с разным `kind`, а не две таблицы. Перевод кандидата в штат меняет `kind`,
+ * история откликов, оценок и обучения остаётся на том же `users.id`.
+ * Любая списочная выборка людей обязана идти через `server/services/repo/people.ts`
+ * (три слоя фильтра, П-16.1) — иначе кандидаты попадут в списки сотрудников.
+ */
+export const USER_KINDS = ['employee', 'candidate'] as const
+export type UserKind = typeof USER_KINDS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -137,4 +147,5 @@ export const ENUMS: Record<string, readonly string[]> = {
   competency_source: COMPETENCY_SOURCES,
   display_as: DISPLAY_AS,
   content_rating_target: CONTENT_RATING_TARGETS,
+  user_kind: USER_KINDS,
 }

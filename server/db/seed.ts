@@ -130,6 +130,20 @@ await db.transaction(async (tx) => {
   ]).returning()
   const [adminU, hr, chef, cook, cashier] = people
 
+  // Слой 3 патча П-16.1 (docs/v2/44-decisions.md В-8, вариант E): канареечные кандидаты.
+  // Пока в базе нет ни одного кандидата, все тесты зелёные независимо от качества фильтров
+  // (docs/v2/42-stages-delta.md §7.1 п. 3) — поэтому три кандидата сеются вместе с колонкой
+  // `kind`, в том же PR. Каждый подобран так, чтобы всплыть в своём классе забытых выборок:
+  // активный с тегом — в списках людей и в раскрытии аудитории по метке; с заблокированным
+  // ботом — в отчёте по Telegram; давно не заходивший — в «неактивні понад 30 днів».
+  // Размещения им не выдаются: кандидат не занимает должности (docs/v2/28 §2).
+  const longAgo = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000)
+  await tx.insert(schema.users).values([
+    { tenantId, kind: 'candidate', phone: '+380671000001', email: 'kanarka1@kappi.test', fullName: 'Канарка Перша', status: 'active', tags: ['кандидат'] },
+    { tenantId, kind: 'candidate', phone: '+380671000002', fullName: 'Канарка Друга', status: 'active', tags: ['кандидат'], telegramBlocked: true },
+    { tenantId, kind: 'candidate', phone: '+380671000003', fullName: 'Канарка Третя', status: 'active', tags: ['кандидат'], createdAt: longAgo, lastSeenAt: longAgo },
+  ])
+
   await tx.insert(schema.userPlacements).values([
     { tenantId, userId: chef!.id, locationId: lazareva!.id, positionId: pos['cook-hot']!.id },
     { tenantId, userId: cook!.id, locationId: lazareva!.id, positionId: pos['cook-hot']!.id },
@@ -670,7 +684,8 @@ await db.transaction(async (tx) => {
   ])
 })
 
-console.log('Сид применён: тенант «Каппі», 2 точки, 5 позиций, 5 системных ролей, 5 людей;'
+console.log('Сид применён: тенант «Каппі», 2 точки, 5 позиций, 5 системных ролей, 5 людей'
+  + ' и 3 канареечных кандидата (П-16.1, слой 3);'
   + ' учебный контент — 4 курса (12 уроков, 9 материалов), 3 теста (12 вопросов),'
   + ' 1 программа, 1 траектория')
 await client.end()

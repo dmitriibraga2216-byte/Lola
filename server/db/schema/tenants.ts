@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { boolean, check, index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 import { baseColumns } from './_common'
 
 /** Статусы тенанта (docs/02 §2.1, docs/25 §8): suspended — вход закрыт, задачи стоят; archived — ждёт tenant.purge. */
@@ -22,6 +22,9 @@ export const tenants = pgTable('tenants', {
   status: text('status').notNull().default('active'), // TENANT_STATUSES
   plan: text('plan').notNull().default('trial'), // trial | point | network | custom
   trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
+  // Рекрутинг выключен, пока тенант его не включил (docs/v2/28 §3, docs/v2/44 В-14): пока флаг
+  // false, кандидатов в тенанте нет ни одного, и откат users.kind сводится к выключению флага.
+  candidatesEnabled: boolean('candidates_enabled').notNull().default(false),
   branding: jsonb('branding').notNull().default(sql`'{}'::jsonb`),
   settings: jsonb('settings').notNull().default(sql`'{}'::jsonb`),
   archivedAt: timestamp('archived_at', { withTimezone: true }), // docs/25 §8: мягкое удаление, tenant.purge через 30 дней

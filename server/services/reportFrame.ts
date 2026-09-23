@@ -3,6 +3,7 @@ import type { SQL } from 'drizzle-orm'
 import type { PassContext, ReportFilter } from '../../shared/schemas/reports'
 import { FRAME_COLUMNS } from '../../shared/schemas/reports'
 import { scopeSql } from './access'
+import { EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Единый каркас отчётов и журналов (docs/22 §13.3, §13.4; CLAUDE.md «Отчёт или журнал»).
@@ -47,9 +48,16 @@ type FrameFilter = Partial<Pick<ReportFilter, 'positionIds' | 'orgUnitId' | 'tag
 /**
  * Фильтры каркаса (docs/22 §3, §7.1, §7.5): область видимости применяется всегда и первой,
  * архивированные исключены по умолчанию, посада/підрозділ/мітки/пошук — по запросу.
+ *
+ * Здесь же — единственная точка фильтра по виду человека для всех отчётов и журналов
+ * (П-16.1, решение docs/v2/44-decisions.md В-8): каркас один на все отчёты, значит и
+ * `kind = 'employee'` должен стоять один раз, а не повторяться в двух десятках запросов.
+ * Отчёт по кандидатам, когда он появится (docs/v2/28 §9), меняет это место параметром —
+ * и меняет его сразу во всех отчётах, а не в одном забытом.
  */
 export function frameWhere(f: FrameFilter = {}): SQL {
   return sql`
+    ${EMPLOYEES_ONLY('u')}
     ${scopeSql(f.scope ?? null, sql`pl.location_id`)}
     ${f.includeArchived ? sql`` : sql`and u.status <> 'archived'`}
     ${f.positionIds?.length ? sql`and pl.position_id in ${f.positionIds}` : sql``}

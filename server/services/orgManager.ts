@@ -53,7 +53,10 @@ export interface ManagerResolution {
 export interface ResolveOptions {
   /** Писать ли найденные расхождения в `org_conflicts`. По умолчанию — нет. */
   recordConflicts?: boolean
-  /** Тенант; нужен только для записи конфликтов. */
+  /**
+   * Тенант для записи конфликтов. Флаг дерева от него не зависит: без `tenantId` тенант
+   * берётся из транзакции (`flagTenantOf`).
+   */
   tenantId?: string
   actorId?: string | null
 }
@@ -64,6 +67,19 @@ const NONE = (userId: string): ManagerResolution => ({ userId, managerUserId: nu
 export async function orgTreeIsSourceOfTruth(tx: TenantTx, tenantId: string): Promise<boolean> {
   const [t] = await tx.select({ settings: tenants.settings }).from(tenants).where(eq(tenants.id, tenantId))
   return (t?.settings as Record<string, unknown> | undefined)?.org_structure_is_source_of_truth === true
+}
+
+/**
+ * Тенант, чей флаг решает, участвует ли дерево (шаг 1). Короткие формы (`managerIdOf`,
+ * `managerIdsOf`) зовутся из двух десятков сервисов без `tenantId` — тогда он берётся из самой
+ * транзакции: `withTenant()` ставит `app.tenant_id`. Без этого дерево учитывала бы только ручка
+ * `GET /org-structure/manager/:userId`, а уведомления, эскалации и отчёты при включённом флаге
+ * по-прежнему шли бы руководителю точки — два ответа на один вопрос (`32` §7.8).
+ */
+async function flagTenantOf(tx: TenantTx, tenantId: string | undefined): Promise<string | null> {
+  if (tenantId) return tenantId
+  const [r] = await tx.execute(sql`select nullif(current_setting('app.tenant_id', true), '') as id`) as unknown as { id: string | null }[]
+  return r?.id ?? null
 }
 
 /**
@@ -171,7 +187,8 @@ export async function resolveManagers(tx: TenantTx, userIds: string[], opts: Res
   if (!ids.length) return out
 
   const tenantId = opts.tenantId
-  const useTree = tenantId ? await orgTreeIsSourceOfTruth(tx, tenantId) : false
+  const flagTenant = await flagTenantOf(tx, tenantId)
+  const useTree = flagTenant ? await orgTreeIsSourceOfTruth(tx, flagTenant) : false
   const tree = useTree ? await fromTree(tx, ids) : new Map<string, ManagerResolution>()
   const byLocation = await fromLocation(tx, ids)
 

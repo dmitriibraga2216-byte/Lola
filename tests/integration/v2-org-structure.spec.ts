@@ -32,7 +32,7 @@ const {
   archiveNode, assignUser, canEditNode, createNode, createSnapshot, endAssignment,
   listTree, moveNode, syncDismissals,
 } = await import('../../server/services/orgStructure')
-const { resolveManager, rebuildManagerMap } = await import('../../server/services/orgManager')
+const { resolveManager, rebuildManagerMap, managerIdOf, managerIdsOf } = await import('../../server/services/orgManager')
 const { withTenant } = await import('../../server/utils/withTenant')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 2, onnotice: () => {} })
@@ -278,6 +278,14 @@ describe('§13 к. 4 и 5 — resolveManager()', () => {
     const [c] = await admin`select details from org_conflicts where user_id = ${worker} and kind = 'manager_mismatch' and resolved_at is null`
     expect(c).toBeDefined()
     expect((c!.details as { tree: string, location: string }).location).toBe(other)
+  })
+
+  it('короткие формы managerIdOf/managerIdsOf видят флаг тенанта сами — уведомления идут тому же, кого называет ручка', async () => {
+    // Поле точки указывает на другого человека: если бы короткие формы пропускали шаг 1
+    // (их зовут без `tenantId`), ответ был бы `other`, а ручка `GET …/manager` назвала бы `chief`.
+    await admin`update locations set manager_id = ${other} where id = ${locationId}`
+    expect(await withTenant(tenantId, adminId, tx => managerIdOf(tx, worker))).toBe(chief)
+    expect((await withTenant(tenantId, adminId, tx => managerIdsOf(tx, [worker]))).get(worker)).toBe(chief)
   })
 
   it('один и тот же конфликт не пишется дважды — журнал не заливается дублями', async () => {

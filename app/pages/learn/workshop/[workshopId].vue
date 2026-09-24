@@ -53,6 +53,16 @@ async function load() {
 onMounted(load)
 
 const editable = computed(() => !w.value?.current || ['draft', 'rework'].includes(w.value.current.status))
+
+/**
+ * Время биениями (docs/v2/37 §7.12, PR-21): чтение задания — «Час на контент», работа над
+ * сдачей — «Час на випробування». Форма сдачи живёт на том же экране, поэтому «открытие
+ * формы» — первое касание её полей (Р-21.10); после отправки экран времени не меряет.
+ */
+const time = useLearningTime({ subjectType: 'workshop', subjectId: workshopId, enrollmentId })
+const stillHere = time.stillHere
+const workingOnForm = ref(false)
+watchEffect(() => time.setKind(!w.value || !editable.value ? null : workingOnForm.value ? 'attempt' : 'content'))
 const canSubmit = computed(() => {
   if (!w.value || !editable.value) return false
   const hasText = text.value.trim().length >= (w.value.minTextLength ?? 1)
@@ -127,6 +137,7 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeri
 
 <template>
   <div class="ws">
+    <StillHereDialog :open="stillHere" @confirm="time.confirmStillHere()" />
     <header class="top">
       <NuxtLink :to="backTo" class="close">✕</NuxtLink>
       <div class="title">{{ w?.title }}</div>
@@ -177,7 +188,7 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeri
       </section>
 
       <!-- Форма сдачи -->
-      <section v-if="editable" class="block form">
+      <section v-if="editable" class="block form" @focusin="workingOnForm = true" @click="workingOnForm = true">
         <template v-if="w.submissionKinds.includes('text')">
           <label for="wtext" class="field-label">{{ t('workshop.commentLabel') }}</label>
           <textarea id="wtext" v-model="text" rows="6" :placeholder="t('workshop.textHint')" @blur="saveDraft" />

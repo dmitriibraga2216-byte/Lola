@@ -8,6 +8,7 @@ import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import { enqueueNotification } from './notifications'
 import { claimReview, closeReview, enqueueReview, releaseReview, reviewConflict } from './reviewQueue'
+import { closeOpenSegments } from './learningTime'
 import type { ContentBlock } from '../../shared/schemas/content'
 import { managerIdOf, managerIdsOf } from './orgManager'
 
@@ -215,6 +216,9 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: rid, code: 'workshop_submitted', payload: { name: me?.fullName, title: w.title, submissionId: s!.id }, dedupKey: `ws_submitted:${s!.id}:${rid}` })
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.submit', entity: 'workshop_submission', entityId: s!.id })
+    // Сдача отправлена — открытый сегмент измерения закрывается `completed` (docs/v2/37 §3.6);
+    // время сдачи в строку и в очередь проверки досчитает свёртка `time.rollup`
+    await closeOpenSegments(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, subjectType: 'workshop', subjectId: workshopId })
     return { ok: true as const, submissionId: s!.id }
   })
 }

@@ -1398,6 +1398,76 @@ create unique index uq_review_queue_items_source on review_queue_items (tenant_i
 заполняются той же транзакцией — **зеркало для совместимости**. Новому коду читать их нельзя;
 удаляются отдельной миграцией через один PR после перевода читателей (В-2).
 
+## Учёт времени обучения
+
+> [исправлено, PR-21 пакета `docs/v2`: раздела не было — время считалось двумя несвязанными
+> счётчиками `lesson_progress.seconds_spent` и `attempts.time_spent_sec`] Ранее: раздела не
+> существовало.
+
+Время прохождения считается **биениями, а не разницей «открыл — закрыл»** (`docs/v2/37`
+§7.10–7.15, сквозная проверка 22 `docs/v2/42` §5). Экран каждые 30 секунд сообщает, сколько
+из них человек был активен; сервер зачитывает не больше этого, не больше прошедшего по своим
+часам и не больше 30 секунд. Строка `learning_time_sessions` — сегмент: непрерывный отрезок
+одного экрана, в который складываются биения. Витрину и колонки прогресса пересчитывает
+фоновая задача `time.rollup` — горячий путь биения их не трогает.
+
+```sql
+-- Миграция 0078_v2_learning_time. Пишет только server/services/learningTime*.ts.
+create table learning_time_sessions (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),   -- по нему свёртка находит изменившиеся пары
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  enrollment_id uuid references enrollments(id) on delete cascade,
+  subject_type text not null, subject_id uuid not null,  -- learning_time_subject_type; ссылка мягкая
+  kind text not null,                               -- learning_time_kind: content | attempt
+  session_key uuid not null, segment_no int not null default 1, beats_count int not null default 0,
+  started_at timestamptz not null, last_beat_at timestamptz not null,
+  closed_reason text,                               -- learning_time_closed_reason; null — открыт
+  credited_seconds int not null default 0,          -- зачтено, ≤ 5400 (потолок сегмента)
+  discarded_seconds int not null default 0,         -- выброшено: простой, потолки, старая догрузка
+  media_seconds int not null default 0,             -- из зачтённого — скрытая вкладка с медиа
+  last_seq int not null default 0, last_credit int not null default 0,  -- идемпотентность по (session_key, seq)
+  device text, is_offline_replay boolean not null default false,
+  unique (tenant_id, session_key, segment_no)
+);
+create index idx_learning_time_sessions_tenant on learning_time_sessions (tenant_id, user_id, subject_type, subject_id, kind);
+create index idx_learning_time_sessions_open on learning_time_sessions (tenant_id, last_beat_at) where closed_reason is null;
+create index idx_learning_time_sessions_updated on learning_time_sessions (tenant_id, updated_at);
+-- открытый сегмент у пары «человек × элемент» один — в каком бы виде он ни был (`v2/37` §4)
+create unique index uq_learning_time_sessions_open_pair on learning_time_sessions (tenant_id, user_id, subject_type, subject_id) where closed_reason is null;
+
+create table learning_time_totals (                 -- витрина «человек × элемент × запись»
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  enrollment_id uuid references enrollments(id) on delete cascade,
+  subject_type text not null, subject_id uuid not null,
+  confidence text not null default 'ok',            -- review_time_confidence
+  content_seconds int not null default 0, attempt_seconds int not null default 0,
+  discarded_seconds int not null default 0, sessions_count int not null default 0,
+  first_started_at timestamptz, last_activity_at timestamptz,
+  unique nulls not distinct (tenant_id, user_id, subject_type, subject_id, enrollment_id)
+);
+create index idx_learning_time_totals_tenant on learning_time_totals (tenant_id, subject_type, subject_id);
+
+-- Колонки учёта у таблиц прогресса (`v2/37` §3.7): пишет только time.rollup. Это учёт, а не
+-- правило прохождения — срок попытки по-прежнему только attempts.deadline_at.
+alter table lesson_progress add column content_seconds int not null default 0,
+  add column discarded_seconds int not null default 0, add column sessions_count int not null default 0;
+alter table attempts add column net_seconds int not null default 0, add column discarded_seconds int not null default 0;
+alter table workshop_submissions add column attempt_seconds int not null default 0, add column content_seconds int not null default 0;
+-- способ ввода ответа (`v2/30` §3.7, `v2/44` В-12); ставит сервер при сохранении ответа
+alter table attempt_answers add column input_mode text not null default 'text'
+  check (input_mode in ('text','voice','video','file'));
+```
+
+`lesson_progress.seconds_spent` и `attempts.time_spent_sec` не удаляются: это «сырые» величины,
+и `seconds_spent` по-прежнему вход правила зачёта урока (`min_seconds`, `11` §7.3). Новые колонки
+расходятся с ними на выброшенный простой.
+
 ## Программы и траектории
 
 ```sql
@@ -2172,8 +2242,23 @@ review_task_type: quiz_open_answer | workshop | offline_confirm | survey_open | 
 review_queue_status: waiting | in_review | done
 
 -- Достоверность измерения времени (`review_queue_items.time_confidence`, `v2/37` §7.15):
--- partial — биения дошли не все (офлайн-досылка), unreliable — в расчёт нормы не входит
+-- partial — биения дошли не все (офлайн-досылка), unreliable — в расчёт нормы не входит.
+-- Тот же перечень — `learning_time_totals.confidence` (PR-21): очередь берёт значение оттуда
 review_time_confidence: ok | partial | unreliable
+
+-- Учёт времени биениями (`v2/37` §3.6, §7.10–7.15, PR-21). Вид времени: content — «Час на
+-- контент», attempt — «Час на випробування»; виды одного элемента не пересекаются
+learning_time_kind: content | attempt
+-- Элемент, по которому меряется время (`learning_time_sessions.subject_type`); тот же
+-- перечень у норм `content_time_norms.subject_type` (`v2/37` §3.5)
+learning_time_subject_type: lesson | quiz | workshop | track_node
+-- Причина закрытия сегмента (`learning_time_sessions.closed_reason`, `v2/37` §4). stale
+-- предварительна: вернувшийся сеанс переписывает её на idle_timeout (`v2/46` Р-21.5)
+learning_time_closed_reason: completed | idle_timeout | segment_cap | daily_cap | navigated_away | session_end | stale
+
+-- Способ ввода ответа (`attempt_answers.input_mode`, `v2/30` §3.7, решение `v2/44` В-12):
+-- голос — не тип вопроса, а способ ответа; ставит сервер при сохранении ответа
+answer_input_mode: text | voice | video | file
 
 -- Состояние вакансии (`vacancies.state`, `v2/29` §4). Переоткрытие закрытой выдаёт новый
 -- токен: старая ссылка расходится по чатам и агрегаторам, и пришедший через полгода

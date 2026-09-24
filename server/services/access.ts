@@ -142,8 +142,10 @@ export async function scopeForGrants(access: Access, tenantScope: Scope | string
 /**
  * Область одного скоупа — по назначениям ролей, где он есть: null — роль на весь тенант;
  * иначе точки (напрямую или через подразделение). Пустой массив — скоупа нет ни в одной роли.
- * Вторая половина `scopeForGrants` — для скоупов без «сетевой» пары (выдача заказов, ручные
- * бонусы: у наставника и руководителя точки они действуют только на своих людей, docs/21 §2).
+ * Вторая половина `scopeForGrants` — для скоупов без «сетевой» пары: выдача заказов и ручные
+ * бонусы (у наставника и руководителя точки они действуют только на своих людей, docs/21 §2),
+ * чужое время обучения (`time.metrics.view`, `docs/v2/37` §2: наставник и руководитель — своя
+ * область, администратор — весь тенант).
  */
 export async function areaForScope(access: Access, scope: Scope | string): Promise<string[] | null> {
   const grants = access.grants.filter(g => g.scopes.includes(scope))

@@ -68,6 +68,16 @@ const requestSent = ref(false)
 const files = ref<Record<string, { name: string }[]>>({})
 const { upload, compressImage } = useMediaUpload()
 
+/**
+ * Время биениями (docs/v2/37 §7.12, PR-21): стартовый экран с условиями — «Час на контент»,
+ * вопросы — «Час на випробування», результат — не меряется. Смена вида — новый сеанс, старый
+ * закрывается. Время в форме жалобы не идёт ни туда, ни туда: оно уже возвращено дедлайну
+ * сдвигом (docs/v2/36 §7.7), и попытку не «съедает» (Р-21.9).
+ */
+const time = useLearningTime({ subjectType: 'quiz', subjectId: quizId, enrollmentId })
+const stillHere = time.stillHere
+watch(phase, p => time.setKind(p === 'intro' ? 'content' : p === 'question' ? 'attempt' : null), { immediate: true })
+
 const current = computed(() => state.value?.questions[index.value] ?? null)
 const total = computed(() => state.value?.questions.length ?? 0)
 const answeredCount = computed(() => Object.keys(answers.value).length)
@@ -243,6 +253,7 @@ function retry() {
 
 <template>
   <div class="quiz">
+    <StillHereDialog :open="stillHere" @confirm="time.confirmStillHere()" />
     <header class="top">
       <NuxtLink :to="backTo" class="close">✕</NuxtLink>
       <div class="crumbs">

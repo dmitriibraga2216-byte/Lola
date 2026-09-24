@@ -5761,5 +5761,10 @@
       "reportedAt": "Reported",
       "issueStatus": "Report status"
     }
+  },
+  "time": {
+    "stillHereTitle": "Are you still here?",
+    "stillHereHint": "You have been learning for 90 minutes in a row. Learning time is paused — press “Continue” to keep counting it.",
+    "stillHereContinue": "Continue"
   }
 }

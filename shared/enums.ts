@@ -577,6 +577,41 @@ export type ReviewQueueStatus = typeof REVIEW_QUEUE_STATUSES[number]
  */
 export const REVIEW_TIME_CONFIDENCE = ['ok', 'partial', 'unreliable'] as const
 export type ReviewTimeConfidence = typeof REVIEW_TIME_CONFIDENCE[number]
+
+/**
+ * Вид измеряемого времени (`learning_time_sessions.kind`, docs/v2/37 §3.6, §7.12):
+ * `content` — «Час на контент» (изучение материала), `attempt` — «Час на випробування»
+ * (выполнение теста или сдача практикума). Виды одного элемента не пересекаются.
+ */
+export const LEARNING_TIME_KINDS = ['content', 'attempt'] as const
+export type LearningTimeKind = typeof LEARNING_TIME_KINDS[number]
+
+/**
+ * Элемент, по которому меряется время (`learning_time_sessions.subject_type`, `37` §3.6).
+ * Тот же перечень у норм времени `content_time_norms.subject_type` (`37` §3.5, PR-22).
+ */
+export const LEARNING_TIME_SUBJECT_TYPES = ['lesson', 'quiz', 'workshop', 'track_node'] as const
+export type LearningTimeSubjectType = typeof LEARNING_TIME_SUBJECT_TYPES[number]
+
+/**
+ * Почему закрыт сегмент измерения (`learning_time_sessions.closed_reason`, `37` §3.6, §4):
+ * `completed` — элемент завершён (урок зачтён, попытка или сдача отправлены); `idle_timeout` —
+ * следующее биение пришло позже 120 с; `segment_cap` — 90 минут подряд, «Ви ще тут?»;
+ * `daily_cap` — 8 часов за сутки; `navigated_away` — открыт другой сеанс того же элемента
+ * (второе устройство или смена вида); `session_end` — экран закрыт; `stale` — биений нет
+ * дольше 120 с, закрыто фоновой задачей (предварительно: вернувшийся сеанс переписывает её
+ * на `idle_timeout`, решение Р-21.5).
+ */
+export const LEARNING_TIME_CLOSED_REASONS = ['completed', 'idle_timeout', 'segment_cap', 'daily_cap', 'navigated_away', 'session_end', 'stale'] as const
+export type LearningTimeClosedReason = typeof LEARNING_TIME_CLOSED_REASONS[number]
+
+/**
+ * Способ ввода ответа (`attempt_answers.input_mode`, docs/v2/30 §3.7, решение docs/v2/44 В-12):
+ * голос — не новый тип вопроса, а способ ответа. Четыре значения DDL `30` §3.7 (`video` —
+ * видеоответ собеседования при `record_video`, `30` §3.3).
+ */
+export const ANSWER_INPUT_MODES = ['text', 'voice', 'video', 'file'] as const
+export type AnswerInputMode = typeof ANSWER_INPUT_MODES[number]
 /** На что жалуются (`v2/36` §3.1): девять видов элементов контента. */
 export const CONTENT_ISSUE_TARGET_TYPES = [
   'resource', 'lesson', 'block', 'quiz', 'question', 'workshop', 'survey', 'knowledge_article', 'media',
@@ -718,6 +753,10 @@ export const ENUMS: Record<string, readonly string[]> = {
   review_task_type: REVIEW_TASK_TYPES,
   review_queue_status: REVIEW_QUEUE_STATUSES,
   review_time_confidence: REVIEW_TIME_CONFIDENCE,
+  learning_time_kind: LEARNING_TIME_KINDS,
+  learning_time_subject_type: LEARNING_TIME_SUBJECT_TYPES,
+  learning_time_closed_reason: LEARNING_TIME_CLOSED_REASONS,
+  answer_input_mode: ANSWER_INPUT_MODES,
   content_issue_target_type: CONTENT_ISSUE_TARGET_TYPES,
   content_issue_type: CONTENT_ISSUE_TYPES,
   content_issue_status: CONTENT_ISSUE_STATUSES,

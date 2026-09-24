@@ -157,6 +157,19 @@ export default defineNitroPlugin(async () => {
         if (ss.started || ss.finished || sr) console.log(`[meetup_session.scan] ${tenantId}:`, { ...ss, reminded: sr })
       })
     })
+    // Учёт времени биениями (docs/v2/37 §11, PR-21). Круг — по всем работающим тенантам
+    // (`activeTenantIds`, таблица tenants без RLS): выборка «тенанты с открытыми сегментами»
+    // вне withTenant под app_user вернула бы пусто — RLS не видит строк без контекста тенанта.
+    await work('time.close_stale_sessions', () => runPerTenant('time.close_stale_sessions', async (tenantId) => {
+      const { closeStaleSessions } = await import('../services/learningTime')
+      const n = await closeStaleSessions(tenantId)
+      if (n) console.log(`[time.close_stale_sessions] ${tenantId}: закрыто ${n}`)
+    }))
+    await work<{ windowMinutes?: number }>('time.rollup', jobs => runPerTenant('time.rollup', async (tenantId) => {
+      const { rollupTenant } = await import('../services/learningTimeRollup')
+      const s = await rollupTenant(tenantId, { windowMinutes: jobs[0]?.data?.windowMinutes })
+      if (s.totals || s.lessonProgress || s.attempts || s.submissions || s.queueItems) console.log(`[time.rollup] ${tenantId}:`, s)
+    }))
     await work('workshop.sla_scan', () => runPerTenant('workshop.sla_scan', async (tenantId) => {
       const s = await workshopSlaScan(tenantId)
       if (s.released || s.breached || s.expired) console.log(`[workshop.sla_scan] ${tenantId}:`, s)

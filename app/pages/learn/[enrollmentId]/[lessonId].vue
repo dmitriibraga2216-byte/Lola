@@ -49,6 +49,14 @@ const offline = ref(false)
 const bodyEl = ref<HTMLElement | null>(null)
 
 /**
+ * «Час на контент» — биениями (docs/v2/37 §7.10, PR-21). Считается отдельно от тика выше:
+ * тик — «сырые» секунды и правило зачёта урока (`min_seconds`), биения — учёт времени с
+ * защитой от открытой вкладки. Урок-тест и практикум меряют себя на своих экранах.
+ */
+const time = useLearningTime({ subjectType: 'lesson', subjectId: lessonId, enrollmentId })
+const stillHere = time.stillHere
+
+/**
  * Строка-подтверждение формы жалобы (docs/v2/36 §5.2): «урок «…», версія N». Человек
  * ничего не вводит — экран сам говорит серверу, где он был (§7.1).
  */
@@ -186,6 +194,7 @@ onMounted(async () => {
     }
     data.value = opened
     tree.value = treeRes
+    time.setKind('content')
     secondsSpent.value = opened.progress.secondsSpent
     blocksState.value = { ...opened.progress.blocksState }
     videoPct.value = opened.progress.videoPct
@@ -330,6 +339,7 @@ async function next() {
 
 <template>
   <div :class="['player', { 'no-print': data && !data.lesson.canPrint }]">
+    <StillHereDialog :open="stillHere" @confirm="time.confirmStillHere()" />
     <header class="top">
       <NuxtLink :to="`/learn/${enrollmentId}`" class="close" :aria-label="t('learner.exit')">←</NuxtLink>
       <div class="crumbs">

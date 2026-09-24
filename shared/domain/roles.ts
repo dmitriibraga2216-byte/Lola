@@ -12,7 +12,10 @@
  * `/admin/settings/lifecycle` уже работают, `docs/v2/33` §2 даёт им право видеть этап);
  * `lifecycle.manage` остаётся только у `admin`. Второе — `offboarding.start` у `manager`
  * (PR-07: экран `/admin/offboarding` работает, `docs/v2/33` §2 — «Запустить офбординг:
- * керівник точки ✓ своей точки»); `offboarding.complete` остаётся только у `admin`. Роль `owner`
+ * керівник точки ✓ своей точки»); `offboarding.complete` остаётся только у `admin`. Третье —
+ * `time.metrics.view` у `mentor` и `manager` (PR-21: `GET /learning/time/totals`, `docs/v2/37`
+ * §2 — чужое время «по своей области»); автору поимённого времени не положено вовсе — ему
+ * обезличенный отчёт PR-22. Роль `owner`
  * заведена (см. ниже) — `docs/v2/35` §2 ссылалась на неё как на существующую, хотя в `01` §1.2
  * её не было. Распределение по будущим ролям `recruiter` и `hr` — в PR, которые добавят
  * соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
@@ -130,6 +133,8 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'org.structure.view',
       // docs/21 §2 «Начислять баллы вручную»: наставник — своим людям (область роли)
       'bonus.grant',
+      // PR-21: «Час на контент» и «Час на випробування» людей своей точки (`docs/v2/37` §2)
+      'time.metrics.view',
     ],
   },
   manager: {
@@ -156,6 +161,8 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       // docs/21 Г-21.1: выдачу отмечает руководитель точки; ручное начисление — своим людям.
       // Каталог магазина (`shop.manage`) — не у него: цена в бонусах одна на сеть (docs/01 §1.3).
       'shop.issue', 'bonus.grant',
+      // PR-21: чужое время обучения своей области (`docs/v2/37` §2)
+      'time.metrics.view',
     ],
   },
   author: {

@@ -52,10 +52,18 @@ let chief: string, worker: string, other: string, outsider: string, loner: strin
 /** Носитель роли со скоупом `report.team` на точке — шаг 3 `resolveManager()` (посев). */
 let roleScopeManager: string
 
+/**
+ * Тестовый человек. Статус — `invited`, а не `active`, намеренно: активный штат считает
+ * `usage.collect`, а его строка `tenant_usage` за сутки идемпотентна, поэтому пять лишних
+ * активных сотрудников в общем тенанте «Каппі» ломают чужую проверку «сбор считает активных
+ * без заблокированных» (`spec24-settings.spec.ts`) — и ломают её не там, где причина.
+ * Дереву подчинения статус безразличен: `assignUser()` отказывает только архивированному,
+ * а `rebuildManagerMap()` берёт и `active`, и `invited`.
+ */
 async function person(phone: string, name: string, placed = true): Promise<string> {
   const [u] = await admin`
     insert into users (tenant_id, full_name, last_name, first_name, phone, status, kind)
-    values (${tenantId}, ${PREFIX + name}, ${name}, 'Тест', ${phone}, 'active', 'employee')
+    values (${tenantId}, ${PREFIX + name}, ${name}, 'Тест', ${phone}, 'invited', 'employee')
     returning id`
   if (placed) {
     await admin`
@@ -249,6 +257,7 @@ describe('§13 к. 4 и 5 — resolveManager()', () => {
 
   it('к. 4 — человека нет в дереве: резерв locations.manager_id, source=location, конфликт unit_missing', async () => {
     await admin`update locations set manager_id = ${other} where id = ${locationId}`
+    await admin`delete from org_conflicts where user_id = ${outsider}`
     const r = await withTenant(tenantId, adminId, tx => resolveManager(tx, outsider, { tenantId, recordConflicts: true }))
     expect(r.managerUserId).toBe(other)
     expect(r.source).toBe('location')
@@ -259,6 +268,10 @@ describe('§13 к. 4 и 5 — resolveManager()', () => {
 
   it('к. 5 — дерево и точка дают разных людей: выигрывает дерево, расхождение в org_conflicts', async () => {
     await admin`update locations set manager_id = ${other} where id = ${locationId}`
+    // Открытый конфликт того же вида второй раз не пишется (`recordConflictOnce`), поэтому
+    // строку, оставшуюся от пересборки карты при привязке к узлу, закрываем: проверяем ту,
+    // что соответствует текущему состоянию поля точки.
+    await admin`delete from org_conflicts where user_id = ${worker} and kind = 'manager_mismatch'`
     const r = await withTenant(tenantId, adminId, tx => resolveManager(tx, worker, { tenantId, recordConflicts: true }))
     expect(r.managerUserId).toBe(chief) // не `other` из поля точки
     expect(r.source).toBe('org_tree')
@@ -289,6 +302,7 @@ describe('§13 к. 4 и 5 — resolveManager()', () => {
   })
 
   it('у человека без руководителя вовсе — source=none и конфликт no_manager', async () => {
+    await admin`delete from org_conflicts where user_id = ${loner}`
     // Ни дерева, ни точки, ни роли в области: у `loner` нет размещения вообще.
     const r = await withTenant(tenantId, adminId, tx => resolveManager(tx, loner, { tenantId, recordConflicts: true }))
     expect(r.managerUserId).toBeNull()
@@ -329,7 +343,7 @@ describe('§13 к. 4 и 5 — resolveManager()', () => {
 
     const [msg] = await admin`select code from notifications where user_id = ${worker} and code = 'org_manager_changed' order by created_at desc limit 1`
     expect(msg?.code).toBe('org_manager_changed')
-    await admin`update users set status = 'active' where id = ${chief}`
+    await admin`update users set status = 'invited' where id = ${chief}`
   })
 })
 

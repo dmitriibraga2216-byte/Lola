@@ -51,6 +51,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await admin`delete from rate_limits where key like ${`%${PHONE}%`}`
+  // Номер «неизвестного» из первого сценария — литерал, а не случайный: его счётчик
+  // переживал прогон и на четвёртом подряд прогоне по одной и той же базе блокировал
+  // отправку, роняя сценарий «наличие не раскрывается». На чистой базе (CI) не видно.
+  await admin`delete from rate_limits where key in ('otp:send:+380000000000', 'otp:ip:10.0.0.1')`
   await admin`delete from otp_codes where phone = ${PHONE}`
   await admin`delete from users where id = ${userId}`
   await admin.end()

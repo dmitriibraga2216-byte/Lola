@@ -319,6 +319,44 @@ check7_vacancy_not_rules_carrier() {
   report "7. вакансия не носитель правил прохождения (docs/v2/42 §5 проверка 13)" "$hits"
 }
 
+# ── Проверка 8. Публичный контур не ходит в БД мимо withTenant() ────────────────────────────
+# docs/v2/42-stages-delta.md §5 проверка 16, docs/v2/39-patches.md П-25.3, решение В-9 п. 2.
+#
+# Это главный риск PR-16 и всего контура: публичная страница работает **без сессии**, тенанта
+# в контексте нет, и соблазн «сходить в базу напрямую, всё равно фильтровать не по чему»
+# максимален. Проверяются два инварианта правила контура сразу:
+#
+#   (а) ни один обработчик под `server/api/v1/public/` не обращается к БД сам — он зовёт
+#       сервис; единственный разрешённый импорт из слоя данных ему просто не нужен;
+#   (б) у каждого обработчика контура стоит `hitRateLimit` (пункт «в» правила В-9) —
+#       без него перебор токенов ограничен только их длиной.
+#
+# Обращение сервисов контура к `db` мимо `withTenant()` этим grep'ом не ловится и ловиться не
+# должно: ровно одно такое обращение разрешено и необходимо — вызов функции `SECURITY DEFINER`,
+# выводящей тенанта из токена (`vacancy_public_lookup`, `mystery_link_lookup`). Оно закрыто
+# тестом `tests/integration/v2-vacancy-apply.spec.ts`, который проверяет результат, а не текст:
+# чужой токен отдаёт 404, а не данные.
+check8_public_contour() {
+  local dir="server/api/v1/public"
+  if [ ! -d "$dir" ]; then
+    echo "[skip] 8. публичный контур (каталог $dir не найден)"
+    return
+  fi
+  local hits=""
+  # (а) обращение к слою данных прямо из обработчика контура
+  hits="$(grep -rln "from '.*db/client'\|from '.*db/schema'\|drizzle-orm" "$dir" --include='*.ts' 2>/dev/null || true)"
+  hits="$(printf '%s\n' "$hits" | sed '/^$/d' | sed 's/$/: обработчик контура обращается к БД сам/')"
+  # (б) обработчик контура без частотного ограничения
+  local missing=""
+  local f
+  for f in $(find "$dir" -name '*.ts' 2>/dev/null | sort); do
+    grep -q 'hitRateLimit' "$f" || missing="$missing$f: нет hitRateLimit (правило публичного контура, В-9 п. 2в)\n"
+  done
+  local combined
+  combined="$(printf '%s\n%b' "$hits" "$missing" | sed '/^$/d')"
+  report "8. публичный контур: БД только через сервис, у каждой ручки hitRateLimit" "$combined"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -326,5 +364,6 @@ check4_i18n
 check5_tokens
 check6_review_queue_rebuild
 check7_vacancy_not_rules_carrier
+check8_public_contour
 
 exit $overall

@@ -33,6 +33,10 @@ export async function getBoss(): Promise<PgBoss> {
       // docs/v2/28 §11: две ночные задачи воронки кандидатов (PR-14)
       await b.createQueue('candidate.auto_archive', { retryLimit: 2, expireInSeconds: 600 })
       await b.createQueue('candidate.consent_sweep', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/29 §11: публичный контур вакансии (PR-16) — истечение неподтверждённых
+      // откликов и уборка журнала попыток
+      await b.createQueue('vacancy.application_expire', { retryLimit: 2, expireInSeconds: 600 })
+      await b.createQueue('vacancy.attempts_gc', { retryLimit: 2, expireInSeconds: 600 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -50,6 +54,11 @@ export async function getBoss(): Promise<PgBoss> {
       // истёкшему согласию в 03:20 — по времени Киева, как и остальные суточные сканы
       await b.schedule('candidate.auto_archive', '0 3 * * *', {}, { singletonKey: 'candidate.auto_archive', tz: 'Europe/Kyiv' })
       await b.schedule('candidate.consent_sweep', '20 3 * * *', {}, { singletonKey: 'candidate.consent_sweep', tz: 'Europe/Kyiv' })
+      // Публичный контур вакансии (docs/v2/29 §11): ежечасно — отклик без подтверждённого
+      // кода старше суток уходит в `expired` и освобождает место, в 03:40 — уборка журнала
+      // попыток старше 30 дней
+      await b.schedule('vacancy.application_expire', '10 * * * *', {}, { singletonKey: 'vacancy.application_expire' })
+      await b.schedule('vacancy.attempts_gc', '40 3 * * *', {}, { singletonKey: 'vacancy.attempts_gc', tz: 'Europe/Kyiv' })
       return b
     })
   }

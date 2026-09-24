@@ -149,3 +149,87 @@ export async function verifyOtp(phone: string, code: string): Promise<OtpVerifyR
   await db.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, row.id))
   return { ok: true, channel: row.channel as 'telegram' | 'sms' | 'email' }
 }
+
+// ── Код на произвольный контакт (docs/v2/29 §7.5, PR-16) ──────────────────────────────────
+
+export type ContactCodeResult
+  = | { ok: true, channel: 'sms' | 'email', devCode?: string }
+    | { ok: false, code: 'rate_limited' }
+
+/**
+ * Код подтверждения на контакт, **не привязанный к учётной записи**: публичная форма отклика
+ * (docs/v2/29 §7.5) проверяет владение телефоном или почтой у человека, которого в тенанте
+ * ещё нет — `usersByPhone()` и выбор канала по настройкам его сессии здесь неприменимы.
+ *
+ * Второго механизма одноразовых кодов при этом не заводится: строка та же (`otp_codes`),
+ * пеппер, argon2id, счётчик попыток и блокировка номера — те же. Отличаются только пороги
+ * (TTL 10 минут против 5, лимит отправок приходит параметром) и то, что `tenant_id`
+ * записывается — отклик всегда принадлежит конкретному пространству, и код живёт внутри
+ * его транзакции, а не в общей пред-сессионной области.
+ *
+ * `29` §7.5 разрешает капче не появляться именно из-за этой проверки: подтверждение владения
+ * контактом дороже для бота, чем распознавание картинки, и полезно бизнесу — рекрутер
+ * получает проверенный номер.
+ */
+export async function issueContactCode(input: {
+  tenantId: string
+  contact: string
+  channel: 'sms' | 'email'
+  ttlSec: number
+  sendsPerHour: number
+  locale?: string
+}): Promise<ContactCodeResult> {
+  const key = `apply:otp:${input.tenantId}:${input.contact}`
+  if (await isBlocked(`otp:block:${input.contact}`)) return { ok: false, code: 'rate_limited' }
+  if (!await hitRateLimit(key, input.sendsPerHour, 3600)) return { ok: false, code: 'rate_limited' }
+
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
+  const hashed = await argonHash(pepper(code))
+  await withTenant(input.tenantId, null, tx => tx.insert(otpCodes).values({
+    tenantId: input.tenantId,
+    phone: input.contact,
+    codeHash: hashed,
+    channel: input.channel,
+    expiresAt: new Date(Date.now() + input.ttlSec * 1000),
+  }))
+  await deliverOtp(input.channel, input.contact, code, {
+    tenantId: input.tenantId,
+    ttlMinutes: Math.round(input.ttlSec / 60),
+    locale: input.locale ?? 'uk',
+  })
+  return { ok: true, channel: input.channel, ...(process.env.OTP_DEBUG === '1' ? { devCode: code } : {}) }
+}
+
+/** Проверка такого кода. Те же пять попыток и та же блокировка контакта, что у входа. */
+export async function verifyContactCode(tenantId: string, contact: string, code: string): Promise<OtpVerifyResult> {
+  if (await isBlocked(`otp:block:${contact}`)) return { ok: false, code: 'rate_limited' }
+  return withTenant(tenantId, null, async (tx) => {
+    const [row] = await tx.select().from(otpCodes)
+      .where(and(
+        eq(otpCodes.phone, contact),
+        eq(otpCodes.tenantId, tenantId),
+        isNull(otpCodes.consumedAt),
+        gt(otpCodes.expiresAt, new Date()),
+      ))
+      .orderBy(desc(otpCodes.createdAt))
+      .limit(1)
+    if (!row) return { ok: false, code: 'otp_invalid' }
+    if (row.attempts >= MAX_ATTEMPTS) return { ok: false, code: 'rate_limited' }
+
+    if (!await argonVerify(row.codeHash, pepper(code))) {
+      const [updated] = await tx.update(otpCodes)
+        .set({ attempts: sql`${otpCodes.attempts} + 1` })
+        .where(eq(otpCodes.id, row.id))
+        .returning({ attempts: otpCodes.attempts })
+      const attempts = updated?.attempts ?? row.attempts + 1
+      if (attempts >= MAX_ATTEMPTS) {
+        await setBlock(`otp:block:${contact}`, BLOCK_SEC)
+        return { ok: false, code: 'rate_limited' }
+      }
+      return { ok: false, code: 'otp_invalid', attemptsLeft: MAX_ATTEMPTS - attempts }
+    }
+
+    await tx.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, row.id))
+    return { ok: true, channel: row.channel as 'telegram' | 'sms' | 'email' }
+  })
+}

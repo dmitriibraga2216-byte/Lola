@@ -101,6 +101,8 @@ export interface VacancyRow {
   publicEnabled: boolean
   publicToken: string | null
   publicApplyOtp: boolean
+  /** Язык публичной страницы (`29` §7.20); `null` — язык пространства. */
+  publicLanguage: string | null
   applyDailyCap: number
   sourceBudget: string | null
   templateId: string | null
@@ -137,6 +139,7 @@ const COLUMNS = {
   publicEnabled: vacancies.publicEnabled,
   publicToken: vacancies.publicToken,
   publicApplyOtp: vacancies.publicApplyOtp,
+  publicLanguage: vacancies.publicLanguage,
   applyDailyCap: vacancies.applyDailyCap,
   sourceBudget: vacancies.sourceBudget,
   templateId: vacancies.templateId,
@@ -344,6 +347,7 @@ function writableFields(input: VacancyCreateInput | VacancyUpdateInput) {
   set('salaryVisible', input.salaryVisible)
   set('assignmentTemplate', input.assignmentTemplate)
   set('publicApplyOtp', input.publicApplyOtp)
+  set('publicLanguage', input.publicLanguage)
   set('applyDailyCap', input.applyDailyCap)
   set('sourceBudget', input.sourceBudget === undefined ? undefined : num(input.sourceBudget))
   return o

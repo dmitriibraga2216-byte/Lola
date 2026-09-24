@@ -505,6 +505,13 @@
       "when": 1790233500000,
       "tag": "0073_v2_billing_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790233560000,
+      "tag": "0074_v2_vacancy_apply",
+      "breakpoints": true
     }
   ]
 }

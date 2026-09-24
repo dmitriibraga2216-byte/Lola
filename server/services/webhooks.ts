@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { webhookDeliveries, webhookEndpoints } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
+import { newsSuppressed } from '../utils/withoutNews'
 import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
 import { effectiveLimits } from './tenantLimits'
@@ -76,8 +77,12 @@ export async function updateEndpoint(ctx: Ctx, id: string, input: { isActive?: b
   return e
 }
 
-/** Постановка события в доставку — вызывается из доменных сервисов внутри их транзакции. */
+/**
+ * Постановка события в доставку — вызывается из доменных сервисов внутри их транзакции.
+ * Внутри `withoutNews()` не ставит ничего: так закрывается попытка, опоздавшая больше чем на сутки (docs/12 §7 п. 8).
+ */
 export async function emitWebhook(tx: TenantTx, tenantId: string, event: WebhookEvent, payload: Record<string, unknown>) {
+  if (newsSuppressed()) return 0
   const endpoints = await tx.select({ id: webhookEndpoints.id }).from(webhookEndpoints)
     .where(and(eq(webhookEndpoints.isActive, true), sql`${event} = any(${webhookEndpoints.events})`))
   if (!endpoints.length) return 0

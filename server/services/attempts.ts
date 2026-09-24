@@ -6,6 +6,7 @@ import {
 import type { z } from 'zod'
 import type { answerFileSchema, reviewAnswersQuerySchema } from '../../shared/schemas/quizzes'
 import { withTenant } from '../utils/withTenant'
+import { withoutNews } from '../utils/withoutNews'
 import { findAssignmentFor, resolveQuizParams } from './taskParams'
 import { balanceOf } from './pointsLedger'
 import { business } from '../utils/metrics'
@@ -25,7 +26,10 @@ import { closeOpenSegments } from './learningTime'
 
 interface Ctx { tenantId: string, actorId: string }
 
-const EXPIRE_AFTER_MS = 24 * 60 * 60 * 1000
+/** Сутки без активности закрывают попытку (docs/12 §7 п. 8). */
+const EXPIRE_AFTER = sql.raw(`interval '24 hours'`)
+/** Закрытие, опоздавшее больше чем на столько, — тихое: без уведомлений и вебхуков (docs/12 §7 п. 8). */
+const QUIET_AFTER = sql.raw(`interval '24 hours'`)
 
 /** Массив строк как параметр запроса: postgres-js не выводит тип text[] сам. */
 function textArray(values: string[]) {
@@ -1024,18 +1028,40 @@ export async function annulAttempt(ctx: Ctx, attemptId: string, reason: string) 
   })
 }
 
-/** Фоновая задача attempt.expire (docs/12 §7.8): закрыть по дедлайну или по 24ч бездействия. */
-export async function expireStaleAttempts(tenantId: string): Promise<number> {
+/**
+ * Фоновая задача attempt.expire (docs/12 §7 п. 8): закрыть по дедлайну или после суток без активности
+ * и оценить по отвеченному.
+ *
+ * - Срок закрытия `due_at` — дедлайн или сутки после последней активности, что раньше. Активность —
+ *   последний сохранённый ответ: `attempts.updated_at` ответами не обновляется, и без этого сутки
+ *   считались бы от старта — попытку без лимита времени закрывало бы посреди работы.
+ * - Условие одно, `due_at <= now()`. Прежнее «and(статус, sql с `or` внутри)» разворачивалось в
+ *   `(status = 'in_progress' and …) or updated_at < …` и захватывало завершённые попытки любого
+ *   статуса: повторная оценка стирала ручную проверку и снимала аннулирование. Пока задача не
+ *   работала (до 25.09.2026, docs/v2/46), этого не было видно.
+ * - Закрытие, опоздавшее больше чем на сутки (`now() - due_at > 24 ч` — воркер стоял), тихое:
+ *   результат, очередь проверки, зачёт и журналы пишутся, а уведомлений и вебхуков это закрытие
+ *   не порождает (`withoutNews`) — иначе после простоя люди получают новости недельной давности.
+ */
+export async function expireStaleAttempts(tenantId: string): Promise<{ closed: number, quiet: number }> {
   return withTenant(tenantId, null, async (tx) => {
-    const now = new Date()
-    const stale = await tx.select().from(attempts).where(and(
-      eq(attempts.status, 'in_progress'),
-      sql`(${attempts.deadlineAt} is not null and ${attempts.deadlineAt} < ${now}) or ${attempts.updatedAt} < ${new Date(now.getTime() - EXPIRE_AFTER_MS)}`,
-    ))
-    for (const a of stale) {
-      await gradeAndFinalize(tx, { tenantId, actorId: a.userId }, a, 'expire')
+    const lastActivity = sql`greatest(${attempts.updatedAt}, (select max(aa.answered_at) from ${attemptAnswers} aa where aa.attempt_id = ${attempts.id}))`
+    const dueAt = sql`least(${attempts.deadlineAt}, ${lastActivity} + ${EXPIRE_AFTER})`
+    const stale = await tx.select({ attempt: attempts, late: sql<boolean>`now() - ${dueAt} > ${QUIET_AFTER}` })
+      .from(attempts)
+      .where(and(eq(attempts.status, 'in_progress'), sql`${dueAt} <= now()`))
+    let quiet = 0
+    for (const { attempt, late } of stale) {
+      const close = () => gradeAndFinalize(tx, { tenantId, actorId: attempt.userId }, attempt, 'expire')
+      if (late) {
+        quiet++
+        await withoutNews(close)
+      }
+      else {
+        await close()
+      }
     }
-    return stale.length
+    return { closed: stale.length, quiet }
   })
 }
 

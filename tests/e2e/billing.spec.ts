@@ -13,6 +13,11 @@ test.beforeEach(resetOtp)
 async function switchToOwner(page: import('@playwright/test').Page) {
   await page.locator('.who').click()
   await page.getByRole('menuitemradio', { name: /Власник/ }).click()
+  // Смена роли — запрос к серверу (`POST /me/role/switch`) и перечитывание профиля. Без ожидания
+  // следующий `goto` обрывает запрос, и страница рисуется ещё под администратором — гонка, которую
+  // CI проигрывал 2 из 2 раз в PR #114. Ждём так же, как admin-roles-owner.spec.ts: у владельца нет
+  // раздела «Контент», его исчезновение и значит, что роль сменилась и меню перерисовано.
+  await expect(page.getByRole('button', { name: 'Контент', exact: true })).toHaveCount(0)
 }
 
 test('admin бачить тариф без суми і без історії платежів', async ({ page }) => {

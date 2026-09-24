@@ -70,7 +70,7 @@ test('адмін будує дерево, цикл відхиляється, к�
   expect(stillRoot[0]!.depth).toBe(1)
 
   // 4. Единственный источник истины о руководителе (к. 4, П-16.4)
-  const me = await api<{ user: { id: string } }>(request, csrf, 'get', '/me')
+  const me = await api<{ user: { id: string } }>(request, csrf, 'get', '/auth/me')
   const mgr = await api<{ source: string }>(request, csrf, 'get', `/org-structure/manager/${me.user.id}`)
   expect(['org_tree', 'location', 'functional', 'role_scope', 'none']).toContain(mgr.source)
 

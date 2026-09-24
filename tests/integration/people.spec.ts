@@ -245,18 +245,23 @@ describe('люди (docs/16 §13)', () => {
 })
 
 describe('docs/31 рядок PersonCard: «Рейтинг» у зведенні «Навчання» для чужої людини', () => {
-  it('personLearning рахує currentRating так само, як /me/study-history (studyHistory)', async () => {
+  it('personLearning рахує currentRating так само, як /me/study-history (studyHistory) — бали з книги (D-069)', async () => {
     const { studyHistory } = await import('../../server/services/reportsExtra')
     const uid = await makePerson('Рейтинг Тест')
     const [enr] = await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, required_total, status, completed_at) values (${tenantId}, ${uid}, ${courseId}, ${versionId}, 'self', 1, 'done', now()) returning id`
     const [att] = await admin`insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, passed, score, started_at, submitted_at) values (${tenantId}, ${quizId}, ${uid}, 1, '{}', '{}', 'passed', true, 90, now(), now()) returning id`
+    // Два виконані завдання з балами — два рядки книги з наростаючим залишком
+    await admin`insert into points_ledger (tenant_id, user_id, currency, delta, balance_after, event, ref_id, title) values
+      (${tenantId}, ${uid}, 'points', 50, 50, 'task_completed', gen_random_uuid(), 'Курс'),
+      (${tenantId}, ${uid}, 'points', 30, 80, 'task_completed', gen_random_uuid(), 'Тест')`
     try {
       const learning = await P.personLearning(ctx(), uid)
       const history = await studyHistory(ctx(), uid)
       expect(learning.currentRating).toBe(history.currentRating)
-      expect(learning.currentRating).toBeGreaterThanOrEqual(2) // курс + тест
+      expect(learning.currentRating).toBe(80) // курс + тест, у балах, а не штуках
     }
     finally {
+      await admin`delete from points_ledger where user_id = ${uid}`
       await admin`delete from attempts where id = ${att!.id}`
       await admin`delete from enrollments where id = ${enr!.id}`
     }

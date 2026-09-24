@@ -63,7 +63,7 @@
 4. Ключи всех списков с курсором перечислены в `KEYSETS` (`shared/domain/keyset.ts`); сторож
    `tests/unit/keyset-cursor-guard.spec.ts` не пропускает курсор, собранный вручную через `Date`.
 
-Курсор по целочисленному `id` (`/audit`, `/security-log`) точен сам по себе и остаётся числом.
+Курсор по целочисленному `id` (`/audit`, `/security-log`, `/bonuses/ledger` — книга бонусов, `id bigserial`) точен сам по себе и остаётся числом.
 
 ## 4.2 Аутентификация
 
@@ -111,7 +111,8 @@
 | GET | `/me/development-plan` | планы развития: `?status=active\|inactive\|done` (старый путь: `/development/me`, до конца R1) |
 | GET | `/me/certificates`, `/me/badges` | достижения; сертифікати — старий шлях `/learning/certificates`, до кінця R1; бейджі — нема зовсім, борг (docs/28 «Spec 04») |
 | GET | `/me/study-history` | история и динамика рейтинга (свой и внешний) |
-| GET | `/me/bonuses` | баланс и книга операций — нет вовсе, долг (docs/28 «Spec 04») |
+| GET | `/me/bonuses` | баланс бонусов, рейтинг (баллы), книга операций человека, «Вистачить на «…»» — `gamification` (`21` §17); модуль «Бонуси і магазин» выключен — 403 `module.disabled` |
+| GET | `/me/gift-store`, `/me/gift-store/orders` | витрина магазина (баланс, категории, товары с `blocked`: `out_of_stock` \| `limit_reached` \| `insufficient` — считает сервер) и свои заказы; кандидату — 403 `shop.employees_only` (`gamification`) |
 | GET/PATCH | `/me/notifications/prefs` | свои переключатели уведомлений (старый путь: `/notifications/prefs`, до конца R1) |
 | POST | `/me/role/switch` | `{roleId}` — переключение активной роли (`01` §1.9.2) среди своих действующих; чужая, снятая или истёкшая — 403 `forbidden`, по API-токену — 400; ответ `{activeRole, changed}`, событие `role.switch` в аудите с обеими ролями |
 
@@ -286,11 +287,15 @@
 | GET | `/notices/:id/coverage` | кто подтвердил, кто нет, по точкам; `POST /notices/:id/remind` — «Нагадати тим, хто не підтвердив» |
 | GET | `/birthdays`, `/contacts`, `/events` | дни рождения (`?tab=upcoming\|past&from=&to=`), контакты (`?q=&orgUnitId=&positionId=&cityId=`), события; `POST /events`, `PATCH /events/:id`, `POST /events/:id/register`; `PATCH /me/birthday-consent` |
 | GET | `/public/guest-page` | гостевая страница без входа: тенант по поддомену `Host` или `?slug=`; неизвестный — 404; `passwordLogin`, `hideLoginForm` (политика «Приховати форму входу», действует при настроенном Google; тогда код/пароль → 403 `login_form_hidden`) |
-| CRUD | `/gift-store/items` | товары магазина |
-| POST | `/gift-store/items/:id/order` | покупка → резерв |
-| POST | `/gift-store/orders/:id/status` | `ready` \| `issued` \| `cancelled` (`21` Г-21.1) |
-| GET | `/bonuses/ledger` | книга операций с остатком в строке |
-| POST | `/bonuses/adjust` | ручное начисление или списание с причиной |
+| CRUD | `/gift-store/items` | товары магазина (`shop.manage`); удаление мягкое |
+| POST | `/gift-store/items/:id/order` | покупка → резерв на 14 дней, списание строкой книги (`learn.view`); 409 `shop.out_of_stock` \| `shop.limit_reached` \| `shop.insufficient_bonuses` |
+| CRUD | `/gift-store/categories` | категории товаров тенанта (`shop.manage`); с товарами — 409 `in_use` (`gamification`) |
+| GET | `/gift-store/orders` | `?tab=pending\|issued\|cancelled&q=` — «До видачі» своей области (`shop.issue`) или сети (`shop.manage`), счётчики вкладок (`gamification`) |
+| POST | `/gift-store/orders/:id/status` | `ready` \| `issued` \| `cancelled` (`21` Г-21.1); отмена ответственным — с `reason`, покупатель отменяет свой `reserved` сам; 409 `shop.invalid_transition` |
+| GET | `/bonuses/ledger` | книга операций с остатком в строке; `?currency=&event=&userId=&q=&from=&to=&cursor=` — курсор = id строки |
+| GET | `/bonuses/balances` | «Керування бонусами»: сотрудники области с текущим остатком (`gamification`) |
+| POST | `/bonuses/adjust` | ручное начисление или списание с причиной (`bonus.grant`, только бонусы; себе — 409 `bonus.self_grant`, ниже нуля — 409 `bonus.insufficient`) |
+| GET/PATCH | `/settings/rewards` | «Правила нарахування» по типу задания (`settings.tenant`); модулем бонусов не гасится — баллы рейтинга идут и без магазина (`gamification`) |
 | GET/PUT | `/guest-blocks` | гостевая страница тенанта: три блока (`21` Г-21.3) |
 | GET/POST | `/comments` | єдина лента комментариев со всех источников; `?sourceType=&isRead=read\|unread&cursor=&limit=`, ответ `{data, meta: {cursor, limit}}` (курсор выдаёт сервер, §4.1); створення — `{sourceType: task\|course\|program\|knowledge\|notice, sourceId, body}`, маршрутизація автору матеріалу рахується сервером (Spec 10, `10` §14.2) |
 | POST | `/comments/:id/read`, `/comments/:id/reply` | пометка и ответ автору материала (Spec 10) |

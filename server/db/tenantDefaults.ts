@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { PgTransaction } from 'drizzle-orm/pg-core'
 import { STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES } from '../../shared/enums'
+import { DEFAULT_SHOP_CATEGORIES } from '../../shared/domain/gamification'
 import type { LifecycleStageCode, StageCapability } from '../../shared/enums'
 
 /**
@@ -90,5 +91,14 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
       insert into lifecycle_stages (tenant_id, code, name_uk, name_en, sort, expected_days, capabilities)
       values (${tenantId}::uuid, ${s.code}, ${s.nameUk}, ${s.nameEn}, ${i}, ${s.expectedDays}, ${JSON.stringify(s.capabilities)}::jsonb)
       on conflict (tenant_id, code) do nothing`)
+  }
+  // Стартовые категории магазина подарков — решение владельца продукта (docs/21 Г-21.1, 24.09.2026):
+  // мерч, вихідні дні, знижки, «щось у закладі». Дальше справочник ведёт администратор тенанта.
+  // Тот же список — в миграции `gamification` догоняющей вставкой для уже заведённых тенантов.
+  for (const [i, name] of DEFAULT_SHOP_CATEGORIES.entries()) {
+    await tx.execute(sql`
+      insert into shop_categories (tenant_id, name, sort)
+      values (${tenantId}::uuid, ${name}, ${i})
+      on conflict (tenant_id, name) do nothing`)
   }
 }

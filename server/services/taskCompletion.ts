@@ -8,6 +8,7 @@ import { findAssignmentFor } from './taskParams'
 import { confirmAssignmentCompetencies } from './developmentExtra'
 import { advanceLifecycleTx } from './lifecycleState'
 import { syncCandidateStatusTx } from './candidateJobs'
+import { accrueTaskRewards } from './rewards'
 
 /**
  * Єдина точка «завдання завершено» для всіх типів контенту (docs/33 D-020, D-034; docs/15 §14, docs/22 §13.4).
@@ -94,6 +95,13 @@ export async function onTaskCompleted(tx: TenantTx, tenantId: string, userId: st
     let competencies = 0
     if (input.status === 'done' && assignmentId) {
       competencies = await confirmAssignmentCompetencies(tx, tenantId, userId, assignmentId, input.sourceId ?? input.enrollmentId ?? null)
+    }
+    // Бали й бонуси «за виконання завдання» (docs/15 §14.3 «Нагороди», docs/21 §3.7; docs/33 D-069) —
+    // тією ж транзакцією, у точці збереження: збій нарахування не відкочує саме завершення,
+    // а повторне завершення того ж призначення не нараховує вдруге (points_ledger_once_uq).
+    if (input.status === 'done' && assignmentId) {
+      await tx.transaction(sp => accrueTaskRewards(sp, tenantId, userId, { contentType: input.contentType, contentId: input.contentId, assignmentId }))
+        .catch(err => console.error('points_ledger accrual failed', err))
     }
     // `lifecycle.advance` (docs/v2/33 §11): переход человека на следующий этап проверяется
     // по событию завершения назначения — здесь, в единой точке, а не в каждом модуле.

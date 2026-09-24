@@ -41,6 +41,8 @@ export const SCOPE_GROUPS: { key: string, scopes: string[] }[] = [
   { key: 'assessment', scopes: ['assessment.own', 'assessment.team', 'assessment.run', 'assessment.manage', 'checklist.run', 'checklist.manage'] },
   { key: 'meetups', scopes: ['meetup.view', 'meetup.enroll', 'meetup.manage', 'meetup.attendance', 'webinar.manage', 'complextest.manage'] },
   { key: 'programs', scopes: ['program.manage', 'program.publish', 'program.link_rule'] },
+  // Мотивація (docs/21 §2, Г-21.1; docs/01 §1.3): магазин подарунків, видача замовлень, ручні бонуси
+  { key: 'gamification', scopes: ['shop.manage', 'shop.issue', 'bonus.grant'] },
   { key: 'settings', scopes: ['settings.tenant', 'settings.notifications', 'settings.integrations', 'audit.view'] },
   // Владение простором (docs/01 §1.3 «Власність»): группа из одного скоупа — он и должен
   // стоять отдельно, а не теряться среди настроек: это единственное право, которое нельзя

@@ -415,6 +415,13 @@ RLS) — один человек может иметь несколько под
 | Объявления | `notice.assigned`, `notice.not_acknowledged` |
 | Руководителю | `digest.daily`, `digest.weekly`, `manager.overdue_escalation` |
 | Бонусы | `bonus.earned`, `bonus.order_ready` |
+
+> [дополнено, `gamification` (24.09.2026)] Бонусы сделаны. Коды в коде — snake_case, как у всех
+> шаблонов (`DEFAULT_TEMPLATES`): `bonus_earned` (начисление за задание и ручное), `bonus_order_ready`
+> («можна забрати на точці»), и ещё два, которых таблица не называла, а `21` Г-21.1 требует
+> («отмена возвращает бонусы», «автоотмена с уведомлением»): `bonus_order_cancelled` — отмена
+> ответственным с причиной, `bonus_order_expired` — истёк резерв. Группа на экране «Мої
+> сповіщення» — «Хаб». Обязательными не сделаны: это не срок и не безопасность.
 | День рождения | `birthday.today`, `birthday.upcoming` |
 
 Обязательные (без переключателя): `auth.*`, `task.assigned`, `task.due_*`,

@@ -4,6 +4,7 @@ import { processMedia, type MediaProcessJob } from '../jobs/mediaProcess'
 import { dueScanTenant } from '../jobs/dueScanTenant'
 import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs/candidateScan'
 import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
+import { shopReserveExpireTenant } from '../jobs/shopReserveExpire'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
 import { expandAssignment, syncAssignments } from '../services/assignments'
@@ -103,6 +104,11 @@ export default defineNitroPlugin(async () => {
       const n = await vacancyAttemptsGcTenant(tenantId)
       if (n) console.log(`[vacancy.attempts_gc] ${tenantId}: прибрано ${n}`)
     }, recruitingTenantIds))
+    // docs/21 Г-21.1: автоотмена просроченного резерва магазина с возвратом бонусов и остатка
+    await work('shop.reserve_expire', () => runPerTenant('shop.reserve_expire', async (tenantId) => {
+      const s = await shopReserveExpireTenant(tenantId)
+      if (s.expired || s.drift) console.log(`[shop.reserve_expire] ${tenantId}:`, s)
+    }))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

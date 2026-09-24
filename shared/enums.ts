@@ -646,6 +646,32 @@ export const CONTENT_ISSUE_LIMITS = {
   muteDays: 14,
 } as const
 
+/**
+ * Валюта книги операций (`points_ledger.currency`, docs/15 §14.3 «Нагороди»). У эталона в
+ * назначении два разных поля: «Бали за виконання завдання» — «використовуються для розрахунку
+ * рейтингу», «Бонуси за виконання завдання» — «для купівлі товарів у магазині подарунків».
+ * Одна книга, две валюты: баланс считается по валюте, трата бонусов рейтинг не уменьшает.
+ */
+export const POINTS_CURRENCIES = ['points', 'bonuses'] as const
+export type PointsCurrency = typeof POINTS_CURRENCIES[number]
+
+/**
+ * Событие книги операций (`points_ledger.event`) — колонка «Подія» журнала эталона
+ * `/gift-store/bonuses-log` (docs/21 §14.9): «Виконання завдання», «Ручне нарахування»,
+ * «Покупка»; плюс `refund` — возврат при отмене заказа отдельной строкой, а не удалением
+ * покупки (docs/21 Г-21.1: «обе операции — строками в книге»).
+ */
+export const POINTS_EVENTS = ['task_completed', 'manual', 'purchase', 'refund'] as const
+export type PointsEvent = typeof POINTS_EVENTS[number]
+
+/**
+ * Статус заказа в магазине (`shop_orders.status`, docs/02 «Корпоративный хаб», docs/21 Г-21.1
+ * `[решение]`): `reserved` — бонусы списаны и остаток уменьшен, `ready` — подготовлено на
+ * точке, `issued` — выдано (кто и когда), `cancelled` — бонусы и остаток возвращены.
+ */
+export const SHOP_ORDER_STATUSES = ['reserved', 'ready', 'issued', 'cancelled'] as const
+export type ShopOrderStatus = typeof SHOP_ORDER_STATUSES[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -710,4 +736,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   vacancy_close_reason: VACANCY_CLOSE_REASONS,
   vacancy_application_state: VACANCY_APPLICATION_STATES,
   public_apply_outcome: PUBLIC_APPLY_OUTCOMES,
+  points_currency: POINTS_CURRENCIES,
+  points_event: POINTS_EVENTS,
+  shop_order_status: SHOP_ORDER_STATUSES,
 }

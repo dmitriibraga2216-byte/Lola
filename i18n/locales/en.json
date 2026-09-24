@@ -146,7 +146,10 @@
       "vacancies": "Vacancies",
       "billing": "Plan and limits",
       "billingHistory": "Payment history",
-      "orgStructure": "Reporting tree"
+      "orgStructure": "Reporting tree",
+      "shop": "Gift shop",
+      "bonuses": "Bonuses",
+      "rewards": "Reward rules"
     },
     "section": {
       "learning": "Learning",
@@ -171,7 +174,8 @@
       "platform": "Platform",
       "billing": "Plan and billing",
       "peopleList": "People",
-      "peopleStructure": "Structure"
+      "peopleStructure": "Structure",
+      "motivation": "Motivation"
     },
     "menu": {
       "learner": "My cabinet",
@@ -670,7 +674,8 @@
       "catalog": "Catalog",
       "admin": "Manage",
       "profile": "Profile",
-      "aria": "Cabinet sections"
+      "aria": "Cabinet sections",
+      "bonuses": "Bonuses"
     },
     "hello": "Hi, {name}",
     "counter": "{n} tasks · {deadlines} with deadline",
@@ -938,7 +943,9 @@
     "noAnswer": "You did not answer",
     "correctIs": "correct — {a}",
     "answerGiven": "answer given",
-    "retry": "Retry"
+    "retry": "Retry",
+    "bonusEarned": "+{amount} earned",
+    "bonusBalance": "Balance: {amount}"
   },
   "quizAdmin": {
     "newTitle": "New quiz title",
@@ -1295,7 +1302,8 @@
       "channel": "Channel",
       "channelDefault": "Person's default",
       "saved": "Settings saved",
-      "invalid": "Check the parameters: some fields are not available for this content type"
+      "invalid": "Check the parameters: some fields are not available for this content type",
+      "byRule": "By rule: {n}"
     },
     "aud": {
       "title": "Assign users",
@@ -3416,7 +3424,11 @@
       "candidate_completed": "Candidate finished the selection",
       "candidate_review_needed": "Candidate needs a decision",
       "candidate_consent_expiring": "Candidate consent expires",
-      "candidate_stale": "Candidates with no movement"
+      "candidate_stale": "Candidates with no movement",
+      "bonus_earned": "Bonuses earned",
+      "bonus_order_ready": "Gift ready for pick-up",
+      "bonus_order_cancelled": "Gift order cancelled",
+      "bonus_order_expired": "Gift reservation expired"
     }
   },
   "ntpl": {
@@ -4519,7 +4531,10 @@
       "person.document.manage": "Manage person documents",
       "person.absence.manage": "Manage absence norms and records",
       "person.rating.view_others": "View others' rating",
-      "tenant.transfer": "Hand over workspace ownership"
+      "tenant.transfer": "Hand over workspace ownership",
+      "shop.manage": "Manage the gift shop",
+      "shop.issue": "Hand over orders at a location",
+      "bonus.grant": "Adjust bonuses manually"
     },
     "roles": {
       "title": "Roles and permissions",
@@ -4566,7 +4581,8 @@
         "content_issue": "Content issue reports",
         "review_delegation": "Review delegation",
         "people_extensions": "Person profile",
-        "ownership": "Ownership"
+        "ownership": "Ownership",
+        "gamification": "Bonuses and shop"
       },
       "ownerReadonly": "The owner's permission set is fixed — ownership is handed over, not rewritten",
       "owner": {
@@ -5317,5 +5333,178 @@
       "forbidden": "You can only change your own branch",
       "stale_tree": "Another user changed the structure, reload the page"
     }
+  },
+  "shop": {
+    "title": "Gift shop",
+    "available": "Available to you",
+    "bonusesCount": {
+      "one": "{n} bonus",
+      "few": "{n} bonuses",
+      "many": "{n} bonuses",
+      "other": "{n} bonuses"
+    },
+    "tabAll": "All",
+    "tabOrders": "Purchased",
+    "allCategories": "All categories",
+    "empty": "No gifts yet — your administrator will add them soon",
+    "emptyOrders": "You have not ordered anything yet. Pick a gift on the “All” tab",
+    "stockLeft": "Left: {n}",
+    "stockUnlimited": "Unlimited",
+    "pickupAt": "Pick up at: {place}",
+    "pickupAny": "Pick up at any location",
+    "limitPerUser": "No more than {n} per person",
+    "reserveRule": "After you order, the gift waits for you for {days} days; then the order is cancelled and the bonuses come back",
+    "order": "Order for {price}",
+    "ordered": "Ordered! Track the order on the “Purchased” tab",
+    "blocked": {
+      "out_of_stock": "Out of stock",
+      "limit_reached": "You have reached the limit",
+      "insufficient": "Not enough bonuses"
+    },
+    "missing": "Missing: {amount}",
+    "status": {
+      "reserved": "Being prepared",
+      "ready": "Ready for pick-up",
+      "issued": "Handed over",
+      "cancelled": "Cancelled"
+    },
+    "reservedUntil": "Reserved until {date}",
+    "issuedOn": "Handed over on {date}",
+    "cancelledOn": "Cancelled on {date}",
+    "cancelledBy": {
+      "self": "You cancelled the order — bonuses returned",
+      "staff": "Reason: {reason}. Bonuses returned",
+      "system": "The reservation expired — bonuses returned"
+    },
+    "cancelOrder": "Cancel order",
+    "cancelConfirm": "Cancel the order “{title}”? The bonuses will return to your balance.",
+    "history": "Bonus history",
+    "details": "Details",
+    "crumb": "Motivation",
+    "addItem": "Add a gift",
+    "tab": {
+      "items": "Gifts",
+      "pending": "To hand over",
+      "issued": "Handed over",
+      "cancelled": "Cancelled",
+      "categories": "Categories"
+    },
+    "col": {
+      "item": "Gift",
+      "category": "Category",
+      "price": "Price, bonuses",
+      "stock": "Stock",
+      "ordered": "Ordered",
+      "published": "Published",
+      "person": "Person",
+      "pickup": "Pick-up point",
+      "state": "State",
+      "reservedUntil": "Reserved until",
+      "issuedAt": "Handed over",
+      "issuedBy": "Handed over by",
+      "cancelledAt": "Cancelled",
+      "reason": "Reason"
+    },
+    "anyPoint": "Any",
+    "markReady": "Ready for pick-up",
+    "markIssued": "Handed over",
+    "cancel": "Cancel",
+    "cancelTitle": "Cancel the order",
+    "cancelHint": "The bonuses go back to the person and the gift goes back to stock. Explain why — the person will see the reason.",
+    "cancelReason": "Reason",
+    "expiredReason": "Reservation expired",
+    "selfCancelled": "Cancelled by the buyer",
+    "search": "Search by person or gift",
+    "emptyItems": "No gifts yet — add the first one",
+    "emptyPending": "Nothing to hand over: all orders are done",
+    "emptyIssued": "Nothing handed over yet",
+    "emptyCancelled": "No cancelled orders",
+    "categoriesHint": "Categories are your own list: rename the starter ones, delete the empty ones",
+    "newCategory": "New category",
+    "addCategory": "Add category",
+    "deleteCategoryConfirm": "Delete the category “{name}”?",
+    "itemsCount": "Gifts: {n}",
+    "form": {
+      "newTitle": "New gift",
+      "editTitle": "Edit gift",
+      "title": "Name",
+      "description": "Description",
+      "image": "Image",
+      "imageHint": "JPG or PNG — one image for the card",
+      "removeImage": "Remove image",
+      "category": "Category",
+      "noCategory": "No category",
+      "price": "Price in bonuses",
+      "stock": "Stock",
+      "stockUnlimited": "Unlimited — a day off, a discount or a service",
+      "location": "Pick-up point",
+      "limit": "Limit per person",
+      "noLimit": "No limit",
+      "published": "Published",
+      "publishedHint": "An unpublished gift is hidden from the shop",
+      "delete": "Delete gift",
+      "deleteConfirm": "Delete the gift “{title}”? Its orders stay."
+    }
+  },
+  "bonuses": {
+    "title": "Bonuses",
+    "shop": "Shop",
+    "rating": "Rating: {n}",
+    "history": "Earned and spent",
+    "empty": "No bonuses yet. You earn them for completed tasks",
+    "enough": "Enough for “{title}”",
+    "event": {
+      "task_completed": "Task completed",
+      "manual": "Manual adjustment",
+      "purchase": "Purchase",
+      "refund": "Refund"
+    },
+    "after": "Balance: {n}",
+    "journalTitle": "Bonus transaction log",
+    "hint": "A person’s balance is not a stored field but the last line of the ledger",
+    "tab": {
+      "journal": "Transactions",
+      "registry": "Bonus balances"
+    },
+    "col": {
+      "person": "Person",
+      "balance": "Balance",
+      "operation": "Amount",
+      "event": "Event",
+      "details": "Details",
+      "date": "Date",
+      "position": "Position",
+      "location": "Location",
+      "tags": "Tags",
+      "current": "Bonuses"
+    },
+    "grant": "Adjust manually",
+    "grantShort": "Adjust",
+    "grantTitle": "Add or deduct bonuses",
+    "grantHint": "Use a minus sign to deduct. The person sees the reason in their bonus history. You cannot adjust your own balance.",
+    "person": "Person",
+    "pickPerson": "Pick a person on the “Bonus balances” tab — the “Adjust” button in their row",
+    "amount": "Amount",
+    "comment": "Reason",
+    "granted": "Done: {name} now has {n}",
+    "search": "Search by name",
+    "anyEvent": "All events",
+    "emptyJournal": "No transactions yet",
+    "emptyRegistry": "Nobody found",
+    "by": "By: {name}",
+    "page": "Page {n} of {total}"
+  },
+  "rewards": {
+    "title": "Reward rules",
+    "hint": "For a completed task a person gets rating points and gift-shop bonuses. These are the defaults per task type; override them for a specific task in the assignment settings (“Rewards”). Rewards are given once per assignment and only to employees.",
+    "moduleOff": "The “Bonuses and shop” module is off — only rating points are awarded. Turn it on in “Settings → Policies → Modules”.",
+    "col": {
+      "type": "Task type",
+      "points": "Points (rating)",
+      "bonuses": "Bonuses (shop)"
+    },
+    "default": "Default: {n}",
+    "saved": "Rules saved",
+    "reset": "Restore defaults"
   }
 }

@@ -212,10 +212,16 @@ export async function myCompetencies(ctx: Ctx, userId: string) {
 // ── Історія навчання і рейтинг у кабінеті (docs/22 §13.5, docs/04 `/me/study-history`) ─
 
 /**
- * Рейтинг — мінімальна формула `[решение]` (docs/28 «Spec 19»): повноцінних балів
- * (`points_ledger`, R3) ще немає, тому рахуємо кількість успішно виконаних призначень
- * (курс/програма/тест) наростаючим підсумком; «зовнішній» ряд — завершені заявки на
- * зовнішнє навчання (`19` §5, «зовнішні бали»). Історія охоплює ті самі типи, що й
+ * «Поточний рейтинг» — сума балів рейтингу з книги `points_ledger` (валюта `points`, docs/33
+ * D-069; docs/15 §14.3 «Бали за виконання завдання — для розрахунку рейтингу»): останній
+ * `balance_after`, а графік «Динаміка рейтингу» — той самий залишок на кінець кожного з 8 місяців.
+ * Бонуси магазину (`bonuses`) у рейтинг не входять і витратою його не зменшують.
+ *
+ * > [исправлено, D-069: зʼявилася книга балів] Ранее: «рейтинг — кількість успішно виконаних
+ * > призначень наростаючим підсумком» (мінімальна формула `[решение]` до `points_ledger`).
+ *
+ * «Зовнішній» ряд — завершені заявки на зовнішнє навчання (`19` §5, «зовнішні бали»): балів у
+ * книзі в них немає, ряд лишився лічильником. Список пройденого охоплює ті самі типи, що й
  * `TASK_REPORT_TYPES` (`reportTasks.ts`) — інші типи не входять, це задокументований долг.
  */
 export async function studyHistory(ctx: Ctx, userId: string) {
@@ -256,17 +262,27 @@ export async function studyHistory(ctx: Ctx, userId: string) {
       ...external.map(e => ({ title: e.title, contentType: 'external_learning', status: 'done', resultPct: null, date: e.at, external: true })),
     ].sort((a, b) => +new Date(b.date) - +new Date(a.date))
 
-    const currentRating = mine.filter(m => m.status === 'done').length
-
-    // Динаміка рейтингу — останні 8 місяців, наростаючим підсумком «мій» і «зовнішній» ряд.
+    // Динаміка рейтингу — останні 8 місяців, наростаючим підсумком «мій» (бали з книги) і «зовнішній» ряд.
     const months: string[] = []
     const now = new Date()
     for (let i = 7; i >= 0; i--) months.push(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)).toISOString().slice(0, 7))
+    const windowStart = `${months[0]}-01T00:00:00Z`
+    const [points] = await tx.execute(sql`
+      select coalesce((select balance_after from points_ledger where user_id = ${userId}::uuid and currency = 'points' order by id desc limit 1), 0)::int as current,
+             coalesce((select sum(delta) from points_ledger where user_id = ${userId}::uuid and currency = 'points' and created_at < ${windowStart}::timestamptz), 0)::int as base
+    `) as unknown as [{ current: number, base: number }]
+    const monthly = await tx.execute(sql`
+      select to_char(created_at at time zone 'UTC', 'YYYY-MM') as period, sum(delta)::int as total
+      from points_ledger where user_id = ${userId}::uuid and currency = 'points' and created_at >= ${windowStart}::timestamptz
+      group by 1
+    `) as unknown as { period: string, total: number }[]
+    const perMonth = new Map(monthly.map(m => [m.period, Number(m.total)]))
+    const currentRating = Number(points.current)
     const monthOf = (d: Date | string) => new Date(d).toISOString().slice(0, 7)
-    let mineAcc = 0
+    let mineAcc = Number(points.base)
     let extAcc = 0
     const series = months.map((period) => {
-      mineAcc += mine.filter(m => m.status === 'done' && monthOf(m.at) === period).length
+      mineAcc += perMonth.get(period) ?? 0
       extAcc += external.filter(e => monthOf(e.at) === period).length
       return { period, mine: mineAcc, external: extAcc }
     })

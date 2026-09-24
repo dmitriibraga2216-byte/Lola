@@ -37,6 +37,12 @@ export const MODULE_ROUTES: { prefix: string, module: ModuleCode }[] = [
   { prefix: '/api/v1/simple-notices', module: 'notices' },
   { prefix: '/api/v1/events', module: 'events' },
   { prefix: '/api/v1/wiki', module: 'wiki' },
+  // Бонуси і магазин (docs/21 Г-21.1): витрина, заказы, журнал и ручные бонусы. Правила
+  // нарахування (`/settings/rewards`) сюда не входят — баллы рейтинга начисляются и без магазина
+  { prefix: '/api/v1/gift-store', module: 'bonuses' },
+  { prefix: '/api/v1/bonuses', module: 'bonuses' },
+  { prefix: '/api/v1/me/gift-store', module: 'bonuses' },
+  { prefix: '/api/v1/me/bonuses', module: 'bonuses' },
 ]
 
 /** Страницы админки и кабинета → модуль (для меню и клиентского middleware). */
@@ -58,6 +64,10 @@ export const MODULE_PAGES: { prefix: string, module: ModuleCode }[] = [
   { prefix: '/admin/events', module: 'events' },
   { prefix: '/learn/wiki', module: 'wiki' },
   { prefix: '/learn/events', module: 'events' },
+  { prefix: '/admin/shop', module: 'bonuses' },
+  { prefix: '/admin/bonuses', module: 'bonuses' },
+  { prefix: '/learn/shop', module: 'bonuses' },
+  { prefix: '/learn/bonuses', module: 'bonuses' },
 ]
 
 export function moduleOfRoute(path: string): ModuleCode | null {

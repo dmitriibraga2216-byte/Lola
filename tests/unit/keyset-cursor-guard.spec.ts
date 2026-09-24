@@ -21,8 +21,15 @@ const root = resolve(__dirname, '../..')
 /** Сама утилита: здесь проверка формата и есть реализация. */
 const IMPLEMENTATION_FILES = new Set(['shared/domain/keyset.ts', 'shared/schemas/keyset.ts', 'server/utils/keyset.ts'])
 
-/** `файл:правило` → почему это не нарушение. Пусто: на момент введения сторожа нарушений нет. */
-const EXCEPTIONS = new Map<string, string>()
+/** `файл:правило` → почему это не нарушение. На момент введения сторожа нарушений не было. */
+const EXCEPTIONS = new Map<string, string>([
+  [
+    'server/services/bonuses.ts:service-without-keyset',
+    'журнал бонусов листается по целому `id` книги (`points_ledger.id bigserial` — порядок вставки под '
+    + 'блокировкой счёта), момента времени в курсоре нет: как `/audit` и `/security-log`, «точен сам по '
+    + 'себе и остаётся числом» (docs/04-api.md §4.1); keysetAfter() с `int` обрезал бы ключ до int4',
+  ],
+])
 
 interface LineRule { id: string, why: string, test: (line: string) => boolean }
 

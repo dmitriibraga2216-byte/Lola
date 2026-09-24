@@ -167,6 +167,12 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // ссылкой на отбор; о том, что его отклик задержала проверка §7.7, он не узнаёт никогда.
   vacancy_applied_welcome: 'Дякуємо за відгук на вакансію «{{vacancy}}». Ми надіслали вам посилання для проходження відбору',
   vacancy_application_received: 'Новий відгук на вакансію «{{vacancy}}»',
+  // docs/23 Г-23.1 «Бонусы» (bonus.earned, bonus.order_ready) + отмена заказа ответственным и по сроку
+  // резерва (docs/21 Г-21.1: «автоотмена с уведомлением»). Коды — snake_case, как у остальных шаблонов.
+  bonus_earned: 'Нараховано бонусів: {{amount}} — «{{title}}». Баланс: {{balance}}',
+  bonus_order_ready: 'Замовлення «{{title}}» готове — заберіть його{{#location}} на точці {{location}}{{/location}}',
+  bonus_order_cancelled: 'Замовлення «{{title}}» скасовано: {{reason}}. Бонуси повернуто: {{amount}}',
+  bonus_order_expired: 'Резерв на «{{title}}» закінчився — замовлення скасовано, бонуси повернуто: {{amount}}',
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',
@@ -537,7 +543,7 @@ export function groupOf(code: string): 'learning' | 'assessment' | 'reminders' |
   if (/^(assignment|enrollment|program|attempt|workshop|review|certificate)/.test(code)) return 'learning'
   if (/^(assessment|checklist|action_item|competency|goal|plan|request)/.test(code)) return 'assessment'
   if (/_due|_overdue|reminder|meetup|webinar|digest/.test(code)) return 'reminders'
-  if (/^(news|announcement|notice|knowledge|survey|event|wiki|birthday|anniversary)/.test(code)) return 'hub'
+  if (/^(news|announcement|notice|knowledge|survey|event|wiki|birthday|anniversary|bonus)/.test(code)) return 'hub'
   return 'other'
 }
 

@@ -1,5 +1,8 @@
 import { z } from 'zod'
 import { SCOPES } from '../domain/roles'
+import { DEFAULT_TASK_REWARDS, MAX_REWARD } from '../domain/gamification'
+import { CONTENT_TYPES } from '../enums'
+import type { ContentType } from '../enums'
 
 /**
  * Настройки тенанта (docs/24 §3, `tenants.settings jsonb`) — единая zod-схема с дефолтами.
@@ -14,8 +17,13 @@ export const MODULES = [
   'assessment', 'knowledge', 'news', 'notices', 'events', 'wiki', 'forum', 'chat', 'bonuses', 'workTasks',
 ] as const
 export type ModuleCode = typeof MODULES[number]
-/** Отклонённые в docs/30 модули (форум, wiki, рабочие задачи) и R3 (бонусы, чат) выключены по умолчанию. */
-const MODULE_DEFAULT_OFF: ModuleCode[] = ['wiki', 'forum', 'chat', 'bonuses', 'workTasks']
+/**
+ * Отклонённые в docs/30 модули (форум, wiki, рабочие задачи) и R3 без реализации (чат) выключены
+ * по умолчанию. `bonuses` включён с появлением модуля (docs/21 Г-21.1, `gamification`): причина
+ * «R3, модуля нет» больше не действует. Тенант, у которого флаг уже записан в настройках явно,
+ * его сохраняет — включает модуль в «Налаштування → Модулі».
+ */
+const MODULE_DEFAULT_OFF: ModuleCode[] = ['wiki', 'forum', 'chat', 'workTasks']
 export const modulesSchema = z.object(
   Object.fromEntries(MODULES.map(m => [m, z.boolean().default(!MODULE_DEFAULT_OFF.includes(m))])) as Record<ModuleCode, z.ZodDefault<z.ZodBoolean>>,
 )
@@ -150,6 +158,24 @@ export const emailLayoutSchema = emailLayoutShape.default({})
 export type EmailLayout = z.infer<typeof emailLayoutSchema>
 export const emailLayoutPatchSchema = emailLayoutShape.partial().strict()
 
+/** Нагорода за виконання завдання одного типу контенту: бали в рейтинг і бонуси в магазин. */
+export const taskRewardSchema = z.object({
+  points: z.number().int().min(0).max(MAX_REWARD),
+  bonuses: z.number().int().min(0).max(MAX_REWARD),
+})
+/** Правила по всіх типах контенту з умовчаннями `DEFAULT_TASK_REWARDS` (shared/domain/gamification.ts). */
+const taskRewardsSchema = z.object(
+  Object.fromEntries(CONTENT_TYPES.map(ct => [ct, taskRewardSchema.default(DEFAULT_TASK_REWARDS[ct])])) as Record<ContentType, z.ZodDefault<typeof taskRewardSchema>>,
+)
+
+/** PATCH /settings/rewards: будь-які типи й будь-яке з двох чисел окремо. */
+export const rewardRulesPatchSchema = z.object({
+  taskRewards: z.object(
+    Object.fromEntries(CONTENT_TYPES.map(ct => [ct, taskRewardSchema.partial().optional()])) as Record<ContentType, z.ZodOptional<z.ZodObject<{ points: z.ZodOptional<z.ZodNumber>, bonuses: z.ZodOptional<z.ZodNumber> }>>>,
+  ).strict(),
+}).strict()
+export type RewardRulesPatch = z.infer<typeof rewardRulesPatchSchema>
+
 export const tenantSettingsSchema = z.object({
   /** Простір (docs/24 §3.1; name/slug/locale/timezone — колонки tenants, акцент — branding) */
   space: z.object({
@@ -204,6 +230,15 @@ export const tenantSettingsSchema = z.object({
   }).default({}),
   guestPage: z.record(z.unknown()).default({}), // форма — guestBlocksSchema (hub)
   importPresets: z.record(z.unknown()).default({}),
+  /**
+   * Правила нарахування балів і бонусів (docs/21 §3.7, §7.5; docs/15 §14.3 «Нагороди»; екран
+   * «Правила нарахування»). Устроено так же, как `defaults` и `learning.quizDefaults`: значения
+   * по умолчанию тенанта, которые перекрывает назначение — «Бали/Бонуси за виконання завдання»
+   * в его параметрах (`server/services/rewards.ts`). Ключ — тип контенту назначения.
+   */
+  gamification: z.object({
+    taskRewards: taskRewardsSchema.default({}),
+  }).default({}),
 })
 export type TenantSettings = z.infer<typeof tenantSettingsSchema>
 export type TenantPolicies = TenantSettings['policies']

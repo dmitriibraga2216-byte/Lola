@@ -4,8 +4,9 @@ const { formatDate, formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
-const { me, initials, logout, hasScope, switchRole, fetchMe } = useAuth()
+const { me, initials, logout, hasScope, switchRole, fetchMe, moduleOn } = useAuth()
 const { api } = useApi()
+const bonusText = useBonusText()
 
 // Переключение активной роли (docs/01 §1.9.2, мокап Profile: список ролей, активная помечена)
 const roleList = computed(() => me.value?.roles ?? [])
@@ -24,6 +25,9 @@ const counts = ref<{ done: number, new: number, overdue: number } | null>(null)
 // Мокап Profile: перша плитка — «Рейтинг» (те саме число, що й на StudyHistory, docs/22 §13.5) —
 // значення вже рахує сервер у /me/study-history, тут лише перевикористовуємо його.
 const rating = ref<number | null>(null)
+// Друга плитка — «Бонуси»: реальний баланс з книги (docs/33 D-069, `/me/bonuses`) і картка
+// «N бонусів · Вистачить на «…» · Магазин» під активністю. Модуль вимкнено — плитка з «—».
+const bonuses = ref<{ balance: number, affordable: { title: string } | null } | null>(null)
 const week = ref<{ days: { date: string, events: number }[], total: number } | null>(null)
 const weekMax = computed(() => Math.max(1, ...(week.value?.days.map(d => d.events) ?? [1])))
 const dayLabel = (iso: string) => formatDate(new Date(iso), { weekday: 'short' }).replace('.', '')
@@ -42,6 +46,7 @@ onMounted(async () => {
     counts.value = my.counts
     week.value = w
     rating.value = h.currentRating
+    if (moduleOn('bonuses')) bonuses.value = await api<{ balance: number, affordable: { title: string } | null }>('/me/bonuses')
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -109,9 +114,9 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
     </template>
 
     <div class="tiles">
-      <div class="tile"><b>{{ rating ?? '—' }}</b><span>{{ t('profile.tiles.rating') }}</span></div>
-      <!-- «Бонуси» — магазин і баланс бонусів R3 (docs/31 рядок Profile), сервер балансу поки не рахує -->
-      <div class="tile"><b>—</b><span>{{ t('profile.tiles.bonuses') }}</span></div>
+      <NuxtLink to="/learn/profile/study-history" class="tile"><b>{{ rating ?? '—' }}</b><span>{{ t('profile.tiles.rating') }}</span></NuxtLink>
+      <NuxtLink v-if="bonuses" to="/learn/bonuses" class="tile"><b>{{ bonuses.balance }}</b><span>{{ t('profile.tiles.bonuses') }}</span></NuxtLink>
+      <div v-else class="tile"><b>—</b><span>{{ t('profile.tiles.bonuses') }}</span></div>
       <div class="tile teal"><b>{{ counts?.done ?? '—' }}</b><span>{{ t('profile.tiles.done') }}</span></div>
     </div>
 
@@ -133,6 +138,14 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
         <div :class="['bar', { on: d.events > 0 }]" :style="{ height: `${Math.max(12, Math.round(d.events / weekMax * 64))}px` }" :title="String(d.events)" />
         <span>{{ dayLabel(d.date) }}</span>
       </div>
+    </div>
+
+    <div v-if="bonuses" class="bonus-card">
+      <span class="bonus-text">
+        <b>{{ bonusText(bonuses.balance) }}</b>
+        <span v-if="bonuses.affordable">{{ t('bonuses.enough', { title: bonuses.affordable.title }) }}</span>
+      </span>
+      <NuxtLink to="/learn/shop" class="btn primary small">{{ t('bonuses.shop') }}</NuxtLink>
     </div>
 
     <h2 class="section-title">{{ t('profile.more') }}</h2>
@@ -182,8 +195,13 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
 .sub { margin: 2px 0 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
 .tiles { grid-template-columns: repeat(3, 1fr); margin-bottom: var(--space-5); }
 .tile b { font-size: 24px; }
+a.tile { color: inherit; text-decoration: none; }
+.bonus-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); background: var(--color-sun-soft); border: 2px solid var(--color-sun); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); }
+.bonus-text { display: grid; min-width: 0; }
+.bonus-text b { font-size: var(--font-size-title-l); font-weight: 900; }
+.bonus-text span { font-size: var(--font-size-body-s); color: var(--color-ink-muted); overflow-wrap: anywhere; }
 .section-title { margin: var(--space-4) 0 var(--space-2); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-muted); }
-.cert { display: flex; align-items: center; gap: var(--space-3); background: #fff4c7; border: 1px solid var(--color-sun); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); text-decoration: none; color: inherit; margin-bottom: var(--space-2); }
+.cert { display: flex; align-items: center; gap: var(--space-3); background: var(--color-sun-soft); border: 1px solid var(--color-sun); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); text-decoration: none; color: inherit; margin-bottom: var(--space-2); }
 .cert svg { width: 22px; height: 22px; color: var(--color-sun-ink); flex: none; }
 .cert b { display: block; font-weight: 900; }
 .cert small { color: var(--color-sun-ink); font-weight: 700; }

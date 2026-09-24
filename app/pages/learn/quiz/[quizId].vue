@@ -5,6 +5,7 @@ definePageMeta({ layout: false })
 
 const { t } = useI18n()
 const { api } = useApi()
+const bonusText = useBonusText()
 const route = useRoute()
 const quizId = route.params.quizId as string
 const enrollmentId = (route.query.enrollmentId as string) || undefined
@@ -48,6 +49,8 @@ interface Result {
   maxScore: number
   protocol: 'shown' | 'hidden' | 'after_last_attempt'
   questions: ResultQ[]
+  /** Мокап TestResult: бонуси за це завдання, якщо їх нарахувала саме ця спроба (docs/33 D-069). */
+  bonus: { earned: number, balance: number } | null
 }
 
 type Phase = 'intro' | 'question' | 'result'
@@ -350,6 +353,11 @@ function retry() {
           </p>
         </div>
 
+        <p v-if="result.bonus" class="note sun bonus-plate" role="status">
+          <b>{{ t('quiz.bonusEarned', { amount: bonusText(result.bonus.earned) }) }}</b>
+          <span>{{ t('quiz.bonusBalance', { amount: bonusText(result.bonus.balance) }) }}</span>
+        </p>
+
         <p v-if="result.protocol === 'after_last_attempt'" class="note sun">{{ t('quiz.protocolAfterLast') }}</p>
 
         <template v-if="result.protocol === 'shown' && result.status !== 'review'">
@@ -582,6 +590,7 @@ dd {
   gap: var(--space-2);
 }
 
+.bonus-plate { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .result-card.teal { border-color: var(--color-teal); }
 .result-card.coral { border-color: var(--color-coral); }
 

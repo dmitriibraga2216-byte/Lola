@@ -2,9 +2,10 @@ import { eq, sql } from 'drizzle-orm'
 import { tenants } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import {
-  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type RecruitingPatch, type TenantPatch, type TenantSettings,
+  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type RecruitingPatch, type RewardRulesPatch, type TenantPatch, type TenantSettings,
 } from '../../shared/schemas/settings'
 import { SETTINGS_GROUP_RECRUITING } from '../../shared/enums'
+import type { ContentType } from '../../shared/enums'
 import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
 
@@ -74,6 +75,24 @@ export async function updateModules(ctx: Ctx, patch: Partial<Record<ModuleCode, 
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const r = await writeGroup(tx, ctx, 'modules', patch, { critical: true })
     return r.settings.modules
+  })
+}
+
+// ── Правила нарахування балів і бонусів (docs/21 §3.7, §7.5; екран «Правила нарахування») ──
+
+/**
+ * Патч правил поверх текущих: каждое число правится отдельно, остальные остаются. Запись — той же
+ * `writeGroup`, что и у остальных групп: полная группа проходит схему, изменения — в audit_log.
+ */
+export async function updateGamification(ctx: Ctx, patch: RewardRulesPatch): Promise<TenantSettings['gamification']> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const before = await readSettings(tx, ctx.tenantId)
+    const taskRewards = { ...before.gamification.taskRewards }
+    for (const [ct, v] of Object.entries(patch.taskRewards) as [ContentType, { points?: number, bonuses?: number } | undefined][]) {
+      if (v) taskRewards[ct] = { ...taskRewards[ct], ...v }
+    }
+    const r = await writeGroup(tx, ctx, 'gamification', { taskRewards })
+    return r.settings.gamification
   })
 }
 

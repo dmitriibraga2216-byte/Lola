@@ -1,4 +1,4 @@
-import { and, eq, lte, sql } from 'drizzle-orm'
+import { and, eq, inArray, lte, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import { db } from '../db/client'
 import { notificationTemplates, notifications, tenants, userNotificationPrefs, users } from '../db/schema'
@@ -582,26 +582,54 @@ export async function broadcast(ctx: { tenantId: string, actorId: string }, inpu
   })
 }
 
-/** Ежечасно (docs/23 §6.6): отправленное с escalate_after_hours без реакции → руководителю точки. */
+/** Окно одного прохода эскалации (`escalationScan`): столько строк разбирается за час на тенант. */
+export const ESCALATION_BATCH = 200
+
+/**
+ * Ежечасно (docs/23 §6.6): отправленное с `escalate_after_hours` без реакции → руководителю.
+ *
+ * Адресат — руководитель по `resolveManager()` (П-16.4), и известен он только после резолва,
+ * поэтому отбор не фильтрует «у кого есть руководитель» в `where`. Отсюда правило прохода:
+ * **каждая выбранная строка закрывается** — эскалацией (`escalated_to_id` = руководитель) или
+ * отметкой «эскалировать некому» (`escalated_at` без `escalated_to_id`). Незакрытая строка
+ * выбиралась бы снова каждый час, и двести человек без руководителя навсегда заняли бы окно
+ * `ESCALATION_BATCH` — до тех, у кого руководитель есть, эскалация не дошла бы никогда.
+ *
+ * Разбор — от самой старой отправки: раз всё выбранное закрывается, окно сдвигается само, и
+ * любая строка обрабатывается не позже чем через «хвост перед ней / ESCALATION_BATCH» часов.
+ * Шаблон проверяется через `exists`, а не `join`: у кода по шаблону на каждый язык, и `join`
+ * повторял бы одно уведомление в окне столько раз, сколько у него переводов.
+ */
 export async function escalationScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
     const rows = await tx.execute(sql`
       select n.id, n.user_id, n.code, n.rendered_text, u.full_name
-      from notifications n join notification_templates t on t.tenant_id = n.tenant_id and t.code = n.code and t.channel = 'telegram' and t.escalate_after_hours is not null
+      from notifications n
       join users u on u.id = n.user_id
-      where n.status = 'sent' and n.reacted_at is null and n.escalated_at is null and n.sent_at < now() - (t.escalate_after_hours || ' hours')::interval
-      limit 200
+      where n.status = 'sent' and n.reacted_at is null and n.escalated_at is null
+        and exists (
+          select 1 from notification_templates t
+          where t.tenant_id = n.tenant_id and t.code = n.code and t.channel = 'telegram'
+            and t.escalate_after_hours is not null
+            and n.sent_at < now() - (t.escalate_after_hours || ' hours')::interval)
+      order by n.sent_at, n.id
+      limit ${ESCALATION_BATCH}
     `) as unknown as { id: string, user_id: string, code: string, rendered_text: string | null, full_name: string }[]
-    // Адресат эскалации — руководитель по `resolveManager()` (П-16.4). Отбор «у кого есть
-    // руководитель» делается после резолва, а не условием на `locations.manager_id` в `where`.
     const escalationManagers = await managerIdsOf(tx, rows.map(r => r.user_id))
+    const at = new Date()
+    const nobody: string[] = []
     let n = 0
     for (const r of rows) {
       const mgr = escalationManagers.get(r.user_id)
-      if (!mgr || mgr === r.user_id) continue
+      if (!mgr || mgr === r.user_id) {
+        nobody.push(r.id)
+        continue
+      }
       if (await enqueueNotification(tx, { tenantId, userId: mgr, code: 'escalation', payload: { name: r.full_name, text: r.rendered_text ?? r.code }, dedupKey: `esc:${r.id}` })) n++
-      await tx.update(notifications).set({ escalatedAt: new Date() }).where(eq(notifications.id, r.id))
+      await tx.update(notifications).set({ escalatedAt: at, escalatedToId: mgr }).where(eq(notifications.id, r.id))
     }
+    // «Эскалировать некому»: строка закрыта без адресата и в следующий проход не попадёт.
+    if (nobody.length) await tx.update(notifications).set({ escalatedAt: at, escalatedToId: null }).where(inArray(notifications.id, nobody))
     return n
   })
 }

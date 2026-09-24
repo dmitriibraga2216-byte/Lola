@@ -250,3 +250,38 @@ ALTER TABLE "org_conflicts" DROP CONSTRAINT "org_conflicts_kind_check";--> state
 ALTER TABLE "org_conflicts" ADD CONSTRAINT "org_conflicts_kind_check" CHECK ("kind" IN ('double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing', 'no_manager', 'manager_mismatch', 'depth_exceeded', 'dismissed_holder', 'position_mismatch'));--> statement-breakpoint
 -- Экран «Конфлікти структури» (`32` §9) фильтрует по важности и по открытости.
 CREATE INDEX "idx_org_conflicts_open" ON "org_conflicts" USING btree ("tenant_id","severity","created_at" DESC) WHERE "resolved_at" IS NULL;
+--> statement-breakpoint
+
+-- ── 6. Эскалация уведомлений: «кому ушла» и «эскалировать некому» (`docs/23` §6.6) ──────
+-- До PR-30 `escalationScan` отбирал только людей с руководителем точки
+-- (`l.manager_id is not null` прямо в `where`), и строки остальных не выбирались никогда. С
+-- `resolveManager()` адресат известен только после резолва, отбор расширен до всех строк — а
+-- значит, строка, эскалировать которую некому, обязана закрываться. Иначе она выбирается
+-- каждый проход, и при двух сотнях таких строк окно выборки навсегда занимают они: до людей
+-- с руководителем эскалация не доходит (голодание очереди).
+--
+-- `escalated_at` — эскалация по строке обработана, `escalated_to_id` — кому ушла; пара
+-- «`escalated_at` есть, `escalated_to_id` нет» и есть отметка «эскалировать некому». Та же пара
+-- колонок, что у `review_queue_items` (`docs/02`, `docs/v2/37`): нового перечня нет.
+ALTER TABLE "notifications" ADD COLUMN "escalated_to_id" uuid;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_escalated_to_id_users_id_fk" FOREIGN KEY ("escalated_to_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+-- История: у уже эскалированных строк адресат восстанавливается по самой эскалации — её
+-- `dedup_key` ставит `escalationScan` как `'esc:' || id`. Без этого старые эскалации читались
+-- бы как «некому».
+UPDATE "notifications" n SET "escalated_to_id" = e."user_id"
+  FROM "notifications" e
+ WHERE n."escalated_at" IS NOT NULL AND n."escalated_to_id" IS NULL
+   AND e."tenant_id" = n."tenant_id" AND e."dedup_key" = 'esc:' || n."id"::text;--> statement-breakpoint
+-- Хвост, который старый отбор не брал никогда (срок эскалации прошёл, а руководителя точки у
+-- человека не было), закрывается как «некому» на момент перехода — по правилу, которое тогда
+-- действовало. Иначе первые проходы нового отбора разбирали бы только этот хвост, а тем, у кого
+-- руководитель теперь находится по роли или по дереву, ушли бы эскалации многомесячной давности.
+UPDATE "notifications" n SET "escalated_at" = now()
+ WHERE n."escalated_at" IS NULL AND n."status" = 'sent' AND n."reacted_at" IS NULL
+   AND EXISTS (SELECT 1 FROM "notification_templates" t
+                WHERE t."tenant_id" = n."tenant_id" AND t."code" = n."code" AND t."channel" = 'telegram'
+                  AND t."escalate_after_hours" IS NOT NULL
+                  AND n."sent_at" < now() - (t."escalate_after_hours" || ' hours')::interval)
+   AND NOT EXISTS (SELECT 1 FROM "user_placements" up JOIN "locations" l ON l."id" = up."location_id"
+                    WHERE up."user_id" = n."user_id" AND up."is_primary" AND up."ended_at" IS NULL
+                      AND l."manager_id" IS NOT NULL AND l."manager_id" <> n."user_id");

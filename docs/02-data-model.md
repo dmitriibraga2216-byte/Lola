@@ -1100,7 +1100,12 @@ create table notifications (
   status text not null default 'queued',       -- queued | sent | failed | skipped
   error text,
   scheduled_for timestamptz not null default now(),
-  sent_at timestamptz
+  sent_at timestamptz,
+  -- `23` §6.6, миграция 0075 (PR-30): эскалация обработана / кому ушла. `escalated_at` без
+  -- `escalated_to_id` — «эскалировать некому» (руководителя нет по `resolveManager()`):
+  -- строка закрыта и в следующий проход `escalationScan` не попадает.
+  escalated_at timestamptz,
+  escalated_to_id uuid references users(id) on delete set null
 );
 create index on notifications (tenant_id, status, scheduled_for);
 

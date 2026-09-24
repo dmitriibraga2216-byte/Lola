@@ -71,7 +71,7 @@ export const tenantUsage = pgTable('tenant_usage', {
   attemptsMonth: integer('attempts_month').notNull().default(0),
   planCode: text('plan_code').references(() => plans.code, { onDelete: 'set null', onUpdate: 'cascade' }),
   candidatesActive: integer('candidates_active').notNull().default(0), // ось candidates_active
-  storageByCategory: jsonb('storage_by_category').notNull().default(sql`'{}'::jsonb`), // 10 категорий треков + other
+  storageByCategory: jsonb('storage_by_category').notNull().default(sql`'{}'::jsonb`), // 9 ключей: 8 кодов этапов + other (docs/v2/44 В-10), наполняет storage.counter_reconcile
   aiOps: jsonb('ai_ops').notNull().default(sql`'{}'::jsonb`), // {ai_generate_ops, ai_review_ops, ai_interview_ops}
   smsOut: integer('sms_out').notNull().default(0), // ось sms_out за биллинговый период
   telegramOut: integer('telegram_out').notNull().default(0), // мягкая ось: только наблюдение

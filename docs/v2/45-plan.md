@@ -406,7 +406,13 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 
 #### PR-36 · `v2-storage-36` · Квота, корзина, сроки хранения
 
-- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0087_v2_storage_quota.sql`.
+**Статус: выполнено** (2026-09-24, ветка `v2-storage-36`; миграция `0083_v2_storage_quota.sql` —
+номер назначен при финальном rebase. Экраны — `/admin/settings/storage` с вкладками «Кошик» и
+«Політики зберігання», а не `/storage`: тенантные экраны живут под `/admin/settings/*`, как
+решил PR-10 для биллинга. Подробности — `docs/v2/46-progress.md`, запись «Фаза 3, PR-36»;
+решения при отступлениях — `docs/28-implementation-notes.md` §28.19 и пометки в `34`.)
+
+- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0083_v2_storage_quota.sql` (план называл `0087`).
 - **Входит:** `storage_usage_counters`, `storage_usage_daily` (разбивка по девяти ключам —
   8 кодов этапов + `other`), `storage_retention_policies`, `storage_deletion_requests`,
   `storage_pending_uploads`; задача `storage.purge`; экраны `/storage`; одна формула квоты.

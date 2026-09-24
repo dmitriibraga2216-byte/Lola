@@ -143,6 +143,8 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/shop': "hasScope('shop.manage') || hasScope('shop.issue')",
   '/admin/bonuses': "hasScope('shop.manage') || hasScope('bonus.grant')",
   '/admin/rewards': "hasScope('settings.tenant')",
+  // PR-36 (docs/v2/34 §5): «Сховище» — admin і owner (`storage.view`); кошик і політики — вкладки сторінки.
+  '/admin/settings/storage': "hasScope('storage.view')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

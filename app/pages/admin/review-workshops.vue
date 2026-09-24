@@ -5,11 +5,12 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'rev
 
 const { t } = useI18n()
 const { api } = useApi()
+const { formatShortDate } = useFormat()
 
-interface Item { id: string, workshopTitle: string, fullName: string, attemptNo: number, status: string, submittedAt: string | null, hoursLeft: number | null, reviewerId: string | null, reworkCount: number, locationName: string | null }
+interface Item { id: string, workshopTitle: string, fullName: string, attemptNo: number, status: string, submittedAt: string | null, hoursLeft: number | null, reviewerId: string | null, reworkCount: number, locationName: string | null, pendingUpload?: boolean }
 interface Criterion { id: string, text: string, isCritical: boolean, weight: number }
 interface Card {
-  submission: { id: string, body: { text?: string }, files: { mediaId: string, name: string, kind: string }[], criteriaSnapshot: Criterion[], attemptNo: number, reworkCount: number, submittedAt: string | null }
+  submission: { id: string, body: { text?: string }, files: { mediaId?: string, pendingId?: string, name: string, kind: string, lost?: boolean, deletedAt?: string | null }[], criteriaSnapshot: Criterion[], attemptNo: number, reworkCount: number, submittedAt: string | null }
   workshop: { title: string, description: ContentBlock[], passRule: { type: string }, allowRework: boolean, maxReworks: number } | null
   learner: { id: string, fullName: string }
   history: { attemptNo: number, status: string, reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean }[] | null }[]
@@ -49,7 +50,9 @@ async function open(item: Item) {
     comment.value = ''
     mediaUrls.value = {}
     for (const f of card.value.submission.files) {
-      api<{ urls: Record<string, string> }>(`/media/${f.mediaId}`).then(m => { mediaUrls.value[f.mediaId] = m.urls['768'] || m.urls.original! }).catch(() => {})
+      const id = f.mediaId
+      if (!id || f.deletedAt) continue
+      api<{ urls: Record<string, string> }>(`/media/${id}`).then(m => { mediaUrls.value[id] = m.urls['768'] || m.urls.original! }).catch(() => {})
     }
   }
   catch (err) {
@@ -74,7 +77,9 @@ async function decide(decision: 'accepted' | 'rejected' | 'rework') {
     notice.value = t(`workshop.decided.${decision}`)
     card.value = null
     await load()
-    if (queue.value[0]) await open(queue.value[0])
+    // Следующая работа — первая, которую можно взять: ждущая досылки файла пропускается
+    const next = queue.value.find(i => !i.pendingUpload)
+    if (next) await open(next)
   }
   catch (err) {
     error.value = apiErrorOf(err).message
@@ -114,7 +119,9 @@ async function skip() {
           <span :class="['sla', { late: (i.hoursLeft ?? 0) < 0 }]">{{ i.hoursLeft < 0 ? t('workshop.overdueH', { n: -i.hoursLeft }) : t('workshop.leftH', { n: i.hoursLeft }) }}</span>
           <span class="caption">{{ t('workshop.inQueue') }}</span>
         </span>
-        <button class="btn primary small" @click="open(i)">{{ t('workshop.claim') }}</button>
+        <!-- Запис ще на пристрої співробітника (docs/v2/34 §7.5 п. 2): робота видна, взяти її не можна -->
+        <span v-if="i.pendingUpload" class="badge sun" :title="t('review.pendingUploadHint')">{{ t('review.pendingUpload') }}</span>
+        <button class="btn primary small" :disabled="i.pendingUpload" :title="i.pendingUpload ? t('review.pendingUploadHint') : undefined" @click="open(i)">{{ t('workshop.claim') }}</button>
       </article>
       <p v-if="queue.length === 0" class="empty">{{ t('review.empty') }}</p>
     </div>
@@ -125,8 +132,11 @@ async function skip() {
         <details class="task"><summary>{{ t('workshop.task') }}</summary><LessonBlocks :blocks="card.workshop?.description ?? []" :blocks-state="{}" readonly /></details>
         <p v-if="card.submission.body.text" class="answer">{{ card.submission.body.text }}</p>
         <div class="gallery">
-          <template v-for="f in card.submission.files" :key="f.mediaId">
-            <a v-if="mediaUrls[f.mediaId]" :href="mediaUrls[f.mediaId]" target="_blank" rel="noopener">
+          <template v-for="f in card.submission.files" :key="f.mediaId ?? f.pendingId">
+            <!-- Удалённый файл остаётся в сдаче строкой (docs/v2/34 §7.2 п. 4, §13 к. 3): оценка на месте, превью — нет -->
+            <span v-if="f.deletedAt" class="file gone">📎 {{ f.name }} · {{ t('workshop.fileDeleted', { date: formatShortDate(f.deletedAt) }) }}</span>
+            <span v-else-if="f.lost" class="file gone">📎 {{ f.name }} · {{ t('workshop.fileLost') }}</span>
+            <a v-else-if="f.mediaId && mediaUrls[f.mediaId]" :href="mediaUrls[f.mediaId]" target="_blank" rel="noopener">
               <img v-if="f.kind === 'photo'" :src="mediaUrls[f.mediaId]" :alt="f.name">
               <span v-else class="file">📎 {{ f.name }}</span>
             </a>
@@ -187,6 +197,7 @@ h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--font-size-body-s)
 .gallery { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .gallery img { width: 160px; height: 160px; object-fit: cover; border-radius: var(--radius-s); }
 .file { display: inline-block; background: var(--color-bg); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
+.file.gone { color: var(--color-ink-muted); font-style: italic; }
 .hist-item { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .crit { display: grid; gap: var(--space-1); }
 .crit-row { display: flex; gap: var(--space-2); align-items: flex-start; font-weight: 700; }

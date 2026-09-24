@@ -43,6 +43,10 @@ const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
  *   а не дедлайн прохождения: проверяемый человек его не видит и на него не влияет.
  * - `review_sla_events.due_at` — снимок `review_queue_items.sla_due_at` на момент события SLA
  *   (`37` §3.4): журнал срока проверки, того же смысла, что и исключённый выше `sla_due_at`.
+ * - `storage_pending_uploads.attempts` — сколько раз **устройство пыталось дослать файл**
+ *   (`34` §3.3, §7.5 п. 3: `storage.pending_upload_retry` выдаёт место и считает выдачи). Счётчик
+ *   транспорта, а не число попыток теста: к прохождению он отношения не имеет, имя колонки —
+ *   дословно из DDL документа.
  *
  * Колонки `attempts_count` из `docs/v2/37` §3.1 здесь нет: она заведена под именем
  * `attempt_no` — как в `workshop_submissions`, где тот же смысл («какая по счёту сдача»).
@@ -55,6 +59,7 @@ const PACKAGE_COLUMN_EXCEPTIONS = new Set([
   'content_issues.rescored_attempts',
   'review_delegations.due_at',
   'review_sla_events.due_at',
+  'storage_pending_uploads.attempts',
 ])
 
 const adminUrl = process.env.DATABASE_ADMIN_URL

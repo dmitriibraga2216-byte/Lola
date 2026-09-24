@@ -116,7 +116,21 @@ export const uploadUrlSchema = z.object({
   sourceId: z.string().uuid().optional(),
   courseId: z.string().uuid().optional(), // из него производится stage_code — ключ разбивки (В-10)
   enrollmentId: z.string().uuid().optional(),
+  // Ключ записи на устройстве (OPFS/IndexedDB, docs/v2/34 §7.5): с ним исчерпанная квота даёт
+  // `202 {deferred: true, pendingId}` вместо отказа, а повтор с тем же ключом досылает файл
+  clientRef: z.string().min(8).max(128).regex(/^[\w:.-]+$/).optional(),
 })
+
+/**
+ * Файл сдачи практикума (docs/13 §5.1): загруженный — `mediaId`; отложенный при исчерпанной
+ * квоте — `pendingId` (docs/v2/34 §7.5): обещание дослать, которое подтверждение загрузки
+ * заменит настоящим `mediaId`. `lost` — срок ожидания истёк, «Файл втрачено» (§7.5 п. 3).
+ */
+export const workshopFileSchema = z.union([
+  z.object({ mediaId: z.string().uuid(), name: z.string().max(300), kind: z.string().max(20), bytes: z.number().int().min(0) }),
+  z.object({ pendingId: z.string().uuid(), name: z.string().max(300), kind: z.string().max(20), bytes: z.number().int().min(0), lost: z.boolean().optional() }),
+])
+export type WorkshopFile = z.infer<typeof workshopFileSchema>
 
 /** Мягкое удаление файла (`DELETE /media/:id`, docs/04 §4.15, docs/v2/34 §6.1, §7.2). */
 export const deleteMediaSchema = z.object({

@@ -204,6 +204,22 @@ export interface LimitCheck {
   axis: LimitAxis
   used: number
   limit: number | null
+  /** Допуск сверх лимита, учтённый в `ok` (только при `withGrace`, только у хранилища). */
+  grace?: number
+}
+
+/**
+ * Допуск сверх лимита хранилища для уже начатых загрузок (docs/v2/34 §7.5 `[решение]`):
+ * **2 % лимита или 1 ГБ — что меньше**. Буфер нужен, чтобы начатая загрузка досылалась, а не
+ * рвалась на последнем мегабайте. Живёт здесь, рядом с формулой лимита, а не в сервисе
+ * хранилища: «лимит + допуск» — это тоже лимит, и второй его формулы в продукте быть не должно
+ * (docs/v2/45 PR-36, условие выхода). У остальных осей допуска нет.
+ */
+export const STORAGE_GRACE_PCT = 0.02
+
+export function graceOf(axis: LimitAxis, limit: number | null): number {
+  if (limit == null || axis !== 'storage_bytes') return 0
+  return Math.min(Math.floor(limit * STORAGE_GRACE_PCT), GIB)
 }
 
 /**
@@ -211,10 +227,14 @@ export interface LimitCheck {
  * `delta = 0` — проверка «уже превышено» (баннер), `delta = 1` — «пройдёт ли следующая
  * операция». Мягкие оси (`telegram_out`) лимита не имеют и всегда `ok` — правило `25` §10
  * «обучение не останавливается лимитами» сильнее любого счётчика.
+ *
+ * `withGrace` — жёсткий порог загрузки файла `used + declared > limit + grace` (`34` §7.5):
+ * так проверяет только выдача presigned URL. Баннер и счёт считают без допуска.
  */
-export async function checkLimit(tenantId: string, axis: LimitAxis, used: number, delta = 1): Promise<LimitCheck> {
+export async function checkLimit(tenantId: string, axis: LimitAxis, used: number, delta = 1, opts: { withGrace?: boolean } = {}): Promise<LimitCheck> {
   const limit = await effectiveLimit(tenantId, axis)
-  return { ok: limit == null || used + delta <= limit, axis, used, limit }
+  const grace = opts.withGrace ? graceOf(axis, limit) : 0
+  return { ok: limit == null || used + delta <= limit + grace, axis, used, limit, ...(opts.withGrace ? { grace } : {}) }
 }
 
 /**

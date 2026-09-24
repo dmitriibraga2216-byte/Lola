@@ -62,6 +62,11 @@ export const KEYSETS = {
    * Закреплённые (≤ 3) всегда первыми — договорённость о развитии не тонет под новыми записями.
    */
   personNotes: ['int', 'at', 'uuid'],
+  /**
+   * Реестр и корзина хранилища (docs/v2/34 §5.1, §5.2): `created_at desc, id desc`, в корзине —
+   * `deleted_at desc, id desc` (в `pending_delete` дата удаления обязательна, `media_assets_purge_chk`).
+   */
+  storageFiles: ['at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

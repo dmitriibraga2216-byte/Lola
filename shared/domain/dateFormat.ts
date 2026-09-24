@@ -93,3 +93,23 @@ export function pluralCategory(value: number, locale: Locale): PluralCategory {
   // zero/two у підтримуваних мовах не трапляються; на всяк випадок зводимо до `other`
   return c === 'zero' || c === 'two' ? 'other' : c
 }
+
+const BYTE_UNITS = ['byte', 'kilobyte', 'megabyte', 'gigabyte', 'terabyte'] as const
+
+/**
+ * Размер файла или объём хранилища под локаль — «12,4 ГБ» / «12.4 GB» (docs/v2/34 §5.1:
+ * «Використовується: 12.4 Gb / 100 Gb»). Шаг — 1024, как у оси `storage_bytes` и её лимита
+ * в ГБ (`tenantLimits.ts`, `GIB`): иначе «100 ГБ» в сводке и «100 ГБ» тарифа разошлись бы
+ * на 7 %. Единица подписывается самим `Intl` (`style: 'unit'`), а не строкой словаря.
+ */
+export function formatBytes(value: number, locale: Locale, opts: { maximumFractionDigits?: number } = {}): string {
+  let n = Math.max(0, value)
+  let i = 0
+  while (n >= 1024 && i < BYTE_UNITS.length - 1) { n /= 1024; i++ }
+  return n.toLocaleString(tagOf(locale), {
+    style: 'unit',
+    unit: BYTE_UNITS[i],
+    unitDisplay: 'short',
+    maximumFractionDigits: i === 0 ? 0 : opts.maximumFractionDigits ?? 1,
+  })
+}

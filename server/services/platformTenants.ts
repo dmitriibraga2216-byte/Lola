@@ -236,6 +236,9 @@ export async function setTenantLimits(id: string, input: TenantLimitsInput, acto
   }
   await recordPlatformAudit(actor, { action: 'tenant.limits', tenantId: id, entity: 'tenant_limits', entityId: id, before: before.overrides, after: values })
   invalidateLimits(id)
+  // Лимит мог вырасти — отложенные записи сотрудников досылаются сразу (docs/v2/34 §7.5 п. 4)
+  const { kickPendingUploads } = await import('./storagePending')
+  await kickPendingUploads(id)
   return getTenantLimits(id)
 }
 
@@ -273,6 +276,10 @@ export async function grantTenantAddon(
   }).returning({ id: tenantAddons.id })
   await recordPlatformAudit(actor, { action: 'tenant.addon_grant', tenantId, entity: 'tenant_addons', entityId: row!.id, after: { addonCode: addon.code, qty: input.qty, unitStep: addon.unitStep, axis: addon.axis, source: input.source ?? 'purchase' } })
   invalidateLimits(tenantId)
+  // «Після оплати лімит перераховується одразу, storage.pending_upload_retry запускається
+  // позачергово» (docs/v2/34 §7.5 п. 4): докупленное место сразу достаётся ждущим записям
+  const { kickPendingUploads } = await import('./storagePending')
+  await kickPendingUploads(tenantId)
   return { ok: true, id: row!.id }
 }
 

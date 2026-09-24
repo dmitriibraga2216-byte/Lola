@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
 import type { PgTransaction } from 'drizzle-orm/pg-core'
-import { STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES, SYSTEM_PERSON_DOCUMENT_TYPES } from '../../shared/enums'
+import { MEDIA_ORIGINS, STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES, SYSTEM_PERSON_DOCUMENT_TYPES } from '../../shared/enums'
 import { DEFAULT_SHOP_CATEGORIES } from '../../shared/domain/gamification'
-import type { LifecycleStageCode, StageCapability } from '../../shared/enums'
+import type { LifecycleStageCode, MediaOrigin, StageCapability, StorageRetentionAction, StorageRetentionAnchor } from '../../shared/enums'
 
 /**
  * Справочники по умолчанию для нового тенанта. Вызывается из сида и createTenant
@@ -52,6 +52,63 @@ export const DEFAULT_LIFECYCLE_STAGES: {
   { code: 'knowledge', nameUk: 'База знань', nameEn: 'Knowledge base', expectedDays: null, capabilities: caps({ ai_generate: true, applies_to_employee: true }) },
   { code: 'offboarding', nameUk: 'Офбординг', nameEn: 'Offboarding', expectedDays: 14, capabilities: caps({ progress: true, deadline: true, review: true, graph: true, applies_to_employee: true }) },
 ]
+
+/**
+ * Политики хранения по умолчанию — строка на каждое происхождение (docs/v2/34 §7.3, для трёх
+ * значений, добавленных позже, — docs/v2/40 §4.3). **Все выключены** у нового тенанта (§7.3:
+ * «первое включение требует сухого прогона и подтверждения объёма»). `Record` по
+ * `MediaOrigin`, а не массив: новое значение перечня без своей строки здесь не скомпилируется.
+ *
+ * Где документ ставит «—» (сертификат, контент, бренд, аватар, документ человека), срока нет:
+ * такие файлы живут вместе с источником и чистятся только осиротением (§7.6). Точка отсчёта у
+ * них `created_at` — нейтральная, потому что политика выключена и срока всё равно нет.
+ * `report_export` — «30 дн.» документа: срок хранится в месяцах (1–120), ближайшее — 1.
+ *
+ * Срок корзины (`trashDays`) у всех 30 дней — предварительное решение docs/v2/44 §8; значение
+ * живёт в строке и меняется без релиза.
+ */
+export const DEFAULT_TRASH_DAYS = 30
+
+export const DEFAULT_RETENTION_POLICIES: Record<MediaOrigin, {
+  keepMonths: number | null
+  anchor: StorageRetentionAnchor
+  action: StorageRetentionAction
+  keepEvidence: boolean
+}> = {
+  video_answer: { keepMonths: 12, anchor: 'graded_at', action: 'soft_delete', keepEvidence: true },
+  workshop_submission: { keepMonths: 12, anchor: 'graded_at', action: 'soft_delete', keepEvidence: true },
+  checklist_photo: { keepMonths: 12, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  candidate_cv: { keepMonths: 6, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  ai_artifact: { keepMonths: 12, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  other: { keepMonths: 6, anchor: 'last_accessed_at', action: 'soft_delete', keepEvidence: true },
+  import: { keepMonths: 3, anchor: 'created_at', action: 'purge', keepEvidence: true },
+  report_export: { keepMonths: 1, anchor: 'created_at', action: 'purge', keepEvidence: true },
+  certificate: { keepMonths: null, anchor: 'created_at', action: 'notify_only', keepEvidence: true },
+  content_cover: { keepMonths: null, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  lesson_attachment: { keepMonths: null, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  brand_asset: { keepMonths: null, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  avatar: { keepMonths: null, anchor: 'created_at', action: 'soft_delete', keepEvidence: true },
+  interview_answer: { keepMonths: 3, anchor: 'created_at', action: 'purge', keepEvidence: false },
+  person_document: { keepMonths: null, anchor: 'created_at', action: 'notify_only', keepEvidence: true },
+  issue_screenshot: { keepMonths: 6, anchor: 'created_at', action: 'purge', keepEvidence: false },
+}
+
+/**
+ * Досевает недостающие строки политик тенанта (идемпотентно). Зовётся посевом тенанта и
+ * сервисом хранилища при первом обращении — так тенант, заведённый до PR-36, получает строки
+ * без копии умолчаний в SQL миграции, а новое значение `origin` — без отдельной миграции данных.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function ensureRetentionPolicies(tx: PgTransaction<any, any, any>, tenantId: string): Promise<void> {
+  const values = MEDIA_ORIGINS.map((origin) => {
+    const p = DEFAULT_RETENTION_POLICIES[origin]
+    return sql`(${tenantId}::uuid, ${origin}, false, ${p.keepMonths}::int, ${p.anchor}, ${p.action}, ${p.keepEvidence}, ${DEFAULT_TRASH_DAYS}::int)`
+  })
+  await tx.execute(sql`
+    insert into storage_retention_policies (tenant_id, origin, enabled, keep_months, anchor, action, keep_evidence, trash_days)
+    values ${sql.join(values, sql`, `)}
+    on conflict (tenant_id, origin) do nothing`)
+}
 
 /** Достраивает карту возможностей до полного перечня: не указанный ключ — `false` (§3.3). */
 function caps(on: Partial<Record<StageCapability, boolean>>): Record<StageCapability, boolean> {
@@ -109,4 +166,6 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
       values (${tenantId}::uuid, ${s.code}, ${s.name}, true, ${s.isRequired}, ${s.validityMonths}, ${s.isFactOnly}, ${s.selfUpload})
       on conflict (tenant_id, code) do nothing`)
   }
+  // Политики хранения — строка на происхождение, все выключены (docs/v2/34 §7.3, PR-36)
+  await ensureRetentionPolicies(tx, tenantId)
 }

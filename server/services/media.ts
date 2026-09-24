@@ -5,11 +5,16 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { courses, libraryModuleVersions, libraryModules, mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
+import { STORAGE_CONFIRM_PHRASE } from '../../shared/schemas/storage'
 import type { MediaOrigin } from '../../shared/enums'
 import { PERSON_DOCUMENT_LIMITS } from '../../shared/enums'
-import { GIB, effectiveLimits } from './tenantLimits'
+import { DEFAULT_TRASH_DAYS } from '../db/tenantDefaults'
+import { GIB } from './tenantLimits'
 import { recordUsage, syncCounter } from './usageCounters'
 import { recordAudit } from './audit'
+import { canStore, mediaUnderReview, storageUsedBytes } from './storage'
+import { trashDaysFor } from './storagePolicies'
+import { completePendingUpload, deferUpload, kickPendingUploads, linkPendingMedia, pendingByClientRef, tryGrant } from './storagePending'
 
 /**
  * Медиа (docs/11 §3.4, Г-11.4, docs/04 §4.15): presigned PUT в S3, ключ — uuid
@@ -112,16 +117,32 @@ export function checkOriginRules(origin: MediaOrigin, mime: string, bytes: numbe
   return { ok: true }
 }
 
+/**
+ * `ok: true` — выдана ссылка на загрузку. Отложенная запись (`code: 'deferred'`) — не ошибка, но и
+ * не ссылка: файл остаётся на устройстве, эндпоинт отвечает `202 {deferred: true, pendingId}`.
+ */
 export type UploadUrlResult
-  = | { ok: true, mediaId: string, uploadUrl: string, key: string }
-    | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big' | 'storage_limit', message: string }
+  = | { ok: true, mediaId: string, uploadUrl: string, key: string, pendingId?: string }
+    | { ok: false, code: 'deferred', deferred: true, pendingId: string, expiresAt: string, message: string }
+    | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big' | 'storage_limit' | 'pending_done' | 'pending_abandoned', message: string }
 
-/** Скільки байт уже займають файли тенанта (докс/33 D-054, docs/25 §10): жорсткий лімит перевіряється по поточному значенню, не по нічному знімку `tenant_usage`. */
+/**
+ * Происхождения, которые загружает сам учащийся, — его собственная работа: сдача практикума,
+ * видеоответ, скриншот к жалобе на материал. Для них достаточно `learn.attempt` —
+ * иначе сотрудник без `media.upload` (docs/01 §1.4: у `employee` его нет) не мог бы сдать
+ * практикум с фото или видео, а при исчерпанной квоте — даже отложить запись (docs/v2/34 §7.5,
+ * §13 к. 1). Загрузку контента (обложки, вложения уроков) это не открывает.
+ */
+export const LEARNER_UPLOAD_ORIGINS: readonly MediaOrigin[] = ['workshop_submission', 'video_answer', 'issue_screenshot']
+
+/**
+ * Скільки байт уже займають файли тенанта (докс/33 D-054, docs/25 §10): жорсткий лімит
+ * перевіряється по поточному значенню, не по нічному знімку `tenant_usage`. С PR-36 —
+ * по оперативному счётчику `storage_usage_counters` (docs/v2/34 §7.4 п. 1): одно число на
+ * экран, баннер и проверку, без второго подсчёта суммой по `media_assets`.
+ */
 export async function tenantStorageBytes(ctx: Ctx): Promise<number> {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.execute(sql`select coalesce(sum(bytes), 0)::bigint as bytes from media_assets where deleted_at is null`) as unknown as { bytes: string }[]
-    return Number(r?.bytes ?? 0)
-  })
+  return storageUsedBytes(ctx.tenantId)
 }
 
 /** Сколько байт уже занимают файлы ресурса (основной файл + медиа в блоках) — для лимита «на ресурс ≤ 1 ГБ». */
@@ -174,6 +195,8 @@ export async function createUploadUrl(ctx: Ctx, input: {
   mime: string
   bytes: number
   resourceId?: string
+  /** Ключ записи на устройстве (OPFS/IndexedDB): с ним исчерпанная квота — не отказ, а отложенная загрузка (docs/v2/34 §7.5). */
+  clientRef?: string
 } & UploadClassification): Promise<UploadUrlResult> {
   const used = input.resourceId ? await resourceBytes(ctx, input.resourceId) : 0
   const check = checkFileLimits(input.mime, input.bytes, used)
@@ -181,19 +204,44 @@ export async function createUploadUrl(ctx: Ctx, input: {
   const byOrigin = checkOriginRules(input.origin, input.mime, input.bytes)
   if (!byOrigin.ok) return byOrigin
 
+  // Досылка отложенной записи тем же входом (решение В-17): устройство повторяет запрос с тем же
+  // `clientRef`. Место уже выдано (`uploading`) — квота не проверяется ещё раз: начатая загрузка
+  // досылается, а не рвётся (§7.5). Файл под неё уже заведён — выдаётся новая ссылка на него же.
+  const pending = input.clientRef
+    ? await withTenant(ctx.tenantId, ctx.actorId, tx => pendingByClientRef(tx, ctx.actorId, input.clientRef!))
+    : null
+  if (pending?.status === 'done') return { ok: false, code: 'pending_done', message: 'Файл уже відправлено' }
+  if (pending?.status === 'abandoned') return { ok: false, code: 'pending_abandoned', message: 'Термін очікування минув — файл не вдалося відправити' }
+  if (pending?.mediaId) {
+    const media = await getMedia(ctx, pending.mediaId)
+    if (media && media.status === 'uploading') {
+      await ensureBucket()
+      const uploadUrl = await getSignedUrl(s3(), new PutObjectCommand({ Bucket: S3_BUCKET(), Key: media.key, ContentType: media.mime }), { expiresIn: 600 })
+      return { ok: true, mediaId: media.id, uploadUrl, key: media.key, pendingId: pending.id }
+    }
+  }
+
   // Жорсткий ліміт диска тенанта (docs/25 §10, docs/24 §4.4; докс/33 D-054): перевіряється в момент
   // операції по поточному об'єму, а не по нічному знімку `tenant_usage`. Навчання не зупиняється —
-  // блокується лише нове завантаження.
-  // Лимит оси `storage_bytes` — в байтах и с доплатами (docs/v2/35 §7.1, §7.3, docs/v2/44 В-5):
-  // «+100 ГБ» опцией видна здесь так же, как в баннере и в расчёте счёта — функция одна.
-  const limitBytes = (await effectiveLimits(ctx.tenantId)).axes.storage_bytes
-  if (limitBytes != null) {
-    const used2 = await tenantStorageBytes(ctx)
-    if (used2 + input.bytes > limitBytes) {
+  // блокується лише нове завантаження. Порог — `used + declared > limit + grace` (docs/v2/34 §7.5):
+  // решение принимает `checkLimit()` из `tenantLimits.ts`, лимит и допуск считает только он —
+  // «+100 ГБ» опцией видна здесь так же, как в баннере и в расчёте счёта (docs/v2/35 §7.3, В-5).
+  if (pending?.status !== 'uploading') {
+    const quota = await canStore(ctx.tenantId, input.bytes)
+    if (!quota.ok) {
+      await syncCounter(ctx.tenantId, 'storage_bytes', quota.used).catch(() => null)
+      // Запись есть на устройстве — сдача не теряется: строка ожидания, досылка по мере места (§7.5)
+      if (input.clientRef) {
+        const row = await deferUpload(ctx, {
+          clientRef: input.clientRef, origin: input.origin, sourceEntity: input.sourceEntity, sourceId: input.sourceId,
+          enrollmentId: input.enrollmentId, bytes: input.bytes,
+        })
+        return { ok: false, code: 'deferred', deferred: true, pendingId: row.id, expiresAt: row.expiresAt, message: 'Сховище компанії заповнене. Запис збережеться на пристрої й відправиться автоматично' }
+      }
       // Ось жёсткая: отклоняется загрузка нового файла, загруженное доступно (docs/v2/35
       // §7.1). Задание при этом можно сдать текстом — обучение не останавливается (§12).
-      await syncCounter(ctx.tenantId, 'storage_bytes', used2).catch(() => null)
-      return { ok: false, code: 'storage_limit', message: `Ліміт дискового простору (${(limitBytes / GIB).toFixed(0)} ГБ) вичерпано. Зверніться до адміністратора` }
+      const limitGb = quota.limit == null ? 0 : quota.limit / GIB
+      return { ok: false, code: 'storage_limit', message: `Ліміт дискового простору (${limitGb.toFixed(0)} ГБ) вичерпано. Зверніться до адміністратора` }
     }
   }
 
@@ -202,7 +250,9 @@ export async function createUploadUrl(ctx: Ctx, input: {
 
   const stageCode = await stageCodeOfCourse(ctx, input.courseId)
 
-  const mediaId = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  const created = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    // Место есть — отложенная запись получает его сейчас, не дожидаясь задачи (§7.5 п. 3)
+    if (pending?.status === 'waiting' && !await tryGrant(tx, ctx.tenantId, pending)) return null
     const [row] = await tx.insert(mediaAssets).values({
       tenantId: ctx.tenantId,
       key,
@@ -223,6 +273,7 @@ export async function createUploadUrl(ctx: Ctx, input: {
       enrollmentId: input.enrollmentId ?? null,
       isEvidence: input.isEvidence ?? false,
     }).returning({ id: mediaAssets.id })
+    if (pending) await linkPendingMedia(tx, pending.id, row!.id)
 
     // Событие `media.upload` — тот самый второй факт, ради которого переименование колонки
     // безопасно (В-4). До этого PR `media.ts` не писал аудит ни разу: файл появлялся
@@ -234,14 +285,17 @@ export async function createUploadUrl(ctx: Ctx, input: {
       action: 'media.upload',
       entity: 'media_assets',
       entityId: row!.id,
-      after: { origin: input.origin, bytes: input.bytes, mime: input.mime, ownerUserId: ctx.actorId, stageCode },
+      after: { origin: input.origin, bytes: input.bytes, mime: input.mime, ownerUserId: ctx.actorId, stageCode, ...(pending ? { pendingId: pending.id } : {}) },
     })
     return row!.id
   })
+  // Место между проверкой и выдачей заняли — запись остаётся ждать (гонка двух загрузок)
+  if (!created && pending) return { ok: false, code: 'deferred', deferred: true, pendingId: pending.id, expiresAt: pending.expiresAt, message: 'Сховище компанії заповнене. Запис збережеться на пристрої й відправиться автоматично' }
+  const mediaId = created!
 
   // Счётчик пополняется в той же точке, где ось проверена (docs/v2/45 PR-09): строка расхода
   // `upload` в `usage_events` и `used += bytes` в счётчике периода. Отдельной формулы квоты
-  // здесь нет — лимит уже спросили у `effectiveLimits()` выше.
+  // здесь нет — лимит уже спросили у `checkLimit()` выше.
   await recordUsage(ctx.tenantId, 'storage_bytes', input.bytes, {
     refKind: 'upload', refId: mediaId, actorUserId: ctx.actorId, meta: { mime: input.mime },
   }).catch(() => null)
@@ -253,16 +307,23 @@ export async function createUploadUrl(ctx: Ctx, input: {
     ContentType: input.mime,
   }), { expiresIn: 600 })
 
-  return { ok: true, mediaId, uploadUrl, key }
+  return { ok: true, mediaId, uploadUrl, key, ...(pending ? { pendingId: pending.id } : {}) }
 }
 
-/** Подтверждение загрузки: файл в хранилище, ставим обработку. */
-export async function completeUpload(ctx: Ctx, mediaId: string) {
+/**
+ * Подтверждение загрузки: файл в хранилище, ставим обработку. Файл отложенной записи
+ * (docs/v2/34 §7.5 п. 3) закрывает свою строку ожидания в той же транзакции: сдача получает
+ * настоящий файл вместо обещания и уходит ментору.
+ *
+ * `ownOnly` — учащийся без `media.upload` подтверждает только свой файл (`LEARNER_UPLOAD_ORIGINS`).
+ */
+export async function completeUpload(ctx: Ctx, mediaId: string, opts: { ownOnly?: boolean } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [row] = await tx.update(mediaAssets)
       .set({ status: 'processing', updatedAt: new Date() })
-      .where(eq(mediaAssets.id, mediaId))
+      .where(opts.ownOnly ? and(eq(mediaAssets.id, mediaId), eq(mediaAssets.ownerUserId, ctx.actorId)) : eq(mediaAssets.id, mediaId))
       .returning()
+    if (row) await completePendingUpload(tx, ctx.tenantId, row.id)
     return row ?? null
   })
 }
@@ -322,16 +383,19 @@ export async function noteMediaAccess(ctx: Ctx, media: { id: string, origin: str
   })
 }
 
-/** Срок корзины (`34` §4, §7.2.3). Строкой `storage_retention_policies` станет в PR-36. */
-export const PURGE_AFTER_DAYS = 30
+/**
+ * Срок корзины по умолчанию (`34` §4, §7.2.3). С PR-36 действующее значение живёт строкой
+ * `storage_retention_policies.trash_days` (docs/v2/44 §8) — константа только умолчание посева.
+ */
+export const PURGE_AFTER_DAYS = DEFAULT_TRASH_DAYS
 
 /** Слово подтверждения удаления доказательства (`34` §6.1) — украинский интерфейс. */
-export const CONFIRM_DELETE_PHRASE = 'ВИДАЛИТИ'
+export const CONFIRM_DELETE_PHRASE = STORAGE_CONFIRM_PHRASE
 
 export type DeleteMediaResult
   = | { ok: true, lifecycle: 'pending_delete', purgeAfter: Date }
     | { ok: false, code: 'not_found' }
-    | { ok: false, code: 'file_not_deletable' | 'evidence_locked' | 'already_deleted', message: string }
+    | { ok: false, code: 'file_not_deletable' | 'evidence_locked' | 'already_deleted' | 'under_review', message: string }
     | { ok: false, code: 'in_library_version', message: string, versions: { libraryModuleId: string, title: string, version: number }[] }
 
 /**
@@ -340,13 +404,15 @@ export type DeleteMediaResult
  * массовое удаление — только заявкой с подсчётом доказательств).
  *
  * Объект в S3 **не трогается**: ставится `lifecycle='pending_delete'`, `deleted_at`,
- * `deleted_by`, `delete_reason` и `purge_after = now() + 30 дней`, восстановление — в один
- * клик. Физическое удаление выполняет только задача `storage.purge` (`34` §11, PR-36);
- * до ответа владельца продукта срок корзины — предварительно 30 дней (`44` §8).
+ * `deleted_by`, `delete_reason` и `purge_after = now() + trash_days`, восстановление — в один
+ * клик. Срок корзины — строка политики хранения этого происхождения (`44` §8: предварительно
+ * 30 дней, меняется без релиза). В `purged` переводит только задача `storage.purge` (PR-36).
  *
  * Счётчик уменьшается **в момент мягкого удаления**, а не при purge (`34` §7.2.3): тенант
- * платит за то, чем распоряжается, корзина не держит квоту заложником. Второй формулы
- * квоты здесь нет — ось `storage_bytes` считает `tenantStorageBytes()`, как и при загрузке.
+ * платит за то, чем распоряжается, корзина не держит квоту заложником. Двигает его триггер
+ * `storage_counter_apply` в той же транзакции; второй формулы квоты здесь нет.
+ *
+ * Файл сдачи, которую сейчас проверяют или дорабатывают, — `409 under_review` (`34` §12).
  */
 export async function softDeleteMedia(ctx: Ctx, mediaId: string, input: { reason?: string, confirmPhrase?: string } = {}): Promise<DeleteMediaResult> {
   const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<DeleteMediaResult> => {
@@ -357,6 +423,10 @@ export async function softDeleteMedia(ctx: Ctx, mediaId: string, input: { reason
     // Запрещено вовсе (`34` §7.2.1): сертификат — выданный документ, он не удаляется никогда.
     if (row.origin === 'certificate') {
       return { ok: false, code: 'file_not_deletable', message: 'Сертифікат видалити не можна' }
+    }
+    // Ментор прямо сейчас ставит оценку по этому файлу (`34` §12) — сначала решение, потом удаление
+    if ((await mediaUnderReview(tx, [row.id])).has(row.id)) {
+      return { ok: false, code: 'under_review', message: 'Роботу з цим файлом зараз перевіряють. Видаліть після рішення наставника' }
     }
     // Доказательство — только с причиной и словом «ВИДАЛИТИ» (`34` §6.1, §7.2.2). Поднять
     // ограничение может только заявка на массовое удаление, у которой есть свой подсчёт.
@@ -376,7 +446,8 @@ export async function softDeleteMedia(ctx: Ctx, mediaId: string, input: { reason
     }
 
     const deletedAt = new Date()
-    const purgeAfter = new Date(deletedAt.getTime() + PURGE_AFTER_DAYS * 24 * 60 * 60 * 1000)
+    const trashDays = await trashDaysFor(tx, ctx.tenantId, row.origin)
+    const purgeAfter = new Date(deletedAt.getTime() + trashDays * 24 * 60 * 60 * 1000)
     await tx.update(mediaAssets).set({
       lifecycle: 'pending_delete',
       deletedAt,
@@ -402,6 +473,8 @@ export async function softDeleteMedia(ctx: Ctx, mediaId: string, input: { reason
 
   if (result.ok) {
     await syncCounter(ctx.tenantId, 'storage_bytes', await tenantStorageBytes(ctx)).catch(() => null)
+    // Место освободилось — отложенные записи сотрудников досылаются сразу, не через 15 минут (§7.5)
+    await kickPendingUploads(ctx.tenantId)
   }
   return result
 }

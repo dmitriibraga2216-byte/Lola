@@ -230,6 +230,18 @@ export default defineNitroPlugin(async () => {
       const { reviewStatsRollup } = await import('../services/reviewSla')
       await reviewStatsRollup(tenantId)
     }))
+    // Хранилище (docs/v2/34 §11, PR-36). Приостановленные тенанты пропускает сам круг
+    // runPerTenant — у клиента, который не может возразить, данные не чистятся (§12).
+    await work('storage.purge', () => runPerTenant('storage.purge', async (tenantId) => {
+      const { purgeDue } = await import('../services/storage')
+      const r = await purgeDue(tenantId)
+      if (r.purged) console.log(`[storage.purge] ${tenantId}:`, r)
+    }))
+    await work('storage.pending_upload_retry', () => runPerTenant('storage.pending_upload_retry', async (tenantId) => {
+      const { pendingUploadRetry } = await import('../services/storagePending')
+      const r = await pendingUploadRetry(tenantId)
+      if (r.granted || r.abandoned) console.log(`[storage.pending_upload_retry] ${tenantId}:`, r)
+    }))
     await work('webhook.deliver', () => runPerTenant('webhook.deliver', async (tenantId) => {
       const s = await deliverPending(tenantId)
       if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)

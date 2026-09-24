@@ -233,7 +233,9 @@ export async function measureLive(tenantId: string, axis: LimitAxis): Promise<nu
         // (`35` §7.1, `28` §7.1, §15 Г-28.7 — тенант не должен платить за архив).
         return q(sql`select count(*)::int as n from users where candidate_state = 'active' ${CANDIDATES_ONLY('')}`)
       case 'storage_bytes':
-        return q(sql`select coalesce(sum(bytes), 0)::bigint as n from media_assets where deleted_at is null`)
+        // Оперативный счётчик хранилища (docs/v2/34 §7.4 п. 1, PR-36): его ведёт триггер на
+        // `media_assets`, по нему же проверяется загрузка — второго подсчёта суммой по файлам нет
+        return q(sql`select coalesce(sum(bytes), 0)::bigint as n from storage_usage_counters`)
       case 'integrations_active':
         return q(sql`select count(*)::int as n from webhook_endpoints where is_active`)
       default:

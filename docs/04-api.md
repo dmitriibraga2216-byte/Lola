@@ -342,10 +342,18 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| POST | `/media/upload-url` | `{filename, mime, bytes, origin, sourceEntity?, sourceId?, courseId?, enrollmentId?, resourceId?}` → presigned PUT, `mediaId`; **единственный** вход загрузки (`v2/44` В-17); отказ 400 `origin_required \| media.too_big \| media.mime_not_allowed \| media.resource_too_big \| media.storage_limit` до передачи |
-| POST | `/media/:id/complete` | подтверждение загрузки, запуск обработки |
+| POST | `/media/upload-url` | `{filename, mime, bytes, origin, sourceEntity?, sourceId?, courseId?, enrollmentId?, resourceId?, clientRef?}` → presigned PUT, `mediaId`; **единственный** вход загрузки (`v2/44` В-17); отказ 400 `origin_required \| media.too_big \| media.mime_not_allowed \| media.resource_too_big \| media.storage_limit` до передачи. Скоуп `media.upload` — любое происхождение; `learn.attempt` — только своя работа (`workshop_submission`, `video_answer`, `issue_screenshot`), иначе 403. С `clientRef` (ключ записи на устройстве) исчерпанная квота — не отказ, а **202** `{deferred:true, pendingId, expiresAt}` (`v2/34` §7.5); повтор с тем же `clientRef` досылает файл, когда место выдано; 409 `pending_upload_done`, 410 `pending_upload_abandoned` (срок 14 дней истёк) |
+| POST | `/media/:id/complete` | подтверждение загрузки, запуск обработки; учащийся без `media.upload` — только своего файла. Файл отложенной записи закрывает её (`done`), сдача получает файл вместо обещания и уходит наставнику (`v2/34` §7.5 п. 3) |
 | GET | `/media/:id` | статус и подписанная ссылка на чтение: 10 минут обычному файлу, **120 секунд** доказательству (`v2/44` В-19); оригинал SVG — только после санитизации (`ready`), до этого `?redirect=1` → 409 `not_ready` (D-011) |
-| DELETE | `/media/:id` | мягкое удаление, скоуп `storage.delete`; тело `{reason?, confirmPhrase?}` → `{lifecycle:'pending_delete', purgeAfter}`; 403 `file_not_deletable` (сертификат), 409 `evidence_locked` (доказательство — нужны причина и слово «ВИДАЛИТИ»), 409 `already_deleted` |
+| DELETE | `/media/:id` | мягкое удаление, скоуп `storage.delete`; тело `{reason?, confirmPhrase?}` → `{lifecycle:'pending_delete', purgeAfter}`; 403 `file_not_deletable` (сертификат), 409 `evidence_locked` (доказательство — нужны причина и слово «ВИДАЛИТИ»), 409 `already_deleted`, 409 `under_review` (сдачу с этим файлом сейчас проверяют, `v2/34` §12) |
+| GET | `/storage/summary` | `?groupBy=origin\|stage` → `{usedBytes, limitBytes, graceBytes, pct, tone, blocked, breakdown[], otherShare, otherFiles, collectedAt, driftBytes, trash, pending, stageLabels, trashDays}`; скоуп `storage.view` (`v2/34` §5.1). Лимит и допуск — из `effectiveLimits()` (`v2/44` В-5), занятое — оперативный счётчик |
+| GET | `/storage/files`, `/storage/trash` | реестр и корзина: `origin` (через запятую), `stage` (девять ключей), `categoryId`, `courseId`, `userId`, `from`, `to`, `status=active\|orphaned\|failed`, `evidenceOnly`, ключевой курсор `cursor` (`KEYSETS.storageFiles`, §4.1), `limit ≤ 100` → `{items[], nextCursor}` |
+| GET | `/storage/pending-uploads` | записи сотрудников, ждущие места (`v2/34` §7.5) |
+| POST | `/storage/files/:id/restore` | вернуть из корзины, сверх лимита тоже; скоуп `storage.delete`; 409 `already_purged`, 409 `not_deleted` |
+| POST | `/storage/deletions` | заявка на массовое удаление `{mode:'selection', mediaIds[]}` или `{mode:'filter', filter}` → черновик с `plannedFiles`, `plannedBytes`, `evidenceCount`, `notDeletableCount`; 422 `deletion.empty`, 422 `deletion.too_many` (> 5000) |
+| POST | `/storage/deletions/:id/confirm`, `/cancel` | `{acknowledged:true, reason?, confirmPhrase?}` — при доказательствах причина 10–500 и «ВИДАЛИТИ» (422 `reason_required`, 422 `confirm_phrase_mismatch`); исполняет заявку, сертификаты — в `skipped` с `not_deletable`; 409 `deletion.not_draft` |
+| GET/PUT | `/storage/retention-policies` | строка на `origin`, скоуп `storage.policy`; первое включение удаляющей политики — только с `dryRunConfirmed` (422 `dry_run_required`), `keepEvidence=false` — с `acknowledgeEvidence` (422 `evidence_ack_required`) |
+| POST | `/storage/retention-policies/dry-run` | `{origin, keepMonths, anchor, action, keepEvidence}` → `{files, bytes, evidenceCount}` — «Буде звільнено приблизно {size}» |
 
 Ограничения (`11` Г-11.4): изображение ≤ 10 МБ, документ ≤ 50 МБ, аудио ≤ 100 МБ,
 видео ≤ 500 МБ, на ресурс суммарно ≤ 1 ГБ; mime — allowlist; ключ — uuid,
@@ -355,8 +363,10 @@
 `v2/40` §4.2) и задаётся **при выдаче presigned URL**, а не вычисляется потом (`v2/34` §7.1):
 второго пути загрузки нет, иначе копятся неклассифицированные файлы. Удаление всегда мягкое:
 строка получает `lifecycle='pending_delete'`, `deleted_at`, `deleted_by`, `delete_reason` и
-`purge_after = now() + 30 днів`, **объект в S3 остаётся** до задачи `storage.purge`
-(`v2/34` §11); квота освобождается сразу. Загрузка пишет в `audit_log` событие `media.upload`,
+`purge_after = now() + trash_days` (срок корзины — строка `storage_retention_policies`, по
+умолчанию 30 днів, `v2/44` §8), **объект в S3 остаётся**; задача `storage.purge` переводит
+строку в `purged` и объект тоже не удаляет до решения владельца продукта (`v2/44` §8,
+`v2/34` §11); квота освобождается сразу, при мягком удалении. Загрузка пишет в `audit_log` событие `media.upload`,
 удаление — `media.delete`, выдача ссылки на доказательство — `media.download`.
 Массовое удаление одиночной ручкой не делается: только заявкой `POST /storage/deletions`
 с подсчётом доказательств и подтверждением фразой (`v2/34` §10).

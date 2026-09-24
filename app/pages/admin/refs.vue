@@ -82,6 +82,8 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
         {{ t(`refs.${k}`) }}
       </button>
       <NuxtLink to="/admin/tags" class="tab">{{ t('refs.tags') }} →</NuxtLink>
+      <!-- Типи документів людини (docs/v2/38 §3.5) — справочник HR, свой экран -->
+      <NuxtLink v-if="hasScope('person.document.manage')" to="/admin/people/document-types" class="tab">{{ t('refs.documentTypes') }} →</NuxtLink>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
 

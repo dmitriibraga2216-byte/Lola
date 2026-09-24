@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { PgTransaction } from 'drizzle-orm/pg-core'
-import { STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES } from '../../shared/enums'
+import { STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES, SYSTEM_PERSON_DOCUMENT_TYPES } from '../../shared/enums'
 import { DEFAULT_SHOP_CATEGORIES } from '../../shared/domain/gamification'
 import type { LifecycleStageCode, StageCapability } from '../../shared/enums'
 
@@ -100,5 +100,13 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
       insert into shop_categories (tenant_id, name, sort)
       values (${tenantId}::uuid, ${name}, ${i})
       on conflict (tenant_id, name) do nothing`)
+  }
+  // Семь системных типов документов человека (docs/v2/38 §3.5): удалить нельзя, править — можно.
+  // Тот же список — в миграции v2_person_notes_docs догоняющей вставкой для уже заведённых тенантов.
+  for (const s of SYSTEM_PERSON_DOCUMENT_TYPES) {
+    await tx.execute(sql`
+      insert into person_document_types (tenant_id, code, name, is_system, is_required, validity_months, is_fact_only, self_upload)
+      values (${tenantId}::uuid, ${s.code}, ${s.name}, true, ${s.isRequired}, ${s.validityMonths}, ${s.isFactOnly}, ${s.selfUpload})
+      on conflict (tenant_id, code) do nothing`)
   }
 }

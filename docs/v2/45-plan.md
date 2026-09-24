@@ -782,6 +782,13 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 
 #### PR-32 · `v2-people-32` · Заметки и документы человека
 
+**Статус: выполнено** (2026-09-25, ветка `v2-people-32`; миграция `0082_v2_person_notes_docs.sql`,
+а не `0083`: номер назначен координатором очереди мержа — `0080` и `0081` занимают PR, идущие перед
+этим.
+Сверх «Входит» — задача `documents.expiry_scan` и уведомления §8: без них не закрыть критерий 8;
+`user_notes` внесена в `V2_PACKAGE_TENANT_TABLES` вместе с ключом на `tenants`, которого у неё
+не было. Подробности, решения и что осталось — `46-progress.md`, запись PR-32.)
+
 - **Модель:** opus. **Оценка:** 3 сессии. **М:** `0083_v2_person_notes_docs.sql`.
 - **Входит:** **`alter user_notes`** вместо новой `person_notes`: +`visibility`, `category`,
   `is_pinned`, `flagged_at`, `flagged_terms`, `shared_at`, `archived_at`, 4 констрейнта и

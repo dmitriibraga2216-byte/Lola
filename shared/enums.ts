@@ -768,6 +768,86 @@ export type LibraryPinMode = typeof LIBRARY_PIN_MODES[number]
 export const LIBRARY_PROPOSAL_STATUSES = ['pending', 'accepted', 'rejected', 'withdrawn'] as const
 export type LibraryProposalStatus = typeof LIBRARY_PROPOSAL_STATUSES[number]
 
+// ── Карточка человека: заметки и документы (docs/v2/38-people-extensions.md §3.4, §3.5, PR-32) ──
+
+/**
+ * Видимость заметки о человеке (`user_notes.visibility`, `v2/38` §3.4, §7.4). Уровня
+ * «тільки автор» нет — такую заметку никто не проверит и она не переживёт ротацию
+ * руководителя. `shared_with_person` однонаправленный (§4): открытое человеку назад не
+ * закрывается, он это уже прочитал — `409 visibility_narrowing_forbidden`.
+ */
+export const PERSON_NOTE_VISIBILITIES = ['hr', 'manager', 'shared_with_person'] as const
+export type PersonNoteVisibility = typeof PERSON_NOTE_VISIBILITIES[number]
+
+/** Категория заметки (`user_notes.category`, `v2/38` §3.4) — определяет срок хранения (§7.6). */
+export const PERSON_NOTE_CATEGORIES = ['general', 'onboarding', 'performance', 'training_plan', 'incident', 'agreement'] as const
+export type PersonNoteCategory = typeof PERSON_NOTE_CATEGORIES[number]
+
+/**
+ * Состояние документа человека (`person_documents.status`, `v2/38` §4): `valid → expiring →
+ * expired` двигает срок, `revoked` ставится вручную с причиной или заменой и необратим.
+ */
+export const PERSON_DOCUMENT_STATUSES = ['valid', 'expiring', 'expired', 'revoked'] as const
+export type PersonDocumentStatus = typeof PERSON_DOCUMENT_STATUSES[number]
+
+/** Числа заметок (`v2/38` §3.4, §6.1, §7.6) — одни для сервера, формы и тестов. */
+export const PERSON_NOTE_LIMITS = {
+  bodyMin: 3,
+  bodyMax: 2000,
+  /** Закреплённых заметок на человека (§3.4): «договорённость о развитии», а не лента. */
+  pinnedMax: 3,
+  /** Срок хранения `general`, `onboarding`, `performance`, `incident` (§7.6). */
+  retentionMonths: 24,
+  /** Срок хранения `training_plan`, `agreement` и любой закреплённой (§7.6). */
+  retentionMonthsLong: 36,
+} as const
+
+/** Категории заметок с долгим сроком хранения (§7.6): договорённость переживает годовой цикл. */
+export const PERSON_NOTE_LONG_RETENTION: readonly PersonNoteCategory[] = ['training_plan', 'agreement']
+
+/** Числа документов (`v2/38` §3.5, §6.2, §7.8). */
+export const PERSON_DOCUMENT_LIMITS = {
+  titleMax: 120,
+  numberMax: 32,
+  /** Хранятся последние 4 знака номера (§7.7): факт, а не содержание. */
+  numberKeep: 4,
+  noteMax: 300,
+  reasonMin: 5,
+  reasonMax: 300,
+  fileMaxMb: 20,
+  fileMimes: ['application/pdf', 'image/jpeg', 'image/png'],
+  /** Файл хранится ещё 3 года после истечения — срок исковой давности по трудовым спорам (§7.8). */
+  retentionYearsAfterExpiry: 3,
+  /** После истечения напоминание ежедневно ещё 14 дней, дальше — тишина (§7.8). */
+  expiredReminderDays: 14,
+} as const
+
+/**
+ * Семь системных типов документов нового тенанта (`v2/38` §3.5). `is_system` запрещает
+ * удаление; название, обязательность, срок, посады тенант правит. Здесь и в миграции
+ * `v2_person_notes_docs` — две копии одного списка, как у колонок воронки.
+ *
+ * `medical_book` — факт и срок без файла (§7.7). Обязателен «для посад из
+ * `required_positions`», но при создании тенанта посад ещё нет, а пустой список значит
+ * «для всех» — HR сужает его сам.
+ */
+export const SYSTEM_PERSON_DOCUMENT_TYPES: {
+  code: string
+  name: string
+  isRequired: boolean
+  validityMonths: number | null
+  isFactOnly: boolean
+  selfUpload: boolean
+}[] = [
+  { code: 'employment_contract', name: 'Трудовий договір', isRequired: true, validityMonths: null, isFactOnly: false, selfUpload: false },
+  { code: 'labor_safety_briefing', name: 'Інструктаж з охорони праці', isRequired: true, validityMonths: 12, isFactOnly: false, selfUpload: false },
+  { code: 'fire_safety_briefing', name: 'Інструктаж з пожежної безпеки', isRequired: true, validityMonths: 12, isFactOnly: false, selfUpload: false },
+  { code: 'medical_book', name: 'Медична книжка', isRequired: true, validityMonths: 12, isFactOnly: true, selfUpload: false },
+  { code: 'nda', name: 'Угода про нерозголошення', isRequired: true, validityMonths: null, isFactOnly: false, selfUpload: false },
+  { code: 'external_certificate', name: 'Сертифікат стороннього навчання', isRequired: false, validityMonths: null, isFactOnly: false, selfUpload: true },
+  { code: 'other', name: 'Інше', isRequired: false, validityMonths: null, isFactOnly: false, selfUpload: false },
+]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -850,4 +930,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   library_container_type: LIBRARY_CONTAINER_TYPES,
   library_pin_mode: LIBRARY_PIN_MODES,
   library_proposal_status: LIBRARY_PROPOSAL_STATUSES,
+  person_note_visibility: PERSON_NOTE_VISIBILITIES,
+  person_note_category: PERSON_NOTE_CATEGORIES,
+  person_document_status: PERSON_DOCUMENT_STATUSES,
 }

@@ -123,7 +123,6 @@ export const archiveSchema = z.object({
 })
 export const mergeSchema = z.object({ primaryId: z.string().uuid(), duplicateId: z.string().uuid() })
 export const gdprEraseSchema = z.object({ userId: z.string().uuid(), reason: z.string().min(3, 'Вкажіть підставу').max(500) })
-export const noteSchema = z.object({ body: z.string().min(1, 'Порожня нотатка').max(2000) })
 export const chiefSchema = z.object({
   userId: z.string().uuid(),
   chiefId: z.string().uuid(),

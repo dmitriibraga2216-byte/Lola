@@ -619,14 +619,9 @@ export async function exportPeople(ctx: Ctx, filter: PersonListFilter, opts: { w
   return toXlsx('Люди', all as never)
 }
 
-// ── Заметки, функциональные руководители, группы (docs/16 §3.4–3.5, §5.2) ──
-
-export async function addNote(ctx: Ctx, userId: string, body: string) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => (await tx.insert(userNotes).values({ tenantId: ctx.tenantId, userId, authorId: ctx.actorId, body }).returning())[0]!)
-}
-export async function listNotes(ctx: Ctx, userId: string) {
-  return withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`select n.id, n.body, n.created_at, u.full_name as author from user_notes n left join users u on u.id = n.author_id where n.user_id = ${userId}::uuid order by n.created_at desc`) as unknown as Promise<Record<string, unknown>[]>)
-}
+// ── Функциональные руководители, группы (docs/16 §3.4–3.5, §5.2) ──
+// Заметки о человеке — `server/services/personNotes.ts` (docs/v2/38 §3.4, PR-32): видимость,
+// категория, срок хранения и журнал чтения выросли в отдельный модуль.
 
 export async function listChiefs(ctx: Ctx, userId?: string) {
   return withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`

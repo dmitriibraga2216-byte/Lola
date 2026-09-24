@@ -656,6 +656,34 @@ AI-генерация текста и критериев, площадки и ж
 списком версий. Обновление мест до новой версии, массовое обновление, `diff` между версиями,
 хотфикс и поиск по телу — PR-26.
 
+### Заметки и документы человека (`docs/v2/38-people-extensions.md` §10, PR-32)
+
+Права решает сервис, а не список скоупов на входе: свои заметки (только открытые) и свои
+документы человек читает без `person.note.read` и `person.document.view_others`; руководитель
+точки — в области своей роли и только уровня `manager` / типов `visible_to_manager`; HR — на весь
+тенант. Чужой тенант и кандидат — `404`.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/people/:id/notes` | лента заметок, видимых смотрящему, страницами: `?cursor=&limit=` (≤ 100, по умолчанию 30), порядок `is_pinned desc, created_at desc, id desc`, ключевой курсор `KEYSETS.personNotes`; ответ — `data` (заметки) и `meta: {cursor, limit, total, canCreate}`; **каждая страница пишет `person_note.read`** в `audit_log` с `{user_id, note_ids, count}` и без текста — единственный `GET` с побочным эффектом (`v2/41` §5.1); `403 forbidden`, битый курсор — `400 validation_failed` |
+| GET | `/people/:id/notes/count` | число для свёрнутой секции «Нотатки (N)» и `canCreate`; содержания не читает, журнала не пишет |
+| POST | `/people/:id/notes` | `{body, category, visibility, isPinned, confirmSensitive?}` (`person.note.write` в области точки человека); `422 note_body_invalid` (3–2000), `409 pinned_limit` (≤ 3), `409 note_sensitive_suspected` с `details.signs` — повтор с `confirmSensitive: true` сохраняет и ставит `flagged_at`, `409 person_archived`, `403 forbidden` (в т. ч. о себе) |
+| GET | `/people/:id/notes/:noteId` | заметка по прямой ссылке; архивная — только администратору (`person.note.write` + `audit.view` на тенант); пишет `person_note.read` |
+| PATCH | `/people/:id/notes/:noteId` | правка своей (администратор — любой); `409 visibility_narrowing_forbidden` — открытую человеку не сузить, `409 note_archived` |
+| DELETE | `/people/:id/notes/:noteId` | свою — автор; чужую — администратор с `reason` (5–300), иначе `422 reason_required` |
+| GET | `/people/:id/documents` | `{items, missing, total, types}`: документы, заглушки отсутствующих обязательных типов по посадам человека, типы для формы |
+| POST | `/people/:id/documents` | `{typeId, mediaId?, number?, issuedAt, expiresAt?, title?, note?}`; тип «лише факт» с `mediaId` — `422 document_file_not_allowed`, без файла у остальных — `422 document_file_required`, `422 document_dates_invalid` (`details.reason`), `422 document_file_invalid`; истёкший — `201` с `meta.warnings: ['already_expired']` |
+| PATCH | `/people/:id/documents/:docId` | `{expiresAt?, status?: 'revoked', reason?, note?}`; отмена необратима и только с причиной; `409 document_revoked` |
+| DELETE | `/people/:id/documents/:docId` | обязательный тип — `409 document_is_evidence`; файл остального — в корзину, как `DELETE /media/:id` |
+| GET | `/people/:id/documents/:docId/file` | подписанная ссылка на файл тем же правам, что документ (`?redirect=1` — 302); доказательство — 120 секунд и `media.download` в журнал |
+| GET | `/person-document-types` | справочник: HR — все со счётчиком документов, руководитель — активные `visible_to_manager`, остальные — активные `self_upload` |
+| POST | `/person-document-types` | новый тип — только HR (`person.document.manage` на тенант); без `code` сервер выдаёт свой `custom_…`; `409 code.exists` |
+| PATCH/DELETE | `/person-document-types/:id` | правка и удаление — только HR; выключить используемый можно (`isActive: false`), удалить — `409 type_in_use`, системный — `409 type_is_system` |
+
+Файл документа грузится единственным входом `POST /media/upload-url` с `origin='person_document'`
+(PDF, JPG, PNG до 20 МБ); `media.upload` для этого не нужен — свой документ `self_upload`
+загружает и сотрудник. Общий `GET /media/:id` такие файлы не отдаёт — только через документ.
+
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом
 `server/api/v1/public/` → `/api/v1/public/*` (префикс задаёт дерево каталогов Nitro, а не

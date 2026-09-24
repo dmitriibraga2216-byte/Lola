@@ -193,6 +193,12 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   review_escalated: 'Перевірку «{{task}}» ескальовано на вас{{#name}} — {{name}}{{/name}}',
   review_queue_moved: 'Вам передано {{n}} робіт із черги {{name}} ({{reason}})',
   review_overloaded: 'У {{name}} {{n}} робіт у черзі при ліміті {{m}}',
+  // Карточка человека (docs/v2/38 §8, PR-32). Человеку — о его документе; руководителю и HR —
+  // с именем того, чей документ ({{person}}), иначе непонятно, о ком речь
+  person_document_expiring: 'Документ «{{type}}»{{#person}} ({{person}}){{/person}} дійсний до {{date}}. Залишилось {{days}} дн.',
+  person_document_expired: 'Документ «{{type}}»{{#person}} ({{person}}){{/person}} прострочено {{date}}. Потрібно оновити.',
+  person_note_shared: 'Керівник поділився з вами нотаткою.',
+  person_note_flagged: 'Нотатку про {{person}} збережено з ознаками чутливого змісту.',
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',

@@ -42,6 +42,11 @@ const EXCEPTIONS = new Map<string, string>([
     "server/services/reportBuilder.ts:DateTimeFormat:en-GB",
     'scheduledReportsScan — час по Києву для порівняння з розкладом звіту, не показ дати',
   ],
+  [
+    "server/services/personDocuments.ts:DateTimeFormat:en-CA",
+    'localDate — календарний день «сьогодні» в поясі тенанта для строків документів (docs/v2/38 §4): '
+    + 'машинний YYYY-MM-DD для порівняння з expires_at, людині не показується',
+  ],
 ])
 
 function walk(dir: string, out: string[] = []): string[] {

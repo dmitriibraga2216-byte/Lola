@@ -561,6 +561,13 @@
       "when": 1790233980000,
       "tag": "0081_v2_library",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790234040000,
+      "tag": "0082_v2_person_notes_docs",
+      "breakpoints": true
     }
   ]
 }

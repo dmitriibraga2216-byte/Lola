@@ -26,6 +26,7 @@ export default defineEventHandler(async (event) => {
       email: users.email,
       locale: users.locale,
       status: users.status,
+      kind: users.kind, // docs/v2/38 §5.1: блоки «Нотатки» и «Документи» своей карточки — только у сотрудника
       birthdayConsent: users.birthdayConsent, // 29 Б.16: тумблер в профиле
       mustChangePassword: users.mustChangePassword, // docs/24 §3.4.1 «Змінити пароль після першого входу»
       hasPassword: sql<boolean>`${users.passwordHash} is not null`, // сам хеш наружу не уходит

@@ -14,6 +14,9 @@ export default defineEventHandler(async (event) => {
   const ctx = { tenantId: access.tenantId, actorId: access.userId }
   const media = await getMedia(ctx, getRouterParam(event, 'id')!)
   if (!media || media.deletedAt) return apiError(event, 404, 'not_found', 'Файл не знайдено')
+  // Документ человека отдаётся только через сам документ — с его правами (docs/v2/38 §2):
+  // `learn.view` есть у каждого, и по одному id скан договора коллеги открывался бы любому
+  if (media.origin === 'person_document') return apiError(event, 404, 'not_found', 'Файл не знайдено')
 
   const variants = media.variants as Record<string, string>
   // D-011: оригинал SVG доступен только после обработки (санитизации) — до неё ссылки на него нет

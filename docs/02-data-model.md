@@ -554,6 +554,61 @@ create table invitations (
   accepted_at timestamptz,
   created_by uuid references users(id)
 );
+
+-- Заметки о человеке (`16` §5.2 п. 6; модель — `v2/38` §3.4, §7.4–§7.6; миграция
+-- v2_person_notes_docs, PR-32). Пакетная person_notes не заводится: это та же user_notes
+-- (`v2/43` §1.2). Чтение пишет person_note.read в audit_log — перечень note_ids без текста.
+create table user_notes (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,     -- о ком (только сотрудник)
+  author_id uuid references users(id),                              -- null — у заметок о себе до PR-32
+  body text not null,                                               -- 3–2000, user_notes_body_chk
+  visibility text not null default 'manager',                       -- person_note_visibility
+  category text not null default 'general',                         -- person_note_category → срок хранения
+  is_pinned boolean not null default false,                         -- ≤ 3 на человека
+  flagged_at timestamptz, flagged_terms text[] not null default '{}', -- мягкий скрин §7.5
+  shared_at timestamptz,                                            -- когда открыли человеку
+  archived_at timestamptz,                                          -- notes.archive_scan, 24/36 месяцев
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  constraint user_notes_self_chk check (author_id <> user_id)
+);
+create index idx_user_notes_tenant on user_notes (tenant_id, user_id, created_at desc) where archived_at is null;
+create index idx_user_notes_tenant_all on user_notes (tenant_id, user_id, created_at desc);
+
+-- Документы человека (`v2/38` §3.5, §4, §7.7, §7.8; PR-32). Документ — факт и срок, файл вторичен:
+-- тип is_fact_only файла не принимает (422 document_file_not_allowed). Файл — media_assets с
+-- origin='person_document', владелец — человек, доказательство для обязательных типов,
+-- retention_until = expires_at + 3 роки.
+create table person_document_types (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  code text not null, name text not null,                           -- семь системных: is_system
+  is_system boolean not null default false, is_required boolean not null default false,
+  required_positions uuid[] not null default '{}',                  -- пусто = для всех посад
+  validity_months int, remind_days int[] not null default '{30,7,0}',
+  is_fact_only boolean not null default false, self_upload boolean not null default false,
+  visible_to_manager boolean not null default true, is_active boolean not null default true,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, code)
+);
+create table person_documents (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  type_id uuid not null references person_document_types(id) on delete restrict,
+  media_id uuid references media_assets(id) on delete set null,     -- null у is_fact_only
+  title text, number_masked text,                                   -- ****1234, ≤ 8
+  issued_at date, expires_at date,
+  status text not null default 'valid',                             -- person_document_status
+  uploaded_by uuid not null references users(id), note text,
+  revoked_at timestamptz, revoke_reason text,                       -- отмена с причиной (§4)
+  replaced_by_id uuid references person_documents(id) on delete set null, -- «Замінено документом від …»
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create index idx_person_documents_tenant on person_documents (tenant_id, user_id, status);
+create index idx_person_documents_tenant_expiry on person_documents (tenant_id, expires_at)
+  where status in ('valid', 'expiring');
 ```
 
 ## 2.4 Контент: курсы, модули, уроки
@@ -2456,6 +2511,19 @@ library_pin_mode: fixed | hotfix_auto
 
 -- Предложение урока в библиотеку (`v2/31` §3.5, §4): все три исхода конечные
 library_proposal_status: pending | accepted | rejected | withdrawn
+
+-- Видимость заметки о человеке (`user_notes.visibility`, `v2/38` §3.4, §7.4, PR-32). Уровня
+-- «тільки автор» нет. shared_with_person однонаправленный: открытое человеку назад не
+-- закрывается (`409 visibility_narrowing_forbidden`, `v2/38` §4)
+person_note_visibility: hr | manager | shared_with_person
+
+-- Категория заметки (`user_notes.category`, `v2/38` §3.4): определяет срок хранения (§7.6) —
+-- 24 месяца, а training_plan, agreement и любая закреплённая заметка — 36
+person_note_category: general | onboarding | performance | training_plan | incident | agreement
+
+-- Состояние документа человека (`person_documents.status`, `v2/38` §4): valid → expiring → expired
+-- двигает срок (`documents.expiry_scan`), revoked — вручную с причиной или заменой, необратимо
+person_document_status: valid | expiring | expired | revoked
 ```
 
 ## Что проверяет тест схемы

@@ -153,6 +153,40 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.stdout).toContain('[ok]   7.')
   })
 
+  /**
+   * Сквозная проверка 22 (`docs/v2/42-stages-delta.md` §5, `37` §7.10): время обучения —
+   * биениями. Статический сторож: колонки учёта пишет только свёртка `learningTimeRollup.ts`.
+   * Три фикстуры: «открыл — закрыл» в сервисе, то же через Drizzle — нарушения; чтение — нет.
+   */
+  it('10. время попытки посчитано разницей «открыл — закрыл» в сервисе', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/bad.ts'), 'export const q = sql`update attempts set net_seconds = extract(epoch from submitted_at - started_at)::int`\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('11. время обучения пишет только свёртка биений')
+  })
+
+  it('10. колонку учёта пишет не свёртка, а Drizzle-запрос сервиса', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/bad.ts'), 'export async function f(tx) { await tx.update(lessonProgress).set({ contentSeconds: 600 }) }\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('11. время обучения')
+  })
+
+  it('10. чтение колонок учёта и их ограничения нарушением не считаются', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    mkdirSync(join(dir, 'server/db/migrations'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ok.ts'), 'export const cols = { netSeconds: attempts.netSeconds, contentSeconds: q.contentSeconds }\n')
+    writeFileSync(join(dir, 'server/db/migrations/9999_ok.sql'), 'ALTER TABLE x ADD CONSTRAINT c CHECK ("content_seconds" >= 0 AND "attempt_seconds" >= 0);\n')
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   10.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

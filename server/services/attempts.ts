@@ -16,11 +16,12 @@ import {
   type GradeResult, type QuizParams, type SnapshotQuestion,
 } from '../../shared/domain/grading'
 import { rescoreVerdict } from '../../shared/domain/contentIssues'
-import type { ScoringMethod } from '../../shared/enums'
+import type { AnswerInputMode, ScoringMethod } from '../../shared/enums'
 import { completeLesson, rollbackLessonCompletion, type RollbackResult } from './learning'
 import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
 import { closeReview, enqueueReview } from './reviewQueue'
+import { closeOpenSegments } from './learningTime'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -251,6 +252,11 @@ export async function getAttemptState(ctx: Ctx, attemptId: string) {
 
 export type SaveAnswerResult = { ok: true } | { ok: false, code: 'not_found' | 'locked' | 'deadline' }
 
+/** Способ ввода ответа (`ANSWER_INPUT_MODES`): вопрос-файл отвечается файлом, остальные — текстом. */
+export function answerInputMode(kind: string): AnswerInputMode {
+  return kind === 'file' ? 'file' : 'text'
+}
+
 /** Сохранение ответа, идемпотентно; после submit — 423 (docs/12 §7.3). */
 export async function saveAnswer(ctx: Ctx, attemptId: string, questionId: string, answer: unknown, timeSpentSec?: number): Promise<SaveAnswerResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -264,6 +270,9 @@ export async function saveAnswer(ctx: Ctx, attemptId: string, questionId: string
     const q = snapshot.find(s => s.id === questionId)
     if (!q) return { ok: false as const, code: 'not_found' as const }
 
+    // Способ ввода — по типу вопроса из снапшота (docs/v2/30 §3.7, docs/v2/44 В-12): решает
+    // сервер, клиент его не присылает. Голос и видео приходят с ИИ-собеседованием (PR-28).
+    const inputMode = answerInputMode(q.kind)
     await tx.insert(attemptAnswers).values({
       tenantId: ctx.tenantId,
       attemptId,
@@ -271,9 +280,10 @@ export async function saveAnswer(ctx: Ctx, attemptId: string, questionId: string
       questionVersion: q.version,
       answer,
       answeredAt: new Date(),
+      inputMode,
     }).onConflictDoUpdate({
       target: [attemptAnswers.tenantId, attemptAnswers.attemptId, attemptAnswers.questionId],
-      set: { answer, answeredAt: new Date(), updatedAt: new Date() },
+      set: { answer, answeredAt: new Date(), updatedAt: new Date(), inputMode },
     })
     if (timeSpentSec) {
       await tx.update(attempts).set({ timeSpentSec: attempt.timeSpentSec + Math.min(timeSpentSec, 3600) })
@@ -339,6 +349,10 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
     updatedAt: now,
   }).where(eq(attempts.id, attempt.id))
   await writeResult(tx, ctx, attempt.id, 'submit', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, reason === 'expire' ? 'expired' : null)
+  // Попытка закончена (отправлена или истекла) — открытый сегмент измерения закрывается
+  // `completed` (docs/v2/37 §3.6); чистое время попытки досчитает свёртка `time.rollup`.
+  // Сам учёт времени попытку не трогает: ни снапшот, ни дедлайн, ни статус (PR-21).
+  await closeOpenSegments(tx, { tenantId: ctx.tenantId, userId: attempt.userId, subjectType: 'quiz', subjectId: attempt.quizId })
 
   // Единая очередь проверки (docs/v2/44 В-2). Точка одна на оба пути завершения попытки —
   // отправку и истечение по дедлайну: очередь не должна зависеть от того, каким из них

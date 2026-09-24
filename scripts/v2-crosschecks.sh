@@ -452,6 +452,25 @@ PYEOF
   report "10. тихие часы кандидата — безусловны, своим окном (docs/v2/42 §5 проверка 19)" "$hits"
 }
 
+# ── Проверка 11. Время обучения — биениями, у колонок учёта один писатель ───────────────────
+# docs/v2/42-stages-delta.md §5 проверка 22, docs/v2/37 §7.10: «время считается биениями, а не
+# разницей «открыл — закрыл»». Поведение проверяет тест (`tests/integration/v2-learning-time.spec.ts`,
+# блок «сквозная проверка 22»); здесь — статический сторож того же правила: колонки учёта
+# `net_seconds`, `content_seconds`, `attempt_seconds` (attempts, lesson_progress,
+# workshop_submissions, review_queue_items, learning_time_totals) пишет **только** свёртка
+# `server/services/learningTimeRollup.ts`. Любая другая запись в них — это и есть «посчитать
+# время иначе»: `net_seconds = extract(epoch from submitted_at - started_at)` в сервисе или в
+# миграции-бэкфилле. Ловятся SQL-присваивание (`col = …`, но не `>=`/`<=`) и запись Drizzle
+# через `.set({…})` / `.values({…})` на одной строке. Чтение (`select`) нарушением не считается.
+check11_time_single_writer() {
+  local hits
+  hits="$(grep -rnE "(net_seconds|content_seconds|attempt_seconds)\"?[[:space:]]*=[^=>]|\.(set|values)\(\{[^}]*(netSeconds|contentSeconds|attemptSeconds)[[:space:]]*:" \
+    server --include='*.ts' --include='*.sql' 2>/dev/null \
+    | grep -v '^server/services/learningTimeRollup.ts:' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|--|#)' || true)"
+  report "11. время обучения пишет только свёртка биений (docs/v2/42 §5 проверка 22)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -462,5 +481,6 @@ check7_vacancy_not_rules_carrier
 check8_public_contour
 check9_resolve_manager
 check10_candidate_quiet_hours
+check11_time_single_writer
 
 exit $overall

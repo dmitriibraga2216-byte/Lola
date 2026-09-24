@@ -311,6 +311,15 @@ tenant
 системных ролей); распределение по новым ролям (`recruiter`, `hr`) — решение того PR, который
 добавит соответствующие эндпоинты и экраны.
 
+> [исправлено, PR-21: абзац отстал от PR, выдававших скоупы вместе со своими эндпоинтами]
+> Ранее абзац выше был правдой целиком. Сейчас системным ролям выдано: `lifecycle.view` —
+> `mentor`, `manager`, `author` (PR-05); `offboarding.start` — `manager` (PR-07);
+> `content_issue.report` — `employee`, `mentor`, `manager`, `author`, `content_issue.view` —
+> `author` (PR-23); `org.structure.view` — всем системным ролям, `org.structure.edit` —
+> `manager` в своей ветке (PR-30); `time.metrics.view` — `mentor`, `manager` (PR-21: `GET /learning/time/totals`,
+> чужое время — в области своей роли, `docs/v2/37` §2). Автор поимённого времени не получает —
+> ему обезличенный отчёт PR-22. Источник истины — `SYSTEM_ROLES` в `shared/domain/roles.ts`.
+
 | Группа | Скоупы | Документ |
 | --- | --- | --- |
 | Кандидати | `candidate.view`, `candidate.edit`, `candidate.assign`, `candidate.decide`, `candidate.hire`, `candidate.delete`, `candidate.status.manage` | `docs/v2/28` |

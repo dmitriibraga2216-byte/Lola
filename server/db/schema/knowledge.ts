@@ -271,6 +271,10 @@ export const workshopSubmissions = pgTable('workshop_submissions', {
   mentorRating: integer('mentor_rating'), // оценка наставника учеником 1–5 после проверки (docs/22 §4.5, Б.7)
   slaDueAt: timestamp('sla_due_at', { withTimezone: true }),
   device: text('device'),
+  // «Час на випробування» и «Час на контент» этой сдачи по биениям (docs/v2/37 §3.7, PR-21):
+  // учёт, пишет только свёртка `time.rollup`; в зачёт и SLA не входят.
+  attemptSeconds: integer('attempt_seconds').notNull().default(0),
+  contentSeconds: integer('content_seconds').notNull().default(0),
 }, t => [
   index().on(t.tenantId, t.status),
   index().on(t.tenantId, t.userId, t.workshopId),

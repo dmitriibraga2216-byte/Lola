@@ -14,6 +14,11 @@ import type { ContentIssueTargetType, ContentIssueType, ContentReportSource } fr
  * таймер попытки и после отправки возвращает ровно туда, где он был (§5.2, §7.7).
  * Время, проведённое в форме, засекается здесь и уходит на сервер — он вернёт его сдвигом
  * дедлайна попытки сам, в своих пределах (§7.7 б).
+ *
+ * Пока форма открыта, счётчик времени экрана стоит (`useLearningTime`, docs/v2/37 §7.10,
+ * решение PR-21 Р-21.9): время в форме — не «Час на випробування» и не «Час на контент».
+ * Сигнал общий на страницу (`issue:formOpen`), потому что флажки живут и в шапке плеера, и в
+ * блоках материала, и в строке вопроса — пробрасывать события через все обёртки незачем.
  */
 const props = defineProps<{
   targetType: ContentIssueTargetType
@@ -45,6 +50,14 @@ const busy = ref(false)
 const error = ref('')
 const sent = ref(false)
 const openedAt = ref(0)
+const formsOpen = useState<number>('issue:formOpen', () => 0)
+watch(open, (now, before) => {
+  if (now && !before) formsOpen.value += 1
+  else if (!now && before) formsOpen.value = Math.max(0, formsOpen.value - 1)
+})
+onUnmounted(() => {
+  if (open.value) formsOpen.value = Math.max(0, formsOpen.value - 1)
+})
 
 const commentRequired = computed(() => !!issueType.value && CONTENT_ISSUE_COMMENT_REQUIRED.includes(issueType.value))
 const canSend = computed(() => !!issueType.value && !busy.value

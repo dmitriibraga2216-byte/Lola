@@ -607,7 +607,9 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 
 #### PR-21 · `v2-time-21` · Учёт времени биениями
 
-- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0072_v2_learning_time.sql`.
+- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0077_v2_learning_time.sql`.
+  > [исправлено, фактическая нумерация при rebase] Ранее: «`0072_v2_learning_time.sql`»:
+  > к моменту rebase в `main` были `0072`–`0076` (PR-15, PR-10, PR-16, PR-30 и геймификация #114).
 - **Входит:** `learning_time_sessions`, `learning_time_totals`; биения вместо разницы
   «открыл — закрыл», запись пачками, агрегат фоном; `alter lesson_progress` +
   `content_seconds`, `discarded_seconds`, `sessions_count`; `alter attempts` + `net_seconds`,
@@ -617,6 +619,16 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 - **Условия выхода:** сквозная проверка 22 (`42` §5) зелёная; нагрузочная проверка на 200
   одновременных прохождениях входит в приёмку.
 - **Приёмка:** `37` §13 критерии 7, 8, 9, 10.
+- **Сделано** (24.09, ветка `v2-time-21`): миграция `0077_v2_learning_time` (две таблицы,
+  четыре `alter`, скоуп `time.metrics.view` наставнику и руководителю), правила в
+  `shared/domain/learningTime.ts`, групповая запись биений и три ручки `/learning/time/*` в
+  `server/services/learningTime.ts`, свёртка `time.rollup` и `time.close_stale_sessions`
+  (`learningTimeRollup.ts`, pg-boss), счётчик экрана `useLearningTime` на уроке, тесте и
+  практикуме, «Ви ще тут?». Критерии 7–10 и проверка 22 — `tests/integration/v2-learning-time.spec.ts`;
+  нагрузка — `v2-learning-time-load.spec.ts`: 200 потоков биений через сервис (со своими
+  часами, ожидание известно заранее) и 200 человек со своими сессиями по HTTP собранного
+  приложения. Принятые по ходу решения Р-21.1…Р-21.18 — `46-progress.md`; гипотезы
+  Г-37.9…Г-37.14 — `37` §15.
 
 #### PR-22 · `v2-time-22` · Нормы времени на контент
 

@@ -17,6 +17,7 @@ import type { TaskGroup } from './enrollmentStatus'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { accessibleCatalogIds, canAccessCatalogItem } from './catalogAccess'
+import { closeOpenSegments } from './learningTime'
 import type { assignmentCreateSchema } from '../../shared/schemas/assignments'
 import type { z } from 'zod'
 import { managerIdOf } from './orgManager'
@@ -762,6 +763,8 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
         completedAt: new Date(),
         updatedAt: new Date(),
       }).where(eq(lessonProgress.id, progress.id))
+      // Урок зачтён — открытый сегмент измерения закрывается `completed` (docs/v2/37 §3.6)
+      await closeOpenSegments(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, subjectType: 'lesson', subjectId: lessonId })
     }
 
     // Пересчёт прогресса (docs/10 §7.2–7.3)

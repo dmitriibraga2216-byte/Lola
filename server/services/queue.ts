@@ -41,6 +41,9 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('shop.reserve_expire', { retryLimit: 2, expireInSeconds: 600 })
       // docs/v2/36 §11 (PR-24): карточки неактивных ответственных — следующему по маршрутизации
       await b.createQueue('content_issue.reassign_scan', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/v2/37 §11: учёт времени биениями (PR-21) — закрытие зависших сегментов и свёртка
+      await b.createQueue('time.close_stale_sessions', { retryLimit: 2, expireInSeconds: 300 })
+      await b.createQueue('time.rollup', { retryLimit: 2, expireInSeconds: 900 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -68,6 +71,12 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('shop.reserve_expire', '25 * * * *', {}, { singletonKey: 'shop.reserve_expire' })
       // Жалобы на материал (docs/v2/36 §11): уволенный ответственный не держит очередь — раз в сутки
       await b.schedule('content_issue.reassign_scan', '50 3 * * *', {}, { singletonKey: 'content_issue.reassign_scan', tz: 'Europe/Kyiv' })
+      // Учёт времени (docs/v2/37 §11): сегменты без биений > 120 с — `stale` каждые 5 минут;
+      // свёртка каждые 10 минут по окну в 2 часа и раз в сутки — по окну в 48 часов, чтобы
+      // догнать всё, что частые прогоны пропустили, пока задача не работала (Р-21.18)
+      await b.schedule('time.close_stale_sessions', '*/5 * * * *', {}, { singletonKey: 'time.close_stale_sessions' })
+      await b.schedule('time.rollup', '*/10 * * * *', { windowMinutes: 120 }, { singletonKey: 'time.rollup', key: 'frequent' })
+      await b.schedule('time.rollup', '40 4 * * *', { windowMinutes: 2880 }, { singletonKey: 'time.rollup.daily', key: 'daily', tz: 'Europe/Kyiv' })
       return b
     })
   }

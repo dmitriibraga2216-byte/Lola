@@ -74,6 +74,10 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'org_node_assignments',
   'org_manager_map',
   'org_structure_snapshots',
+  // 37. Учёт времени биениями (PR-21, миграция 0077_v2_learning_time): сегменты измерения и
+  // витрина «человек × элемент × запись». Нормы времени (`content_time_norms`) — PR-22.
+  'learning_time_sessions',
+  'learning_time_totals',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

@@ -76,6 +76,12 @@ export const lessonProgress = pgTable('lesson_progress', {
   firstOpenedAt: timestamp('first_opened_at', { withTimezone: true }).notNull().defaultNow(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   device: text('device'), // mobile | desktop
+  // Учёт времени биениями (docs/v2/37 §3.7, PR-21): пишет только свёртка `time.rollup`.
+  // `seconds_spent` выше остаётся «сырой» величиной тиков и правилом зачёта урока (min_seconds);
+  // эти три колонки — учёт и ни в одно правило не входят.
+  contentSeconds: integer('content_seconds').notNull().default(0),
+  discardedSeconds: integer('discarded_seconds').notNull().default(0),
+  sessionsCount: integer('sessions_count').notNull().default(0),
 }, t => [
   unique().on(t.tenantId, t.enrollmentId, t.lessonId),
   index().on(t.tenantId, t.enrollmentId),

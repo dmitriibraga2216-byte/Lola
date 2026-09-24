@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  boolean, index, inet, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
+  boolean, check, index, inet, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
@@ -122,6 +122,11 @@ export const attempts = pgTable('attempts', {
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
   gradedAt: timestamp('graded_at', { withTimezone: true }),
   timeSpentSec: integer('time_spent_sec').notNull().default(0),
+  // Чистое время попытки по биениям и выброшенный простой (docs/v2/37 §3.7, PR-21). Это учёт,
+  // а не правило прохождения: срок попытки — только `deadline_at` и `params.timeLimitSec`,
+  // снапшот эти колонки не трогают (правило 4). Пишет только свёртка `time.rollup`.
+  netSeconds: integer('net_seconds').notNull().default(0),
+  discardedSeconds: integer('discarded_seconds').notNull().default(0),
   ip: inet('ip'),
   device: text('device'),
   annulledBy: uuid('annulled_by').references(() => users.id),
@@ -145,8 +150,15 @@ export const attemptAnswers = pgTable('attempt_answers', {
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   reviewComment: text('review_comment'),
   answeredAt: timestamp('answered_at', { withTimezone: true }),
+  /**
+   * Способ ввода ответа — `ANSWER_INPUT_MODES` (docs/v2/30 §3.7, решение docs/v2/44 В-12): голос —
+   * не тип вопроса, а способ ответа. Ставит сервер при сохранении: вопрос-файл — `file`, иначе
+   * `text`; `voice` и `video` приходят с ИИ-собеседованием (PR-28).
+   */
+  inputMode: text('input_mode').notNull().default('text'),
 }, t => [
   unique().on(t.tenantId, t.attemptId, t.questionId),
+  check('attempt_answers_input_mode_chk', sql`${t.inputMode} in ('text', 'voice', 'video', 'file')`),
 ])
 
 /**

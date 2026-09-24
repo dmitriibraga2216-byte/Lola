@@ -1,4 +1,4 @@
-import { formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, pluralCategory, resolveLocale } from '#shared/domain/dateFormat'
+import { formatBytes, formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, pluralCategory, resolveLocale } from '#shared/domain/dateFormat'
 import type { DateInput } from '#shared/domain/dateFormat'
 
 /**
@@ -23,5 +23,7 @@ export function useFormat() {
     formatNumber: (value: number, opts?: Intl.NumberFormatOptions) => formatNumber(value, loc(), opts),
     /** Категорія множини для ключа словника (`shop.bonusesCount.<категорія>`): «1 бонус», «3 бонуси», «5 бонусів». */
     plural: (value: number) => pluralCategory(value, loc()),
+    /** Розмір файлу чи обсяг сховища — «12,4 ГБ» (docs/v2/34 §5.1), крок 1024, одиниця від Intl. */
+    formatBytes: (value: number, opts?: { maximumFractionDigits?: number }) => formatBytes(value, loc(), opts),
   }
 }

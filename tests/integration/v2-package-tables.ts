@@ -100,6 +100,14 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'user_notes',
   'person_document_types',
   'person_documents',
+  // 34. Хранилище: квота, корзина, сроки хранения (PR-36, миграция 0083_v2_storage_quota).
+  // Пять таблиц `34` §3.3; шестая `storage_quota_addons` не создаётся (Р-6, сквозная 23) —
+  // докупка места живёт в `tenant_addons` со `storage_pack`.
+  'storage_usage_counters',
+  'storage_usage_daily',
+  'storage_retention_policies',
+  'storage_deletion_requests',
+  'storage_pending_uploads',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

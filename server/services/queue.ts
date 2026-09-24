@@ -58,6 +58,9 @@ export async function getBoss(): Promise<PgBoss> {
       // docs/v2/38 §11: две ночные задачи карточки человека (PR-32)
       await b.createQueue('notes.archive_scan', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('documents.expiry_scan', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/34 §11 (PR-36): корзина хранилища и отложенные загрузки
+      await b.createQueue('storage.purge', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -104,6 +107,10 @@ export async function getBoss(): Promise<PgBoss> {
       // Карточка человека (docs/v2/38 §11): архив заметок в 02:00, сроки документов в 06:00
       await b.schedule('notes.archive_scan', '0 2 * * *', {}, { singletonKey: 'notes.archive_scan', tz: 'Europe/Kyiv' })
       await b.schedule('documents.expiry_scan', '0 6 * * *', {}, { singletonKey: 'documents.expiry_scan', tz: 'Europe/Kyiv' })
+      // Хранилище (docs/v2/34 §11): корзина с истёкшим сроком — в purged в 04:00 (объект в S3
+      // остаётся до решения владельца продукта, docs/v2/44 §8); отложенные загрузки — каждые 15 минут
+      await b.schedule('storage.purge', '0 4 * * *', {}, { singletonKey: 'storage.purge', tz: 'Europe/Kyiv' })
+      await b.schedule('storage.pending_upload_retry', '*/15 * * * *', {}, { singletonKey: 'storage.pending_upload_retry' })
       return b
     })
   }
@@ -135,3 +142,4 @@ export async function enqueueTrajectoryTimer(tenantId: string, stateId: string, 
   const b = await getBoss()
   await b.send('trajectory.timer', { tenantId, stateId }, { singletonKey: `trajectory:${stateId}`, startAfter: at })
 }
+

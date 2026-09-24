@@ -31,6 +31,7 @@ export default defineEventHandler(async (event) => {
     if (result.code === 'already_deleted') return apiError(event, 409, 'already_deleted', result.message)
     // docs/v2/31 §7.13, §12: «409 со списком версий» — чтобы было понятно, какие модули его держат
     if (result.code === 'in_library_version') return apiError(event, 409, 'media.in_library_version', result.message, { versions: result.versions })
+    if (result.code === 'under_review') return apiError(event, 409, 'under_review', result.message)
     return apiError(event, 409, 'evidence_locked', result.message)
   }
   return apiData({ lifecycle: result.lifecycle, purgeAfter: result.purgeAfter })

@@ -1,8 +1,9 @@
 import { z } from 'zod'
+import { workshopFileSchema } from '../../../../../../shared/schemas/content'
 import { requireScope } from '../../../../../services/access'
 import { submitWorkshop } from '../../../../../services/workshops'
 import { apiData, apiError } from '../../../../../utils/apiResponse'
-const schema = z.object({ text: z.string().max(5000).optional(), files: z.array(z.object({ mediaId: z.string().uuid(), name: z.string(), kind: z.string(), bytes: z.number() })).optional(), enrollmentId: z.string().uuid().optional(), lessonId: z.string().uuid().optional(), device: z.enum(['mobile', 'desktop']).optional() })
+const schema = z.object({ text: z.string().max(5000).optional(), files: z.array(workshopFileSchema).optional(), enrollmentId: z.string().uuid().optional(), lessonId: z.string().uuid().optional(), device: z.enum(['mobile', 'desktop']).optional() })
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'learn.view')
   const p = schema.safeParse(await readBody(event))

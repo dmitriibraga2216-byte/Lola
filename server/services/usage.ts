@@ -50,6 +50,11 @@ export interface UsageSnapshot {
  */
 export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
   const { syncLiveAxes, usageByAxis } = await import('./usageCounters')
+  // `storage.counter_reconcile` внутри `usage.collect` (docs/v2/34 §7.4 п. 2, §11): полный
+  // пересчёт хранилища, суточный срез `storage_usage_daily`, выравнивание оперативного счётчика
+  // и дрейф. Идёт первым — оси ниже читают уже выровненный счётчик.
+  const { reconcileStorage } = await import('./storage')
+  const storage = await reconcileStorage(tenantId)
   await syncLiveAxes(tenantId)
   const axes = await usageByAxis(tenantId)
   const axisUsed = (axis: LimitAxis) => axes.find(a => a.axis === axis)?.used ?? 0
@@ -60,26 +65,19 @@ export async function collectUsage(tenantId: string): Promise<UsageSnapshot> {
         (select count(*)::int from users where status = 'active' and not is_blocked ${EMPLOYEES_ONLY('')}) as active_users,
         (select count(*)::int from users where (is_blocked or status = 'suspended') ${EMPLOYEES_ONLY('')}) as blocked_users,
         (select count(*)::int from users where status = 'archived' ${EMPLOYEES_ONLY('')}) as archived_users,
-        (select coalesce(sum(bytes), 0)::bigint from media_assets where deleted_at is null) as storage_bytes,
         (select count(*)::int from notifications where channel = 'sms' and status = 'sent' and sent_at >= date_trunc('month', now())) as sms_month,
         (select count(*)::int from courses where deleted_at is null) as courses_count,
         (select count(*)::int from assignments where status = 'active') as assignments_count,
         (select count(*)::int from attempts where started_at >= date_trunc('month', now())) as attempts_month
     `) as unknown as Record<string, number | string>[]
-    // Разбивка хранилища по категориям треков плюс `other` (docs/v2/35 §3.3, экран §5.4).
-    // Колонка категории у файла (`media_assets.stage_code`) появляется в PR-12 — до неё
-    // весь объём честно ложится в `other`, единственное значение разбивки, которое уже
-    // определено (docs/28 §28.12). Выдуманной категории здесь не появляется.
-    const cats = await tx.execute(sql`
-      select 'other' as category, coalesce(sum(bytes), 0)::bigint as bytes
-        from media_assets where deleted_at is null
-    `) as unknown as { category: string, bytes: string | number }[]
-    const storageByCategory: Record<string, number> = {}
-    for (const c of cats) storageByCategory[c.category] = Number(c.bytes)
+    // Разбивка хранилища по девяти ключам — восемь кодов этапов и `other` (решение
+    // docs/v2/44 В-10, docs/v2/35 §3.3): из того же пересчёта, что и суточный срез. Биллинг
+    // берёт значение пересчёта, а не счётчика (docs/v2/34 §12).
+    const storageByCategory: Record<string, number> = storage.byStage
     const values = {
       tenantId,
       activeUsers: Number(m!.active_users), blockedUsers: Number(m!.blocked_users), archivedUsers: Number(m!.archived_users),
-      storageBytes: Number(m!.storage_bytes), smsMonth: Number(m!.sms_month),
+      storageBytes: storage.factBytes, smsMonth: Number(m!.sms_month),
       coursesCount: Number(m!.courses_count), assignmentsCount: Number(m!.assignments_count), attemptsMonth: Number(m!.attempts_month),
       planCode: t?.plan ?? null,
       candidatesActive: axisUsed('candidates_active'),

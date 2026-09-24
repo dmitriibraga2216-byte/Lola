@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
-const { formatDateTime } = useFormat()
+const { formatDateTime, formatShortDate } = useFormat()
 
 definePageMeta({ layout: false })
 
@@ -12,7 +12,13 @@ const enrollmentId = (route.query.enrollmentId as string) || undefined
 const lessonId = (route.query.lessonId as string) || undefined
 
 interface Criterion { id: string, text: string, isCritical: boolean }
-interface Sub { id: string, status: string, attemptNo: number, mentorRating: number | null, reviewerId: string | null, body: { text?: string }, files: { mediaId: string, name: string, kind: string, bytes: number }[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null }
+/**
+ * Файл сдачи: загруженный (`mediaId`) или отложенный при заполненном хранилище (`pendingId`,
+ * docs/v2/34 §7.5) — запись ждёт на устройстве и досылается сама; `lost` — срок ожидания истёк.
+ * `lifecycle`/`deletedAt` — файл удалён администратором: сдача остаётся, превью — нет (§13 к. 3).
+ */
+interface SubFile { mediaId?: string, pendingId?: string, name: string, kind: string, bytes: number, lost?: boolean, lifecycle?: string, deletedAt?: string | null }
+interface Sub { id: string, status: string, attemptNo: number, mentorRating: number | null, reviewerId: string | null, body: { text?: string }, files: SubFile[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null, pendingUpload?: boolean }
 interface W {
   id: string, title: string, description: ContentBlock[], submissionKinds: string[], minTextLength: number | null, maxFiles: number, maxFileMb: number, allowCameraOnly: boolean,
   criteria: Criterion[], slaHours: number, current: Sub | null, history: { attemptNo: number, status: string, submittedAt: string | null, reviewComment: string | null }[], comments: { id: string, authorName: string, body: string, createdAt: string }[]
@@ -20,7 +26,9 @@ interface W {
 
 const w = ref<W | null>(null)
 const text = ref('')
-const files = ref<{ mediaId: string, name: string, kind: string, bytes: number }[]>([])
+const files = ref<SubFile[]>([])
+const storageFull = ref(false)
+const { saveLocal, syncPending } = usePendingUploads()
 const uploading = ref(false)
 const busy = ref(false)
 const error = ref('')
@@ -44,13 +52,17 @@ async function load() {
       text.value = w.value.current.body.text ?? ''
       files.value = w.value.current.files
     }
-    await Promise.all(files.value.filter(f => f.kind === 'photo').map(f => loadThumb(f.mediaId)))
+    await Promise.all(files.value.filter(f => f.kind === 'photo' && f.mediaId && !f.deletedAt).map(f => loadThumb(f.mediaId!)))
   }
   catch (err) {
     error.value = apiErrorOf(err).message
   }
 }
-onMounted(load)
+onMounted(async () => {
+  // Сначала — дослать то, что ждёт на устройстве: тогда сдача покажет уже настоящий файл
+  if (await syncPending().catch(() => 0)) storageFull.value = false
+  await load()
+})
 
 const editable = computed(() => !w.value?.current || ['draft', 'rework'].includes(w.value.current.status))
 
@@ -83,12 +95,25 @@ async function addFile(e: Event) {
   error.value = ''
   try {
     // origin обязателен (docs/v2/34 §7.1): файл сдачи практикума — кандидат в доказательства,
-    // признак is_evidence ставится сервером при принятом решении по сдаче (§7.1 п. 2)
-    const { mediaId, uploadUrl } = await api<{ mediaId: string, uploadUrl: string }>('/media/upload-url', { method: 'POST', body: { filename: file.name, mime: file.type, bytes: file.size, origin: 'workshop_submission', sourceEntity: 'workshops', sourceId: w.value.id, ...(enrollmentId ? { enrollmentId } : {}) } })
-    await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
-    await api(`/media/${mediaId}/complete`, { method: 'POST' })
-    files.value.push({ mediaId, name: file.name, kind: file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file', bytes: file.size })
-    await loadThumb(mediaId)
+    // признак is_evidence ставится сервером при принятом решении по сдаче (§7.1 п. 2).
+    // `clientRef` — ключ записи на устройстве: при заполненном хранилище компании сервер
+    // отвечает не отказом, а «отложено» (§7.5), и запись ждёт здесь, а не теряется.
+    const clientRef = newClientRef()
+    const kind = file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file'
+    const meta = { filename: file.name, mime: file.type, bytes: file.size, origin: 'workshop_submission' as const, sourceEntity: 'workshops', sourceId: w.value.id, ...(enrollmentId ? { enrollmentId } : {}) }
+    const res = await api<{ mediaId?: string, uploadUrl?: string, deferred?: boolean, pendingId?: string }>('/media/upload-url', { method: 'POST', body: { ...meta, clientRef } })
+    if (res.deferred && res.pendingId) {
+      try { await saveLocal({ ...meta, clientRef, blob: file, pendingId: res.pendingId, savedAt: new Date().toISOString() }) }
+      catch { error.value = t('workshop.localSaveFailed'); return }
+      storageFull.value = true
+      files.value.push({ pendingId: res.pendingId, name: file.name, kind, bytes: file.size })
+      await saveDraft()
+      return
+    }
+    await fetch(res.uploadUrl!, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
+    await api(`/media/${res.mediaId}/complete`, { method: 'POST' })
+    files.value.push({ mediaId: res.mediaId!, name: file.name, kind, bytes: file.size })
+    await loadThumb(res.mediaId!)
     await saveDraft() // без окремої кнопки «Зберегти чернетку» (мокап Workshop) — чернетка зберігається автоматично
   }
   catch (err) {
@@ -133,6 +158,13 @@ async function sendComment() {
 
 const backTo = computed(() => enrollmentId ? `/learn/${enrollmentId}` : '/learn')
 const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+/** Подпись файла, которого нет в превью: ждёт досылки, потерян или удалён администратором. */
+function fileState(f: SubFile): string | null {
+  if (f.pendingId && !f.lost) return t('workshop.pendingUpload')
+  if (f.lost) return t('workshop.fileLost')
+  if (f.deletedAt) return t('workshop.fileDeleted', { date: formatShortDate(f.deletedAt) })
+  return null
+}
 </script>
 
 <template>
@@ -149,8 +181,11 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeri
       <!-- Статус текущей сдачи -->
       <div v-if="w.current?.status === 'submitted' || w.current?.status === 'in_review'" class="status sun">
         <b>{{ t('workshop.onReview') }}</b>
-        <span>{{ t('workshop.reviewBy', { at: fmt(w.current.slaDueAt) }) }}</span>
+        <span v-if="w.current.pendingUpload">{{ t('workshop.pendingSaved') }}</span>
+        <span v-else>{{ t('workshop.reviewBy', { at: fmt(w.current.slaDueAt) }) }}</span>
       </div>
+      <!-- Хранилище компании заполнено (docs/v2/34 §7.5 п. 1): запись сохранена на устройстве -->
+      <p v-if="storageFull" class="status coral" role="status">{{ t('workshop.storageFull') }}</p>
       <div v-else-if="w.current?.status === 'rework'" class="status coral">
         <b>{{ t('workshop.rework') }}</b>
         <p>{{ w.current.reviewComment }}</p>
@@ -187,6 +222,16 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeri
         </ol>
       </section>
 
+      <!-- Файлы сданной работы (docs/v2/34 §13 к. 1, 3): ждёт досылки, потерян или удалён — сдача при этом остаётся -->
+      <section v-if="!editable && w.current?.files?.length" class="block">
+        <ul class="file-list">
+          <li v-for="f in w.current.files" :key="f.mediaId ?? f.pendingId">
+            <span>{{ f.kind === 'photo' ? '🖼' : f.kind === 'video' ? '🎬' : '📎' }} {{ f.name }}</span>
+            <span v-if="fileState(f)" class="sub">{{ fileState(f) }}</span>
+          </li>
+        </ul>
+      </section>
+
       <!-- Форма сдачи -->
       <section v-if="editable" class="block form" @focusin="workingOnForm = true" @click="workingOnForm = true">
         <template v-if="w.submissionKinds.includes('text')">
@@ -195,10 +240,11 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeri
         </template>
         <p v-if="hint" class="hint">{{ hint }}</p>
         <div v-if="w.submissionKinds.some(k => k !== 'text')" class="files">
-          <div v-for="(f, i) in files" :key="f.mediaId" class="tile" :class="{ photo: f.kind === 'photo' }">
-            <img v-if="f.kind === 'photo' && thumbSrc(f.mediaId)" :src="thumbSrc(f.mediaId)" :alt="f.name">
+          <div v-for="(f, i) in files" :key="f.mediaId ?? f.pendingId" class="tile" :class="{ photo: f.kind === 'photo' && !fileState(f), pending: !!fileState(f) }">
+            <img v-if="f.kind === 'photo' && f.mediaId && !fileState(f) && thumbSrc(f.mediaId)" :src="thumbSrc(f.mediaId)" :alt="f.name">
             <span v-else class="tile-icon">{{ f.kind === 'photo' ? '🖼' : f.kind === 'video' ? '🎬' : '📎' }}</span>
-            <span v-if="f.kind !== 'photo'" class="tile-name">{{ f.name }}</span>
+            <span v-if="fileState(f)" class="tile-name">{{ fileState(f) }}</span>
+            <span v-else-if="f.kind !== 'photo'" class="tile-name">{{ f.name }}</span>
             <button class="remove" :aria-label="t('common.delete')" @click="removeFile(i)">✕</button>
           </div>
           <label class="add-file tile">
@@ -267,6 +313,9 @@ textarea, input { font: inherit; border: 2px solid var(--color-bg-line); border-
 .tile .tile-name { font-size: var(--font-size-body-s); font-weight: 800; text-align: center; padding: 0 var(--space-1); word-break: break-word; }
 .tile .remove { position: absolute; top: 4px; right: 4px; font: inherit; border: none; background: var(--color-bg-soft); color: var(--color-ink); border-radius: var(--radius-pill); width: 28px; height: 28px; cursor: pointer; }
 .add-file { border: 2px dashed var(--color-bg-line); background: var(--color-bg-soft); cursor: pointer; color: var(--color-ink-muted); }
+.tile.pending { background: var(--color-sun-soft); border: 2px solid var(--color-sun); }
+.file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+.file-list li { display: flex; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); overflow-wrap: anywhere; }
 .mini { font: inherit; border: 1px solid var(--color-bg-line); background: var(--color-bg); border-radius: var(--radius-pill); width: 32px; height: 32px; cursor: pointer; flex: none; }
 .comment { background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
 .comment p { margin: var(--space-1) 0 0; }

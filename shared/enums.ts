@@ -328,6 +328,62 @@ export const MEDIA_LIFECYCLES = ['active', 'orphaned', 'pending_delete', 'purged
 export type MediaLifecycle = typeof MEDIA_LIFECYCLES[number]
 
 /**
+ * Положения файла, которые **засчитываются в квоту** (docs/v2/34 §7.4 п. 3): `active` и
+ * `orphaned` — да, `pending_delete` и `purged` — нет. Корзина квоту не держит: тенант платит
+ * за то, чем распоряжается (§7.2 п. 3). Тот же список — в триггере `storage_counter_apply`.
+ */
+export const MEDIA_COUNTED_LIFECYCLES = ['active', 'orphaned'] as const satisfies readonly MediaLifecycle[]
+
+/**
+ * Точка отсчёта срока хранения (`storage_retention_policies.anchor`, docs/v2/34 §3.3, §6.2):
+ * дата загрузки, дата оценки сдачи или дата последнего обращения к файлу.
+ */
+export const STORAGE_RETENTION_ANCHORS = ['created_at', 'graded_at', 'last_accessed_at'] as const
+export type StorageRetentionAnchor = typeof STORAGE_RETENTION_ANCHORS[number]
+
+/**
+ * Что политика делает с файлом по истечении срока (`storage_retention_policies.action`,
+ * docs/v2/34 §3.3): в корзину, сразу в `purged` без корзины, или только предупредить.
+ */
+export const STORAGE_RETENTION_ACTIONS = ['soft_delete', 'purge', 'notify_only'] as const
+export type StorageRetentionAction = typeof STORAGE_RETENTION_ACTIONS[number]
+
+/**
+ * Откуда пришла заявка на массовое удаление (`storage_deletion_requests.mode`, docs/v2/34
+ * §3.3): выделение на экране, снимок фильтра, политика хранения, решение по осиротевшим.
+ */
+export const STORAGE_DELETION_MODES = ['selection', 'filter', 'retention', 'orphan'] as const
+export type StorageDeletionMode = typeof STORAGE_DELETION_MODES[number]
+
+/**
+ * Состояние заявки на массовое удаление (`storage_deletion_requests.status`, docs/v2/34 §4):
+ * `draft → confirmed → running → done`, ветки `cancelled` (до подтверждения) и `failed`.
+ */
+export const STORAGE_DELETION_STATUSES = ['draft', 'confirmed', 'running', 'done', 'cancelled', 'failed'] as const
+export type StorageDeletionStatus = typeof STORAGE_DELETION_STATUSES[number]
+
+/**
+ * Почему файл из заявки не удалён (`storage_deletion_requests.skipped[].reason`, docs/v2/34
+ * §12, §13 к. 4): запрещён к удалению (сертификат), уже в корзине, сдача сейчас на проверке.
+ */
+export const STORAGE_SKIP_REASONS = ['not_deletable', 'already_deleted', 'under_review'] as const
+export type StorageSkipReason = typeof STORAGE_SKIP_REASONS[number]
+
+/**
+ * Отложенная загрузка — работа сотрудника, не поместившаяся в квоту (`storage_pending_uploads
+ * .status`, docs/v2/34 §4, §7.5): `waiting → uploading → done`, ветка `abandoned` по сроку.
+ */
+export const STORAGE_PENDING_UPLOAD_STATUSES = ['waiting', 'uploading', 'done', 'abandoned'] as const
+export type StoragePendingUploadStatus = typeof STORAGE_PENDING_UPLOAD_STATUSES[number]
+
+/**
+ * Девятый ключ разбивки хранилища (решение docs/v2/44 В-10): файл вне курса кода этапа не
+ * получает (`media_assets.stage_code is null`) и в сводке показывается под этим ключом.
+ * Восемь остальных — `LIFECYCLE_STAGE_CODES`; девять ключей сравнимы между тенантами.
+ */
+export const STORAGE_OTHER_KEY = 'other'
+
+/**
  * Терминальное состояние воронки кандидата (`users.candidate_state`, docs/v2/28 §3.2, §4.2).
  *
  * Первая из **двух независимых осей** состояния (§4.1): на эту смотрят отчёты, лимиты тарифа
@@ -886,6 +942,12 @@ export const ENUMS: Record<string, readonly string[]> = {
   limit_notice_level: LIMIT_NOTICE_LEVELS,
   media_origin: MEDIA_ORIGINS,
   media_lifecycle: MEDIA_LIFECYCLES,
+  storage_retention_anchor: STORAGE_RETENTION_ANCHORS,
+  storage_retention_action: STORAGE_RETENTION_ACTIONS,
+  storage_deletion_mode: STORAGE_DELETION_MODES,
+  storage_deletion_status: STORAGE_DELETION_STATUSES,
+  storage_skip_reason: STORAGE_SKIP_REASONS,
+  storage_pending_upload_status: STORAGE_PENDING_UPLOAD_STATUSES,
   candidate_state: CANDIDATE_STATES,
   candidate_source: CANDIDATE_SOURCES,
   candidate_score_kind: CANDIDATE_SCORE_KINDS,

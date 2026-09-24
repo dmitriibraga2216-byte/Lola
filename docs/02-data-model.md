@@ -1240,6 +1240,66 @@ create table media_assets (
   unique (tenant_id, key)
 );
 
+-- Хранилище как управляемый ресурс (`v2/34` §3.3, PR-36, миграция 0083_v2_storage_quota).
+-- Лимита здесь нет: эффективную квоту считает только effectiveLimits() (`v2/35` §7.3, `v2/44` В-5);
+-- отдельной таблицы докупленного объёма нет (`v2/40` Р-6) — опция storage_pack живёт в tenant_addons.
+-- origin в этих таблицах check-ом не закрыт: перечень один, на media_assets (В-6, CLAUDE.md п. 19).
+create table storage_usage_counters (          -- оперативный счётчик: ведёт триггер storage_counter_apply на media_assets
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  origin text not null,
+  stage_code text,                             -- ключ разбивки = код этапа (`v2/44` В-10); null — девятый ключ other
+  bytes bigint not null default 0 check (bytes >= 0), files_count int not null default 0,
+  updated_at timestamptz not null default now(),
+  constraint storage_usage_counters_pk unique nulls not distinct (tenant_id, origin, stage_code)
+);
+create table storage_usage_daily (             -- суточный срез storage.counter_reconcile; drift = counter − пересчёт
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  day date not null, origin text not null, stage_code text,
+  bytes bigint not null, files_count int not null, counter_bytes bigint, drift_bytes bigint not null default 0,
+  collected_at timestamptz not null default now(),
+  unique nulls not distinct (tenant_id, day, origin, stage_code)
+);
+create table storage_retention_policies (      -- строка на origin, у нового тенанта всё выключено (`v2/34` §7.3)
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  origin text not null, enabled boolean not null default false,
+  keep_months int check (keep_months between 1 and 120),
+  anchor text not null default 'graded_at',    -- storage_retention_anchor
+  action text not null default 'soft_delete',  -- storage_retention_action
+  keep_evidence boolean not null default true, warn_days_before int not null default 14,
+  max_batch_per_run int not null default 500,
+  trash_days int not null default 30,          -- срок корзины (`v2/44` §8): строкой, не константой
+  updated_by uuid references users(id) on delete set null, updated_at timestamptz not null default now(),
+  unique (tenant_id, origin)
+);
+create table storage_deletion_requests (       -- массовое удаление — только заявкой (`v2/44` В-17)
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  requested_by uuid references users(id) on delete set null,
+  mode text not null default 'selection',      -- storage_deletion_mode
+  filter jsonb not null default '{}', media_ids uuid[] not null default '{}',
+  planned_files int not null default 0, planned_bytes bigint not null default 0, evidence_count int not null default 0,
+  reason text,                                 -- 10–500, обязательна при доказательствах (`v2/34` §6.1)
+  confirm_phrase text,
+  status text not null default 'draft',        -- storage_deletion_status
+  confirmed_at timestamptz, finished_at timestamptz,
+  skipped jsonb not null default '[]',         -- [{mediaId, reason: storage_skip_reason}]
+  deleted_files int not null default 0, deleted_bytes bigint not null default 0,
+  created_at timestamptz not null default now()
+);
+create table storage_pending_uploads (         -- работа сотрудника, не поместившаяся в квоту (`v2/34` §7.5)
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  enrollment_id uuid references enrollments(id) on delete cascade,
+  source_entity text not null, source_id uuid, origin text not null,
+  declared_bytes bigint not null check (declared_bytes > 0),
+  attempts int not null default 0,             -- сколько раз выдавалось место (счётчик транспорта, не попытки теста)
+  client_ref text not null,                    -- ключ записи на устройстве (IndexedDB)
+  status text not null default 'waiting',      -- storage_pending_upload_status
+  last_error text,
+  media_id uuid references media_assets(id) on delete set null, -- файл, заведённый под досылку
+  expires_at timestamptz not null, created_at timestamptz not null default now(),
+  unique (tenant_id, user_id, client_ref)
+);
+
 create table import_jobs (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -2325,6 +2385,24 @@ media_origin: content_cover | lesson_attachment | workshop_submission | video_an
 -- status='ready' и lifecycle='orphaned' одновременно. purged терминально: строка
 -- media_assets не удаляется никогда, на неё ссылаются audit_log и workshop_submissions.files
 media_lifecycle: active | orphaned | pending_delete | purged
+
+-- Хранилище (`v2/34` §3.3, §4, §6.2, §12; PR-36). Точка отсчёта и действие политики хранения
+-- (`storage_retention_policies.anchor`, `.action`); purge — сразу в purged, без корзины
+storage_retention_anchor: created_at | graded_at | last_accessed_at
+storage_retention_action: soft_delete | purge | notify_only
+
+-- Заявка на массовое удаление (`storage_deletion_requests.mode`, `.status`, `v2/34` §3.3, §4):
+-- откуда пришла выборка и где заявка сейчас; cancelled — только до подтверждения
+storage_deletion_mode: selection | filter | retention | orphan
+storage_deletion_status: draft | confirmed | running | done | cancelled | failed
+
+-- Почему файл из заявки не удалён (`storage_deletion_requests.skipped[].reason`, `v2/34` §12,
+-- §13 к. 4): сертификат удалять нельзя вовсе, файл уже в корзине, сдача сейчас на проверке
+storage_skip_reason: not_deletable | already_deleted | under_review
+
+-- Отложенная загрузка (`storage_pending_uploads.status`, `v2/34` §4, §7.5): работа сотрудника
+-- при исчерпанной квоте ждёт места на устройстве; abandoned — истёк срок 14 дней
+storage_pending_upload_status: waiting | uploading | done | abandoned
 
 -- Терминальное состояние воронки кандидата (`v2/28` §3.2, §4.2; `users.candidate_state`).
 -- Первая из двух независимых осей (§4.1): на неё смотрят отчёты, лимиты и уведомления.

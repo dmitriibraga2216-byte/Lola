@@ -152,6 +152,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/billing', label: t('admin.nav.billing'), show: hasScope('billing.view'), group: t('admin.group.billing') },
     { to: '/admin/settings/billing/history', label: t('admin.nav.billingHistory'), show: hasScope('billing.payments.view'), group: t('admin.group.billing') },
     { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('billing.usage.view'), group: t('admin.group.billing') },
+    // Сховище (docs/v2/34 §5): місце — тарифікований ресурс, тому поруч із тарифом; кошик і політики — вкладки всередині
+    { to: '/admin/settings/storage', label: t('admin.nav.storage'), show: hasScope('storage.view'), group: t('admin.group.billing') },
   ] },
 ].map(s => ({ ...s, items: s.items.filter((i) => {
   const m = moduleOfPage(i.to)

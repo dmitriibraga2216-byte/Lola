@@ -86,6 +86,11 @@ async function limitColumnsOf(tenantId: string): Promise<Record<string, unknown>
   }
 }
 
+/**
+ * Список тенантов панели оператора. Объём медиа — оперативный счётчик хранилища
+ * `storage_usage_counters` (docs/v2/34 §7.4, PR-36): то же число, что видит тенант на `/storage`
+ * и по которому проверяется загрузка, а не отдельная сумма по `media_assets`.
+ */
 export async function listTenants() {
   const db = platformDb()
   const rows = await db.execute(sql`
@@ -93,7 +98,7 @@ export async function listTenants() {
            (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
            (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
-           (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
+           (select coalesce(sum(c.bytes), 0)::bigint from storage_usage_counters c where c.tenant_id = t.id) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
     from tenants t
     order by t.created_at desc
@@ -109,7 +114,7 @@ export async function getTenantCard(id: string): Promise<Record<string, unknown>
            (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
            (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,
-           (select coalesce(sum(m.bytes), 0)::bigint from media_assets m where m.tenant_id = t.id and m.deleted_at is null) as media_bytes,
+           (select coalesce(sum(c.bytes), 0)::bigint from storage_usage_counters c where c.tenant_id = t.id) as media_bytes,
            (select count(*)::int from enrollments e where e.tenant_id = t.id and e.status = 'done' and e.completed_at >= now() - interval '30 days') as completed_30d
     from tenants t
     where t.id = ${id}::uuid
@@ -233,7 +238,7 @@ export async function platformMetrics() {
       (select count(*)::int from users where status = 'active' ${EMPLOYEES_ONLY('')}) as users_active,
       (select count(distinct user_id)::int from sessions where created_at >= current_date) as dau,
       (select count(distinct user_id)::int from sessions where created_at >= current_date - 7) as wau,
-      (select coalesce(sum(bytes), 0)::bigint from media_assets where deleted_at is null) as media_bytes,
+      (select coalesce(sum(bytes), 0)::bigint from storage_usage_counters) as media_bytes,
       (select count(*)::int from notifications where status = 'failed' and created_at >= now() - interval '24 hours') as notifications_failed_24h,
       (select count(*)::int from notifications where status = 'queued') as notifications_queued,
       (select count(*)::int from webhook_deliveries where status = 'failed' and created_at >= now() - interval '24 hours') as webhooks_failed_24h,

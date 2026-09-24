@@ -10,7 +10,7 @@ import { enqueueNotification } from './notifications'
 import { claimReview, closeReview, enqueueReview, heldByOtherSql, releaseReview, reviewConflict, staleClaims } from './reviewQueue'
 import { CLAIM_TTL_MS } from './reviewRules'
 import { closeOpenSegments } from './learningTime'
-import type { ContentBlock } from '../../shared/schemas/content'
+import type { ContentBlock, WorkshopFile } from '../../shared/schemas/content'
 import { managerIdOf, managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -19,6 +19,37 @@ export interface Criterion { id: string, text: string, weight: number, isCritica
 
 /** Решение по практикуму словами — для `review_delegation_resolved` делегировавшему (docs/v2/37 §8). */
 const WORKSHOP_DECISION_UK: Record<'accepted' | 'rejected' | 'rework', string> = { accepted: 'зараховано', rejected: 'не зараховано', rework: 'на доопрацювання' }
+
+// ── Файлы сдачи и отложенная загрузка (docs/v2/34 §7.5, §13 к. 1) ────────────────────────
+
+/** Файл-обещание: запись на устройстве сотрудника ждёт места в хранилище и ещё не дослана. */
+export function isPendingFile(f: unknown): boolean {
+  const e = f as { pendingId?: string, mediaId?: string, lost?: boolean }
+  return !!e?.pendingId && !e.mediaId && !e.lost
+}
+
+/** SQL-признак «в сдаче есть недосланный файл» — для очереди ментора (метка «Очікує вивантаження»). */
+const PENDING_FILES_SQL = sql`jsonb_path_exists(${workshopSubmissions.files}, 'lax $[*] ? (exists(@.pendingId) && !(@.lost == true))')`
+
+/**
+ * Состояние файлов сдачи в хранилище: удалённый файл остаётся в сдаче строкой, а экран
+ * показывает «Файл видалено {дата}» вместо превью (docs/v2/34 §4, §7.2 п. 4, §13 к. 3) —
+ * удаление файла никогда не меняет запись прохождения.
+ */
+async function withFileState(tx: TenantTx, files: unknown): Promise<(Record<string, unknown> & { deletedAt?: string | null, lifecycle?: string })[]> {
+  const list = Array.isArray(files) ? files as Record<string, unknown>[] : []
+  const ids = list.map(f => f.mediaId).filter((v): v is string => typeof v === 'string')
+  if (!ids.length) return list
+  const rows = await tx.execute(sql`
+    select id::text as id, lifecycle, deleted_at from media_assets
+     where id::text in (${sql.join(ids.map(id => sql`${id}`), sql`, `)})
+  `) as unknown as { id: string, lifecycle: string, deleted_at: Date | string | null }[]
+  const byId = new Map(rows.map(r => [r.id, r]))
+  return list.map((f) => {
+    const m = typeof f.mediaId === 'string' ? byId.get(f.mediaId) : undefined
+    return m ? { ...f, lifecycle: m.lifecycle, deletedAt: m.deleted_at ? new Date(m.deleted_at).toISOString() : null } : f
+  })
+}
 
 // ── Управление (методист) ──────────────────────────────────────────────
 
@@ -133,17 +164,18 @@ export async function workshopForLearner(ctx: Ctx, workshopId: string, enrollmen
           .where(and(eq(workshopComments.submissionId, current.id), eq(workshopComments.isInternal, false), isNull(workshopComments.deletedAt)))
           .orderBy(asc(workshopComments.createdAt))
       : []
+    const currentWithFiles = current ? { ...current, files: await withFileState(tx, current.files), pendingUpload: (current.files as unknown[] ?? []).some(isPendingFile) } : null
     return {
       id: w.id, title: w.title, description: w.description, instructionMedia: w.instructionMedia,
       submissionKinds: w.submissionKinds, minTextLength: w.minTextLength, maxFiles: w.maxFiles, maxFileMb: w.maxFileMb,
       allowCameraOnly: w.allowCameraOnly, criteria: w.criteria, slaHours: w.slaHours, allowRework: w.allowRework, maxReworks: w.maxReworks,
-      current, history: history.map(h => ({ id: h.id, attemptNo: h.attemptNo, status: h.status, submittedAt: h.submittedAt, reviewedAt: h.reviewedAt, passed: h.passed, reviewComment: h.reviewComment })),
+      current: currentWithFiles, history: history.map(h => ({ id: h.id, attemptNo: h.attemptNo, status: h.status, submittedAt: h.submittedAt, reviewedAt: h.reviewedAt, passed: h.passed, reviewComment: h.reviewComment })),
       comments,
     }
   })
 }
 
-export async function saveDraft(ctx: Ctx, workshopId: string, input: { text?: string, files?: unknown[], enrollmentId?: string, lessonId?: string }) {
+export async function saveDraft(ctx: Ctx, workshopId: string, input: { text?: string, files?: WorkshopFile[] | unknown[], enrollmentId?: string, lessonId?: string }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [w] = await tx.select().from(workshops).where(eq(workshops.id, workshopId))
     if (!w) return null
@@ -164,10 +196,82 @@ export async function saveDraft(ctx: Ctx, workshopId: string, input: { text?: st
   })
 }
 
-export type SubmitResult = { ok: true, submissionId: string } | { ok: false, code: 'not_found' | 'requirements_not_met' | 'already_submitted', reasons?: string[] }
+export type SubmitResult = { ok: true, submissionId: string, pendingUpload: boolean } | { ok: false, code: 'not_found' | 'requirements_not_met' | 'already_submitted', reasons?: string[] }
+
+/**
+ * Позвать проверяющих: работа готова к проверке (docs/13 §7.1). Если правило распределения уже
+ * назначило проверяющего (он получил `review_assigned`), звать всех наставников точки нечестно:
+ * взять назначенную другому работу нельзя (docs/v2/37 §7.1).
+ */
+async function notifyReviewers(tx: TenantTx, tenantId: string, w: typeof workshops.$inferSelect, submitterId: string, submissionId: string): Promise<void> {
+  const [queued] = await tx.select({ assigned: reviewQueueItems.assignedReviewerId }).from(reviewQueueItems)
+    .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, submissionId)))
+  if (queued?.assigned) return
+  const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, submitterId))
+  for (const rid of await reviewersFor(tx, tenantId, w, submitterId)) {
+    await enqueueNotification(tx, { tenantId, userId: rid, code: 'workshop_submitted', payload: { name: me?.fullName, title: w.title, submissionId }, dedupKey: `ws_submitted:${submissionId}:${rid}` })
+  }
+}
+
+/**
+ * Сдача, в которой есть файл-обещание `pendingId`, — найти её и переписать запись файла.
+ * Возвращает название практикума для уведомления (или `null`, если сдачи нет — например,
+ * сотрудник удалил файл из черновика и так и не сдал).
+ */
+async function rewritePendingFile(
+  tx: TenantTx,
+  tenantId: string,
+  userId: string,
+  pendingId: string,
+  patch: (entry: Record<string, unknown>) => Record<string, unknown>,
+): Promise<string | null> {
+  const [row] = await tx.select({ s: workshopSubmissions, w: workshops })
+    .from(workshopSubmissions)
+    .innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
+    .where(and(
+      eq(workshopSubmissions.userId, userId),
+      sql`jsonb_path_exists(${workshopSubmissions.files}, 'lax $[*] ? (@.pendingId == $id)', jsonb_build_object('id', ${pendingId}::text))`,
+    ))
+    .orderBy(desc(workshopSubmissions.attemptNo))
+    .limit(1)
+  if (!row) return null
+  const files = (Array.isArray(row.s.files) ? row.s.files : []) as Record<string, unknown>[]
+  const next = files.map(f => (f.pendingId === pendingId ? patch(f) : f))
+  await tx.update(workshopSubmissions).set({ files: next, updatedAt: new Date() }).where(eq(workshopSubmissions.id, row.s.id))
+
+  // Последний недосланный файл пришёл (или потерян) — работа уходит к ментору (§7.5 п. 3).
+  // Срок проверки считается от этого момента: пока файла не было, взять работу было нельзя,
+  // и SLA ментора не должен был тикать. Строка очереди открывается заново (та же строка).
+  if (['submitted', 'in_review'].includes(row.s.status) && !next.some(isPendingFile)) {
+    const now = new Date()
+    await tx.update(workshopSubmissions).set({ slaDueAt: new Date(now.getTime() + row.w.slaHours * 3_600_000) }).where(eq(workshopSubmissions.id, row.s.id))
+    const [enr] = row.s.enrollmentId
+      ? await tx.select({ courseId: enrollments.subjectId }).from(enrollments).where(and(eq(enrollments.id, row.s.enrollmentId), eq(enrollments.subjectType, 'course')))
+      : []
+    await enqueueReview(tx, {
+      tenantId, taskType: 'workshop', sourceId: row.s.id, userId, taskTitle: row.w.title,
+      trackId: enr?.courseId ?? null, submittedAt: now, attemptNo: row.s.attemptNo, slaHours: row.w.slaHours,
+    })
+    await notifyReviewers(tx, tenantId, row.w, userId, row.s.id)
+  }
+  return row.w.title
+}
+
+/** Отложенная запись дослана (docs/v2/34 §7.5 п. 3): обещание заменяется настоящим файлом. */
+export async function attachPendingFile(tx: TenantTx, tenantId: string, userId: string, pendingId: string, mediaId: string): Promise<string | null> {
+  return rewritePendingFile(tx, tenantId, userId, pendingId, (f) => {
+    const { pendingId: _drop, lost: _lost, ...rest } = f
+    return { ...rest, mediaId }
+  })
+}
+
+/** Срок ожидания истёк (§7.5 п. 3): сдача остаётся зачтённой, файл помечен «Файл втрачено». */
+export async function markPendingFileLost(tx: TenantTx, tenantId: string, userId: string, pendingId: string): Promise<string | null> {
+  return rewritePendingFile(tx, tenantId, userId, pendingId, f => ({ ...f, lost: true }))
+}
 
 /** Отправка на проверку (docs/13 §6.2, §7.1): проверка минимальных условий, назначение проверяющих, SLA. */
-export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text?: string, files?: { mediaId: string, name: string, kind: string, bytes: number }[], enrollmentId?: string, lessonId?: string, device?: string }): Promise<SubmitResult> {
+export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text?: string, files?: WorkshopFile[], enrollmentId?: string, lessonId?: string, device?: string }): Promise<SubmitResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [w] = await tx.select().from(workshops).where(and(eq(workshops.id, workshopId), isNull(workshops.deletedAt)))
     if (!w) return { ok: false as const, code: 'not_found' as const }
@@ -213,19 +317,16 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
       slaHours: w.slaHours,
     })
 
-    // Правило распределения уже назначило проверяющего (он получил `review_assigned`) — звать
-    // всех наставников точки «перевірити» нечестно: взять назначенную другому работу нельзя.
-    const [queued] = await tx.select({ assigned: reviewQueueItems.assignedReviewerId }).from(reviewQueueItems)
-      .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, s!.id)))
-    const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
-    for (const rid of queued?.assigned ? [] : await reviewersFor(tx, ctx.tenantId, w, ctx.actorId)) {
-      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: rid, code: 'workshop_submitted', payload: { name: me?.fullName, title: w.title, submissionId: s!.id }, dedupKey: `ws_submitted:${s!.id}:${rid}` })
-    }
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.submit', entity: 'workshop_submission', entityId: s!.id })
+    // Сдача с недосланной записью (квота тенанта исчерпана, docs/v2/34 §7.5 п. 2): срок засчитан
+    // временем записи — `submitted_at` уже стоит, — но звать проверяющих некого: взять работу
+    // нельзя, пока файл не дослан. Позовёт их `attachPendingFile()` в момент досылки.
+    const pendingUpload = files.some(isPendingFile)
+    if (!pendingUpload) await notifyReviewers(tx, ctx.tenantId, w, ctx.actorId, s!.id)
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.submit', entity: 'workshop_submission', entityId: s!.id, ...(pendingUpload ? { after: { pendingUpload: true } } : {}) })
     // Сдача отправлена — открытый сегмент измерения закрывается `completed` (docs/v2/37 §3.6);
     // время сдачи в строку и в очередь проверки досчитает свёртка `time.rollup`
     await closeOpenSegments(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, subjectType: 'workshop', subjectId: workshopId })
-    return { ok: true as const, submissionId: s!.id }
+    return { ok: true as const, submissionId: s!.id, pendingUpload }
   })
 }
 
@@ -267,6 +368,8 @@ export async function reviewQueue(ctx: Ctx, filter: { mine?: boolean, overdue?: 
       status: workshopSubmissions.status, submittedAt: workshopSubmissions.submittedAt, slaDueAt: workshopSubmissions.slaDueAt,
       reviewerId: workshopSubmissions.reviewerId, claimedAt: workshopSubmissions.claimedAt, reworkCount: workshopSubmissions.reworkCount,
       locationName: locations.name,
+      // «Очікує вивантаження» (docs/v2/34 §7.5 п. 2): работа видна, взять её нельзя
+      pendingUpload: sql<boolean>`${PENDING_FILES_SQL}`,
     })
       .from(workshopSubmissions)
       .innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
@@ -290,7 +393,7 @@ export async function reviewQueue(ctx: Ctx, filter: { mine?: boolean, overdue?: 
   })
 }
 
-export type ClaimResult = { ok: true } | { ok: false, code: 'not_found' | 'already_claimed' | 'self_review' | 'assigned_to_other' }
+export type ClaimResult = { ok: true } | { ok: false, code: 'not_found' | 'already_claimed' | 'self_review' | 'assigned_to_other' | 'pending_upload' }
 
 /**
  * Захват карточки (docs/13 §7.2): открытие берёт работу в руки; через 30 минут бездействия
@@ -302,6 +405,8 @@ export async function claim(ctx: Ctx, submissionId: string): Promise<ClaimResult
     const [s] = await tx.select().from(workshopSubmissions).where(eq(workshopSubmissions.id, submissionId))
     if (!s || !['submitted', 'in_review'].includes(s.status)) return { ok: false as const, code: 'not_found' as const }
     if (s.userId === ctx.actorId) return { ok: false as const, code: 'self_review' as const }
+    // Файл ещё на устройстве сотрудника (docs/v2/34 §7.5 п. 2): проверять пока нечего
+    if ((s.files as unknown[] ?? []).some(isPendingFile)) return { ok: false as const, code: 'pending_upload' as const }
     const guard = await claimReview(tx, { taskType: 'workshop', sourceId: submissionId, reviewerId: ctx.actorId })
     if (!guard.ok) return { ok: false as const, code: guard.code }
     // `workshop_submissions.reviewer_id` и `claimed_at` — зеркало для совместимости (В-2):
@@ -340,7 +445,7 @@ export async function submissionForReview(ctx: Ctx, submissionId: string) {
     // Конфликт интересов (docs/v2/37 §7.7–7.8): своя работа — решение запрещено; автор
     // материала — решение разрешено, но карточка предупреждает, а факт идёт в audit_log.
     const conflict = await reviewConflict(tx, { actorId: ctx.actorId, subjectUserId: s.userId, authorIds: w?.authorIds })
-    return { submission: s, workshop: w ? { id: w.id, title: w.title, description: w.description, passRule: w.passRule, allowRework: w.allowRework, maxReworks: w.maxReworks } : null, learner: { id: s.userId, fullName: u?.fullName }, history, comments, conflict }
+    return { submission: { ...s, files: await withFileState(tx, s.files) }, workshop: w ? { id: w.id, title: w.title, description: w.description, passRule: w.passRule, allowRework: w.allowRework, maxReworks: w.maxReworks } : null, learner: { id: s.userId, fullName: u?.fullName }, history, comments, conflict }
   })
 }
 
@@ -393,6 +498,16 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     if (input.decision === 'accepted' && s.enrollmentId && s.lessonId) {
       await tx.insert(lessonProgress).values({ tenantId: ctx.tenantId, enrollmentId: s.enrollmentId, lessonId: s.lessonId, status: 'completed', completedAt: now })
         .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: now } })
+    }
+
+    // По файлам принято решение человеком — они становятся доказательством прохождения
+    // (docs/v2/34 §7.1 п. 2): удалить их можно только с причиной и словом «ВИДАЛИТИ».
+    // Доработка решением по существу не является — файлы ещё заменятся.
+    if (input.decision === 'accepted' || input.decision === 'rejected') {
+      const ids = ((s.files as { mediaId?: string }[] | null) ?? []).map(f => f.mediaId).filter((v): v is string => typeof v === 'string')
+      if (ids.length) {
+        await tx.execute(sql`update media_assets set is_evidence = true, updated_at = now() where id::text in (${sql.join(ids.map(id => sql`${id}`), sql`, `)}) and not is_evidence`)
+      }
     }
 
     // Решение принято — элемент очереди закрывается, но остаётся строкой (проверка 21:

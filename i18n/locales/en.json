@@ -154,7 +154,8 @@
       "contentQuality": "Content quality",
       "reviewQueue": "My reviews",
       "reviewWorkload": "Reviewer workload",
-      "reviewRouting": "Routing rules"
+      "reviewRouting": "Routing rules",
+      "storage": "Storage"
     },
     "section": {
       "learning": "Learning",
@@ -1049,7 +1050,9 @@
       "passed": "passed",
       "failed": "failed",
       "review": "under review"
-    }
+    },
+    "pendingUpload": "Waiting for upload",
+    "pendingUploadHint": "The file is still on the employee’s device — you can take the work as soon as it arrives"
   },
   "cert": {
     "valid": "Valid",
@@ -1827,7 +1830,13 @@
     "cardTitle": "Workshop \"{title}\"",
     "criteriaLearner": "What the mentor checks",
     "morePhoto": "More photos",
-    "commentLabel": "Comment for the mentor"
+    "commentLabel": "Comment for the mentor",
+    "storageFull": "Company storage is full. The recording will be saved on your device and sent automatically once the administrator frees up space.",
+    "pendingUpload": "Waiting for upload",
+    "pendingSaved": "Answer saved. The file will be sent as soon as there is space",
+    "fileLost": "File lost",
+    "fileDeleted": "File deleted {date}",
+    "localSaveFailed": "Could not save the recording on the device. Please try again"
   },
   "ops": {
     "title": "Operator panel",
@@ -3461,7 +3470,12 @@
       "person_document_expiring": "Document expiring",
       "person_document_expired": "Document expired",
       "person_note_shared": "A manager shared a note",
-      "person_note_flagged": "Note with signs of sensitive content"
+      "person_note_flagged": "Note with signs of sensitive content",
+      "storage_upload_blocked": "Answers are waiting for storage space",
+      "storage_upload_deferred": "Recording saved on the device",
+      "storage_pending_upload_done": "File uploaded",
+      "storage_pending_upload_expired": "File could not be uploaded",
+      "storage_bulk_delete_done": "Files deleted from storage"
     }
   },
   "ntpl": {
@@ -6225,6 +6239,152 @@
       "code_exists": "A type with this code already exists",
       "forbidden": "The document type list is managed by HR",
       "remind": "Reminder days are whole numbers from 0 to 365, comma-separated"
+    }
+  },
+  "storage": {
+    "title": "Storage",
+    "tabs": {
+      "files": "Files",
+      "trash": "Trash",
+      "policies": "Retention policies",
+      "aria": "Storage sections"
+    },
+    "increase": "Increase storage",
+    "increaseHint": "Extra space is enabled by your Lola manager: the payment is accepted manually and the limit grows right after it is enabled.",
+    "used": "In use: {used} / {limit}",
+    "usedUnlimited": "In use: {used} · unlimited",
+    "updatedNow": "Updated just now",
+    "collectedAt": "Billing data collected {date}",
+    "notCollected": "Billing data has not been collected yet",
+    "drift": "Counter drift in the last snapshot: {size}",
+    "blocked": "Storage is full. File uploads are paused, learning continues.",
+    "unclassified": "Could not classify: {n} files",
+    "otherShareHigh": "“Other” takes {pct} of the volume — more than 5%. This points to a file classification defect.",
+    "pending": "{n} employee answers are waiting to be uploaded ({size})",
+    "trashSummary": "{n} files in the trash ({size}) — they do not count towards the quota",
+    "breakdown": {
+      "title": "Volume breakdown",
+      "byOrigin": "By origin",
+      "byStage": "By stage",
+      "empty": "No files yet",
+      "files": "{n} files",
+      "other": "Other"
+    },
+    "origin": {
+      "content_cover": "Content covers",
+      "lesson_attachment": "Lesson attachments",
+      "workshop_submission": "Workshop submissions",
+      "video_answer": "Video answers",
+      "candidate_cv": "Candidate CVs",
+      "certificate": "Certificates",
+      "import": "Import files",
+      "checklist_photo": "Checklist photos",
+      "avatar": "Avatars",
+      "brand_asset": "Company brand",
+      "ai_artifact": "AI materials",
+      "report_export": "Report exports",
+      "interview_answer": "Interview answers",
+      "person_document": "Employee documents",
+      "issue_screenshot": "Issue screenshots",
+      "other": "Other"
+    },
+    "filters": {
+      "origin": "Origin",
+      "anyOrigin": "All origins",
+      "stage": "Stage",
+      "anyStage": "All stages",
+      "from": "From",
+      "to": "to",
+      "status": "Status",
+      "evidenceOnly": "Evidence only",
+      "apply": "Apply",
+      "reset": "Reset"
+    },
+    "statusOf": {
+      "active": "Active",
+      "orphaned": "Orphaned",
+      "failed": "Processing error"
+    },
+    "col": {
+      "file": "File",
+      "origin": "Origin",
+      "owner": "Employee",
+      "track": "Track",
+      "date": "Date",
+      "size": "File size",
+      "evidence": "Evidence",
+      "deleted": "Deleted",
+      "purge": "Will be purged",
+      "actions": "Actions"
+    },
+    "evidence": "Completion evidence",
+    "ownerDeleted": "Employee deleted",
+    "selected": "{n} files selected · {size}",
+    "delete": "Delete",
+    "selectAll": "Select all files on the page",
+    "selectRow": "Select file {name}",
+    "notDeletable": {
+      "not_deletable": "A certificate cannot be deleted",
+      "under_review": "The work with this file is being reviewed right now",
+      "already_deleted": "The file is already deleted"
+    },
+    "empty": "There are no files in storage yet",
+    "loadError": "Could not load the file list",
+    "retry": "Try again",
+    "confirm": {
+      "title": "Delete files?",
+      "skipped": "{n} files will be skipped: certificates and work under review",
+      "evidenceWarning": "{k} of them are completion evidence. Deleting them removes the basis for the grades already given.",
+      "reason": "Reason",
+      "reasonHint": "Why are you deleting",
+      "phrase": "Type ВИДАЛИТИ to confirm",
+      "ack": "I understand the files can be restored within {days} days",
+      "cancel": "Cancel",
+      "submit": "Delete",
+      "reasonError": "Give a reason: 10 to 500 characters",
+      "phraseError": "Type the word ВИДАЛИТИ in capital letters",
+      "ackError": "Confirm that you have read this",
+      "done": "{n} files deleted, {size} freed. Skipped: {skipped}"
+    },
+    "trash": {
+      "empty": "The trash is empty. Deleted files are kept here for {days} days",
+      "restore": "Restore",
+      "restored": "File restored",
+      "purgeIn": "in {n} d",
+      "purgeToday": "today",
+      "reason": "Reason: {reason}"
+    },
+    "policies": {
+      "intro": "All policies stay off until you turn them on. Turning one on for the first time requires a dry run and confirming the volume.",
+      "notScheduled": "Settings are saved already; running the policies on a schedule comes with a separate update — until then no files are deleted by policy.",
+      "enabled": "On",
+      "keep": "Keep, months",
+      "keepError": "From 1 to 120 months",
+      "anchor": "Count from",
+      "anchorOf": {
+        "created_at": "upload date",
+        "graded_at": "grading date",
+        "last_accessed_at": "last access"
+      },
+      "action": "Action",
+      "actionOf": {
+        "soft_delete": "To trash",
+        "purge": "Delete without trash",
+        "notify_only": "Notify only"
+      },
+      "keepEvidence": "Keep evidence",
+      "warn": "Warn in advance, days",
+      "trashDays": "Trash, days",
+      "purgeWarning": "Files will be deleted without the trash, they cannot be restored",
+      "evidenceAck": "I understand that grade evidence will be deleted",
+      "willFree": "About {size} will be freed",
+      "dryRun": "Dry run",
+      "dryRunError": "Could not calculate the volume",
+      "save": "Save",
+      "saved": "Policies saved",
+      "dryRunRequired": "Run a dry run first and confirm the volume",
+      "evidenceAckRequired": "Confirm you understand that grade evidence will be deleted",
+      "confirmVolume": "I have checked the dry run volume"
     }
   }
 }

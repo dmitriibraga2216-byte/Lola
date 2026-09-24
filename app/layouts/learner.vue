@@ -9,6 +9,22 @@ const route = useRoute()
 const { moduleOn } = useAuth()
 const isTab = (path: string) => route.path === path || (path !== '/learn' && route.path.startsWith(`${path}/`))
 const bonusesTab = computed(() => isTab('/learn/shop') || isTab('/learn/bonuses'))
+
+// Записи, отложенные при заполненном хранилище компании (docs/v2/34 §7.5): досылаются, пока
+// кабинет открыт, — при входе, раз в 5 минут и при появлении сети. Сервер выдаёт место
+// очередью раз в 15 минут; устройство подхватывает выданное при ближайшей синхронизации.
+const { syncPending } = usePendingUploads()
+let timer: ReturnType<typeof setInterval> | undefined
+const onOnline = () => { syncPending() }
+onMounted(() => {
+  syncPending()
+  timer = setInterval(syncPending, 5 * 60_000)
+  window.addEventListener('online', onOnline)
+})
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  window.removeEventListener('online', onOnline)
+})
 </script>
 
 <template>

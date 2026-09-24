@@ -1178,6 +1178,47 @@ create index on audit_log (tenant_id, created_at desc);
 
 ## 2.10 Геймификация (этап 5, закладываем таблицы)
 
+> [исправлено, `gamification` (24.09.2026): книга построена, миграция `gamification`] Ранее:
+> `points_ledger(id, tenant_id, user_id, delta, reason, ref_id, created_at)` — одна валюта без
+> остатка в строке. Эталон держит **две** валюты в назначении («Бали за виконання завдання» —
+> в рейтинг, «Бонуси за виконання завдання» — в магазин, `15` §14.3) и журнал «с остатком в
+> каждой строке» (`21` §14.9). Итоговая книга ниже; `badges`/`user_badges` по-прежнему не
+> построены (D-068, `33`) — правил бейджей в ТЗ нет.
+
+Книга операций — **единственный источник баланса**. `[решение]` Баланс не хранится отдельным
+полем и не кешируется: это `balance_after` последней строки человека по валюте (индекс
+`(tenant_id, user_id, currency, id)`). Кеш был бы второй правдой, которую пришлось бы пересобирать
+и сверять, а последняя строка читается так же дёшево. Согласованность `balance_after` держит
+блокировка счёта (`pg_advisory_xact_lock` по тенанту, человеку и валюте) на время записи —
+`server/services/pointsLedger.ts`. Расхождение с суммой `delta` ищет ночная сверка
+(`ledgerDrift`) и пишет в лог ошибок, книга не правится. Строки не правятся и не удаляются:
+списание — отрицательная строка, возврат при отмене заказа — компенсирующая `refund`.
+
+```sql
+-- Итоговая книга (миграция `gamification`); `reason` стала `event` (перечисление
+-- points_event), тип ссылки задаёт событие — отдельной колонки `ref_type` из `21` §14.9 нет
+points_ledger(
+  id bigserial primary key,          -- порядок строк = порядок вставки под блокировкой счёта
+  tenant_id uuid not null references tenants on delete cascade,
+  user_id uuid not null references users on delete cascade,
+  currency text not null,            -- points_currency: points (рейтинг) | bonuses (магазин)
+  delta int not null,                -- <> 0; списание — отрицательное
+  balance_after int not null,        -- >= 0: «Бонуси після операції» журнала эталона
+  event text not null,               -- points_event: task_completed | manual | purchase | refund
+  ref_id uuid,                       -- task_completed → assignments.id; purchase/refund → shop_orders.id; manual → null
+  title text,                        -- «Деталі»: название задания/товара на момент операции
+  comment text,                      -- причина ручной операции или отмены
+  actor_id uuid references users on delete set null,  -- кто провёл (`granted_by` из `21` §3.7); null — система
+  request_context jsonb,             -- CLAUDE.md п. 14
+  created_at timestamptz not null default now(),
+  check ((event = 'manual') = (ref_id is null))
+)
+-- Идемпотентность: одно событие со ссылкой — одна строка (manual без ссылки — сколько угодно)
+create unique index points_ledger_once_uq on points_ledger (tenant_id, user_id, currency, event, ref_id);
+```
+
+Исходный набросок этапа 5 (оставлен для истории):
+
 ```sql
 create table badges (
   id uuid primary key default gen_random_uuid(),
@@ -1573,6 +1614,15 @@ shop_orders(user_id, item_id, price_bonuses int,
           status text,                      -- reserved | ready | issued | cancelled
           reserved_until timestamptz,       -- 14 дней, потом автоотмена  [решение]
           issued_by uuid, issued_at timestamptz, cancel_reason text)
+-- Построено (`gamification`, 24.09.2026). Дополнено против строк выше `[решение]`:
+--   shop_categories(name, sort)  — справочник категорий тенанта (`21` §14.3 «Додати нову
+--     категорію»); стартовые «Мерч · Вихідні дні · Знижки · У закладі» — решение владельца
+--     продукта 24.09.2026, засеваются ensureTenantDefaults и миграцией, дальше их ведёт администратор;
+--   shop_items: stock null — без ограничения (выходной, скидка, «щось у закладі»: физического
+--     остатка нет, выдача — отметкой ответственного); image_key — media_assets.id (origin
+--     content_cover); created_by; deleted_at — мягкое удаление (на товар ссылаются заказы и книга);
+--   shop_orders: price_bonuses — снимок цены (возврат = ровно списанное); ready_at; cancelled_at,
+--     cancelled_by (null при cancelled — автоотмена по сроку резерва), cancel_reason.
 ```
 
 ## Рабочие задачи
@@ -1653,7 +1703,7 @@ saved_reports(name, entity text, fields jsonb, filters jsonb, group_by jsonb,
 --   {ip, geo:{country,country_code,city}, user_agent, browser, os, device}
 -- Журналы: audit_log, security_log, sessions, enrollment_events, notifications,
 -- import_jobs, goal_status_log, automation_runs, task_access_log, org_conflicts, task_status_log
--- (+ points_ledger, когда появится).
+-- points_ledger (книга баллов и бонусов, §2.10; `gamification`).
 -- Заполняет server/utils/requestContext.ts; вне HTTP-запроса (очередь, вебхук) — null.
 -- security_log.severity text not null default 'info' — security_severity (см. перечисления).
 
@@ -2154,6 +2204,20 @@ vacancy_application_state: pending | pending_review | accepted | merged | reject
 -- Исход обращения к публичной форме (`public_apply_attempts.outcome`, `v2/29` §7.4):
 -- журнал нужен затем, что ответ формы одинаков при успехе и при отказе (§7.3)
 public_apply_outcome: view | submit_ok | submit_blocked | otp_sent | otp_failed
+
+-- Валюта книги операций (`points_ledger.currency`, §2.10). Снято с эталона: в назначении
+-- два разных поля «Нагороди» (`15` §14.3) — «Бали за виконання завдання» идут в рейтинг,
+-- «Бонуси за виконання завдання» тратятся в магазине подарков. Трата бонусов рейтинг не трогает
+points_currency: points | bonuses
+
+-- Событие книги операций (`points_ledger.event`, колонка «Подія» журнала эталона `21` §14.9):
+-- «Виконання завдання», «Ручне нарахування», «Покупка» + refund — возврат при отмене заказа
+-- отдельной строкой, не удалением покупки (`21` Г-21.1)
+points_event: task_completed | manual | purchase | refund
+
+-- Статус заказа в магазине (`shop_orders.status`, `21` Г-21.1 [решение]): reserved — бонусы
+-- списаны и остаток уменьшен; cancelled возвращает и то, и другое строками книги
+shop_order_status: reserved | ready | issued | cancelled
 ```
 
 ## Что проверяет тест схемы

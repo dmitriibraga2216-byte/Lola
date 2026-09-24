@@ -132,6 +132,10 @@ const ORIGINAL_SHOW: Record<string, string> = {
   // тем же порядком, что и `/admin/vacancies` в #106: состав меню меняется только вместе
   // с этой строкой, молча пункт не появится.
   '/org-structure': "hasScope('org.structure.edit')",
+  // `gamification` (docs/21 Г-21.1): группа «Мотивація» в «Навчанні» — магазин, журнал бонусов, правила
+  '/admin/shop': "hasScope('shop.manage') || hasScope('shop.issue')",
+  '/admin/bonuses': "hasScope('shop.manage') || hasScope('bonus.grant')",
+  '/admin/rewards': "hasScope('settings.tenant')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

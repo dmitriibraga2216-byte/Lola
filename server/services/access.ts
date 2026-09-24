@@ -136,7 +136,17 @@ export async function requireAnyScope(event: H3Event, scopes: (Scope | string)[]
  */
 export async function scopeForGrants(access: Access, tenantScope: Scope | string, teamScope: Scope | string): Promise<string[] | null> {
   if (can(access, tenantScope)) return null
-  const grants = access.grants.filter(g => g.scopes.includes(teamScope))
+  return areaForScope(access, teamScope)
+}
+
+/**
+ * Область одного скоупа — по назначениям ролей, где он есть: null — роль на весь тенант;
+ * иначе точки (напрямую или через подразделение). Пустой массив — скоупа нет ни в одной роли.
+ * Вторая половина `scopeForGrants` — для скоупов без «сетевой» пары (выдача заказов, ручные
+ * бонусы: у наставника и руководителя точки они действуют только на своих людей, docs/21 §2).
+ */
+export async function areaForScope(access: Access, scope: Scope | string): Promise<string[] | null> {
+  const grants = access.grants.filter(g => g.scopes.includes(scope))
   if (grants.some(g => g.scopeType === 'tenant')) return null
   const locs = new Set(grants.filter(g => g.scopeType === 'location' && g.scopeId).map(g => g.scopeId!))
   const units = grants.filter(g => g.scopeType === 'org_unit' && g.scopeId).map(g => g.scopeId!)

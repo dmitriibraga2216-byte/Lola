@@ -1,12 +1,13 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
   attemptAnswers, attemptRequests, attemptResults, attempts, enrollments, lessonProgress, lessons, locations, mediaAssets,
-  positions, questions, quizQuestions, quizzes, userPlacements, users,
+  pointsLedger, positions, questions, quizQuestions, quizzes, userPlacements, users,
 } from '../db/schema'
 import type { z } from 'zod'
 import type { answerFileSchema, reviewAnswersQuerySchema } from '../../shared/schemas/quizzes'
 import { withTenant } from '../utils/withTenant'
-import { resolveQuizParams } from './taskParams'
+import { findAssignmentFor, resolveQuizParams } from './taskParams'
+import { balanceOf } from './pointsLedger'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -491,6 +492,7 @@ export async function getAttemptResult(ctx: Ctx, attemptId: string) {
     const earned = snapshot.reduce((sum, q) => sum + Number(byQ.get(q.id)?.score ?? 0), 0)
     return {
       locked: false as const,
+      bonus: await attemptBonus(tx, attempt),
       status: attempt.status,
       score: params.showScore ? Number(attempt.score) : null,
       passScore: params.passScore,
@@ -523,6 +525,22 @@ export async function getAttemptResult(ctx: Ctx, attemptId: string) {
           }),
     }
   })
+}
+
+/**
+ * Плашка «+5 бонусів зараховано · Баланс: 23 бонуси» (мокап TestResult; docs/33 D-069): бонусы
+ * за это задание, если их начислила именно эта попытка. Тест в уроке курса — не задание (его
+ * завершение засчитывает курс), повторная попытка уже вознаграждённого назначения — без плашки:
+ * строка книги старше попытки.
+ */
+async function attemptBonus(tx: TenantTx, attempt: typeof attempts.$inferSelect): Promise<{ earned: number, balance: number } | null> {
+  if (!attempt.passed || attempt.lessonId) return null
+  const assignmentId = attempt.assignmentId ?? (await findAssignmentFor(tx, 'test', attempt.quizId, attempt.userId))?.id ?? null
+  if (!assignmentId) return null
+  const [row] = await tx.select({ delta: pointsLedger.delta, createdAt: pointsLedger.createdAt }).from(pointsLedger)
+    .where(and(eq(pointsLedger.userId, attempt.userId), eq(pointsLedger.currency, 'bonuses'), eq(pointsLedger.event, 'task_completed'), eq(pointsLedger.refId, assignmentId)))
+  if (!row || row.createdAt < attempt.createdAt) return null
+  return { earned: row.delta, balance: await balanceOf(tx, attempt.userId, 'bonuses') }
 }
 
 /** Вложение к свободному ответу (docs/04 §4.6): файл уже загружен через /media, здесь — ссылка в ответе. */

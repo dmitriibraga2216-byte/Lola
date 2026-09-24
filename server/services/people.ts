@@ -743,8 +743,8 @@ export async function inactiveReport(ctx: Ctx, days = 30, scope: string[] | null
 
 export async function personLearning(ctx: Ctx, userId: string) {
   // «Рейтинг» у зведенні «Навчання» (докс/31 рядок PersonCard) — той самий розрахунок, що й
-  // «Поточний рейтинг» у «Мій розвиток» (`/me/study-history`, docs/33 D-069): кількість
-  // завершених курсів/програм/тестів. Окрема транзакція (studyHistory сам відкриває withTenant),
+  // «Поточний рейтинг» у «Мій розвиток» (`/me/study-history`, docs/33 D-069): сума балів рейтингу
+  // з книги `points_ledger`. Окрема транзакція (studyHistory сам відкриває withTenant),
   // не вкладаємо в транзакцію нижче.
   const { currentRating } = await studyHistory(ctx, userId)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {

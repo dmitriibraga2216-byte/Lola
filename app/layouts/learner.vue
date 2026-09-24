@@ -1,11 +1,14 @@
 <script setup lang="ts">
 /**
  * Каркас кабинета сотрудника (телефон 390×844, docs/31): без шапки, нижняя панель
- * «Навчання · Каталог · Бонуси · Профіль». «Бонуси» — R3, вкладка появится с модулем.
+ * «Навчання · Каталог · Бонуси · Профіль». «Бонуси» ведёт в магазин подарков (мокап Shop: вкладка
+ * активна на «Магазин подарунків») и горит и на истории бонусов; нет модуля — нет вкладки.
  */
 const { t } = useI18n()
 const route = useRoute()
+const { moduleOn } = useAuth()
 const isTab = (path: string) => route.path === path || (path !== '/learn' && route.path.startsWith(`${path}/`))
+const bonusesTab = computed(() => isTab('/learn/shop') || isTab('/learn/bonuses'))
 </script>
 
 <template>
@@ -21,6 +24,10 @@ const isTab = (path: string) => route.path === path || (path !== '/learn' && rou
       <NuxtLink to="/learn/catalog" :class="['tab', { on: isTab('/learn/catalog') }]">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm6.3 9.9 4.4 4.4-1.4 1.4-4.4-4.4 1.4-1.4z" fill="currentColor" /></svg>
         <span>{{ t('learner.nav.catalog') }}</span>
+      </NuxtLink>
+      <NuxtLink v-if="moduleOn('bonuses')" to="/learn/shop" :class="['tab', { on: bonusesTab }]">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="9.5" width="17" height="11" rx="1.5" /><path d="M3.5 13.5h17M12 9.5v11" /><path d="M12 9.5S9.5 4 7 5.5 9 9.5 12 9.5zM12 9.5s2.5-5.5 5-4-1 4-5 4z" /></svg>
+        <span>{{ t('learner.nav.bonuses') }}</span>
       </NuxtLink>
       <NuxtLink to="/learn/profile" :class="['tab', { on: isTab('/learn/profile') }]">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8a7 7 0 0 1 14 0H5z" fill="currentColor" /></svg>

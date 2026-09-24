@@ -53,6 +53,10 @@ export const SCOPES = [
   'wiki.edit', 'report.builder',
   // Программы и траектории (docs/17 §2)
   'program.manage', 'program.publish', 'program.link_rule',
+  // Мотивація: бонуси і магазин подарунків (docs/21 §2, Г-21.1; docs/01 §1.3). Заказать себе
+  // подарок права не нужно — это `learn.view`; скоупы — у того, кто ведёт магазин, выдаёт
+  // заказы на точке и начисляет бонусы вручную.
+  'shop.manage', 'shop.issue', 'bonus.grant',
 
   // --- Пакет docs/v2 (patch П-01, docs/v2/39-patches.md) ---
   // Рекрутинг: кандидаты (docs/v2/28 §2)
@@ -124,6 +128,8 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'report.own', 'report.team', 'development.own', 'development.team', 'assessment.own', 'checklist.run',
       'meetup.view', 'meetup.enroll', 'meetup.attendance', 'lifecycle.view', 'content_issue.report',
       'org.structure.view',
+      // docs/21 §2 «Начислять баллы вручную»: наставник — своим людям (область роли)
+      'bonus.grant',
     ],
   },
   manager: {
@@ -145,6 +151,9 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       // на всё дерево: узлы вне поддерева, где человек держатель, недоступны и для drop
       // (`canEditNode()`). Импорт и откат остаются у администратора.
       'org.structure.view', 'org.structure.edit',
+      // docs/21 Г-21.1: выдачу отмечает руководитель точки; ручное начисление — своим людям.
+      // Каталог магазина (`shop.manage`) — не у него: цена в бонусах одна на сеть (docs/01 §1.3).
+      'shop.issue', 'bonus.grant',
     ],
   },
   author: {

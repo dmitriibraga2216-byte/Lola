@@ -712,10 +712,27 @@ await db.transaction(async (tx) => {
     { tenantId, trajectoryId: trajectoryCook!.id, fromNodeId: nRetry!.id, toNodeId: nOr!.id, condition: null, sort: 0 },
     { tenantId, trajectoryId: trajectoryCook!.id, fromNodeId: nOr!.id, toNodeId: nFinish!.id, condition: null, sort: 0 },
   ])
+
+  // Магазин подарунків (docs/21 Г-21.1): по подарунку на кожну стартову категорію
+  // (ensureTenantDefaults вже засіяв їх вище). Вихідний і знижка — без залишку (stock null),
+  // обід — лише на Лазарева. Кухарю — ручне нарахування від адміна, щоб на стенді було що витратити:
+  // книга пишеться так само, як це робить сервіс, — рядок із залишком після операції.
+  const shopCats = await tx.select().from(schema.shopCategories).where(eq(schema.shopCategories.tenantId, tenantId))
+  const cat = (name: string) => shopCats.find(c => c.name === name)?.id ?? null
+  await tx.insert(schema.shopItems).values([
+    { tenantId, title: 'Футболка Каппі', description: 'Бавовняна футболка з логотипом, розміри S–XL.', categoryId: cat('Мерч'), priceBonuses: 20, stock: 10, isActive: true, createdBy: adminU!.id },
+    { tenantId, title: 'Додатковий вихідний', description: 'Один оплачуваний вихідний — дату погоджуєте з керівником точки.', categoryId: cat('Вихідні дні'), priceBonuses: 60, stock: null, limitPerUser: 2, isActive: true, createdBy: adminU!.id },
+    { tenantId, title: 'Знижка 20% на меню', description: 'Разова знижка для вас і гостей у будь-якому закладі мережі.', categoryId: cat('Знижки'), priceBonuses: 10, stock: null, isActive: true, createdBy: adminU!.id },
+    { tenantId, title: 'Обід від шефа', description: 'Обід у закладі на Лазарева в зручний день.', categoryId: cat('У закладі'), priceBonuses: 15, stock: null, locationId: lazareva!.id, isActive: true, createdBy: adminU!.id },
+  ])
+  await tx.insert(schema.pointsLedger).values({
+    tenantId, userId: cook!.id, currency: 'bonuses', delta: 30, balanceAfter: 30, event: 'manual',
+    comment: 'Вітальні бонуси за перший місяць', actorId: adminU!.id,
+  })
 })
 
 console.log('Сид применён: тенант «Каппі», 2 точки, 5 позиций, 6 системных ролей, 5 людей'
   + ' и 3 канареечных кандидата (П-16.1, слой 3);'
   + ' учебный контент — 4 курса (12 уроков, 9 материалов), 3 теста (12 вопросов),'
-  + ' 1 программа, 1 траектория')
+  + ' 1 программа, 1 траектория; магазин подарунків — 4 подарунки')
 await client.end()

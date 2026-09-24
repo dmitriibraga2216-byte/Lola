@@ -14,6 +14,7 @@ import { parseImportFile } from './importPeople'
 import { matchesConditions, ruleConditions } from './automation'
 import { logPassEvent } from './passEvents'
 import { stageParamKeys, stageParamsFor, subjectStage } from './taskParams'
+import { rewardRuleFor } from './rewards'
 import {
   DEFAULT_REMINDERS, METHOD_KEYS, paramsFor, parseTaskParams, remindersSchema,
 } from '../../shared/schemas/assignments'
@@ -46,7 +47,9 @@ export async function getTaskParams(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const a = await loadTask(tx, id)
     if (!a) return null
-    return serializeParams(a, await allowedKeys(tx, a))
+    // «Нагороди»: пустые «Бали/Бонуси за виконання завдання» берутся из правила тенанта (docs/21 §3.7) —
+    // форма показывает его подсказкой в поле, а не подставляет значение (иначе правило перестало бы действовать)
+    return { ...serializeParams(a, await allowedKeys(tx, a)), rewardRule: await rewardRuleFor(tx, ctx.tenantId, a.subjectType as ContentType) }
   })
 }
 

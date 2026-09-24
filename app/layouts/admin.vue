@@ -20,6 +20,7 @@ const PAGE_MODULES: [string, string][] = [
   ['/admin/workshops', 'workshops'], ['/admin/review-workshops', 'workshops'], ['/admin/programs', 'programs'], ['/admin/trajectories', 'trajectories'], ['/admin/rules', 'trajectories'],
   ['/admin/meetups/complex', 'complexTests'], ['/admin/meetups', 'meetups'], ['/admin/development', 'development'], ['/admin/assessment', 'assessment'], ['/admin/checklists', 'assessment'],
   ['/admin/knowledge', 'knowledge'], ['/admin/news', 'news'], ['/admin/notices', 'notices'], ['/admin/simple-notices', 'notices'], ['/admin/events', 'events'],
+  ['/admin/shop', 'bonuses'], ['/admin/bonuses', 'bonuses'],
 ]
 function moduleOfPage(to: string): string | null {
   return [...PAGE_MODULES].sort((a, b) => b[0].length - a[0].length).find(([p]) => to === p || to.startsWith(`${p}/`))?.[1] ?? null
@@ -46,6 +47,11 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/assessment/forms', label: t('admin.nav.assessForms'), show: hasScope('assessment.manage'), group: t('admin.group.assessment') },
     { to: '/admin/assessment/cycles', label: t('admin.nav.assessCycles'), show: hasScope('assessment.run'), group: t('admin.group.assessment') },
     { to: '/admin/checklists', label: t('admin.nav.checklists'), show: hasScope('checklist.manage'), group: t('admin.group.assessment') },
+    // Мотивація (docs/21 Г-21.1, мокапи ShopAdmin/Bonuses: крихти «Навчання · Мотивація») — магазин
+    // і журнал бонусів гасяться разом з модулем; правила нарахування — ні: бали рейтингу йдуть і без магазину.
+    { to: '/admin/shop', label: t('admin.nav.shop'), show: hasScope('shop.manage') || hasScope('shop.issue'), group: t('admin.group.motivation') },
+    { to: '/admin/bonuses', label: t('admin.nav.bonuses'), show: hasScope('shop.manage') || hasScope('bonus.grant'), group: t('admin.group.motivation') },
+    { to: '/admin/rewards', label: t('admin.nav.rewards'), show: hasScope('settings.tenant'), group: t('admin.group.motivation') },
   ] },
   { key: 'content', label: t('admin.section.content'), icon: 'doc', items: [
     { to: '/admin/resources', label: t('admin.nav.resources'), show: hasScope('course.view') },

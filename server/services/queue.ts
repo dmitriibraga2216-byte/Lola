@@ -37,6 +37,8 @@ export async function getBoss(): Promise<PgBoss> {
       // откликов и уборка журнала попыток
       await b.createQueue('vacancy.application_expire', { retryLimit: 2, expireInSeconds: 600 })
       await b.createQueue('vacancy.attempts_gc', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/21 Г-21.1: автоотмена заказов магазина с истёкшим резервом (+ сверка книги бонусов)
+      await b.createQueue('shop.reserve_expire', { retryLimit: 2, expireInSeconds: 600 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -59,6 +61,9 @@ export async function getBoss(): Promise<PgBoss> {
       // попыток старше 30 дней
       await b.schedule('vacancy.application_expire', '10 * * * *', {}, { singletonKey: 'vacancy.application_expire' })
       await b.schedule('vacancy.attempts_gc', '40 3 * * *', {}, { singletonKey: 'vacancy.attempts_gc', tz: 'Europe/Kyiv' })
+      // Резерв магазина (docs/21 Г-21.1) — ежечасно: срок считается часами от заказа, а не днями,
+      // и суточный проход держал бы бонусы и остаток до 23 лишних часов
+      await b.schedule('shop.reserve_expire', '25 * * * *', {}, { singletonKey: 'shop.reserve_expire' })
       return b
     })
   }

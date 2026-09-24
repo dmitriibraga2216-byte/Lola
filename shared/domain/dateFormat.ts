@@ -81,3 +81,15 @@ export function formatTime(value: DateInput, locale: Locale, opts: Intl.DateTime
 export function formatNumber(value: number, locale: Locale, opts?: Intl.NumberFormatOptions): string {
   return value.toLocaleString(tagOf(locale), opts)
 }
+
+/**
+ * Категорія множини під локаль (`Intl.PluralRules`): `one | few | many | other` — «1 бонус»,
+ * «3 бонуси», «5 бонусів». Словник тримає всі чотири форми в кожній мові (`i18n-locales.spec.ts`
+ * вимагає однакових ключів), англійська просто повторює `other` у `few`/`many`.
+ */
+export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other'
+export function pluralCategory(value: number, locale: Locale): PluralCategory {
+  const c = new Intl.PluralRules(tagOf(locale)).select(value) as PluralCategory
+  // zero/two у підтримуваних мовах не трапляються; на всяк випадок зводимо до `other`
+  return c === 'zero' || c === 'two' ? 'other' : c
+}

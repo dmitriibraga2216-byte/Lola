@@ -48,7 +48,10 @@ const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events'
   // `content_issue_events` — журнал карточки жалобы (docs/v2/36 §3, PR-23): тем же решением,
   // что и два журнала выше. Он доказывает склейку и компенсацию времени попытки, значит
   // обязан отвечать и на «с какого устройства пришла жалоба»
-  'content_issue_events']
+  'content_issue_events',
+  // `points_ledger` — книга баллов и бонусов (docs/02 §2.10, `gamification`): docs/02 заранее
+  // включил её в список журналов («+ points_ledger, когда появится») — «это деньги» (docs/22 §11)
+  'points_ledger']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

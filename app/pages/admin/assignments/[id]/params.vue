@@ -26,7 +26,7 @@ const GROUP_KEYS: Partial<Record<Group, string[]>> = {
 }
 const group = ref<Group>('general')
 
-interface ParamsData { contentType: ContentType, params: Record<string, unknown>, paramKeys: string[], method: { viaCatalog: boolean, automationRuleId: string | null, useInDevPlans: boolean } }
+interface ParamsData { contentType: ContentType, params: Record<string, unknown>, paramKeys: string[], method: { viaCatalog: boolean, automationRuleId: string | null, useInDevPlans: boolean }, rewardRule: { points: number, bonuses: number } }
 interface Reminders { enabled: boolean, beforeDueDays: number[], onDueDate: boolean, afterDueEveryDays: number | null, afterDueMaxCount: number, escalateToManagerAfterDays: number | null, channel: string | null, notifyOnAssign: boolean }
 
 const contentType = ref<ContentType>('course')
@@ -47,6 +47,8 @@ const timeMin = ref(30)
 const attemptsN = ref(3)
 
 const paramKeys = ref<string[]>([])
+// «Правила нарахування» тенанта (docs/21 §3.7): пусте поле «Бали/Бонуси» = за правилом — показуємо його підказкою
+const rewardRule = ref<{ points: number, bonuses: number } | null>(null)
 const has = (key: string) => paramKeys.value.includes(key)
 const isTest = computed(() => contentType.value === 'test')
 const visibleGroups = computed(() => GROUPS.filter(g => !GROUP_KEYS[g] || GROUP_KEYS[g]!.some(has)))
@@ -61,6 +63,7 @@ async function load() {
     ])
     contentType.value = d.contentType
     paramKeys.value = d.paramKeys
+    rewardRule.value = d.rewardRule
     title.value = card.title
     Object.assign(p, d.params)
     Object.assign(method, d.method)
@@ -208,8 +211,8 @@ async function save() {
         <section v-show="group === 'rewards'" class="group">
           <label v-if="has('badgeId')" class="inline"><span class="label">{{ t('assign.p.badge') }}</span><input v-model="p.badgeId" class="field" :placeholder="t('assign.p.none')"></label>
           <label v-if="has('certificateId')" class="inline"><span class="label">{{ t('assign.p.certificate') }}</span><input v-model="p.certificateId" class="field" :placeholder="t('assign.p.none')"></label>
-          <label v-if="has('points')" class="inline"><span class="label">{{ t('assign.p.points') }}</span><input v-model.number="p.points" class="field short" type="number" min="0" max="10000"><span class="help">{{ t('assign.p.pointsHint') }}</span></label>
-          <label v-if="has('bonuses')" class="inline"><span class="label">{{ t('assign.p.bonuses') }}</span><input v-model.number="p.bonuses" class="field short" type="number" min="0" max="10000"><span class="help">{{ t('assign.p.bonusesHint') }}</span></label>
+          <label v-if="has('points')" class="inline"><span class="label">{{ t('assign.p.points') }}</span><input v-model.number="p.points" class="field short" type="number" min="0" max="10000" :placeholder="rewardRule ? t('assign.p.byRule', { n: rewardRule.points }) : ''"><span class="help">{{ t('assign.p.pointsHint') }}</span></label>
+          <label v-if="has('bonuses')" class="inline"><span class="label">{{ t('assign.p.bonuses') }}</span><input v-model.number="p.bonuses" class="field short" type="number" min="0" max="10000" :placeholder="rewardRule ? t('assign.p.byRule', { n: rewardRule.bonuses }) : ''"><span class="help">{{ t('assign.p.bonusesHint') }}</span></label>
         </section>
 
         <!-- Метод призначення -->

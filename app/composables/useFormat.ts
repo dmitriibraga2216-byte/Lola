@@ -1,4 +1,4 @@
-import { formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, resolveLocale } from '#shared/domain/dateFormat'
+import { formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, pluralCategory, resolveLocale } from '#shared/domain/dateFormat'
 import type { DateInput } from '#shared/domain/dateFormat'
 
 /**
@@ -21,5 +21,7 @@ export function useFormat() {
     formatTime: (value: DateInput, opts?: Intl.DateTimeFormatOptions) => formatTime(value, loc(), opts),
     /** Число з розділювачами розрядів під локаль. */
     formatNumber: (value: number, opts?: Intl.NumberFormatOptions) => formatNumber(value, loc(), opts),
+    /** Категорія множини для ключа словника (`shop.bonusesCount.<категорія>`): «1 бонус», «3 бонуси», «5 бонусів». */
+    plural: (value: number) => pluralCategory(value, loc()),
   }
 }

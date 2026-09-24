@@ -398,8 +398,10 @@ describe('docs/19 часть 2: матрица, курс → компетенц�
 })
 
 describe('docs/22 §13.5, docs/04 `/me/study-history`: історія навчання і рейтинг у кабінеті', () => {
-  it('список охоплює курс, тест і завершену заявку на зовнішнє навчання; рейтинг — кількість виконаного', async () => {
+  it('список охоплює курс, тест і завершену заявку на зовнішнє навчання; рейтинг — бали з книги points_ledger (D-069)', async () => {
     const { studyHistory } = await import('../../server/services/reportsExtra')
+    const { postEntry } = await import('../../server/services/pointsLedger')
+    const { withTenant } = await import('../../server/utils/withTenant')
     const stamp = Date.now()
     const [course] = await admin`insert into courses (tenant_id, title, slug, status) values (${tenantId}, ${`Історія курс ${stamp}`}, ${`hist-${stamp}`}, 'published') returning id`
     const [ver] = await admin`insert into course_versions (tenant_id, course_id, version) values (${tenantId}, ${course!.id}, 1) returning id`
@@ -409,18 +411,24 @@ describe('docs/22 §13.5, docs/04 `/me/study-history`: історія навча
     const req = await import('../../server/services/requests')
     const r = await req.createExternalRequest(asBarista(), { title: `Історія заявка ${stamp}`, format: 'offline', cost: 1000 })
     await admin`update external_training_requests set status = 'completed', decided_at = now() where id = ${r.id}`
+    // Рейтинг — не кількість виконаного, а бали за виконання завдань (docs/15 §14.3): рядок книги
+    const ref = crypto.randomUUID()
+    const posted = await withTenant(tenantId, adminId, tx => postEntry(tx, { tenantId, userId: baristaId, currency: 'points', delta: 40, event: 'task_completed', refId: ref, title: 'Історія курс' }))
+    if (!posted.ok) throw new Error(posted.code)
     try {
       const h = await studyHistory(asBarista(), baristaId)
       expect(h.profile).toMatchObject({ full_name: 'Бариста Тестовий' })
       expect(h.items.some(i => i.contentType === 'course' && i.status === 'done')).toBe(true)
       expect(h.items.some(i => i.contentType === 'test' && i.status === 'done')).toBe(true)
       expect(h.items.some(i => i.external && i.status === 'done')).toBe(true)
-      expect(h.currentRating).toBeGreaterThanOrEqual(2) // курс + тест, заявка в рейтинг не входить (тільки в зовнішній ряд)
+      expect(h.currentRating).toBe(posted.balanceAfter) // останній balance_after балів; заявка в рейтинг не входить (тільки в зовнішній ряд)
+      expect(h.currentRating).toBeGreaterThanOrEqual(40)
       expect(h.series.length).toBe(8)
-      expect(h.series.at(-1)!.mine).toBeGreaterThanOrEqual(2)
+      expect(h.series.at(-1)!.mine).toBe(posted.balanceAfter)
       expect(h.series.at(-1)!.external).toBeGreaterThanOrEqual(1)
     }
     finally {
+      await admin`delete from points_ledger where ref_id = ${ref}`
       await admin`delete from external_training_requests where id = ${r.id}`
       await admin`delete from attempts where id = ${att!.id}`; await admin`delete from quizzes where id = ${quiz!.id}`
       await admin`delete from enrollments where id = ${enr!.id}`; await admin`delete from course_versions where id = ${ver!.id}`; await admin`delete from courses where id = ${course!.id}`

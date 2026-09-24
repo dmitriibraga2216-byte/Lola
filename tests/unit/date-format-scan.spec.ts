@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 /**
  * Долг PR-107 (docs/v2/46-progress.md, запись 2026-09-23): «около полусотни мест форматирования
  * дат хардкодят локаль (toLocaleDateString('uk-UA', …) и подобное), не глядя на выбранный язык».
- * Все такие места переведены на `shared/utils/dateFormat.ts` (через `useFormat()` на клиенте,
+ * Все такие места переведены на `shared/domain/dateFormat.ts` (через `useFormat()` на клиенте,
  * `server/utils/formatLocale.ts` на сервере) — этот тест не даёт долгу вернуться: любой новый
  * вызов `toLocale*String`/`Intl.*Format` с локалью-строковым литералом в `app/` или `server/`
  * (кроме самой утилиты) валится с указанием файла и строки.
@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(__dirname, '../..')
 
 /** Файлы самой утилиты — здесь литеральные Intl-теги ('uk-UA' и т.п.) являются реализацией, не долгом. */
-const IMPLEMENTATION_FILES = new Set(['shared/utils/dateFormat.ts'])
+const IMPLEMENTATION_FILES = new Set(['shared/domain/dateFormat.ts'])
 
 /**
  * `file:method:локаль-літерал` — привязка к конкретному методу и конкретному хардкод-значению
@@ -78,7 +78,7 @@ function findViolations(files: string[]): Violation[] {
 
 const keyOf = (v: Violation) => `${v.file}:${v.method}:${v.locale}`
 
-describe('дати/час/числа: жодного хардкоду локалі поза shared/utils/dateFormat.ts', () => {
+describe('дати/час/числа: жодного хардкоду локалі поза shared/domain/dateFormat.ts', () => {
   const files = [...walk(join(root, 'app')), ...walk(join(root, 'server')), ...walk(join(root, 'shared'))]
 
   it('сканер реально знаходить файли (не порожній прогін)', () => {

@@ -1,12 +1,12 @@
-import { DEFAULT_LOCALE, resolveLocale } from '../../shared/utils/dateFormat'
-import type { Locale } from '../../shared/utils/dateFormat'
+import { DEFAULT_LOCALE, resolveLocale } from '../../shared/domain/dateFormat'
+import type { Locale } from '../../shared/domain/dateFormat'
 
-// Ничего не реэкспортируем из `shared/utils/dateFormat` под теми же именами: Nuxt авто-импортирует
-// `shared/utils/**` и на клиенте, и на сервере, и повторный экспорт тех же имён отсюда даёт
-// предупреждение о дублирующемся авто-импорте при `nuxt prepare`. Сервисам, которым нужны
-// `formatDate`/`formatShortDate`/`formatDateTime`/`formatTime`/`formatNumber`/`resolveLocale`/
-// `Locale` — импортировать их напрямую из `shared/utils/dateFormat` (относительным путём —
-// алиас `#shared` собирает только сама Nuxt/Nitro, plain vitest его не резолвит).
+// Ничего не реэкспортируем из `shared/domain/dateFormat` под теми же именами — этот файл
+// добавляет только `recipientLocale`. Сервисам, которым нужны `formatDate`/`formatShortDate`/
+// `formatDateTime`/`formatTime`/`formatNumber`/`resolveLocale`/`Locale` — импортировать их
+// напрямую из `../../shared/domain/dateFormat` относительным путём, как и `shared/domain/
+// roles.ts`/`shared/schemas/settings.ts` везде в `server/**` — это проверенный рабочий способ
+// (см. докблок `dateFormat.ts` о том, почему на клиенте нужен именно алиас `#shared`, а не он).
 
 /**
  * Локаль отримувача листа/сповіщення (докс/23 §3.4, §13.4): своя — `users.locale`, інакше

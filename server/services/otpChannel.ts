@@ -2,7 +2,7 @@ import { withTenant } from '../utils/withTenant'
 import { sendEmail, type ChannelResult } from './channels'
 import { readSettings } from './settings'
 import { tenantOverrides } from './translations'
-import { resolveLocale } from '../../shared/utils/dateFormat'
+import { resolveLocale } from '../../shared/domain/dateFormat'
 
 /**
  * Доставка OTP. Этап 1 (docs/07-stages.md): Telegram + SMS-заглушка в логе.

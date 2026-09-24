@@ -5,6 +5,21 @@
  * (локаль из `useI18n()`), и `server/utils/formatLocale.ts` (локаль получателя
  * `users.locale ?? tenants.locale ?? 'uk'`, как в `dispatchNotifications`). Новый язык
  * интерфейса — правка `SUPPORTED_LOCALES`/`LOCALE_TAGS` в одном месте, а не обход всех экранов.
+ *
+ * Лежит в `shared/domain/`, а не в `shared/utils/`: Nuxt (compatibilityVersion 4) авто-
+ * импортирует `shared/utils/**`/`shared/types/**` глобально на клиенте и на сервере — лишняя
+ * магия для файла, у которого уже есть явная точка входа (`useFormat()`/`formatLocale.ts`),
+ * и она мешала диагностике первой красной сборки. `shared/schemas/*` и `shared/domain/*`
+ * (как этот файл) auto-import не затрагивает.
+ *
+ * Импорт из `app/composables/useFormat.ts` — обязательно через алиас `#shared/domain/
+ * dateFormat`, не относительным путём: этот файл первым в репозитории попал в оба графа
+ * сборки одновременно (клиентский чанк и серверный Nitro-бандл), и Vite не инлайнит его тело
+ * в серверный вывод при относительном импорте с клиентской стороны — оставляет сырую ссылку
+ * `./shared/domain/dateFormat.ts`, которую Rollup потом не резолвит уже внутри собранного
+ * `server.mjs` (`RollupError: Could not resolve...`). Из `server/**` — обычным относительным
+ * путём, как и `shared/domain/roles.ts`, `shared/schemas/settings.ts` и весь остальной
+ * `shared/`: там это уже проверенный рабочий способ, замена на алиас не нужна.
  */
 
 export type Locale = 'uk' | 'en' | 'ru'

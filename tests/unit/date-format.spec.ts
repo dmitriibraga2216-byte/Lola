@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_LOCALE, formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, resolveLocale, SUPPORTED_LOCALES } from '../../shared/utils/dateFormat'
+import { DEFAULT_LOCALE, formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, resolveLocale, SUPPORTED_LOCALES } from '../../shared/domain/dateFormat'
 
 /**
  * Единая точка форматирования дат/времени/чисел (докс/28, долг PR-107 — «около полусотни мест
@@ -10,7 +10,7 @@ import { DEFAULT_LOCALE, formatDate, formatDateTime, formatNumber, formatShortDa
 
 const SAMPLE = new Date('2026-09-24T14:05:00Z')
 
-describe('shared/utils/dateFormat: resolveLocale', () => {
+describe('shared/domain/dateFormat: resolveLocale', () => {
   it('пропускает поддерживаемые локали как есть', () => {
     for (const l of SUPPORTED_LOCALES) expect(resolveLocale(l)).toBe(l)
   })
@@ -23,7 +23,7 @@ describe('shared/utils/dateFormat: resolveLocale', () => {
   })
 })
 
-describe('shared/utils/dateFormat: одна дата — три локали, три разных написания', () => {
+describe('shared/domain/dateFormat: одна дата — три локали, три разных написания', () => {
   it('formatDate (полная дата) отличается для uk/en/ru и не хардкодит уникальный вид', () => {
     const uk = formatDate(SAMPLE, 'uk')
     const en = formatDate(SAMPLE, 'en')
@@ -73,7 +73,7 @@ describe('shared/utils/dateFormat: одна дата — три локали, т
   })
 })
 
-describe('shared/utils/dateFormat: невірна локаль на вході формату падає на uk, а не кидає виняток', () => {
+describe('shared/domain/dateFormat: невірна локаль на вході формату падає на uk, а не кидає виняток', () => {
   it('formatDate/formatShortDate/formatDateTime/formatTime приймають лише Locale — виклик через resolveLocale перед ними', () => {
     // Місце виклику (композабл/сервер) завжди прогонює довільний рядок через resolveLocale();
     // самі format-функції типізовані на Locale і не бачать «сирих» значень — перевіряємо саме

@@ -181,7 +181,7 @@ POST/DELETE, `/billing/addons`, `/billing/plans`, экран §5.2, форма �
 сертификата вёрстан только на украинском». Эта задача закрывает оба пункта.
 
 **Сделано:**
-- `shared/utils/dateFormat.ts` — единая изоморфная утилита (`formatDate`, `formatShortDate`,
+- `shared/domain/dateFormat.ts` — единая изоморфная утилита (`formatDate`, `formatShortDate`,
   `formatDateTime`, `formatTime`, `formatNumber`, `resolveLocale`); `app/composables/
   useFormat.ts` — клиентская обёртка (локаль из `useI18n()`); `server/utils/formatLocale.ts` —
   серверная (`recipientLocale(userLocale, tenantLocale)`, тот же порядок `users.locale ??
@@ -213,6 +213,27 @@ POST/DELETE, `/billing/addons`, `/billing/plans`, экран §5.2, форма �
   начало `<script setup>` четырёх файлов, сдвинула номера строк с хекс-литералами цвета на
   единицу — обновлён `scripts/v2-crosschecks.sh` (allowlist проверки 5), сами хекс-литералы
   не трогали.
+- CI поймал на шаге Build то, что `pnpm test:quiet`/`nuxt typecheck` не видят (там своя
+  резолюция путей, не Rollup): изначально утилита лежала в `shared/utils/dateFormat.ts` и
+  импортировалась относительным путём и из `server/**`, и из `app/composables/useFormat.ts`.
+  Собрал два урока по дороге. Первый — Nuxt (compatibilityVersion 4) авто-импортирует
+  `shared/utils/**`/`shared/types/**` глобально, что для файла с уже своей точкой входа
+  избыточно и мешает диагностике; файл переехал в `shared/domain/dateFormat.ts`, рядом с
+  `roles.ts`/`grading.ts` — туда auto-import не долезает. Второй, настоящая причина падения:
+  этот файл — первый в репозитории, который одновременно входит и в клиентский граф сборки
+  (через композабл), и в серверный (через несколько `server/**`), с исполняемым (не только
+  типовым) экспортом. При относительном импорте с клиентской стороны Vite не инлайнит его тело
+  в серверный Nitro-бандл, оставляя нерезолвленную ссылку `./shared/domain/dateFormat.ts`
+  (`RollupError: Could not resolve...`) — сам `nuxt build` перед этим падением ловил ложные
+  таймауты на общей машине (OOM на heap 2 ГБ из-за параллельных сессий, не по коду). Починка —
+  `app/composables/useFormat.ts` импортирует утилиту через алиас `#shared/domain/dateFormat`
+  (как уже делают `.vue`-компоненты, например `#shared/schemas/settings`), а весь `server/**`
+  остаётся на относительном пути (доказанно рабочий способ — так уже импортируют `roles.ts` и
+  `shared/schemas/settings.ts` из полутора десятков файлов). После починки `pnpm build`
+  проходит целиком. Мораль на будущее: для нового файла в `shared/`, который одновременно
+  нужен и клиенту, и серверу как исполняемый код (а не только тип), — со стороны `app/**`
+  импортировать через `#shared/...`, со стороны `server/**` — относительным путём; проверять
+  это может только настоящий `pnpm build`, ни тесты, ни typecheck такую связку не ловят.
 
 **Долг, оставленный этой задачей (осознанно, не вслепую):**
 1. **`server/routes/c/[token].get.ts`** (публичная страница проверки сертификата без входа) —

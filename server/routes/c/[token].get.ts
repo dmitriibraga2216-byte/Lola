@@ -1,5 +1,5 @@
 import { publicCertificate } from '../../services/certificates'
-import { formatDate } from '../../../shared/utils/dateFormat'
+import { formatDate } from '../../../shared/domain/dateFormat'
 
 /** Публичная проверка сертификата (docs/14 §5.5): без входа, noindex, только безопасные поля. */
 export default defineEventHandler(async (event) => {

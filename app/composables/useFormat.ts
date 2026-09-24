@@ -1,10 +1,10 @@
-import { formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, resolveLocale } from '../../shared/utils/dateFormat'
-import type { DateInput } from '../../shared/utils/dateFormat'
+import { formatDate, formatDateTime, formatNumber, formatShortDate, formatTime, resolveLocale } from '#shared/domain/dateFormat'
+import type { DateInput } from '#shared/domain/dateFormat'
 
 /**
  * Єдина точка форматування дат/часу/чисел на екранах (докс/28, долг PR-107): бере активну
  * локаль з `useI18n()`, а не хардкодить `uk-UA`, як робили ~50 місць в `app/pages/**` до цієї
- * правки. Сама логіка форматів і мапа локалей — `shared/utils/dateFormat.ts`, тут лише
+ * правки. Сама логіка форматів і мапа локалей — `shared/domain/dateFormat.ts`, тут лише
  * прив'язка до поточної локалі інтерфейсу.
  */
 export function useFormat() {

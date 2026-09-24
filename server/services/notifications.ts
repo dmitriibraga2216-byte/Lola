@@ -12,7 +12,7 @@ import { tenantOverrides } from './translations'
 import type { Locale } from './translations'
 import { buildEmailHtml } from './emailRender'
 import { EMPLOYEES_ONLY } from './repo/people'
-import { formatDate } from '../../shared/utils/dateFormat'
+import { formatDate } from '../../shared/domain/dateFormat'
 import { recipientLocale } from '../utils/formatLocale'
 
 /**

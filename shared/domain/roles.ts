@@ -18,7 +18,9 @@
  * обезличенный отчёт PR-22.
  * Четвёртое — скоупы проверки (PR-19, `docs/v2/37` §2): `review.delegate` и
  * `review.absence.manage` у `mentor` и `manager`, плюс `review.delegate.any`,
- * `review.routing.manage`, `review.workload.view` у `manager`. Роль `owner`
+ * `review.routing.manage`, `review.workload.view` у `manager`. Пятое —
+ * библиотека модулей (PR-25, `docs/v2/31` §2): `library.view` + `library.use` у `mentor` и
+ * `manager`, плюс `library.publish` у `author`; `library.manage` — только у `admin`. Роль `owner`
  * заведена (см. ниже) — `docs/v2/35` §2 ссылалась на неё как на существующую, хотя в `01` §1.2
  * её не было. Распределение по будущим ролям `recruiter` и `hr` — в PR, которые добавят
  * соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
@@ -140,6 +142,9 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'time.metrics.view',
       // PR-19 (`docs/v2/37` §2): делегировать свою проверку и отмечать своё отсутствие.
       'review.delegate', 'review.absence.manage',
+      // PR-25: библиотеку видит и предлагает в неё свой урок (`docs/v2/31` §2); вставлять
+      // модуль не может — нет `course.edit`, а положить в библиотеку — нет `library.publish`
+      'library.view', 'library.use',
     ],
   },
   manager: {
@@ -172,6 +177,8 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       // отзывает и переназначает чужое, правит правила распределения, видит нагрузку и
       // перебрасывает очередь отсутствующего.
       'review.delegate', 'review.delegate.any', 'review.routing.manage', 'review.workload.view', 'review.absence.manage',
+      // PR-25: как у наставника — видит библиотеку и предлагает урок (`docs/v2/31` §2)
+      'library.view', 'library.use',
     ],
   },
   author: {
@@ -193,6 +200,9 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       // баллов и mute — только у администратора: менять выставленные людям результаты автор не вправе
       'content_issue.report', 'content_issue.view', 'content_issue.triage',
       'org.structure.view',
+      // PR-25: кладёт модули в библиотеку, правит свои и принимает предложения (`docs/v2/31`
+      // §2); чужие модули, физическое удаление и массовое обновление — `library.manage`, у admin
+      'library.view', 'library.use', 'library.publish',
     ],
   },
   admin: {

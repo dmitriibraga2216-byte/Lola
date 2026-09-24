@@ -29,6 +29,8 @@ export default defineEventHandler(async (event) => {
     if (result.code === 'not_found') return apiError(event, 404, 'not_found', 'Файл не знайдено')
     if (result.code === 'file_not_deletable') return apiError(event, 403, 'file_not_deletable', result.message)
     if (result.code === 'already_deleted') return apiError(event, 409, 'already_deleted', result.message)
+    // docs/v2/31 §7.13, §12: «409 со списком версий» — чтобы было понятно, какие модули его держат
+    if (result.code === 'in_library_version') return apiError(event, 409, 'media.in_library_version', result.message, { versions: result.versions })
     return apiError(event, 409, 'evidence_locked', result.message)
   }
   return apiData({ lifecycle: result.lifecycle, purgeAfter: result.purgeAfter })

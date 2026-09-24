@@ -193,7 +193,7 @@ SQL: итоговый констрейнт `media_assets.origin` (§4), блок
 | `tenant_usage` | `35` | 8 | 1 индекс |
 | `lesson_progress` | `37` | 3 | `seconds_spent` сохраняется как «сырая» величина |
 | `courses` | `33` | 2 | 1 индекс |
-| `lessons` | `31` | 2 | `module_id` становится nullable, 2 констрейнта, 1 индекс |
+| `lessons` | `31` | 2 | `module_id` становится nullable, 3 констрейнта, 2 индекса (PR-25; `31` §3.1) |
 | `attempts` | `37` | 2 | `time_spent_sec` сохраняется |
 | `workshop_submissions` | `37` | 2 | — |
 | `trajectory_nodes` | `31` | 1 | 1 индекс |
@@ -591,8 +591,15 @@ library_modules`. Порядок внутри файла:
 3. `alter table library_modules add constraint library_modules_current_version_fk`
 4. `library_module_usages`, `library_module_proposals`
 5. `alter table lessons` — `alter column module_id drop not null`,
-   `library_module_id`, `library_version_id`, констрейнты `lessons_owner_ck` и
-   `lessons_library_ref_ck`, индекс
+   `library_module_id`, `library_version_id`, констрейнты `lessons_owner_ck`,
+   `lessons_library_ref_ck` и `lessons_library_body_ck`, два индекса
+
+> [исправлено, PR-25: третий констрейнт `lessons_library_body_ck` (в R1 телом модуля бывает
+> только материал, Р-31.7) и второй индекс по `library_version_id`; `lessons.library_version_id`
+> — `on delete set null`, а не `restrict`: иначе `tenant.purge` (удаление по таблицам с
+> повтором) упирается в цикл «урок курса → версия → урок-снимок» и не сходится. Шаг 6
+> (`trajectory_nodes`) — отдельной миграцией PR-26, `45` §5] Ранее: «констрейнты
+> `lessons_owner_ck` и `lessons_library_ref_ck`, индекс»; шаг 6 в том же файле.
 6. `alter table trajectory_nodes` — `library_version_id`, индекс
 
 Шаг 5 обязан идти последним: `lessons_owner_ck` требует, чтобы у каждой существующей

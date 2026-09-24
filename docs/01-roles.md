@@ -334,6 +334,16 @@ tenant
 | Делегування перевірки | `review.delegate`, `review.delegate.any`, `review.routing.manage`, `review.workload.view`, `review.absence.manage`, `time.metrics.view` | `docs/v2/37` |
 | Картка людини | `person.activity.view_others`, `person.note.read`, `person.note.write`, `person.document.view_others`, `person.document.manage`, `person.absence.manage`, `person.rating.view_others` | `docs/v2/38` |
 
+> [исправлено, PR-25: у библиотеки модулей появились эндпоинты (`/library/*`), и скоупы
+> распределены по `docs/v2/31` §2: `library.view` + `library.use` — `mentor` и `manager`
+> (видят библиотеку и предлагают свой урок; вставлять не могут — нет `course.edit`), плюс
+> `library.publish` — `author` (кладёт модули, правит свои, принимает предложения);
+> `library.manage` (чужие модули, физическое удаление) — только `admin`. Уже заведённым
+> тенантам скоупы выдаёт миграция PR-25, новым — матрица `SYSTEM_ROLES`. Так же раньше
+> поступили PR-05 (`lifecycle.view`), PR-07 (`offboarding.start`) и PR-23 (`content_issue.*`) —
+> перечень исключений ведётся в шапке `shared/domain/roles.ts`] Ранее: «Ни один не назначен
+> ролям `employee`, `mentor`, `manager`, `author` по умолчанию».
+
 **Отдельно.** Скоупы `platform.plans.manage`, `platform.limits.override`, `platform.ai.grant`,
 `platform.payments.manage` из `docs/v2/35-billing-limits.md` §2 в `SCOPES` не включены: доступ
 оператора платформы — отдельный механизм (`platform_admin`, BYPASSRLS-подключение,

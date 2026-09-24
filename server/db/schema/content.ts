@@ -1,12 +1,13 @@
 import { sql } from 'drizzle-orm'
 import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import {
-  boolean, numeric, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
+  boolean, check, numeric, index, integer, jsonb, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { lifecycleStages } from './lifecycle'
 import { enrollments } from './learning'
 import { users } from './people'
+import { libraryModules, libraryModuleVersions } from './library'
 
 /**
  * Контент (docs/02-data-model.md §2.4, docs/11-content-lessons.md):
@@ -214,10 +215,28 @@ export const modules = pgTable('modules', {
   index().on(t.tenantId),
 ])
 
+/**
+ * Урок — элемент плана **или** тело библиотечного модуля (`docs/v2/31` §3.1, патч П-11).
+ *
+ * Владелец ровно один (`lessons_owner_ck`): раздел курса (`moduleId`) либо модуль библиотеки
+ * (`libraryModuleId` — черновик или неизменяемый снимок версии, `resourceVersionId` у снимка
+ * указывает на `resource_versions`). Поэтому `moduleId` nullable, и любая выборка уроков
+ * курса обязана идти через раздел (join `modules` или `moduleId is not null`), а не по одному
+ * `id`: урок модуля по прямой ссылке правится только сервисом библиотеки.
+ *
+ * `libraryVersionId` — урок курса как **место использования** версии модуля: своего материала
+ * у него нет, он читает закреплённый снимок (`lessons_library_ref_ck`), и публикация курса его
+ * не перезакрепляет (`courses.ts#pinResourceVersions`).
+ */
 export const lessons = pgTable('lessons', {
   ...baseColumns,
   tenantId: tenantId(),
-  moduleId: uuid('module_id').notNull().references(() => modules.id, { onDelete: 'cascade' }),
+  moduleId: uuid('module_id').references(() => modules.id, { onDelete: 'cascade' }),
+  libraryModuleId: uuid('library_module_id').references((): AnyPgColumn => libraryModules.id, { onDelete: 'cascade' }),
+  // `set null`, а не `restrict` из DDL `31` §3.1: иначе удаление тенанта (`tenant.purge`) упирается
+  // в цикл «урок курса → версия → урок-снимок» и не сходится. Версия, на которую ссылается урок,
+  // приложением не удаляется никогда (физическое удаление модуля — только без мест, §7.5).
+  libraryVersionId: uuid('library_version_id').references((): AnyPgColumn => libraryModuleVersions.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
   sort: integer('sort').notNull(),
   itemType: text('item_type').notNull().default('resource'), // resource | quiz | workshop | survey
@@ -230,6 +249,11 @@ export const lessons = pgTable('lessons', {
   resourceVersionId: uuid('resource_version_id').references(() => resourceVersions.id, { onDelete: 'set null' }), // снимок ресурса, закреплённый публикацией курса (Г-11.3)
 }, t => [
   index().on(t.tenantId, t.moduleId, t.sort),
+  index('idx_lessons_tenant_library').on(t.tenantId, t.libraryModuleId).where(sql`library_module_id is not null`),
+  index('idx_lessons_tenant_library_version').on(t.tenantId, t.libraryVersionId).where(sql`library_version_id is not null`),
+  check('lessons_owner_ck', sql`(${t.moduleId} is not null)::int + (${t.libraryModuleId} is not null)::int = 1`),
+  check('lessons_library_ref_ck', sql`${t.libraryVersionId} is null or (${t.moduleId} is not null and ${t.itemType} = 'resource' and ${t.resourceVersionId} is not null)`),
+  check('lessons_library_body_ck', sql`${t.libraryModuleId} is null or ${t.itemType} = 'resource'`),
 ])
 
 export const mediaAssets = pgTable('media_assets', {

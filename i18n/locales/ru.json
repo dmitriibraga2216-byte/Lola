@@ -3453,7 +3453,11 @@
       "review_sla_breach": "Проверка просрочена",
       "review_escalated": "Проверка эскалирована",
       "review_queue_moved": "Вам передана очередь проверки",
-      "review_overloaded": "Проверяющий перегружен"
+      "review_overloaded": "Проверяющий перегружен",
+      "library_module_updated": "Модуль библиотеки обновлён",
+      "library_module_archived": "Модуль библиотеки заархивирован",
+      "library_proposal_created": "Предложение в библиотеку",
+      "library_proposal_decided": "Решение по предложению в библиотеку"
     }
   },
   "ntpl": {

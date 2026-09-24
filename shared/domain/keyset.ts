@@ -55,6 +55,8 @@ export const KEYSETS = {
    * при равном числе жалоб его карточка выше.
    */
   contentIssues: ['int', 'int', 'at', 'uuid'],
+  /** Библиотека модулей и палитра вставки: `updated_at desc, id desc` (docs/v2/31 §5.1). */
+  libraryModules: ['at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

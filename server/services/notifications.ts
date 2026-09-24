@@ -234,6 +234,13 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   content_issue_rescore_ready: '{{count}} спроб можна перерахувати після виправлення «{{title}}»',
   content_issue_rescored: 'Питання «{{title}}» виправили, твій результат перераховано: {{scoreOld}} → {{scoreNew}}',
   content_reporter_muted: 'Надсилання повідомлень про помилки контенту призупинено до {{until}}',
+  // docs/v2/31 §8 (PR-25): библиотека модулей. Коды — `snake_case`, как у воронки кандидатов.
+  // Хотфикс и еженедельный дайджест устаревших ссылок (`library_hotfix_*`, `library_stale_digest`)
+  // приходят с PR-26 вместе с обновлением мест использования.
+  library_module_updated: 'Модуль «{{title}}» оновлено до v{{version}}. {{changelog}}',
+  library_module_archived: 'Модуль «{{title}}» заархівовано. Причина: {{reason}}',
+  library_proposal_created: '{{user}} пропонує додати «{{title}}» до бібліотеки',
+  library_proposal_decided: 'Вашу пропозицію «{{title}}» {{decision}}.{{#comment}} {{comment}}{{/comment}}',
 }
 
 /**

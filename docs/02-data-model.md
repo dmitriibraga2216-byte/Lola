@@ -694,7 +694,7 @@ create table modules (                         -- раздел курса
 create table lessons (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
-  module_id uuid not null references modules(id) on delete cascade,
+  module_id uuid references modules(id) on delete cascade,   -- раздел курса; пуст у тела модуля библиотеки
   title text not null,
   sort int not null,
   kind text not null,                          -- content | quiz | task | survey | external
@@ -702,8 +702,38 @@ create table lessons (
   quiz_id uuid references quizzes(id),
   min_seconds int,                             -- минимальное время на уроке
   is_required boolean not null default true,
-  resource_version_id uuid references resource_versions(id) on delete set null  -- снимок ресурса, закреплённый публикацией курса (Г-11.3)
+  resource_version_id uuid references resource_versions(id) on delete set null, -- снимок ресурса, закреплённый публикацией курса (Г-11.3)
+  -- Библиотека модулей (`v2/31` §3.1, П-11, PR-25): урок — элемент плана ИЛИ тело модуля
+  library_module_id uuid references library_modules(id) on delete cascade,       -- владелец-модуль: черновик или снимок версии
+  library_version_id uuid references library_module_versions(id) on delete set null, -- урок курса как место использования версии
+  constraint lessons_owner_ck check ((module_id is not null)::int + (library_module_id is not null)::int = 1),
+  constraint lessons_library_ref_ck check (library_version_id is null
+    or (module_id is not null and item_type = 'resource' and resource_version_id is not null)),
+  constraint lessons_library_body_ck check (library_module_id is null or item_type = 'resource')
 );
+-- В коде урок ссылается на материал (`item_type`, `item_id`), своего `body` у него нет (`11` §3.2):
+-- блоки живут в `resources.body` и `resource_versions.body`. Тело модуля библиотеки — урок с
+-- `library_module_id`, чей материал ведёт только библиотека; место использования в курсе —
+-- урок с `library_version_id`, читающий закреплённый снимок. Ровно одно владение — lessons_owner_ck.
+create index idx_lessons_tenant_library on lessons (tenant_id, library_module_id) where library_module_id is not null;
+create index idx_lessons_tenant_library_version on lessons (tenant_id, library_version_id) where library_version_id is not null;
+
+-- Библиотека переиспользуемых модулей (`v2/31` §3, PR-25). Полный DDL — `v2/31` §3.6.
+-- library_modules — карточка: title, slug (уникален в тенанте), content_kind (перечень
+--   resources.kind), category_id → course_categories, tags, language, summary, estimated_minutes,
+--   owner_id, author_ids (1–10), draft_lesson_id → lessons, current_version_id → версия,
+--   status (library_module_status), usage_count, archived_at/by/reason, search_tsv (триггер),
+--   embedding vector(768) + embedding_model
+-- library_module_versions — версия: version (своя нумерация), lesson_id → урок-снимок, title,
+--   content_kind, changelog 5–500, diff {added,removed,changed} по block.id, is_hotfix,
+--   media_ids (держит файлы от удаления), status (library_version_status), published_at/by
+-- library_module_usages — место использования: version_id, holder_type/holder_id/holder_title
+--   (library_holder_type), container_type/container_id/container_title (library_container_type),
+--   pin_mode (library_pin_mode), is_stale, latest_version_seen, attached_by/at, detached_at;
+--   строка не удаляется; одна активная ссылка на держателя (частичный уникальный индекс)
+-- library_module_proposals — предложение урока: source_lesson_id, source_container_*,
+--   proposed_title, proposed_category_id, comment, status (library_proposal_status),
+--   decided_by/at, decision_comment (обязателен при rejected), library_module_id
 ```
 
 ### 2.5 Формат `lessons.body`
@@ -2407,6 +2437,25 @@ points_event: task_completed | manual | purchase | refund
 -- Статус заказа в магазине (`shop_orders.status`, `21` Г-21.1 [решение]): reserved — бонусы
 -- списаны и остаток уменьшен; cancelled возвращает и то, и другое строками книги
 shop_order_status: reserved | ready | issued | cancelled
+
+-- Библиотека модулей (`v2/31` §3–§4, PR-25). Тип модуля (`library_modules.content_kind`)
+-- своего перечня не имеет — это перечень `resources.kind` (Р-31.5): тело модуля и есть
+-- материал. Карточка: из archived в draft дороги нет — у модуля уже есть версии и места
+library_module_status: draft | published | archived
+
+-- Версия модуля: retired — её не закрепляет ни одно активное место; тело-снимок остаётся
+library_version_status: published | retired
+
+-- Место использования (`library_module_usages`): кто держит ссылку и в каком контейнере
+library_holder_type: trajectory_node | course_lesson
+library_container_type: trajectory | course
+
+-- Режим закрепления версии: версия закреплена всегда, режим решает только, доезжает ли
+-- «Критичне виправлення» само (Р-31.4). По умолчанию hotfix_auto (критерий приёмки 6)
+library_pin_mode: fixed | hotfix_auto
+
+-- Предложение урока в библиотеку (`v2/31` §3.5, §4): все три исхода конечные
+library_proposal_status: pending | accepted | rejected | withdrawn
 ```
 
 ## Что проверяет тест схемы
@@ -2438,7 +2487,7 @@ shop_order_status: reserved | ready | issued | cancelled
 | Рекрутинг: кандидаты и вакансии | `docs/v2/28-recruiting-candidates.md`, `29-vacancies.md` | по счётчикам `40` §2 |
 | Жизненный цикл и офбординг | `docs/v2/33-lifecycle.md` | — |
 | ИИ-собеседование | `docs/v2/30-ai-interview.md` | — |
-| Библиотека модулей | `docs/v2/31-module-library.md` | — |
+| Библиотека модулей | `docs/v2/31-module-library.md` | 4 (PR-25; §2.4 выше) |
 | Оргструктура | `docs/v2/32-org-structure.md` | — |
 | Хранилище | `docs/v2/34-storage.md` | — |
 | Тариф и лимиты | `docs/v2/35-billing-limits.md` | — |

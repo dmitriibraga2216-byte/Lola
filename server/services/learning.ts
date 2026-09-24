@@ -446,7 +446,11 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
     }
 
     const material = await lessonMaterial(tx, lesson)
-    const [mod] = await tx.select({ title: modules.title, sort: modules.sort }).from(modules).where(eq(modules.id, lesson.moduleId))
+    // Урок из плана курса — у него всегда есть раздел; `moduleId` nullable только у тела модуля
+    // библиотеки (docs/v2/31 §3.1), а его `checkAvailable` в плане не найдёт
+    const [mod] = lesson.moduleId
+      ? await tx.select({ title: modules.title, sort: modules.sort }).from(modules).where(eq(modules.id, lesson.moduleId))
+      : []
     const evaluation = material ? evaluateLesson(material.facts, progressFacts(current!)) : null
 
     return {

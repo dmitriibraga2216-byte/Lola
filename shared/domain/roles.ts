@@ -111,7 +111,9 @@ export const OWNER_ROLE_CODE = 'owner'
 export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defaultScopeType?: 'tenant' | 'org_unit' | 'location' }> = {
   employee: {
     name: 'Співробітник',
-    scopes: ['learn.view', 'learn.catalog', 'learn.attempt', 'report.own', 'development.own', 'assessment.own', 'meetup.view', 'meetup.enroll', 'content_issue.report'],
+    // `org.structure.view` — витрину оргструктуры видят все роли (`docs/v2/32` §2):
+    // «Видеть витрину, себя и свою ветку в ней» — строка с галочками во всех пяти столбцах.
+    scopes: ['learn.view', 'learn.catalog', 'learn.attempt', 'report.own', 'development.own', 'assessment.own', 'meetup.view', 'meetup.enroll', 'content_issue.report', 'org.structure.view'],
   },
   mentor: {
     name: 'Наставник',
@@ -121,6 +123,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'review.queue', 'review.grade', 'certification.confirm',
       'report.own', 'report.team', 'development.own', 'development.team', 'assessment.own', 'checklist.run',
       'meetup.view', 'meetup.enroll', 'meetup.attendance', 'lifecycle.view', 'content_issue.report',
+      'org.structure.view',
     ],
   },
   manager: {
@@ -137,6 +140,11 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       // PR-07: «Запустить офбординг» — керівник точки своей точки (`docs/v2/33` §2);
       // завершает офбординг только администратор (`offboarding.complete` остаётся у него).
       'offboarding.start',
+      // PR-30: витрина и конструктор **своей ветки** (`docs/v2/32` §2 [решение], Г-32.8).
+      // Область роли `manager` — точка, а не тенант, поэтому сам скоуп не даёт права
+      // на всё дерево: узлы вне поддерева, где человек держатель, недоступны и для drop
+      // (`canEditNode()`). Импорт и откат остаются у администратора.
+      'org.structure.view', 'org.structure.edit',
     ],
   },
   author: {
@@ -155,6 +163,7 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'program.manage', 'program.publish', 'lifecycle.view',
       // Автор и сам жалуется на чужой материал (`v2/36` §2); очередь и разбор — PR-24
       'content_issue.report', 'content_issue.view',
+      'org.structure.view',
     ],
   },
   admin: {

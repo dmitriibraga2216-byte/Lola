@@ -9,6 +9,7 @@ import { sanitizeBody } from './sanitize'
 import { enqueueNotification } from './notifications'
 import { claimReview, closeReview, enqueueReview, releaseReview, reviewConflict } from './reviewQueue'
 import type { ContentBlock } from '../../shared/schemas/content'
+import { managerIdOf, managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -235,11 +236,11 @@ async function reviewersFor(tx: TenantTx, tenantId: string, w: typeof workshops.
     }
   }
   ids = [...new Set(ids)].filter(id => id !== submitterId)
-  // Единственный проверяющий — сам сдавший → руководителю точки (docs/14 §7.9)
+  // Единственный проверяющий — сам сдавший → руководителю (docs/14 §7.9).
+  // Руководитель берётся `resolveManager()` (П-16.4), а не из `locations.manager_id`.
   if (ids.length === 0) {
-    const [pl] = await tx.select({ managerId: locations.managerId }).from(userPlacements).innerJoin(locations, eq(locations.id, userPlacements.locationId))
-      .where(and(eq(userPlacements.userId, submitterId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-    if (pl?.managerId && pl.managerId !== submitterId) ids = [pl.managerId]
+    const mgr = await managerIdOf(tx, submitterId)
+    if (mgr && mgr !== submitterId) ids = [mgr]
   }
   return ids
 }
@@ -437,12 +438,12 @@ export async function workshopSlaScan(tenantId: string): Promise<{ released: num
     let breached = 0
     const overdue = await tx.select({ s: workshopSubmissions, w: workshops }).from(workshopSubmissions).innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
       .where(and(inArray(workshopSubmissions.status, ['submitted', 'in_review']), sql`${workshopSubmissions.slaDueAt} < now() - (${workshops.slaHours} || ' hours')::interval`))
+    const slaManagers = await managerIdsOf(tx, overdue.map(o => o.s.userId)) // П-16.4
     for (const { s, w } of overdue) {
-      const [pl] = await tx.select({ managerId: locations.managerId }).from(userPlacements).innerJoin(locations, eq(locations.id, userPlacements.locationId))
-        .where(and(eq(userPlacements.userId, s.userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-      if (pl?.managerId) {
+      const mgr = slaManagers.get(s.userId)
+      if (mgr) {
         const hours = Math.round((Date.now() - (s.submittedAt?.getTime() ?? Date.now())) / 3_600_000)
-        if (await enqueueNotification(tx, { tenantId, userId: pl.managerId, code: 'workshop_sla_breach', payload: { title: w.title, hours, submissionId: s.id }, dedupKey: `ws_sla:${s.id}:${new Date().toISOString().slice(0, 10)}` })) breached++
+        if (await enqueueNotification(tx, { tenantId, userId: mgr, code: 'workshop_sla_breach', payload: { title: w.title, hours, submissionId: s.id }, dedupKey: `ws_sla:${s.id}:${new Date().toISOString().slice(0, 10)}` })) breached++
       }
     }
 

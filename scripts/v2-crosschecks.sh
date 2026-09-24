@@ -66,8 +66,10 @@ check1_stage_codes() {
   local allow=(
     "server/db/schema/content.ts:103" # строка сдвинулась на 1 в v2 PR-11/12 (импорт enrollments в схеме media_assets)
     "server/api/v1/access-groups/index.get.ts:7"
-    "server/services/comments.ts:31" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
-    "server/services/comments.ts:91" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
+    # Номера сдвинулись дважды: fix-keyset-cursor (+2, импорт keyset) и PR-30 (+1 импорт
+    # orgManager, −2 на сжатии локального managerOf()). Сами строки не менялись: 29 → 32, 89 → 90.
+    "server/services/comments.ts:32"
+    "server/services/comments.ts:90"
     "server/services/modules.ts:34"
     "server/services/modules.ts:54"
     "server/services/resources.ts:479"
@@ -357,6 +359,57 @@ check8_public_contour() {
   report "8. публичный контур: БД только через сервис, у каждой ручки hitRateLimit" "$combined"
 }
 
+# ── Проверка 9. Руководитель человека — только через resolveManager() ───────────────────────
+# docs/v2/39-patches.md П-16.4, docs/v2/32-org-structure.md §7.8, план PR-30.
+# До PR-30 «руководитель» вычислялся в шестнадцати местах, и каждое делало это по-своему:
+# где-то с `is_primary`, где-то без; где-то с проверкой «не сам себе», где-то без; условие
+# «у человека есть руководитель» то стояло в `where`, то не стояло — и люди без точки молча
+# выпадали из эскалаций. Одно поле `locations.manager_id` вдобавок не описывает подчинение
+# ВНУТРИ точки (шеф-кухар → кухарі) и ломается на совместителях.
+#
+# Проверяется: ни одного чтения `locations.manager_id` / `locations.managerId` вне
+# `server/services/orgManager.ts`. Allowlist — поимённый, каждая строка с причиной
+# (docs/v2/44 В-8: «список осознанных решений, а не исключений»).
+check9_resolve_manager() {
+  local hits
+  hits="$(grep -rnE "locations\.manager_id|locations\.managerId|l\.manager_id|managerId: locations\.managerId" \
+    server app shared --include='*.ts' --include='*.vue' 2>/dev/null \
+    | grep -v 'server/services/orgManager.ts' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|--|#)' || true)"
+  # Allowlist. Три вида законных обращений к полю точки:
+  #
+  # (а) САМО ПОЛЕ как элемент справочника точек — его заводят, правят и показывают
+  #     (`docs/16` §3.3). Понижение поля до резервного источника не означает, что его больше
+  #     нельзя редактировать: `resolveManager()` шаг 2 из него и читает.
+  # (б) «КТО РУКОВОДИТЕЛЬ ЭТОЙ ТОЧКИ» — вопрос о точке, а не о человеке. Чек-лист заполняется
+  #     ПО ТОЧКЕ, недельный дайджест считает цифры ПО ТОЧКЕ, право провести занятие даётся
+  #     держателю точки. Подставлять сюда руководителя человека было бы не «единым источником
+  #     истины», а подменой вопроса.
+  # (в) ЗАПИСЬ поля — импорт людей заполняет `user_placements.manager_id` по внешнему номеру,
+  #     посев платформы ставит администратора руководителем точки. Ни то ни другое не читает
+  #     поле ради ответа «кто руководитель человека X».
+  local allow=(
+    "server/db/schema/org.ts:26"                  # (а) объявление колонки locations.manager_id
+    "server/db/schema/people.ts:112"              # (а) объявление колонки user_placements.manager_id
+    "server/services/refs.ts:32"                  # (а) список редактируемых полей справочника точек
+    "server/services/refs.ts:35"                  # (а) карта camelCase → snake_case того же справочника
+    "server/api/v1/refs/[kind]/[id].patch.ts:15"  # (а) zod-схема правки точки
+    "server/services/orgTree.ts:11"               # (б) карточка точки в публичной оргструктуре: «керівник точки»
+    "server/services/orgTree.ts:21"               # (б) то же, подстановка имени в карточку
+    "server/services/meetupSessions.ts:380"       # (б) право вести занятие — у держателя точки (docs/18 §7)
+    "server/services/checklists.ts:198"           # (б) чек-лист по точке провален → руководителю точки (docs/20 §8)
+    "server/services/checklists.ts:415"           # (б) точка не выполнила норму прогонов → руководителю точки
+    "server/services/checklists.ts:418"           # (б) то же, условие выборки
+    "server/services/checklists.ts:419"           # (б) то же, тип строки
+    "server/services/reportsExtra.ts:283"         # (б) недельный дайджест по точке (docs/22 §8): цифры тоже по точке
+    "server/services/assessment.ts:400"           # (б) «какими точками человек руководит» — вопрос о точках
+    "server/services/importPeople.ts:622"         # (в) запись user_placements.manager_id из файла
+    "server/services/platform.ts:172"             # (в) посев нового тенанта: администратор — руководитель точки
+  )
+  hits="$(filter_allowlist "$hits" "${allow[@]}")"
+  report "9. руководитель человека мимо resolveManager() (docs/v2/39 П-16.4)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -365,5 +418,6 @@ check5_tokens
 check6_review_queue_rebuild
 check7_vacancy_not_rules_carrier
 check8_public_contour
+check9_resolve_manager
 
 exit $overall

@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import {
-  assignments, lessonProgress, locations, meetupSessionRegistrations, meetupSessions, meetups, userPlacements, users,
+  assignments, lessonProgress, locations, meetupSessionRegistrations, meetupSessions, meetups, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -10,6 +10,7 @@ import { enqueueNotification } from './notifications'
 import { completeLesson } from './learning'
 import { frameFirst, frameJoins, frameSelect, frameTail, frameWhere, periodSql } from './reportFrame'
 import type { SessionAttendanceInput, SessionCreateInput } from '../../shared/schemas/meetupSessions'
+import { managerIdsOf } from './orgManager'
 
 /**
  * Сесії очних занять і вебінарів на призначенні (docs/18 §14.1, §15 Г-18.1, Г-18.2; docs/29 Б.3).
@@ -492,8 +493,8 @@ export async function statusScan(tenantId: string): Promise<{ started: number, f
       if (noShow.length) {
         const names = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(inArray(users.id, noShow.map(n => n.userId)))
         const byManager = new Map<string, string[]>()
-        const pl = await tx.select({ userId: userPlacements.userId, managerId: locations.managerId }).from(userPlacements).innerJoin(locations, eq(locations.id, userPlacements.locationId)).where(and(inArray(userPlacements.userId, noShow.map(n => n.userId)), eq(userPlacements.isPrimary, true), sql`${userPlacements.endedAt} is null`))
-        for (const p of pl) if (p.managerId) byManager.set(p.managerId, [...(byManager.get(p.managerId) ?? []), names.find(n => n.id === p.userId)?.fullName ?? '?'])
+        // П-16.4: «не прийшов» уходит руководителю человека, а не руководителю его точки.
+        for (const [uid, mgr] of await managerIdsOf(tx, noShow.map(n => n.userId))) byManager.set(mgr, [...(byManager.get(mgr) ?? []), names.find(n => n.id === uid)?.fullName ?? '?'])
         for (const n of noShow) await enqueueNotification(tx, { tenantId, userId: n.userId, code: 'meetup_missed', payload: { title: m?.title ?? '' }, dedupKey: `ms_missed:${s.id}:${n.userId}` })
         for (const [mgr, list] of byManager) await enqueueNotification(tx, { tenantId, userId: mgr, code: 'meetup_missed_manager', payload: { title: m?.title ?? '', names: list.join(', ') }, dedupKey: `ms_missed_m:${s.id}:${mgr}` })
       }

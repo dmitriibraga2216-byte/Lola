@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { currentRequestContext } from '../utils/requestContext'
 import {
   certificates, courseCategories, courseVersions, courses, enrollmentEvents, enrollments, lessonProgress, lessons,
-  locations, mediaAssets, modules, resources, userPlacements,
+  mediaAssets, modules, resources,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { business } from '../utils/metrics'
@@ -19,6 +19,7 @@ import { enqueueNotification } from './notifications'
 import { accessibleCatalogIds, canAccessCatalogItem } from './catalogAccess'
 import type { assignmentCreateSchema } from '../../shared/schemas/assignments'
 import type { z } from 'zod'
+import { managerIdOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -202,12 +203,12 @@ export async function selfEnroll(ctx: Ctx, courseId: string): Promise<EnrollResu
   })
 }
 
-/** Керівник точки людини — той, кому йде заявка через каталог (docs/10 §14.1), якщо в неї нема автора-власника. */
+/**
+ * Керівник людини — той, кому йде заявка через каталог (docs/10 §14.1), якщо в неї нема
+ * автора-власника. Джерело — `resolveManager()` (П-16.4), а не `locations.manager_id`.
+ */
 async function managerFor(tx: TenantTx, userId: string): Promise<string | null> {
-  const [row] = await tx.select({ managerId: locations.managerId }).from(userPlacements)
-    .innerJoin(locations, eq(locations.id, userPlacements.locationId))
-    .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-  return row?.managerId ?? null
+  return managerIdOf(tx, userId)
 }
 
 export type RequestResult

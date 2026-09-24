@@ -14,6 +14,7 @@ import { buildEmailHtml } from './emailRender'
 import { EMPLOYEES_ONLY } from './repo/people'
 import { formatDate } from '../../shared/domain/dateFormat'
 import { recipientLocale } from '../utils/formatLocale'
+import { managerIdOf, managerIdsOf } from './orgManager'
 
 /**
  * Уведомления (docs/03 §3.10, docs/06 §6.4): ни одна задача не шлёт напрямую —
@@ -118,6 +119,13 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   trajectory_access_closed: 'Траєкторія «{{title}}»: доступ до наступного кроку закрито{{#step}} ({{step}}){{/step}}',
   trajectory_mentor_confirm: 'Траєкторія «{{title}}»: підопічний чекає на ваше підтвердження кроку{{#step}} «{{step}}»{{/step}}',
   trajectory_request: 'Заявка на траєкторію «{{title}}» чекає рішення',
+  // Оргструктура (docs/v2/32 §8, PR-30). Адресат везде — результат `resolveManager()`,
+  // а не `locations.manager_id`: вопрос «кто руководитель» задаётся одному месту (П-16.4).
+  org_node_assigned: 'Вас додано до оргструктури: {{node_title}}. Керівник — {{manager_name}}.',
+  org_manager_changed: 'Ваш керівник змінився: тепер це {{manager_name}}.',
+  org_subordinate_added: 'У вашій команді новий співробітник: {{user_name}} ({{node_title}}).',
+  org_node_vacant: 'Вузол «{{node_title}}» став вакантним.',
+  org_structure_conflict: 'В оргструктурі виявлено {{count}} конфліктів.',
   // docs/16 §8
   user_invited: 'Вас запрошено до Lola. Посилання для входу: {{url}}',
   knowledge_review_due: 'Статтю «{{title}}» час перечитати й підтвердити актуальність',
@@ -442,8 +450,8 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
         else if (res.blocked) {
           // Бот заблокирован (docs/23 §6.5): помечаем, критичное — сразу SMS, руководителю уведомление
           await tx.update(users).set({ telegramBlocked: true }).where(eq(users.id, n.userId))
-          const [mgr] = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${n.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
-          if (mgr?.manager_id) await enqueueNotification(tx, { tenantId, userId: mgr.manager_id, code: 'telegram_blocked_manager', payload: { name: user.fullName }, dedupKey: `tg_blocked:${n.userId}` })
+          const mgr = await managerIdOf(tx, n.userId) // П-16.4
+          if (mgr) await enqueueNotification(tx, { tenantId, userId: mgr, code: 'telegram_blocked_manager', payload: { name: user.fullName }, dedupKey: `tg_blocked:${n.userId}` })
           if (tpl.isMandatory && user.phone) {
             const { sendViaChannel } = await import('./channels')
             const r2 = await sendViaChannel(tenantId, 'sms', { userId: n.userId, text, subject: n.code })
@@ -578,16 +586,20 @@ export async function broadcast(ctx: { tenantId: string, actorId: string }, inpu
 export async function escalationScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
     const rows = await tx.execute(sql`
-      select n.id, n.user_id, n.code, n.rendered_text, u.full_name, l.manager_id
+      select n.id, n.user_id, n.code, n.rendered_text, u.full_name
       from notifications n join notification_templates t on t.tenant_id = n.tenant_id and t.code = n.code and t.channel = 'telegram' and t.escalate_after_hours is not null
       join users u on u.id = n.user_id
-      left join user_placements up on up.user_id = n.user_id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
-      where n.status = 'sent' and n.reacted_at is null and n.escalated_at is null and n.sent_at < now() - (t.escalate_after_hours || ' hours')::interval and l.manager_id is not null and l.manager_id <> n.user_id
+      where n.status = 'sent' and n.reacted_at is null and n.escalated_at is null and n.sent_at < now() - (t.escalate_after_hours || ' hours')::interval
       limit 200
-    `) as unknown as { id: string, user_id: string, code: string, rendered_text: string | null, full_name: string, manager_id: string }[]
+    `) as unknown as { id: string, user_id: string, code: string, rendered_text: string | null, full_name: string }[]
+    // Адресат эскалации — руководитель по `resolveManager()` (П-16.4). Отбор «у кого есть
+    // руководитель» делается после резолва, а не условием на `locations.manager_id` в `where`.
+    const escalationManagers = await managerIdsOf(tx, rows.map(r => r.user_id))
     let n = 0
     for (const r of rows) {
-      if (await enqueueNotification(tx, { tenantId, userId: r.manager_id, code: 'escalation', payload: { name: r.full_name, text: r.rendered_text ?? r.code }, dedupKey: `esc:${r.id}` })) n++
+      const mgr = escalationManagers.get(r.user_id)
+      if (!mgr || mgr === r.user_id) continue
+      if (await enqueueNotification(tx, { tenantId, userId: mgr, code: 'escalation', payload: { name: r.full_name, text: r.rendered_text ?? r.code }, dedupKey: `esc:${r.id}` })) n++
       await tx.update(notifications).set({ escalatedAt: new Date() }).where(eq(notifications.id, r.id))
     }
     return n

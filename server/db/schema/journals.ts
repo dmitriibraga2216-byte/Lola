@@ -31,12 +31,19 @@ export const orgConflicts = pgTable('org_conflicts', {
   ...baseColumns,
   tenantId: tenantId(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
-  kind: text('kind').notNull(), // double_unit | placement_replaced | manager_self | manager_cycle
+  kind: text('kind').notNull(), // ORG_CONFLICT_KINDS — один список из десяти (docs/v2/44 В-7)
+  // Важность конфликта (docs/v2/32 §3.3, решение В-7): перечень взят у существующего
+  // `security_severity`, а не заведён свой парой `error | warning` — один смысл, одно написание.
+  severity: text('severity').notNull().default('warning'), // ORG_CONFLICT_SEVERITIES
+  // Узел дерева, на котором конфликт обнаружен; null — конфликт про человека, а не про узел.
+  nodeId: uuid('node_id'),
   source: text('source').notNull().default('manual'), // manual | import
   importJobId: uuid('import_job_id'),
   details: jsonb('details').notNull().default('{}'),
   actorId: uuid('actor_id'),
   requestContext: jsonb('request_context'),
+  // Состояние конфликта выражено этой парой, а не третьей колонкой `status` (решение В-7):
+  // открыт = `resolved_at is null`.
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   resolvedBy: uuid('resolved_by'),
 }, t => [

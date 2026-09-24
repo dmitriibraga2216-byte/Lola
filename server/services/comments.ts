@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import {
-  comments, courses, locations, notices, programs, quizzes, resources, roles, userPlacements, userRoles, users,
+  comments, courses, notices, programs, quizzes, resources, roles, userRoles, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -9,6 +9,7 @@ import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import type { CommentSourceType } from '../../shared/schemas/catalog'
+import { managerIdOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -46,11 +47,9 @@ async function contentAuthor(tx: TenantTx, sourceType: CommentSourceType, source
   }
 }
 
+/** Руководитель человека — единственный источник истины `resolveManager()` (П-16.4, docs/v2/32 §7.8). */
 async function managerOf(tx: TenantTx, userId: string): Promise<string | null> {
-  const [row] = await tx.select({ managerId: locations.managerId }).from(userPlacements)
-    .innerJoin(locations, eq(locations.id, userPlacements.locationId))
-    .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-  return row?.managerId ?? null
+  return managerIdOf(tx, userId)
 }
 
 /**

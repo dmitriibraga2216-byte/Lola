@@ -1665,10 +1665,55 @@ task_access_log(
 -- Протокол конфліктів в оргструктурі (`16` §7, §14): эталон не падает на конфликте, а пишет строку и продолжает. Spec 22.
 org_conflicts(
   id, tenant_id, user_id,
-  kind text not null,             -- org_conflict_kind: double_unit | placement_replaced | manager_self | manager_cycle | unit_missing (Spec 16, по мокапу)
+  kind text not null,             -- org_conflict_kind, десять значений (см. перечисления; `v2/44` В-7)
+  severity text not null default 'warning',  -- org_conflict_severity (PR-30)
+  node_id uuid,                   -- узел дерева, на котором конфликт найден; null — конфликт про человека (PR-30)
   source text not null default 'manual',  -- manual | import
   import_job_id uuid, details jsonb, actor_id uuid,
   request_context jsonb, resolved_at timestamptz, resolved_by uuid, created_at   -- разрешение: details.resolution {action acknowledge|close_placement, placementId, comment, by, at}
+)
+-- Открытый конфликт — `resolved_at is null`. Колонок `status` и `detected_at` из `v2/32` §3.3
+-- здесь нет намеренно (`v2/44` В-7): `detected_at` — второе имя `created_at`, а третье место
+-- для факта «разобран» неизбежно разойдётся с парой resolved_at / resolved_by.
+
+-- Дерево подчинения (`v2/32` §3, миграция 0074). Кто кому подчиняется — третья сущность,
+-- отдельная от `org_units` («до якого шматка компанії належить») и `positions` («як
+-- називається робота»). Единственный вход для вопроса «хто керівник людини X» —
+-- resolveManager() (server/services/orgManager.ts), патч П-16.4.
+org_nodes(
+  id, tenant_id, parent_id uuid,  -- null = корень, до 10 корней на тенант
+  path ltree not null, depth int not null default 1, sort int not null default 0,  -- depth = nlevel(path), глубина ≤ 12
+  type text not null default 'position',   -- org_node_type
+  title text not null,            -- 2…120, без < >
+  external_key text, note text,   -- ключ импорта (PR-31); заметка, в витрине не видна
+  position_id uuid, org_unit_id uuid, location_id uuid,
+  holder_user_id uuid,            -- кэш держателя именного узла; источник истины — org_node_assignments
+  headcount_planned int not null default 1, is_manager_point boolean not null default false,
+  state text not null default 'vacant',    -- org_node_state
+  created_by uuid, archived_at timestamptz, created_at, updated_at,
+  unique (tenant_id, path), unique (tenant_id, external_key)
+)
+-- Триггер org_nodes_guard: путь ребёнка = путь родителя + метка, depth = nlevel(path),
+-- родитель того же тенанта и **никаких циклов** — предка нельзя подчинить его потомку.
+org_node_assignments(
+  id, tenant_id, node_id, user_id, placement_id uuid,
+  is_primary boolean not null default true,  -- ровно одно активное основное на человека (частичный уникальный индекс)
+  role_in_node text not null default 'holder',   -- org_assignment_role
+  started_at date not null default current_date, ended_at date,
+  ended_reason text,              -- org_assignment_end_reason
+  created_by uuid, created_at, updated_at
+)
+org_manager_map(                  -- проекция resolveManager(); пишет только rebuildManagerMap()
+  tenant_id, user_id, manager_user_id uuid,
+  source text not null default 'none',   -- org_manager_source
+  node_id uuid, chain uuid[] not null default '{}',  -- цепочка снизу вверх, ≤ 12
+  computed_at timestamptz not null default now(),
+  primary key (tenant_id, user_id)
+)
+org_structure_snapshots(          -- снимок дерева; импорт и откат — PR-31
+  id, tenant_id, label text not null,
+  kind text not null default 'manual',   -- org_snapshot_kind
+  tree jsonb not null, node_count int not null default 0, created_by uuid, created_at, updated_at
 )
 -- Протокол змін статусу завдань (docs/33 D-020, D-034; `debts-4`): единая точка «завдання завершено» для всех
 -- 11 типов контента + траектория. Пишет только хук `onTaskCompleted` (server/services/taskCompletion.ts) из
@@ -1875,8 +1920,35 @@ attempt_request_status: pending | approved | rejected
 -- Область действия метки (`16` §14.2; `30`): обязательна
 tag_scope: user | course | resource | question | task
 
--- Вид конфликта оргструктуры (`16` §7, §14; Spec 22; unit_missing — по мокапу OrgConflicts, Spec 16)
+-- Вид конфликта оргструктуры (`16` §7, §14; Spec 22; unit_missing — по мокапу OrgConflicts, Spec 16).
+-- Пять последних добавил PR-30 вместе с деревом `org_nodes` (`v2/32` §3.3, решение `v2/44` В-7).
+-- Три имени пакета в перечень не вошли: `self_manager`, `multi_primary` и `orphan_user` —
+-- переименования manager_self, double_unit и unit_missing, а не новые виды конфликта.
 org_conflict_kind: double_unit | placement_replaced | manager_self | manager_cycle | unit_missing
+                 | no_manager | manager_mismatch | depth_exceeded | dismissed_holder | position_mismatch
+
+-- Важность конфликта оргструктуры (`v2/32` §3.3, `v2/44` В-7): взят существующий
+-- security_severity, а не своя пара error | warning — один смысл, одно написание
+org_conflict_severity: info | warning | critical
+
+-- Вид узла дерева подчинения (`v2/32` §3.2): штатная точка со счётчиком «N з M» либо именная
+org_node_type: position | employee
+
+-- Состояние узла (`v2/32` §4): физического удаления нет, красная корзина эталона — архивация
+org_node_state: vacant | occupied | archived
+
+-- Роль человека в узле (`v2/32` §3.3): тримач посади | виконувач обов'язків | заступник
+org_assignment_role: holder | acting | deputy
+
+-- Почему назначение на узел закрыто (`v2/32` §3.3); обратного перехода нет
+org_assignment_end_reason: moved | dismissed | node_archived | manual
+
+-- Откуда взят руководитель — результат resolveManager() (`v2/32` §7.8, патч П-16.4).
+-- Строгий приоритет: дерево → точка → роль в области → никого
+org_manager_source: org_tree | location | functional | role_scope | none
+
+-- Вид снимка дерева (`v2/32` §3.3); откат по снимку — PR-31
+org_snapshot_kind: manual | auto_daily | pre_import | pre_bulk_move
 
 -- Коды событий журнала безопасности (`16` §15 Г-16.2); Spec 16
 security_event: login.success | login.failed | login.blocked | otp.sent | otp.failed | session.revoked

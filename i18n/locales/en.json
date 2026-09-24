@@ -145,7 +145,8 @@
       "recruitingSettings": "Recruiting",
       "vacancies": "Vacancies",
       "billing": "Plan and limits",
-      "billingHistory": "Payment history"
+      "billingHistory": "Payment history",
+      "orgStructure": "Reporting tree"
     },
     "section": {
       "learning": "Learning",
@@ -168,7 +169,9 @@
       "moduleReports": "Module reports",
       "notifications": "Notifications & integrations",
       "platform": "Platform",
-      "billing": "Plan and billing"
+      "billing": "Plan and billing",
+      "peopleList": "People",
+      "peopleStructure": "Structure"
     },
     "menu": {
       "learner": "My cabinet",
@@ -611,7 +614,12 @@
       "placement_replaced": "Import replaced a manual placement",
       "manager_self": "Manager reports to themselves",
       "manager_cycle": "Manager cycle",
-      "unit_missing": "Imported unit is missing from the dictionary"
+      "unit_missing": "Imported unit is missing from the dictionary",
+      "no_manager": "Person has no manager",
+      "manager_mismatch": "Tree and location give different managers",
+      "depth_exceeded": "Structure depth exceeded",
+      "dismissed_holder": "Node holder is dismissed",
+      "position_mismatch": "Node position differs from placement"
     },
     "conflictSource": {
       "manual": "Manual",
@@ -649,7 +657,12 @@
       "attempt_recalculate_review": "Recalculated: attempt {n} of {of} under review"
     },
     "month": "Month",
-    "system": "System"
+    "system": "System",
+    "conflictSeverity": {
+      "info": "Info",
+      "warning": "Warning",
+      "critical": "Critical"
+    }
   },
   "learner": {
     "nav": {
@@ -5230,5 +5243,79 @@
     "confirm": "Confirm",
     "acceptedTitle": "Thank you! Your application is accepted",
     "acceptedHint": "We will send you a link to the selection process"
+  },
+  "orgStructure": {
+    "title": "Org structure",
+    "tabAdmin": "Admin — builder",
+    "tabView": "Employee — view",
+    "addRoot": "Add root node",
+    "addChild": "Add child node",
+    "edit": "Edit",
+    "archive": "Archive",
+    "restore": "Restore",
+    "assign": "Assign employee",
+    "unassign": "Remove from node",
+    "snapshot": "Snapshot",
+    "snapshotLabel": "Snapshot name",
+    "snapshotDone": "Snapshot created",
+    "empty": "The structure has not been created yet",
+    "emptyView": "The company structure has not been published yet",
+    "loadError": "Could not load the structure",
+    "retry": "Try again",
+    "vacancy": "Vacancy",
+    "counter": "{n} of {m}",
+    "myNode": "This is you",
+    "notMyBranch": "You can only change your own branch",
+    "manager": "Manager",
+    "managerSource": "Manager source",
+    "noManager": "No manager determined",
+    "showVacant": "Show vacancies",
+    "kind": "Node type",
+    "kindPosition": "Position",
+    "kindEmployee": "Employee",
+    "position": "Position",
+    "nodeTitle": "Node name",
+    "employee": "Employee",
+    "headcount": "Planned headcount",
+    "managerPoint": "Manager point",
+    "managerPointHint": "This decides who receives notifications",
+    "unit": "Department",
+    "location": "Branch",
+    "parent": "Parent node",
+    "note": "Note",
+    "noteHint": "Not shown in the public view",
+    "save": "Save",
+    "cancel": "Cancel",
+    "makeNamed": "Make this a named node?",
+    "yes": "Yes",
+    "no": "No",
+    "primaryExists": "This person already has a primary reporting line. Move it here?",
+    "transfer": "Move",
+    "asSecondary": "Add as secondary",
+    "role": "Role in node",
+    "roleHolder": "Position holder",
+    "roleActing": "Acting",
+    "roleDeputy": "Deputy",
+    "source": {
+      "org_tree": "Tree",
+      "location": "Branch",
+      "functional": "Functional",
+      "role_scope": "Role scope",
+      "none": "None"
+    },
+    "err": {
+      "depth_exceeded": "Maximum structure depth is 12 levels",
+      "cycle_detected": "A node cannot report to its own descendant",
+      "has_children": "Move or archive the child nodes first",
+      "has_holders": "Remove the employees from the node first",
+      "parent_archived": "The parent node is archived",
+      "node_archived": "The node is archived",
+      "too_many_roots": "There cannot be more than ten roots",
+      "user_archived": "The employee is archived",
+      "validation_failed": "Check the form fields",
+      "not_found": "Node not found",
+      "forbidden": "You can only change your own branch",
+      "stale_tree": "Another user changed the structure, reload the page"
+    }
   }
 }

@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import {
-  assessmentAnswers, assessmentCycles, assessmentForms, assessmentItems, assessmentTasks, competencies, competencyAssessments, criteria, criteriaGroups,
-  functionalChiefs, locations, positionProfiles, scaleLevels, scales, userPlacements, users,
+  assessmentAnswers, assessmentCycles, assessmentForms, assessmentItems, assessmentTasks, competencies,
+  competencyAssessments, criteria, criteriaGroups, functionalChiefs, positionProfiles, scaleLevels, scales,
+  userPlacements, users,
 } from '../db/schema'
 import type { Requirement } from './development'
 import { RATER_KINDS, RATER_ROLE_DEFAULTS as RATER_ROLE_DEFAULTS_BY_KIND } from '../../shared/enums'
@@ -13,6 +14,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { resolveAudience } from './audience'
 import { enqueueNotification } from './notifications'
+import { managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -336,12 +338,18 @@ export async function createCycle(ctx: Ctx, input: {
 
 interface Placement { userId: string, locationId: string, positionId: string, managerId: string | null }
 
+/**
+ * Размещение оцениваемых плюс их руководитель. Руководитель — из `resolveManager()`
+ * (П-16.4): оценщик роли `manager` обязан быть тем же человеком, которому уходят
+ * уведомления о подопечном, иначе оценка «від керівника» придёт не от руководителя.
+ */
 async function placementsOf(tx: TenantTx, userIds: string[]): Promise<Map<string, Placement>> {
   if (!userIds.length) return new Map()
-  const rows = await tx.select({ userId: userPlacements.userId, locationId: userPlacements.locationId, positionId: userPlacements.positionId, managerId: locations.managerId })
-    .from(userPlacements).innerJoin(locations, eq(locations.id, userPlacements.locationId))
+  const rows = await tx.select({ userId: userPlacements.userId, locationId: userPlacements.locationId, positionId: userPlacements.positionId })
+    .from(userPlacements)
     .where(and(inArray(userPlacements.userId, userIds), eq(userPlacements.isPrimary, true), sql`${userPlacements.endedAt} is null`))
-  return new Map(rows.map(r => [r.userId, r]))
+  const managers = await managerIdsOf(tx, rows.map(r => r.userId))
+  return new Map(rows.map(r => [r.userId, { ...r, managerId: managers.get(r.userId) ?? null }]))
 }
 
 /**
@@ -382,6 +390,8 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
       .from(userPlacements).innerJoin(users, eq(users.id, userPlacements.userId))
       .where(and(eq(userPlacements.isPrimary, true), sql`${userPlacements.endedAt} is null`, eq(users.status, 'active')))
     const mentorIds = new Set((await tx.execute(sql`select ur.user_id from user_roles ur join roles r on r.id = ur.role_id where r.code = 'mentor'`) as unknown as { user_id: string }[]).map(r => r.user_id))
+    // Карта «человек → его руководитель» по всем активным: нужна для оценщиков-подчинённых.
+    const subordinateOf = await managerIdsOf(tx, everyone.map(e => e.userId))
 
     for (const s of subjects) {
       const p = pl.get(s)
@@ -397,9 +407,10 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
         for (const e of pool.slice(0, c.peersCount ?? 2)) add(s, e.userId, 'peer')
       }
       if (kinds.includes('subordinate')) {
-        const managed = await tx.select({ id: locations.id }).from(locations).where(eq(locations.managerId, s))
-        const locIds = new Set(managed.map(l => l.id))
-        for (const e of everyone.filter(e => locIds.has(e.locationId) && e.userId !== s).slice(0, 5)) add(s, e.userId, 'subordinate')
+        // Подчинённые — обратная сторона того же вопроса (П-16.4): не «люди точки, где он
+        // руководитель», а «люди, для которых `resolveManager()` вернул его». Разница видна
+        // там, где внутри одной точки есть своя иерархия (шеф-кухар → кухарі).
+        for (const e of everyone.filter(e => e.userId !== s && subordinateOf.get(e.userId) === s).slice(0, 5)) add(s, e.userId, 'subordinate')
       }
       if (kinds.includes('external') && p) {
         for (const e of everyone.filter(e => e.locationId === p.locationId && mentorIds.has(e.userId) && e.userId !== s)) add(s, e.userId, 'external')

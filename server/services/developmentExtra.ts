@@ -13,6 +13,7 @@ import { scopeSql } from './access'
 import { EMPLOYEES_ONLY } from './repo/people'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { DisplayAs } from '../../shared/enums'
+import { managerIdOf, managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -340,8 +341,11 @@ export async function confirmAssignmentCompetencies(tx: TenantTx, tenantId: stri
 
 export async function gapDetectedOnPlacement(tenantId: string, userId: string) {
   return withTenant(tenantId, null, async (tx) => {
-    const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, manager_id: string | null, full_name: string }[]
-    if (!pl?.manager_id) return 0
+    const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, u.full_name from user_placements up join users u on u.id = up.user_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, full_name: string }[]
+    // Руководитель — из `resolveManager()` (П-16.4), а не колонкой в этом же запросе.
+    if (!pl) return 0
+    const managerId = await managerIdOf(tx, userId)
+    if (!managerId) return 0
     const profile = await profileForPosition(tx, pl.position_id)
     if (!profile) return 0
     const levels = await currentLevels(tx, userId)
@@ -349,7 +353,7 @@ export async function gapDetectedOnPlacement(tenantId: string, userId: string) {
     const critical = reqs.filter(r => r.isCritical && (levels.get(r.competencyId)?.level ?? 0) < r.requiredLevel)
     if (!critical.length) return 0
     const names = await tx.select({ name: competencies.name }).from(competencies).where(sql`${competencies.id} in ${critical.map(c => c.competencyId)}`)
-    await enqueueNotification(tx, { tenantId, userId: pl.manager_id, code: 'competency_gap_detected', payload: { name: pl.full_name, competencies: names.map(n => n.name).join(', ') }, dedupKey: `gap:${userId}:${pl.position_id}` })
+    await enqueueNotification(tx, { tenantId, userId: managerId, code: 'competency_gap_detected', payload: { name: pl.full_name, competencies: names.map(n => n.name).join(', ') }, dedupKey: `gap:${userId}:${pl.position_id}` })
     return critical.length
   })
 }
@@ -380,15 +384,17 @@ export async function competencyExpiryScan(tenantId: string): Promise<{ warned: 
     for (const e of expired) {
       if (await enqueueNotification(tx, { tenantId, userId: e.user_id, code: 'competency_expired', payload: { name: e.name }, dedupKey: `comp_exp:${e.user_id}:${e.competency_id}:${day}` })) out.expired++
       // Истечение могло открыть критический разрыв по профилю должности — та же логика, что при смене должности (docs/19 §12).
-      const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, l.manager_id, u.full_name from user_placements up join locations l on l.id = up.location_id join users u on u.id = up.user_id where up.user_id = ${e.user_id}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, manager_id: string | null, full_name: string }[]
-      if (!pl?.manager_id) continue
+      const [pl] = await tx.execute(sql`select up.position_id, up.position_level_id, u.full_name from user_placements up join users u on u.id = up.user_id where up.user_id = ${e.user_id}::uuid and up.is_primary and up.ended_at is null`) as unknown as { position_id: string, position_level_id: string | null, full_name: string }[]
+      if (!pl) continue
+      const managerId = await managerIdOf(tx, e.user_id)
+      if (!managerId) continue
       const profile = await profileForPosition(tx, pl.position_id)
       if (!profile) continue
       const req = effectiveRequirements(profile.competencyRequirements as Requirement[], profile.usePositionLevels, pl.position_level_id).find(r => r.competencyId === e.competency_id)
       if (!req?.isCritical) continue
       const levels = await currentLevels(tx, e.user_id)
       if ((levels.get(e.competency_id)?.level ?? 0) < req.requiredLevel) {
-        await enqueueNotification(tx, { tenantId, userId: pl.manager_id, code: 'competency_gap_detected', payload: { name: pl.full_name, competencies: e.name }, dedupKey: `gap_exp:${e.user_id}:${e.competency_id}:${day}` })
+        await enqueueNotification(tx, { tenantId, userId: managerId, code: 'competency_gap_detected', payload: { name: pl.full_name, competencies: e.name }, dedupKey: `gap_exp:${e.user_id}:${e.competency_id}:${day}` })
       }
     }
     return out
@@ -434,17 +440,18 @@ export async function planPeriodScan(tenantId: string): Promise<{ ending: number
 export async function requestReportScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
     const rows = await tx.execute(sql`
-      select r.id, r.user_id, r.title, l.manager_id
+      select r.id, r.user_id, r.title
       from external_training_requests r
-      left join user_placements up on up.user_id = r.user_id and up.is_primary and up.ended_at is null
-      left join locations l on l.id = up.location_id
       where r.status = 'approved' and r.report is null and coalesce(r.starts_at, r.decided_at::date) < current_date - 14
-    `) as unknown as { id: string, user_id: string, title: string, manager_id: string | null }[]
+    `) as unknown as { id: string, user_id: string, title: string }[]
+    // Руководители всех адресатов одним резолвом (П-16.4).
+    const managers = await managerIdsOf(tx, rows.map(r => r.user_id))
     let n = 0
     const week = new Date().toISOString().slice(0, 7) + ':' + Math.floor(new Date().getDate() / 7)
     for (const r of rows) {
       if (await enqueueNotification(tx, { tenantId, userId: r.user_id, code: 'request_report_required', payload: { title: r.title }, dedupKey: `req_report:${r.id}:${week}` })) n++
-      if (r.manager_id) await enqueueNotification(tx, { tenantId, userId: r.manager_id, code: 'request_report_required_manager', payload: { title: r.title }, dedupKey: `req_report_m:${r.id}:${week}` })
+      const managerId = managers.get(r.user_id)
+      if (managerId) await enqueueNotification(tx, { tenantId, userId: managerId, code: 'request_report_required_manager', payload: { title: r.title }, dedupKey: `req_report_m:${r.id}:${week}` })
     }
     return n
   })

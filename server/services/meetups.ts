@@ -1,12 +1,15 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import { lessonProgress, locations, meetupRegistrations, meetupSessions, meetups, userPlacements, users, webinarParticipations, webinars } from '../db/schema'
+import {
+  lessonProgress, locations, meetupRegistrations, meetupSessions, meetups, users, webinarParticipations, webinars,
+} from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { completeLesson } from './learning'
+import { managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -137,11 +140,8 @@ export async function cancelMeetup(ctx: Ctx, id: string, input: { reason: string
     if (input.notify !== false) {
       const [alt] = input.alternativeId ? await tx.select({ title: meetups.title, startsAt: meetups.startsAt }).from(meetups).where(eq(meetups.id, input.alternativeId)) : []
       const managers = new Set<string>()
-      if (regs.length) {
-        const pl = await tx.select({ managerId: locations.managerId }).from(userPlacements).innerJoin(locations, eq(locations.id, userPlacements.locationId))
-          .where(and(inArray(userPlacements.userId, regs.map(r => r.userId)), eq(userPlacements.isPrimary, true), sql`${userPlacements.endedAt} is null`))
-        for (const p of pl) if (p.managerId) managers.add(p.managerId)
-      }
+      // П-16.4: руководители записавшихся — одним резолвом, а не через `locations.manager_id`.
+      if (regs.length) for (const mgr of (await managerIdsOf(tx, regs.map(r => r.userId))).values()) managers.add(mgr)
       const payload = { title: m.title, reason: input.reason, alternative: alt ? `${alt.title} (${alt.startsAt.toISOString()})` : '' }
       for (const u of new Set([...regs.map(r => r.userId), ...managers])) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: u, code: 'meetup_cancelled', payload, dedupKey: `mt_cancel:${id}:${u}` })
     }
@@ -414,8 +414,8 @@ export async function statusScan(tenantId: string): Promise<{ started: number, f
       if (noShow.length) {
         const names = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(inArray(users.id, noShow.map(n => n.userId)))
         const byManager = new Map<string, string[]>()
-        const pl = await tx.select({ userId: userPlacements.userId, managerId: locations.managerId }).from(userPlacements).innerJoin(locations, eq(locations.id, userPlacements.locationId)).where(and(inArray(userPlacements.userId, noShow.map(n => n.userId)), eq(userPlacements.isPrimary, true), sql`${userPlacements.endedAt} is null`))
-        for (const p of pl) if (p.managerId) byManager.set(p.managerId, [...(byManager.get(p.managerId) ?? []), names.find(n => n.id === p.userId)?.fullName ?? '?'])
+        // П-16.4: «не прийшов» уходит руководителю человека, а не руководителю его точки.
+        for (const [uid, mgr] of await managerIdsOf(tx, noShow.map(n => n.userId))) byManager.set(mgr, [...(byManager.get(mgr) ?? []), names.find(n => n.id === uid)?.fullName ?? '?'])
         for (const n of noShow) await enqueueNotification(tx, { tenantId, userId: n.userId, code: 'meetup_missed', payload: { title: m.title }, dedupKey: `mt_missed:${m.id}:${n.userId}` })
         for (const [mgr, list] of byManager) await enqueueNotification(tx, { tenantId, userId: mgr, code: 'meetup_missed_manager', payload: { title: m.title, names: list.join(', ') }, dedupKey: `mt_missed_m:${m.id}:${mgr}` })
       }

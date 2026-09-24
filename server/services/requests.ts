@@ -5,6 +5,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { developmentSettings } from './developmentExtra'
+import { managerIdOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -15,9 +16,9 @@ interface Ctx { tenantId: string, actorId: string }
 
 const EXT_FLOW = ['new', 'manager_approved', 'hr_approved', 'approved'] as const
 
+/** Руководитель человека — единственный источник истины `resolveManager()` (П-16.4, docs/v2/32 §7.8). */
 async function managerOf(tx: TenantTx, userId: string) {
-  const r = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
-  return r[0]?.manager_id ?? null
+  return managerIdOf(tx, userId)
 }
 
 // Мокап ExternalRequests: під імʼям людини — «Посада · Точка» з основного розміщення (docs/16, user_placements).

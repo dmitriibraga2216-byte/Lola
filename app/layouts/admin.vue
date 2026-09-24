@@ -59,21 +59,28 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/assessment/criteria', label: t('admin.nav.assessCriteria'), show: hasScope('assessment.manage') },
     { to: '/admin/resources/categories', label: t('admin.nav.resourceCategories'), show: hasScope('course.edit') },
   ] },
+  // PR-30: раздел дорос до одиннадцати пунктов и перестал помещаться одной пачкой
+  // (лимит 10, `tests/unit/admin-nav.spec.ts`). Разделён подзаголовками по смыслу:
+  // «Люди» — сами карточки и наборы людей, «Структура» — где эти люди стоят.
   { key: 'people', label: t('admin.section.people'), icon: 'people', items: [
-    { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view') },
+    { to: '/admin/people', label: t('admin.nav.people'), show: hasScope('people.view'), group: t('admin.group.peopleList') },
     // Воронка кандидатов (docs/v2/28 §5.1, §5.2) — только при включённом рекрутинге:
     // флаг тенанта, а не модуль настроек, поэтому проверка своя (`recruitingOn`).
-    { to: '/admin/candidates', label: t('admin.nav.candidates'), show: recruitingOn() && hasScope('candidate.view') },
+    { to: '/admin/candidates', label: t('admin.nav.candidates'), show: recruitingOn() && hasScope('candidate.view'), group: t('admin.group.peopleList') },
     // Реестр вакансий (docs/v2/29 §5.1) — тот же флаг рекрутинга, что и у воронки:
     // без кандидатов вакансия некуда ведёт.
-    { to: '/admin/vacancies', label: t('admin.nav.vacancies'), show: recruitingOn() && hasScope('vacancy.view') },
-    { to: '/admin/people/groups', label: t('admin.nav.groups'), show: hasScope('people.view') },
-    { to: '/admin/org', label: t('admin.nav.org'), show: hasScope('people.view') },
-    { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view') },
-    { to: '/admin/tags', label: t('admin.nav.tags'), show: hasScope('people.view') },
-    { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import') },
-    { to: '/admin/org-conflicts', label: t('admin.nav.orgConflicts'), show: hasScope('people.edit') },
-    { to: '/admin/offboarding', label: t('admin.nav.offboarding'), show: hasScope('offboarding.start') },
+    { to: '/admin/vacancies', label: t('admin.nav.vacancies'), show: recruitingOn() && hasScope('vacancy.view'), group: t('admin.group.peopleList') },
+    { to: '/admin/people/groups', label: t('admin.nav.groups'), show: hasScope('people.view'), group: t('admin.group.peopleList') },
+    { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import'), group: t('admin.group.peopleList') },
+    { to: '/admin/offboarding', label: t('admin.nav.offboarding'), show: hasScope('offboarding.start'), group: t('admin.group.peopleList') },
+    { to: '/admin/org', label: t('admin.nav.org'), show: hasScope('people.view'), group: t('admin.group.peopleStructure') },
+    // PR-30 (docs/v2/32): дерево подчинения — отдельная сущность от справочника точек
+    // выше: `/admin/org` отвечает «до якого шматка компанії належить», `/org-structure` —
+    // «хто кому підпорядкований». Экран общий с витриной, поэтому путь без префикса.
+    { to: '/org-structure', label: t('admin.nav.orgStructure'), show: hasScope('org.structure.edit'), group: t('admin.group.peopleStructure') },
+    { to: '/admin/org-conflicts', label: t('admin.nav.orgConflicts'), show: hasScope('people.edit'), group: t('admin.group.peopleStructure') },
+    { to: '/admin/refs', label: t('admin.nav.refs'), show: hasScope('people.view'), group: t('admin.group.peopleStructure') },
+    { to: '/admin/tags', label: t('admin.nav.tags'), show: hasScope('people.view'), group: t('admin.group.peopleStructure') },
   ] },
   // Розвиток — окремо від довідника людей: цілі, компетенції, плани (раніше тонули в «Людях»).
   { key: 'development', label: t('admin.section.development'), icon: 'growth', items: [

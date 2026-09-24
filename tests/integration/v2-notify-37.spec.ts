@@ -13,10 +13,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  *   не зависят от тумблера тенанта и берут таймзону точки вакансии, на которую откликнулся.
  *
  * `candidate.hired` и `offboarding.completed` шлются из реальных `hireCandidate()` /
- * `completeOffboarding()` — оба уже существуют в `main` (PR-14, PR-07). `vacancy.application_received`
- * зарегистрирован (`WEBHOOK_EVENTS`, шаблон уведомления `vacancy_application_received` уже
- * завёл PR-16), но приёма отклика в `main` ещё нет (PR-16 не смержен) — контракт payload
- * проверен прямым вызовом `emitWebhook()`, реальную точку вызова подключит PR-16.
+ * `completeOffboarding()` — оба уже существуют в `main` (PR-14, PR-07). PR-16 (публичный
+ * приём отклика) смержен в main **во время работы над этим PR** (#109, после `0e174c6`) —
+ * рабочая ветка перебазирована на него, и `vacancy.application_received` подключён здесь же
+ * к `convertApplication()` в `server/services/publicApply.ts`, реальным приёмом отклика
+ * (`submitApplication()` без OTP — тот же путь, что критерий `29` §13 к. 7).
  */
 
 process.env.ENCRYPTION_KEY ??= 'test-encryption-key'
@@ -24,12 +25,14 @@ process.env.ENCRYPTION_KEY ??= 'test-encryption-key'
 const { createCandidate, viewerOf } = await import('../../server/services/candidates')
 const { hireCandidate } = await import('../../server/services/candidateHire')
 const { hire: hireEmployee, startOffboarding, completeOffboarding } = await import('../../server/services/offboarding')
-const { createEndpoint, emitWebhook, WEBHOOK_EVENTS } = await import('../../server/services/webhooks')
+const { createEndpoint, WEBHOOK_EVENTS } = await import('../../server/services/webhooks')
 const {
   enqueueNotification, scheduleWithQuietHours, CANDIDATE_QUIET_HOURS, DEFAULT_TEMPLATES, renderTemplate,
 } = await import('../../server/services/notifications')
 const { updateQuietHours, readSettings } = await import('../../server/services/settings')
 const { withTenant } = await import('../../server/utils/withTenant')
+const { createVacancy, publishVacancy } = await import('../../server/services/vacancies')
+const { submitApplication, signNonce } = await import('../../server/services/publicApply')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 2, onnotice: () => {} })
 
@@ -192,21 +195,63 @@ describe('вебхук offboarding.completed: реальное завершен�
   })
 })
 
-describe('вебхук vacancy.application_received: контракт payload (реального вызова в main пока нет — PR-16)', () => {
+describe('вебхук vacancy.application_received: реальный отклик по публичной ссылке (PR-16, смержен как #109)', () => {
   let endpointId: string
+  let vacancyId: string
+  let vacancyToken: string
+  const APPLICANT_NAME = `${MARK} Відгук Вебхук`
+  const APPLICANT_PHONE = `${PREFIX}0004`
 
   beforeAll(async () => {
     const ep = await createEndpoint(ctx, { url: 'https://example.test/lola-webhook-3', events: ['vacancy.application_received'], description: `${MARK} test` })
     if (!ep.ok) throw new Error(`endpoint не создан: ${JSON.stringify(ep)}`)
     endpointId = ep.id
     seededEndpoints.push(endpointId)
+
+    const [course] = await admin`select id from courses where tenant_id = ${tenantId} and status = 'published' order by title limit 1`
+    const created = await createVacancy(ctx, {
+      title: `${MARK} Вакансія Вебхук`,
+      courseId: course!.id as string,
+      locationId,
+      recruiterId: adminId,
+      salaryCurrency: 'UAH',
+      salaryVisible: false,
+      publicApplyOtp: false, // без OTP — тот же путь, что критерий `29` §13 к. 7, отклик становится кандидатом сразу
+      applyDailyCap: 200,
+      assignmentTemplate: { dueMode: 'relative', dueDays: 7, isMandatory: true, params: {}, reminders: {}, notifyOnAssign: true },
+    } as Parameters<typeof createVacancy>[1])
+    vacancyId = created.id
+    seededVacancies.push(vacancyId)
+    const hrVacancy = viewerOf({ userId: adminId, tenantId, grants: [{ scopes: ['vacancy.view', 'vacancy.edit', 'vacancy.publish'], scopeType: 'tenant', scopeId: null }] })
+    const published = await publishVacancy(hrVacancy, vacancyId)
+    if (!published.ok) throw new Error(`вакансия не опубликовалась: ${JSON.stringify(published)}`)
+    const [row] = await admin`select public_token from vacancies where id = ${vacancyId}`
+    vacancyToken = row!.public_token as string
   })
 
-  it('payload — только {vacancyId, applicationId, receivedAt}, приём проверен через withTenant()', async () => {
-    const vacancyId = '00000000-0000-4000-8000-000000000001'
-    const applicationId = '00000000-0000-4000-8000-000000000002'
-    const receivedAt = new Date().toISOString()
-    await withTenant(tenantId, adminId, tx => emitWebhook(tx, tenantId, 'vacancy.application_received', { vacancyId, applicationId, receivedAt }))
+  // Локально, а не в общем afterAll: assignFromVacancy() создаёт свою assignments+enrollment
+  // на кандидата (§7.20), и они обязаны уйти раньше пользователя — FK не каскадный, как и
+  // в tests/integration/v2-offboarding.spec.ts#cleanupPerson.
+  afterAll(async () => {
+    const rows = await admin`select id from assignments where title = ${`${MARK} Вакансія Вебхук`}`
+    for (const a of rows) {
+      await admin`delete from enrollment_events where enrollment_id in (select id from enrollments where assignment_id = ${a.id})`
+      await admin`delete from enrollments where assignment_id = ${a.id}`
+      await admin`delete from audit_log where entity = 'assignment' and entity_id = ${a.id}`
+      await admin`delete from assignments where id = ${a.id}`
+    }
+  })
+
+  it('приём отклика (submitApplication, без OTP) шлёт payload — только {vacancyId, applicationId, receivedAt}', async () => {
+    const submitted = await submitApplication(vacancyToken, {
+      fullName: APPLICANT_NAME,
+      phone: APPLICANT_PHONE,
+      consent: true,
+      formNonce: signNonce(vacancyId, Date.now() - 10_000),
+    } as Parameters<typeof submitApplication>[1], { ip: '203.0.113.55' })
+    expect(submitted.ok, `отклик не принят: ${JSON.stringify(submitted)}`).toBe(true)
+    if (!submitted.ok) return
+    seededUsers.push((await admin`select candidate_id from vacancy_applications where id = ${submitted.applicationId}`)[0]!.candidate_id as string)
 
     const [delivery] = await admin`
       select payload from webhook_deliveries
@@ -216,7 +261,8 @@ describe('вебхук vacancy.application_received: контракт payload (�
     const payload = delivery!.payload as { event: string, data: Record<string, unknown> }
     expect(Object.keys(payload.data).sort()).toEqual(['applicationId', 'receivedAt', 'vacancyId'])
     expect(payload.data.vacancyId).toBe(vacancyId)
-    expect(payload.data.applicationId).toBe(applicationId)
+    expect(payload.data.applicationId).toBe(submitted.applicationId)
+    assertNoPii(JSON.stringify(payload), [APPLICANT_NAME, MARK, APPLICANT_PHONE])
   })
 })
 

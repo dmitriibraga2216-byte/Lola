@@ -151,10 +151,20 @@
 
 ## 2026-09-24 · Фаза 3, PR-37 — коды уведомлений и вебхуки (П-23, В-18)
 
-**Ветка:** `v2-notify-37` от `origin/main` (`0e174c6`, после i18n-форматирования дат).
+**Ветка:** `v2-notify-37`, начата от `origin/main` (`0e174c6`). **Сессия прерывалась** после
+основной реализации (17 файлов, промежуточный WIP-коммит) — восстановлена по тому же
+worktree, `git status`/`git diff --stat` подтвердили целостность, продолжено без потерь.
+За время работы в `main` влился PR-16 (`v2-vacancy-16`, #109, публичный приём отклика) —
+ветка перебазирована на него **после** WIP-коммита: конфликт в `scripts/v2-crosschecks.sh`
+(PR-16 тоже добавил свою «Проверку 8» — публичный контур; моя стала «Проверкой 9»), в
+`server/services/notifications.ts` (оба PR вставляли новые коды в одно место после
+`candidate_stale` — коды PR-16 и мои строки просто идут подряд) и в `docs/v2/46-progress.md`
+(обе записи внизу файла). После ребейза `vacancy.application_received` подключён к реальному
+коду PR-16 (`convertApplication()`), а не оставлен контрактом на будущее — см. п. 3.
 **Результат:** 22 недостающих кода уведомлений зарегистрированы в `DEFAULT_TEMPLATES`, три новых
-события вебхуков добавлены в `WEBHOOK_EVENTS` (итого 10) с PII-free payload, тихие часы
-кандидата реализованы в `enqueueNotification()`. **Миграции нет** — см. решение ниже.
+события вебхуков добавлены в `WEBHOOK_EVENTS` (итого 10) с PII-free payload на реальных
+данных, тихие часы кандидата реализованы в `enqueueNotification()`. **Миграции нет** — см.
+решение ниже.
 
 ### Что сделано
 
@@ -187,11 +197,13 @@
      сразу после `recordAudit`), `{userId, vacancyId, hiredAt}`;
    - `offboarding.completed` — вызов добавлен в `offboarding.ts#completeOffboarding()`,
      `{userId, caseId, completedAt}`;
-   - `vacancy.application_received` — событие зарегистрировано и покрыто тестом контракта
-     payload (`{vacancyId, applicationId, receivedAt}` через прямой `emitWebhook()`), но
-     реального вызова из приёма отклика нет: этого кода в `main` физически не существует —
-     `server/services/publicApply.ts` целиком приезжает с PR-16 (открыт, не слит). Подключить
-     вызов — задача PR-16 при его следующем ребейзе, шаблон и контракт уже на месте.
+   - `vacancy.application_received` — вызов добавлен в `publicApply.ts#convertApplication()`
+     в обеих ветках конверсии (`accepted` и `merged`), рядом с существующим
+     `notifyRecruiter()`; `{vacancyId, applicationId, receivedAt}`, где `receivedAt` —
+     `vacancy_applications.created_at` (момент подачи формы, не момент конверсии — она может
+     быть отложена модерацией §7.7). На момент постановки задачи PR-16 был открыт и это
+     событие планировалось контрактом на будущее; за время работы PR-16 слился (#109), и
+     вызов подключён к реальному коду тем же PR-37 после ребейза.
 4. **`docs/04-api.md` §4.18 и `docs/09-integrations.md` §9.5** приведены к фактическому составу
    кода: убран несуществующий `certificate.revoked`, `task.overdue` → `assignment.overdue`,
    добавлен `notice.acknowledged` (его не было в `09`), дописаны три новых события и таблица
@@ -207,9 +219,10 @@
    `users.vacancy_id → vacancies.location_id → locations.timezone`, цепочка существующих FK,
    без новой колонки и без миграции. Без вакансии (кандидат заведён вручную) — таймзона
    тенанта, тот же порядок отказа, что у сотрудника.
-6. **Сквозная проверка 19** (`42` §5) добавлена в `scripts/v2-crosschecks.sh` как `check8` —
+6. **Сквозная проверка 19** (`42` §5) добавлена в `scripts/v2-crosschecks.sh` как `check9`
+   (после ребейза на PR-16 — у него уже была своя «Проверка 8», публичный контур) —
    статический инвариант (ветка кандидата не смотрит на `quietHours.enabled`, использует
-   `CANDIDATE_QUIET_HOURS`) плюс шесть фикстур в `tests/unit/v2-crosschecks.spec.ts` (по
+   `CANDIDATE_QUIET_HOURS`) плюс три фикстуры в `tests/unit/v2-crosschecks.spec.ts` (по
    образцу check2/check6/check7: провал без ветки, провал с проверкой тумблера, проход).
    Полное поведение по времени (два примера проверки 19 — 22:10 и 20:30) — отдельный чистый
    unit-тест `tests/unit/v2-notify-37-quiet-hours.spec.ts` на `Etc/UTC` (числа проверены руками,
@@ -247,10 +260,12 @@
 
 ### Что осталось
 
-- **PR-16** (когда смержится): подключить `emitWebhook('vacancy.application_received', ...)` в
-  реальный приём отклика (`server/services/publicApply.ts`); доделать 6 оставшихся кодов `29`
-  §8, часть из которых (`published_external`, `publication_failed`, `account_revoked`,
-  `publication_expiring`) относится к PR-17 (публикация на джобборды).
+- **Вакансия — 8 кодов `29` §8 зарегистрированы, вызовов пока ни одного**:
+  `vacancy_application_review`, `vacancy_spam_burst`, `vacancy_closed_with_candidates`,
+  `vacancy_subscriber_reopened` — код-триггер в объёме будущих PR по модерации/закрытию
+  вакансии; `vacancy_published_external`, `vacancy_publication_failed`,
+  `vacancy_account_revoked`, `vacancy_publication_expiring` — специфично ждут PR-17
+  (площадки и журнал публикаций, схемы которого сегодня нет).
 - **PR-24**: подключить 10 зарегистрированных здесь кодов `36` §8 к резолюциям жалоб —
   `content_issue_rescored` нужен буквально для критерия `36` §13 к. 5.
 - **PR-30/31**: `org_structure_import_finished`/`org_structure_rollback` зарегистрированы,

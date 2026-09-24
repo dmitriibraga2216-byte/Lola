@@ -596,6 +596,13 @@
       "when": 1790234280000,
       "tag": "0086_v2_vacancy_publish",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790234340000,
+      "tag": "0087_v2_review_mirror_drop",
+      "breakpoints": true
     }
   ]
 }

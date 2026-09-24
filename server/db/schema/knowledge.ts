@@ -260,8 +260,6 @@ export const workshopSubmissions = pgTable('workshop_submissions', {
   status: text('status').notNull().default('draft'),
   // draft | submitted | in_review | rework | accepted | rejected | expired | annulled
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
-  reviewerId: uuid('reviewer_id').references(() => users.id),
-  claimedAt: timestamp('claimed_at', { withTimezone: true }),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
   criteriaResults: jsonb('criteria_results'), // [{criterionId, passed, comment}]
   score: numeric('score', { precision: 5, scale: 2 }),
@@ -269,7 +267,9 @@ export const workshopSubmissions = pgTable('workshop_submissions', {
   reviewComment: text('review_comment'),
   reworkCount: integer('rework_count').notNull().default(0),
   mentorRating: integer('mentor_rating'), // оценка наставника учеником 1–5 после проверки (docs/22 §4.5, Б.7)
-  slaDueAt: timestamp('sla_due_at', { withTimezone: true }),
+  // `reviewer_id` / `claimed_at` / `sla_due_at` были зеркалом `review_queue_items` (docs/v2/44
+  // В-2, PR-18 #100), PR-20 их сняла: очередь — единственный источник истины о состоянии
+  // проверки (миграция 0087_v2_review_mirror_drop).
   device: text('device'),
   // «Час на випробування» и «Час на контент» этой сдачи по биениям (docs/v2/37 §3.7, PR-21):
   // учёт, пишет только свёртка `time.rollup`; в зачёт и SLA не входят.

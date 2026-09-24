@@ -68,9 +68,13 @@ export async function progress(ctx: Ctx, f: Period & { subject?: Subject, subjec
                                 where a.status <> 'in_progress' and a.created_at >= ${from}::date and a.created_at < (${to}::date + 1) ${f.subjectId ? sql`and a.quiz_id = ${f.subjectId}::uuid` : sql``}`))
   }
   else if (subject === 'workshop') {
-    rows = await q(ctx, people(sql`select s.user_id, s.workshop_id as subject_id, w.title, s.status, null::int as progress_pct, s.score, s.sla_due_at::date as due_at, s.submitted_at as started_at, s.reviewed_at as completed_at, s.created_at, false as is_mandatory,
+    // `due_at` — срок проверки наставником: до PR-20 читался из зеркала `s.sla_due_at`, теперь
+    // только из `review_queue_items` (В-2); левое соединение — черновик (`draft`) ещё не встал
+    // в очередь, и `due_at` для него корректно пуст, как было пусто и у зеркального `sla_due_at`.
+    rows = await q(ctx, people(sql`select s.user_id, s.workshop_id as subject_id, w.title, s.status, null::int as progress_pct, s.score, q.sla_due_at::date as due_at, s.submitted_at as started_at, s.reviewed_at as completed_at, s.created_at, false as is_mandatory,
                                        (s.rework_count = 0 and s.passed) as passed_first
                                 from workshop_submissions s join workshops w on w.id = s.workshop_id
+                                left join review_queue_items q on q.task_type = 'workshop' and q.source_id = s.id
                                 where s.created_at >= ${from}::date and s.created_at < (${to}::date + 1) ${f.subjectId ? sql`and s.workshop_id = ${f.subjectId}::uuid` : sql``}`))
   }
   else if (subject === 'meetup') {

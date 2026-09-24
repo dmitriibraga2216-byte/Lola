@@ -437,8 +437,8 @@ describe('доступ к карточке (§2, §7.10; критерии §13 �
       values (${tenantId}, 'v2-13 тестове завдання', '{}'::jsonb, '[]'::jsonb, 'published')
       returning id`
     const [sub] = await admin`
-      insert into workshop_submissions (tenant_id, workshop_id, user_id, criteria_snapshot, status, reviewer_id, submitted_at)
-      values (${tenantId}, ${workshop!.id}, ${created[0]!}, '[]'::jsonb, 'in_review', ${recruiterId}, now())
+      insert into workshop_submissions (tenant_id, workshop_id, user_id, criteria_snapshot, status, submitted_at)
+      values (${tenantId}, ${workshop!.id}, ${created[0]!}, '[]'::jsonb, 'in_review', now())
       returning id`
     // С PR-19 «какая проверка назначена наставнику» решает очередь проверки (источник истины,
     // docs/v2/44 В-2): строка очереди с его захватом, а не зеркало `workshop_submissions`.

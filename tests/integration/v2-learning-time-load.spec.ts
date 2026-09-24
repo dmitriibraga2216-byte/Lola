@@ -143,7 +143,7 @@ describe(`нагрузка: ${LEARNERS} одновременных прохож�
       const buffered: BeatInput[] = []
       for (let j = 1; j <= BEATS; j++) {
         const active = activeMsOf(i, j)
-        expected[i] += Math.floor(active / 1000)
+        expected[i] = (expected[i] ?? 0) + Math.floor(active / 1000)
         const at = new Date(T0 + j * 30_000 + i * 7)
         const b = beatOf(i, key, j, active, at)
         if (offline && j > BEATS - OFFLINE_TAIL) {
@@ -156,7 +156,7 @@ describe(`нагрузка: ${LEARNERS} одновременных прохож�
         const ok = res.map(r => (r as { ok: true, result: BeatResult }).result)
         const original = ok.find(r => !r.duplicate)
         if (!original) { failures.push(`${i}/${j}: нет исходного ответа`); continue }
-        answered[i] += original.credited
+        answered[i] = (answered[i] ?? 0) + original.credited
         for (const d of ok.filter(r => r.duplicate)) {
           if (d.credited !== original.credited) mismatchedRetries.push(`${i}/${j}: ${d.credited} ≠ ${original.credited}`)
         }
@@ -165,7 +165,7 @@ describe(`нагрузка: ${LEARNERS} одновременных прохож�
         const sentAt = new Date(T0 + (BEATS + 1) * 30_000 + i * 7)
         const r = await recordBeats(ctx, { beats: buffered, sentAt: sentAt.toISOString() }, { now: sentAt })
         if (!r.ok) failures.push(`${i}: пакет отвергнут ${r.code}`)
-        else answered[i] += r.result.credited
+        else answered[i] = (answered[i] ?? 0) + r.result.credited
       }
     }
 
@@ -294,7 +294,7 @@ describe.skipIf(!BUILT)(`нагрузка: ${LEARNERS} человек шлют �
         // Каждый пятый поток переспрашивает второе биение — ответ не должен удвоиться
         const sent = i % 5 === 0 && j === 2 ? await Promise.all([post(i, b), post(i, b)]) : [await post(i, b)]
         const original = sent.find(r => r && !r.duplicate)
-        if (original) answered[i] += original.credited
+        if (original) answered[i] = (answered[i] ?? 0) + original.credited
       }
     }))
 

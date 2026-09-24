@@ -207,6 +207,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // но явно отложил уведомления на PR-24 (`docs/v2/46-progress.md`, «Что осталось — PR-24»).
   // Шаблоны заведены здесь как реестр (П-23 требует зарегистрировать код, а не отправку);
   // вызовы enqueueNotification с этими кодами добавляет PR-24 при подключении резолюций.
+  // PR-24 подключил отправку девяти кодов (`server/services/contentIssueNotify.ts`);
+  // `content_issue_overdue` отправит SLA-скан (§7.6); `{{points}}` пуст, пока в `points_event`
+  // (книга баллов #114) нет события `content_issue` — новое значение перечня через обсуждение (правило 13).
   content_issue_created: 'Нова скарга на «{{title}}»: {{typeLabel}}',
   content_issue_merged: 'Вже {{count}} скарг на «{{title}}»',
   content_issue_blocking: 'Контент не працює: {{title}}',
@@ -235,6 +238,7 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
 export function emailDefaultEnabled(code: string): boolean {
   if (code === 'otp_code' || code === 'manual' || code === 'test_message') return true
   return code === 'security_alert'
+    || code === 'content_issue_rescore_ready' // docs/v2/36 §8: in-app + e-mail администратору
     || /_manager$/.test(code)
     || eventClassOf(code) === 'managerDigest'
     || /^(scheduled_report|report_export_)/.test(code)
@@ -312,7 +316,12 @@ export interface EnqueueInput {
   code: string
   payload: Record<string, unknown>
   dedupKey?: string
-  channel?: 'telegram' | 'sms' | 'email' | 'push'
+  /**
+   * Канал доставки. `inapp` — только колокольчик: диспетчер наружу не шлёт (`skip_reason =
+   * no_channel`, как у человека без Telegram), запись видна в `inbox()`. Нужен кодам, которые
+   * по своей таблице каналов живут только в колокольчике (docs/v2/36 §8).
+   */
+  channel?: 'telegram' | 'sms' | 'email' | 'push' | 'inapp'
   urgent?: boolean // OTP и подобное — минуя тихие часы
   refType?: string
   refId?: string

@@ -649,6 +649,12 @@ library_modules`. Порядок внутри файла:
 - `content_issues`, `content_reports`, `content_issue_events`,
   `content_issue_routing_rules`, `content_reporter_stats`
 
+> [исправлено, реализация: модуль лёг двумя миграциями — `0069_v2_content_issues` (PR-23, четыре
+> таблицы подачи) и `0077_v2_content_routing` (PR-24, `content_issue_routing_rules`). Вторая
+> добавляет два `alter table` к базовым таблицам, которых в этом перечне не было:
+> `course_categories.owner_id` («владелец категории курса», `36` §7.5 в) и `attempt_results.issue_id`
+> (запись пересчёта ссылается на карточку, `36` §7.8)] Ранее: одна миграция без `alter table`
+
 Зависимости: 0009 (`content_reports.screenshot_media_id`), `users`, `enrollments`,
 `lessons`, `attempts`, `course_categories`, `roles`.
 `content_issues.target_id` — намеренно полиморфная мягкая ссылка без FK: целью бывает

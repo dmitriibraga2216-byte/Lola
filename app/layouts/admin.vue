@@ -40,6 +40,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue'), group: t('admin.group.review') },
     { to: '/admin/attempt-requests', label: t('admin.nav.attemptRequests'), show: hasScope('review.grade'), group: t('admin.group.review') },
     { to: '/admin/comments', label: t('admin.nav.comments'), show: hasScope('course.view'), group: t('admin.group.review') },
+    // «Звіт про помилки» (docs/v2/36 §5.3): черга скарг на матеріали — поруч із коментарями
+    { to: '/admin/content-issues', label: t('admin.nav.contentIssues'), show: hasScope('content_issue.view'), group: t('admin.group.review') },
     // Доступ до каталогу — заявки та ручне керування доступом.
     { to: '/admin/catalog/requests', label: t('admin.nav.catalogRequests'), show: hasScope('assignment.create'), group: t('admin.group.catalogAccess') },
     { to: '/admin/catalog/access', label: t('admin.nav.catalogAccess'), show: hasScope('assignment.create'), group: t('admin.group.catalogAccess') },
@@ -127,6 +129,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/meetups/report', label: t('admin.nav.attendanceReport'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/development/reports', label: t('admin.nav.devReports'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/knowledge/report', label: t('admin.nav.kbReport'), show: hasScope('knowledge.manage'), group: t('admin.group.moduleReports') },
+    { to: '/admin/reports/content-quality', label: t('admin.nav.contentQuality'), show: hasScope('content_issue.view'), group: t('admin.group.moduleReports') },
   ] },
   { key: 'settings', label: t('admin.section.settings'), icon: 'gear', items: [
     { to: '/admin/settings/notifications', label: t('admin.nav.notifications'), show: hasScope('settings.notifications'), group: t('admin.group.notifications') },

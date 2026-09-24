@@ -7,6 +7,8 @@ import {
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { currentRequestContext } from '../utils/requestContext'
+import { assignTx, authorIdsSql, derivedCourseIds, routeIssueTx, uuidArray } from './contentIssueRouting'
+import { notifyAssignee } from './contentIssueNotify'
 import {
   checkRate, deadlineShiftFor, dedupeKeyOf, dueAtFor, nextReporterState, rateWindows, severityOf,
 } from '../../shared/domain/contentIssues'
@@ -77,9 +79,17 @@ async function resolveTarget(tx: TenantTx, ctx: Ctx, targetType: ContentIssueTar
       break
     }
     case 'lesson': {
-      const [l] = await tx.select({ title: lessons.title }).from(lessons).where(eq(lessons.id, targetId))
+      // Версия урока — версия курса, в которую он входит: публикация курса копирует уроки в
+      // новую версию (`ensureDraftVersion`), и «опубликована версия выше» (§7.9) для урока
+      // значит «опубликована версия курса выше» (PR-24; раньше здесь всегда стояла 1)
+      const [l] = await tx.select({ title: lessons.title, version: courseVersions.version })
+        .from(lessons)
+        .innerJoin(modules, eq(modules.id, lessons.moduleId))
+        .innerJoin(courseVersions, eq(courseVersions.id, modules.courseVersionId))
+        .where(eq(lessons.id, targetId))
       if (!l) return null
       title = l.title
+      contentVersion = l.version
       break
     }
     case 'quiz': {
@@ -110,9 +120,12 @@ async function resolveTarget(tx: TenantTx, ctx: Ctx, targetType: ContentIssueTar
       break
     }
     case 'knowledge_article': {
-      const [a] = await tx.select({ title: knowledgeArticles.title }).from(knowledgeArticles).where(eq(knowledgeArticles.id, targetId))
+      const [a] = await tx.select({ title: knowledgeArticles.title, version: knowledgeArticles.version, status: knowledgeArticles.status })
+        .from(knowledgeArticles).where(eq(knowledgeArticles.id, targetId))
       if (!a) return null
       title = a.title
+      contentVersion = a.version
+      archived = a.status === 'archived'
       break
     }
     case 'media': {
@@ -141,10 +154,15 @@ async function resolveTarget(tx: TenantTx, ctx: Ctx, targetType: ContentIssueTar
   return { title: title.slice(0, 200), contentVersion, courseIds, lessonRequired, archived }
 }
 
-/** Версия вопроса из снапшота попытки (правило 4: снапшот неизменен, версия берётся оттуда). */
+/**
+ * Версия вопроса из снапшота попытки (правило 4: снапшот неизменен, версия берётся оттуда).
+ * Снапшот попытки — массив вопросов (`attempts.ts` `buildSnapshot`); форма `{ questions: […] }`
+ * поддерживается для старых записей тестов PR-23. PR-24: раньше функция читала только её, и на
+ * настоящей попытке версия молча бралась из текущей редакции вопроса.
+ */
 function versionFromSnapshot(snapshot: unknown, questionId: string): number | null {
-  const questionsList = (snapshot as { questions?: { id: string, version?: number }[] } | null)?.questions
-  const q = Array.isArray(questionsList) ? questionsList.find(x => x.id === questionId) : undefined
+  const list = Array.isArray(snapshot) ? snapshot : (snapshot as { questions?: unknown } | null)?.questions
+  const q = Array.isArray(list) ? (list as { id: string, version?: number }[]).find(x => x?.id === questionId) : undefined
   return q?.version ?? null
 }
 
@@ -170,6 +188,9 @@ export async function submitReport(ctx: Ctx, input: ContentReportInput, opts: { 
     // ── 1. Материал существует и он нашего тенанта (RLS уже сузила выборку) ──────────────
     const target = await resolveTarget(tx, ctx, input.targetType, input.targetId, input.lessonId)
     if (!target) return { ok: false as const, code: 'not_found' as const }
+    // Колонка «Трек» (§5.3) — все курсы, где встречается элемент, а не только тот, откуда пришёл
+    // заявитель: методист видит масштаб дефекта раньше, чем откроет карточку (PR-24)
+    target.courseIds = [...new Set([...target.courseIds, ...await derivedCourseIds(tx, input.targetType, input.targetId)])]
 
     // ── 2. Попытка: версия вопроса из снапшота, а не из текущей редакции ────────────────
     let attempt: { id: string, deadlineAt: Date | null, snapshot: unknown } | null = null
@@ -283,7 +304,12 @@ export async function submitReport(ctx: Ctx, input: ContentReportInput, opts: { 
 
     if (merged) {
       await tx.update(contentIssues)
-        .set({ reportsCount: sql`${contentIssues.reportsCount} + 1`, lastReportedAt: now, updatedAt: now })
+        .set({
+          reportsCount: sql`${contentIssues.reportsCount} + 1`,
+          lastReportedAt: now,
+          courseIds: sql`array(select distinct c from unnest(${contentIssues.courseIds} || ${uuidArray(target.courseIds)}) c)`,
+          updatedAt: now,
+        })
         .where(and(eq(contentIssues.tenantId, ctx.tenantId), eq(contentIssues.id, issueId)))
       // Жалоба во время попытки поднимает флаг и у уже открытой карточки (§7.7 в)
       if (affectsScoring) {
@@ -331,6 +357,10 @@ export async function submitReport(ctx: Ctx, input: ContentReportInput, opts: { 
       set: { reportsTotal: sql`${contentReporterStats.reportsTotal} + 1`, lastReportAt: now, updatedAt: now },
     })
 
+    // ── 11. Адресат и уведомления (PR-24, §7.5, §8) ──────────────────────────────────────
+    if (merged) await notifyAssignee(tx, ctx.tenantId, issueId, 'content_issue_merged')
+    else await routeNewIssue(tx, ctx, issueId)
+
     return {
       ok: true as const,
       result: {
@@ -358,43 +388,83 @@ export async function applyResolutionToReporters(
   issueId: string,
   resolution: 'spam' | 'confirmed' | 'rejected',
 ): Promise<string[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, tx => applyResolutionToReportersTx(tx, ctx, issueId, resolution))
+}
+
+/**
+ * То же внутри транзакции разбора (PR-24): резолюция, репутация заявителей и уведомление
+ * о mute фиксируются одной транзакцией — иначе отказ мог бы сохраниться без серии `spam`.
+ */
+export async function applyResolutionToReportersTx(
+  tx: TenantTx,
+  ctx: Ctx,
+  issueId: string,
+  resolution: 'spam' | 'confirmed' | 'rejected',
+): Promise<string[]> {
   const now = new Date()
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const reporters = await tx.select({ userId: contentReports.userId }).from(contentReports)
-      .where(and(eq(contentReports.tenantId, ctx.tenantId), eq(contentReports.issueId, issueId)))
-    const muted: string[] = []
-    for (const r of reporters) {
-      const [prev] = await tx.select().from(contentReporterStats)
-        .where(and(eq(contentReporterStats.tenantId, ctx.tenantId), eq(contentReporterStats.userId, r.userId)))
-      const base = {
-        spamCount: prev?.spamCount ?? 0,
-        consecutiveSpam: prev?.consecutiveSpam ?? 0,
-        confirmedCount: prev?.confirmedCount ?? 0,
-        rejectedCount: prev?.rejectedCount ?? 0,
-        mutedUntil: prev?.mutedUntil ?? null,
-      }
-      const next = nextReporterState(base, resolution, now)
-      await tx.insert(contentReporterStats).values({
-        tenantId: ctx.tenantId, userId: r.userId,
-        reportsTotal: prev?.reportsTotal ?? 0,
+  const reporters = await tx.select({ userId: contentReports.userId }).from(contentReports)
+    .where(and(eq(contentReports.tenantId, ctx.tenantId), eq(contentReports.issueId, issueId)))
+  const muted: string[] = []
+  for (const r of reporters) {
+    const [prev] = await tx.select().from(contentReporterStats)
+      .where(and(eq(contentReporterStats.tenantId, ctx.tenantId), eq(contentReporterStats.userId, r.userId)))
+    const base = {
+      spamCount: prev?.spamCount ?? 0,
+      consecutiveSpam: prev?.consecutiveSpam ?? 0,
+      confirmedCount: prev?.confirmedCount ?? 0,
+      rejectedCount: prev?.rejectedCount ?? 0,
+      mutedUntil: prev?.mutedUntil ?? null,
+    }
+    const next = nextReporterState(base, resolution, now)
+    await tx.insert(contentReporterStats).values({
+      tenantId: ctx.tenantId, userId: r.userId,
+      reportsTotal: prev?.reportsTotal ?? 0,
+      spamCount: next.spamCount, consecutiveSpam: next.consecutiveSpam,
+      confirmedCount: next.confirmedCount, rejectedCount: next.rejectedCount,
+      mutedUntil: next.mutedUntil,
+      muteReason: next.autoMuted ? 'auto_spam_streak' : (prev?.muteReason ?? null),
+    }).onConflictDoUpdate({
+      target: [contentReporterStats.tenantId, contentReporterStats.userId],
+      set: {
         spamCount: next.spamCount, consecutiveSpam: next.consecutiveSpam,
         confirmedCount: next.confirmedCount, rejectedCount: next.rejectedCount,
         mutedUntil: next.mutedUntil,
-        muteReason: next.autoMuted ? 'auto_spam_streak' : (prev?.muteReason ?? null),
-      }).onConflictDoUpdate({
-        target: [contentReporterStats.tenantId, contentReporterStats.userId],
-        set: {
-          spamCount: next.spamCount, consecutiveSpam: next.consecutiveSpam,
-          confirmedCount: next.confirmedCount, rejectedCount: next.rejectedCount,
-          mutedUntil: next.mutedUntil,
-          ...(next.autoMuted ? { muteReason: 'auto_spam_streak' } : {}),
-          updatedAt: now,
-        },
-      })
-      if (next.autoMuted) muted.push(r.userId)
+        ...(next.autoMuted ? { muteReason: 'auto_spam_streak' } : {}),
+        updatedAt: now,
+      },
+    })
+    if (next.autoMuted) muted.push(r.userId)
+  }
+  return muted
+}
+
+/**
+ * Новая карточка получает ответственного сразу при подаче (§7.5), событием `assigned` от
+ * системы. Автор, пожаловавшийся на свой материал, берёт карточку в работу сам (§12): она
+ * сразу `in_progress` на нём. Карточка `blocking` будит ответственного и администраторов (§8).
+ */
+async function routeNewIssue(tx: TenantTx, ctx: Ctx, issueId: string): Promise<void> {
+  const [self] = await tx.execute(sql`
+    select ${ctx.actorId}::uuid = any(${authorIdsSql('i')}) as is_author
+      from content_issues i where i.id = ${issueId}::uuid`) as unknown as { is_author: boolean }[]
+  if (self?.is_author) {
+    await assignTx(tx, ctx.tenantId, issueId, ctx.actorId, { actorId: ctx.actorId, from: null, step: 'author' })
+    await tx.update(contentIssues).set({ status: 'in_progress', updatedAt: new Date() }).where(eq(contentIssues.id, issueId))
+    await tx.insert(contentIssueEvents).values({
+      tenantId: ctx.tenantId, issueId, actorId: ctx.actorId, kind: 'status_changed',
+      fromStatus: 'new', toStatus: 'in_progress', payload: { self_report: true },
+      requestContext: currentRequestContext(),
+    })
+  }
+  else {
+    const route = await routeIssueTx(tx, issueId)
+    if (route.assigneeId) {
+      await assignTx(tx, ctx.tenantId, issueId, route.assigneeId, { actorId: null, from: null, step: route.step, ruleId: route.ruleId })
+      await notifyAssignee(tx, ctx.tenantId, issueId, 'content_issue_created')
     }
-    return muted
-  })
+  }
+  const [row] = await tx.select({ severity: contentIssues.severity }).from(contentIssues).where(eq(contentIssues.id, issueId))
+  if (row?.severity === 'blocking') await notifyAssignee(tx, ctx.tenantId, issueId, 'content_issue_blocking')
 }
 
 /** Свои жалобы со статусами — «Мої повідомлення про помилки» (§5.5). */

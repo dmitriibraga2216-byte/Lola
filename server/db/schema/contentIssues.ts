@@ -2,8 +2,8 @@ import { sql } from 'drizzle-orm'
 import { boolean, check, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
-import { users } from './people'
-import { lessons, mediaAssets } from './content'
+import { roles, users } from './people'
+import { courseCategories, lessons, mediaAssets } from './content'
 import { enrollments } from './learning'
 import { attempts } from './quizzes'
 import {
@@ -18,15 +18,16 @@ import {
 } from '../../../shared/enums'
 
 /**
- * Обратная связь по контенту (docs/v2/36-content-feedback.md §3, миграция
- * `0069_v2_content_issues`). Четыре таблицы разводят четыре разные сущности, которые
- * на эталоне слиты в одну «заявку» и потому не считаются:
+ * Обратная связь по контенту (docs/v2/36-content-feedback.md §3, миграции
+ * `0069_v2_content_issues` и `0077_v2_content_routing`). Пять таблиц разводят пять разных
+ * сущностей, которые на эталоне слиты в одну «заявку» и потому не считаются:
  *
  * - `contentIssues` — **дефект**: один на материал + тип проблемы + версию. Сорок жалоб
  *   на одно битое видео дают одну карточку с `reportsCount = 40` (§12);
  * - `contentReports` — **обращение** человека со своим контекстом и скриншотом;
  * - `contentIssueEvents` — журнал карточки, включая факт компенсации времени попытки (§7.7 б);
- * - `contentReporterStats` — репутация заявителя: лимиты и `mutedUntil` (§7.11).
+ * - `contentReporterStats` — репутация заявителя: лимиты и `mutedUntil` (§7.11);
+ * - `contentIssueRoutingRules` — кому карточка уходит, если её не адресовал автор (§7.5).
  *
  * Перечни значений — в `shared/enums.ts` и в `docs/02` «Перечисления»; CHECK-констрейнты
  * строятся из тех же массивов, чтобы третьей копии списка не возникло.
@@ -177,4 +178,36 @@ export const contentReporterStats = pgTable('content_reporter_stats', {
   unique('content_reporter_stats_tenant_id_user_id_unique').on(t.tenantId, t.userId),
   index('idx_content_reporter_stats_tenant').on(t.tenantId),
   check('content_reporter_stats_mute_reason_chk', sql`mute_reason is null or char_length(mute_reason) <= 300`),
+])
+
+/**
+ * Правило адресации (§3.2, §6.3, §7.5): фильтр по типу элемента, типу проблемы и категории
+ * курса → человек или роль. Пустой фильтр — «Будь-який». Порядок — `sort` по возрастанию.
+ *
+ * Запасное правило (`fallback`) — шаг (г) маршрутизации, после авторов и владельца категории;
+ * фильтров у него нет по смыслу, и в шаге (а) оно не участвует. Одно на тенант: «не больше
+ * одного» держит частичный уникальный индекс, «не меньше одного, если правила вообще есть» —
+ * сервис (`content_issue.fallback_rule_required`).
+ */
+export const contentIssueRoutingRules = pgTable('content_issue_routing_rules', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  sort: integer('sort').notNull().default(100),
+  /** Одно из `CONTENT_ISSUE_TARGET_TYPES`; null — любой элемент. */
+  targetType: text('target_type'),
+  /** Одно из `CONTENT_ISSUE_TYPES`; null — любая проблема. */
+  issueType: text('issue_type'),
+  categoryId: uuid('category_id').references(() => courseCategories.id, { onDelete: 'cascade' }),
+  assigneeUserId: uuid('assignee_user_id').references(() => users.id, { onDelete: 'set null' }),
+  assigneeRoleId: uuid('assignee_role_id').references(() => roles.id, { onDelete: 'set null' }),
+  fallback: boolean('fallback').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+}, t => [
+  index('idx_content_issue_routing_rules_tenant').on(t.tenantId),
+  index('idx_content_issue_routing_rules_order').on(t.tenantId, t.isActive, t.sort),
+  uniqueIndex('uq_content_issue_routing_rules_fallback').on(t.tenantId).where(sql`fallback`),
+  check('content_issue_routing_rules_assignee_chk', sql`assignee_user_id is not null or assignee_role_id is not null`),
+  check('content_issue_routing_rules_sort_chk', sql`sort between 0 and 10000`),
+  check('content_issue_routing_rules_target_type_chk', sql`target_type is null or ${inList(sql`target_type`, CONTENT_ISSUE_TARGET_TYPES)}`),
+  check('content_issue_routing_rules_issue_type_chk', sql`issue_type is null or ${inList(sql`issue_type`, CONTENT_ISSUE_TYPES)}`),
 ])

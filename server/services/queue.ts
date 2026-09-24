@@ -39,6 +39,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('vacancy.attempts_gc', { retryLimit: 2, expireInSeconds: 600 })
       // docs/21 Г-21.1: автоотмена заказов магазина с истёкшим резервом (+ сверка книги бонусов)
       await b.createQueue('shop.reserve_expire', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/v2/36 §11 (PR-24): карточки неактивных ответственных — следующему по маршрутизации
+      await b.createQueue('content_issue.reassign_scan', { retryLimit: 2, expireInSeconds: 600 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -64,6 +66,8 @@ export async function getBoss(): Promise<PgBoss> {
       // Резерв магазина (docs/21 Г-21.1) — ежечасно: срок считается часами от заказа, а не днями,
       // и суточный проход держал бы бонусы и остаток до 23 лишних часов
       await b.schedule('shop.reserve_expire', '25 * * * *', {}, { singletonKey: 'shop.reserve_expire' })
+      // Жалобы на материал (docs/v2/36 §11): уволенный ответственный не держит очередь — раз в сутки
+      await b.schedule('content_issue.reassign_scan', '50 3 * * *', {}, { singletonKey: 'content_issue.reassign_scan', tz: 'Europe/Kyiv' })
       return b
     })
   }

@@ -161,6 +161,13 @@ export default defineNitroPlugin(async () => {
       const s = await workshopSlaScan(tenantId)
       if (s.released || s.breached || s.expired) console.log(`[workshop.sla_scan] ${tenantId}:`, s)
     }))
+    // docs/v2/36 §11 `content_issue.reassign_scan`: открытые жалобы уволенного или
+    // заблокированного ответственного уходят следующему по маршрутизации §7.5
+    await work('content_issue.reassign_scan', () => runPerTenant('content_issue.reassign_scan', async (tenantId) => {
+      const { reassignScan } = await import('../services/contentIssueRouting')
+      const n = await reassignScan(tenantId)
+      if (n) console.log(`[content_issue.reassign_scan] ${tenantId}: переназначено ${n}`)
+    }))
     await work('webhook.deliver', () => runPerTenant('webhook.deliver', async (tenantId) => {
       const s = await deliverPending(tenantId)
       if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)

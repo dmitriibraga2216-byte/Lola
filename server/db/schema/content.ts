@@ -20,6 +20,7 @@ export const courseCategories = pgTable('course_categories', {
   parentId: uuid('parent_id').references((): AnyPgColumn => courseCategories.id),
   name: text('name').notNull(),
   sort: integer('sort').notNull().default(0),
+  ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }), // владелец — адресат жалобы при неактивных авторах (docs/v2/36 §7.5 в)
 }, t => [
   index().on(t.tenantId),
 ])

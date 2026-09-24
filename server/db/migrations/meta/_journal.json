@@ -526,6 +526,13 @@
       "when": 1790233680000,
       "tag": "0076_gamification",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790233740000,
+      "tag": "0077_v2_content_routing",
+      "breakpoints": true
     }
   ]
 }

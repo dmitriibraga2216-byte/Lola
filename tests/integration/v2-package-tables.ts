@@ -44,6 +44,10 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'content_reports',
   'content_issue_events',
   'content_reporter_stats',
+  // 36. Разбор жалобы: маршрутизация, резолюции, пересчёт (PR-24, миграция 0077_v2_content_routing).
+  // Пятая и последняя таблица модуля; `course_categories.owner_id` и `attempt_results.issue_id`
+  // той же миграции — колонки базовых таблиц, а не таблицы пакета.
+  'content_issue_routing_rules',
   // 29. Вакансии: схема, критерии, шаблон параметров (PR-15, миграция 0071_v2_vacancies).
   // Самой вакансии в списке мало: `users.vacancy_id` — колонка кандидата, а не таблица; её
   // ключ `users_vacancy_id_fk` проверяет девятый контрактный тест `deferred-fk.spec.ts`

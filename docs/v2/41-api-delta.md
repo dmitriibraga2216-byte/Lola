@@ -289,6 +289,11 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 **16 эндпоинтов.** Четыре строки `/settings/content-issue-routing-rules` развёрнуты из записи
 `CRUD` документа-владельца; методы и путь элемента там явно не названы (§8.5).
 
+> [исправлено, PR-24: POST, PATCH и DELETE `/settings/content-issue-routing-rules` требуют
+> `content_issue.assign`, а не `triage`: `36` §2 отдаёт «Править маршрутизацию» только
+> администратору, а `triage` есть и у методиста; GET остаётся на `triage`. Путь элемента —
+> `/settings/content-issue-routing-rules/:id`] Ранее: все четыре на `content_issue.triage`
+
 ### 2.10 Проверка, делегирование и учёт времени — документ `37`
 
 | Метод | Путь | Скоуп | Назначение |

@@ -401,10 +401,29 @@
 
 ## 4.18 Вебхуки наружу
 
-События: `enrollment.completed`, `attempt.passed`, `attempt.failed`, `certificate.issued`,
-`certificate.revoked`, `task.overdue`, `notice.acknowledged`, `user.created`.
+> [исправлено, `docs/v2/44-decisions.md` В-18] Ранее: «`certificate.revoked`, `task.overdue`,
+> `notice.acknowledged`, `user.created`» — отзыв сертификата случается (`docs/28-implementation-
+> notes.md`, «Spec 12»: откат `passed → failed` при пересчёте пишет `audit_log
+> certificate.revoke`), но **события вебхука** `certificate.revoked` в `WEBHOOK_EVENTS` нет и не
+> было; рабочее событие для просрочки называется `assignment.overdue`, не `task.overdue`.
+> Список приведён к фактическому составу `WEBHOOK_EVENTS` (`server/services/webhooks.ts`) плюс
+> три новых события пакета `docs/v2`.
+
+События (10): `enrollment.completed`, `attempt.passed`, `attempt.failed`, `certificate.issued`,
+`assignment.overdue`, `user.created`, `notice.acknowledged`, `candidate.hired`,
+`vacancy.application_received`, `offboarding.completed`.
 Доставка: POST с подписью `X-Lola-Signature` (HMAC-SHA256 по телу), три повтора
 с экспонентой, журнал доставок с телом запроса и ответом, ручной повтор из интерфейса.
+
+**Payload без персональных данных** (докс/v2/44 В-18): `data` несёт идентификаторы и время,
+не ФИО/e-mail/телефон/резюме — правило действует на все десять событий, включая существующий
+`user.created`. Получатель добирает подробности через API под своими скоупами:
+
+| Событие | `data` |
+|---|---|
+| `candidate.hired` | `{userId, vacancyId, hiredAt}` |
+| `vacancy.application_received` | `{vacancyId, applicationId, receivedAt}` |
+| `offboarding.completed` | `{userId, caseId, completedAt}` |
 
 ## 4.19 Телеграм-бот
 

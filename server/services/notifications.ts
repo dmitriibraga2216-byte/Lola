@@ -163,6 +163,12 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   candidate_review_needed: '{{name}}: завдання відбору не зараховано — потрібне ваше рішення',
   candidate_consent_expiring: 'У {{n}} кандидат(ів) завершується строк згоди на обробку даних — після цього дані буде знеособлено',
   candidate_stale: '{{n}} кандидат(ів) без руху більше тижня',
+  // docs/v2/28 §8 (PR-37): двух кодов не хватало против реестра `41-api-delta.md` §6.1 —
+  // `candidate.invited`/`candidate.reminder` в PR-14 не завелись (там были только найм,
+  // відмова, дайджести). `candidate.hired.internal` уже покрыт `candidate_hired_manager`,
+  // `candidate.limit_warning` схлопнут в `limit_warning` (докс/v2/39 П-23) — новых кодов нет.
+  candidate_invited: 'Вітаємо! Для участі у відборі на посаду «{{vacancy}}» пройдіть матеріали за посиланням: {{url}}{{#until}}. Доступ до {{until}}{{/until}}',
+  candidate_reminder: 'Залишилось {{days}} дн., щоб завершити відбір на посаду «{{vacancy}}»',
   // docs/v2/29 §8 (PR-16): отклик по публичной ссылке. Кандидату — только приветствие со
   // ссылкой на отбор; о том, что его отклик задержала проверка §7.7, он не узнаёт никогда.
   vacancy_applied_welcome: 'Дякуємо за відгук на вакансію «{{vacancy}}». Ми надіслали вам посилання для проходження відбору',
@@ -170,6 +176,41 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',
+  // docs/v2/41-api-delta.md §6 (PR-37, П-23): недостающие коды пакета сверх PR-14/16/23/30
+  // (найдены сверкой факт. main против реестра — см. docs/v2/46-progress.md). Публикация на
+  // джобборды, ai_quota и addon-коды намеренно не заводятся здесь — они принадлежат PR-17 и
+  // PR-08/09/10/36, у которых нет ни схемы, ни вызывающего кода; регистрировать шаблон без
+  // события, которое пакет ещё не описал числом/условием, означает угадывать текст.
+  //
+  // 29-vacancies.md §8 (докс/v2/45 PR-16 уже завёл vacancy_applied_welcome/vacancy_application_received)
+  vacancy_application_review: 'Відгук на «{{vacancy}}» потребує перевірки: підозра на спам',
+  vacancy_spam_burst: 'Незвична активність на сторінці вакансії «{{vacancy}}». Посилання тимчасово обмежено',
+  vacancy_published_external: 'Вакансію «{{vacancy}}» опубліковано на {{platform}}',
+  vacancy_publication_failed: 'Не вдалося опублікувати «{{vacancy}}» на {{platform}}: {{error}}',
+  vacancy_account_revoked: 'Акаунт {{platform}} більше не авторизований. Підключіть його заново',
+  vacancy_publication_expiring: 'Оголошення «{{vacancy}}» на {{platform}} завершується {{date}}',
+  // vacancies.ts (PR-15) уже пише в комментарии «получает vacancy.closed_with_candidates» —
+  // код был анонсирован раньше, чем заведён; закрываем разрыв.
+  vacancy_closed_with_candidates: 'Вакансію «{{vacancy}}» закрито. {{n}} кандидат(ів) ще проходять відбір',
+  vacancy_subscriber_reopened: 'Набір на «{{vacancy}}» знову відкрито',
+  // 32-org-structure.md §8 (докс/v2/45 PR-30 уже завёл пять из семи кодов — org_node_assigned,
+  // org_manager_changed, org_subordinate_added, org_node_vacant, org_structure_conflict)
+  org_structure_import_finished: 'Імпорт оргструктури: створено {{created}}, оновлено {{updated}}, помилок {{errors}}',
+  org_structure_rollback: 'Оргструктуру відкочено до знімка «{{label}}» від {{date}}',
+  // 36-content-feedback.md §8: PR-23 создал таблицы `content_issues`/`content_issue_events`,
+  // но явно отложил уведомления на PR-24 (`docs/v2/46-progress.md`, «Что осталось — PR-24»).
+  // Шаблоны заведены здесь как реестр (П-23 требует зарегистрировать код, а не отправку);
+  // вызовы enqueueNotification с этими кодами добавляет PR-24 при подключении резолюций.
+  content_issue_created: 'Нова скарга на «{{title}}»: {{typeLabel}}',
+  content_issue_merged: 'Вже {{count}} скарг на «{{title}}»',
+  content_issue_blocking: 'Контент не працює: {{title}}',
+  content_issue_overdue: 'Скарга на «{{title}}» прострочена на {{days}} дн.',
+  content_issue_accepted: 'Твоє повідомлення про «{{title}}» прийняли в роботу',
+  content_issue_fixed: 'Помилку в «{{title}}» виправлено. Дякуємо{{#points}} — {{points}} балів{{/points}}',
+  content_issue_rejected: 'Ми перевірили скаргу на «{{title}}»: {{comment}}',
+  content_issue_rescore_ready: '{{count}} спроб можна перерахувати після виправлення «{{title}}»',
+  content_issue_rescored: 'Питання «{{title}}» виправили, твій результат перераховано: {{scoreOld}} → {{scoreNew}}',
+  content_reporter_muted: 'Надсилання повідомлень про помилки контенту призупинено до {{until}}',
 }
 
 /**
@@ -278,21 +319,64 @@ export interface EnqueueInput {
 export const BYPASS_DAILY_LIMIT = (code: string) => /(_due_today|_overdue|_expiring|^assessment_|^announcement_|^notice_|^security_|^user_invited$|^import_)/.test(code)
 export const DAILY_LIMIT = 10
 
+/**
+ * Тихі часи кандидата (докс/v2/39-patches.md П-23, сквозная проверка 19 — `docs/v2/42` §5):
+ * 09:00–20:00 **по його власному часовому поясу**, і це вікно абсолютне — воно не звірене з
+ * тумблером `settings.quietHours.enabled` тенанта і не обходиться через `urgent`/
+ * `ignoreQuietHours` (кандидатських кодів такого типу немає: OTP кандидата йде мимо черги,
+ * як і у співробітника). Тенант не має права присунути кандидату розсилку вночі, вимкнувши
+ * власні тихі часи для персоналу.
+ */
+export const CANDIDATE_QUIET_HOURS = { from: 9, to: 20 }
+
+/**
+ * Часовий пояс кандидата [решение] (докс/v2/39 П-23): у `users` для кандидата такої колонки
+ * немає, і заводити її окремою міграцією заради одного поля не пропорційно — кандидат не
+ * заповнює розширений профіль, як співробітник (докс/v2/28 §3.2 таких полів не додає).
+ * Джерело — часовий пояс **точки вакансії**, на яку кандидат відгукнувся:
+ * `users.vacancy_id → vacancies.location_id → locations.timezone` — ланцюжок уже існуючих
+ * зовнішніх ключів, без нової колонки. Це не фізичне місце кандидата, а обґрунтоване
+ * наближення: тихі часи існують, щоб не розбудити людину вночі, а більшість кандидатів
+ * фізично перебувають біля міста, куди відгукнулись. Без вакансії (кандидат заведений вручну
+ * рекрутером) повертає `null` — далі береться таймзона тенанта, той самий порядок відмови,
+ * що і в співробітника нижче.
+ */
+async function candidateTimezone(tx: TenantTx, userId: string): Promise<string | null> {
+  const [row] = await tx.execute(sql`
+    select l.timezone from users u
+    join vacancies v on v.id = u.vacancy_id
+    join locations l on l.id = v.location_id
+    where u.id = ${userId}::uuid
+  `) as unknown as { timezone: string | null }[]
+  return row?.timezone ?? null
+}
+
 /** Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален). */
 export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Promise<boolean> {
   const [tenant] = await db.select({ timezone: tenants.timezone, settings: tenants.settings }).from(tenants).where(eq(tenants.id, input.tenantId))
   const settings = await readSettings(tx, input.tenantId)
-  // Тихие часы по таймзоне точки человека (docs/23 §3.3), иначе — тенанта
-  const [loc] = await tx.execute(sql`select l.timezone from user_placements up join locations l on l.id = up.location_id where up.user_id = ${input.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { timezone: string | null }[]
-  const [tpl] = await tx.select({ ignoreQuietHours: notificationTemplates.ignoreQuietHours }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, input.channel ?? 'telegram')))
+  const [recipient] = await tx.select({ kind: users.kind }).from(users).where(eq(users.id, input.userId))
   const now = new Date()
-  const timezone = loc?.timezone ?? tenant?.timezone ?? 'Europe/Kyiv'
-  const cls = eventClassOf(input.code)
   let scheduledFor: Date
-  if (input.urgent || tpl?.ignoreQuietHours) scheduledFor = now
-  else if (cls) scheduledFor = nextOccurrence(now, timezone, settings.notificationSchedule[cls].hour, settings.notificationSchedule[cls].minute) // §13.2.1: свій час класу — понад тихі часи
-  else if (settings.quietHours.enabled) scheduledFor = scheduleWithQuietHours(now, timezone, settings.quietHours)
-  else scheduledFor = now
+
+  if (recipient?.kind === 'candidate') {
+    // П-23: кандидат — поза тихими часами тенанта (він не працівник цієї мережі), але в межах
+    // 09:00–20:00 свого часу. Без урахування urgent/ignoreQuietHours і тумблера тенанта — див.
+    // коментар CANDIDATE_QUIET_HOURS.
+    const timezone = (await candidateTimezone(tx, input.userId)) ?? tenant?.timezone ?? 'Europe/Kyiv'
+    scheduledFor = scheduleWithQuietHours(now, timezone, CANDIDATE_QUIET_HOURS)
+  }
+  else {
+    // Тихие часы по таймзоне точки человека (docs/23 §3.3), иначе — тенанта
+    const [loc] = await tx.execute(sql`select l.timezone from user_placements up join locations l on l.id = up.location_id where up.user_id = ${input.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { timezone: string | null }[]
+    const [tpl] = await tx.select({ ignoreQuietHours: notificationTemplates.ignoreQuietHours }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, input.channel ?? 'telegram')))
+    const timezone = loc?.timezone ?? tenant?.timezone ?? 'Europe/Kyiv'
+    const cls = eventClassOf(input.code)
+    if (input.urgent || tpl?.ignoreQuietHours) scheduledFor = now
+    else if (cls) scheduledFor = nextOccurrence(now, timezone, settings.notificationSchedule[cls].hour, settings.notificationSchedule[cls].minute) // §13.2.1: свій час класу — понад тихі часи
+    else if (settings.quietHours.enabled) scheduledFor = scheduleWithQuietHours(now, timezone, settings.quietHours)
+    else scheduledFor = now
+  }
 
   const [row] = await tx.insert(notifications).values({
     tenantId: input.tenantId,
@@ -328,7 +412,7 @@ export async function templateFor(tx: TenantTx, tenantId: string, code: string, 
   return body ? { body, subject: null, bodyMjml: null, version: 0, isMandatory: MANDATORY_DEFAULT(code), throttle: null, buttons: [], scope: 'global' } : null
 }
 /** Обязательные по умолчанию: дедлайны, аттестации, объявления, безопасность, приглашение. */
-export const MANDATORY_DEFAULT = (code: string) => (BYPASS_DAILY_LIMIT(code) && code !== 'notice_not_acknowledged') || /_due_soon$|^user_blocked$|^user_role_granted$|^otp_/.test(code) // docs/23 §13: notice.assigned обязательное, напоминание — нет; otp_* людина не вимикає
+export const MANDATORY_DEFAULT = (code: string) => (BYPASS_DAILY_LIMIT(code) && code !== 'notice_not_acknowledged') || /_due_soon$|^user_blocked$|^user_role_granted$|^otp_|^content_issue_blocking$/.test(code) // docs/23 §13: notice.assigned обязательное, напоминание — нет; otp_* людина не вимикає; content_issue_blocking — docs/v2/36 §8, content_issue_overdue вже покриває BYPASS_DAILY_LIMIT (`_overdue`)
 
 /** Общие переменные шаблонов (docs/23 §3.4): user.*, location.name, position.name, tenant.name, link. */
 async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promise<Record<string, unknown>> {

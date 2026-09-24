@@ -16,6 +16,7 @@ import { COLUMNS, canMove, maskRow, scopeCond } from './candidates'
 import type { CandidateRow, Viewer } from './candidates'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
+import { emitWebhook } from './webhooks'
 import { readSettings } from './settings'
 import { enterStageByCodeTx } from './lifecycleState'
 import { applyPositionRoles } from './positionRoleMap'
@@ -272,6 +273,9 @@ export async function hireCandidate(v: Viewer, id: string, input: CandidateHireI
         mentorId: input.mentorId ?? null,
       },
     })
+    // Вебхук наружу (докс/v2/44 В-18): только идентификаторы и время, без ФИО и контактов —
+    // получатель добирает подробности через API под своими скоупами.
+    await emitWebhook(tx, v.tenantId, 'candidate.hired', { userId: id, vacancyId: row.vacancyId, hiredAt: input.startDate })
     return { ok: true, outcome: { userId: id, assigned: 0, usersActive: 0, candidatesActive: 0 } }
   })
   if (!hired.ok) return hired

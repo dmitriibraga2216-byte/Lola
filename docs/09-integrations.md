@@ -113,9 +113,20 @@ create table tenant_secrets (
 
 ## 9.5 Вебхуки наружу
 
-События: `enrollment.completed`, `attempt.passed`, `attempt.failed`, `certificate.issued`,
-`assignment.overdue`, `user.created`. Подпись `X-Lola-Signature` (HMAC-SHA256 по телу),
-три повтора с экспонентой, журнал доставок с телом запроса и ответом, ручной повтор из UI.
+> [исправлено, `docs/v2/44-decisions.md` В-18] Ранее список не включал `notice.acknowledged`
+> (Spec 21, уже работает в коде) и три новых события пакета `docs/v2`.
+
+События (10): `enrollment.completed`, `attempt.passed`, `attempt.failed`, `certificate.issued`,
+`assignment.overdue`, `user.created`, `notice.acknowledged`, `candidate.hired`,
+`vacancy.application_received`, `offboarding.completed`. Подпись `X-Lola-Signature`
+(HMAC-SHA256 по телу), три повтора с экспонентой, журнал доставок с телом запроса и ответом,
+ручной повтор из UI.
+
+**Правило payload** (докс/v2/44 В-18): вебхук несёт идентификаторы и время, но не персональные
+данные (ФИО, e-mail, телефон, резюме, результат собеседования) — ни в одном из десяти событий,
+включая существующий `user.created`. Кто нужен по имени — забирает его через API под своими
+скоупами; так утечка ПД через внешний канал невозможна по построению, а не по внимательности
+интегратора.
 
 ## 9.6 Входящий API для учётной системы тенанта
 

@@ -15,7 +15,7 @@ import { locations, orgUnits, positions } from './org'
  *
  * Единственный вход для вопроса «кто руководитель человека X» — `resolveManager()`
  * (`server/services/orgManager.ts`, патч П-16.4). Читать `locations.manager_id` напрямую
- * запрещено: проверка 8 в `scripts/v2-crosschecks.sh`.
+ * запрещено: проверка 9 в `scripts/v2-crosschecks.sh`.
  */
 
 /** `uuid[]` — цепочка руководителей снизу вверх; Drizzle своего типа для массива uuid не даёт. */

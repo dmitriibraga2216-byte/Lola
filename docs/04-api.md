@@ -482,7 +482,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 належить») и `/positions` («як називається робота»): оно отвечает на «хто кому
 підпорядкований». Единственный публичный ответ о руководителе — `GET
 /org-structure/manager/:userId` (патч П-16.4): читать `locations.manager_id` мимо него
-запрещено, проверка 8 в `scripts/v2-crosschecks.sh`.
+запрещено, проверка 9 в `scripts/v2-crosschecks.sh`.
 
 | Метод | Путь | Описание |
 | --- | --- | --- |

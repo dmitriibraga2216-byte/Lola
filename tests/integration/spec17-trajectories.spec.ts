@@ -23,6 +23,31 @@ let tenantId: string, adminId: string, lazarevaId: string, posId: string, otherP
 const userIds: string[] = [], courseIds: string[] = [], quizIds: string[] = [], trajIds: string[] = [], ruleIds: string[] = []
 const ctx = (actorId = adminId) => ({ tenantId, actorId })
 const stamp = Date.now()
+/**
+ * Опрос условия вместо фиксированной паузы. completeLesson/submitAttempt коммитят свою
+ * транзакцию и только потом, в `.then()`, не дожидаясь, запускают `import('./trajectories').then(t =>
+ * t.onTaskResult(...))` (server/services/learning.ts:817–818, attempts.ts:483–484) — это fire-and-forget,
+ * вызывающий не держит на него ссылку. Время его применения не гарантировано: под нагрузкой
+ * (несколько файлов тестов параллельно, медленная машина) фиксированная пауза (sleep(250)) иногда
+ * заканчивалась раньше, чем хук успевал дописать состояние узла — отсюда флейк «Закриття доступу»
+ * (таймер опережал хук и закрывал узел, который человек уже фактически сдал). Ждём факт, а не время.
+ */
+async function waitFor(cond: () => Promise<boolean>, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await cond()) return
+    if (Date.now() >= deadline) throw new Error(`тайм-аут ожидания (${timeoutMs}ms) — хук курса/теста не успел обновить состояние траектории`)
+    await new Promise(r => setTimeout(r, 20))
+  }
+}
+/**
+ * Активная (не снятая) запись на курс — сигнал, что фоновое раскрытие назначения узла уже случилось.
+ * Сам узел и его строка `assignments` создаются в транзакции хука, а фактическая строка `enrollments` —
+ * только в `applyEffects`/`expandAssignment` ПОСЛЕ её коммита (server/services/trajectories.ts:614–668).
+ * Поэтому «узел доступен» и «запись на курс уже существует» — не один и тот же момент.
+ */
+const hasCourseEnrollment = async (userId: string, courseId: string) =>
+  (await admin`select 1 from enrollments where user_id = ${userId} and subject_id = ${courseId} and cancelled_at is null`).length > 0
 
 async function makePerson(name: string, pos = posId) {
   const phone = `+38063${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
@@ -39,9 +64,14 @@ async function makeCourse(title: string) {
   await publishCourse(ctx(), c.id, 'v1')
   return c.id
 }
-/** Пройти курс по записи, созданной назначением узла. */
-async function passCourse(userId: string, courseId: string) {
-  const [enr] = await admin`select id from enrollments where user_id = ${userId} and subject_id = ${courseId} and cancelled_at is null order by created_at desc limit 1`
+/** Пройти курс по записи, созданной назначением узла; `until` — признак того, что хук траектории уже применился. */
+async function passCourse(userId: string, courseId: string, until: () => Promise<boolean>) {
+  const findEnrollment = () => admin`select id from enrollments where user_id = ${userId} and subject_id = ${courseId} and cancelled_at is null order by created_at desc limit 1`
+  // Запись о зачислении на курс раскрывается вне транзакции хука (см. hasCourseEnrollment выше) —
+  // сразу после активации узла её может ещё не быть; ждём опросом вместо немедленного throw.
+  let rows = await findEnrollment()
+  if (!rows[0]) await waitFor(async () => { rows = await findEnrollment(); return !!rows[0] })
+  const enr = rows[0]
   if (!enr) throw new Error('нет записи на курс — узел не создал назначение')
   const tree = await enrollmentTree(ctx(userId), enr.id as string)
   const lessonId = tree!.modules[0]!.lessons[0]!.id
@@ -49,7 +79,7 @@ async function passCourse(userId: string, courseId: string) {
   await readThrough(admin, enr.id as string, lessonId)
   const r = await completeLesson(ctx(userId), enr.id as string, lessonId)
   expect(r.ok).toBe(true)
-  await new Promise(r => setTimeout(r, 250)) // хук траектории — вне транзакции
+  await waitFor(until) // хук траектории — вне транзакции; ждём его результат опросом, а не паузой
 }
 async function makeQuiz() {
   const q = (await createQuestion(ctx(), { bankId, kind: 'single', stem: [{ id: 'b', type: 'text', html: '<p>?</p>' }], options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], answer: { correctId: 'a' }, isCritical: false, difficulty: 1, points: 1, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [] })).id
@@ -59,13 +89,13 @@ async function makeQuiz() {
   await admin`update quizzes set status = 'published' where id = ${quiz.id}`
   return quiz.id
 }
-async function takeQuiz(userId: string, quizId: string, correct: boolean) {
+async function takeQuiz(userId: string, quizId: string, correct: boolean, until: () => Promise<boolean>) {
   const s = await startAttempt(ctx(userId), quizId)
   if (!s.ok) throw new Error(s.code)
   const st = await getAttemptState(ctx(userId), s.attemptId)
   await saveAnswer(ctx(userId), s.attemptId, st!.questions[0]!.id, { optionId: correct ? 'a' : 'b' })
   await submitAttempt(ctx(userId), s.attemptId)
-  await new Promise(r => setTimeout(r, 250))
+  await waitFor(until) // хук траектории — вне транзакции (submitAttempt, аналогично passCourse)
 }
 
 type N = Parameters<typeof tr.putGraph>[2]['nodes'][number]
@@ -177,13 +207,13 @@ describe('движок прохождения', () => {
     expect(asg.every(a => a.kind === 'trajectory')).toBe(true)
     expect(asg.find(a => a.subject_id === c1)!.due_days).toBe(5) // правила — из узла
     expect((await admin`select count(*)::int as c from enrollments where user_id = ${u} and subject_id in (${c1}, ${c2})`)[0]!.c).toBe(2)
-    await passCourse(u, c1)
+    await passCourse(u, c1, async () => (await stateOf(e, t.ids.get('and')!))?.status === 'available')
     expect((await stateOf(e, t.ids.get('and')!))!.status).toBe('available') // ждёт второй вход
     expect((await stateOf(e, t.ids.get('c')!))!.status).toBe('locked')
-    await passCourse(u, c2)
+    await passCourse(u, c2, async () => (await stateOf(e, t.ids.get('and')!))?.status === 'done')
     expect((await stateOf(e, t.ids.get('and')!))!.status).toBe('done')
     expect((await stateOf(e, t.ids.get('c')!))!.status).toBe('available')
-    await passCourse(u, c3)
+    await passCourse(u, c3, async () => (await enrOf(e)).status === 'done')
     expect(await enrOf(e)).toMatchObject({ status: 'done' })
     expect(Number((await enrOf(e)).progress_pct)).toBe(100)
     expect((await admin`select count(*)::int as c from notifications where user_id = ${u} and code = 'trajectory_finished'`)[0]!.c).toBe(1)
@@ -197,7 +227,7 @@ describe('движок прохождения', () => {
       [edge('start', 'a'), edge('start', 'b'), edge('a', 'or'), edge('b', 'or'), edge('or', 'c'), edge('c', 'finish')])
     const u = await makePerson('Один із двох')
     const e = await enroll(t.id, u)
-    await passCourse(u, c2)
+    await passCourse(u, c2, async () => (await stateOf(e, t.ids.get('or')!))?.status === 'done')
     expect((await stateOf(e, t.ids.get('or')!))!.status).toBe('done')
     expect((await stateOf(e, t.ids.get('c')!))!.status).toBe('available')
     const my = (await tr.myTrajectory(ctx(u), e))!
@@ -229,7 +259,9 @@ describe('движок прохождения', () => {
       [edge('start', 'a'), edge('a', 'sd'), edge('sd', 'b'), edge('b', 'finish')])
     const u = await makePerson('Не встиг')
     const e = await enroll(t.id, u)
-    await passCourse(u, c1)
+    // Ждём не только смены статуса узла «b», а фактического появления записи на курс c2 —
+    // иначе fireTimer ниже может застать её ещё не раскрытой и не отменить (флейк, см. PR).
+    await passCourse(u, c1, async () => (await stateOf(e, t.ids.get('b')!))?.status === 'available' && await hasCourseEnrollment(u, c2))
     expect((await stateOf(e, t.ids.get('sd')!))!.status).toBe('done') // пропустил сразу
     expect((await stateOf(e, t.ids.get('b')!))!.status).toBe('available') // курс выдан
     const [st] = await admin`select id from trajectory_node_states where enrollment_id = ${e} and node_id = ${t.ids.get('sd')!}`
@@ -241,7 +273,10 @@ describe('движок прохождения', () => {
     // Выполненный вовремя блок закрытие не трогает
     const u2 = await makePerson('Встиг')
     const e2 = await enroll(t.id, u2)
-    await passCourse(u2, c1); await passCourse(u2, c2)
+    // Ждём не только «курс принят», а фактическое применение хука траектории — иначе fireTimer ниже
+    // может застать узел «b» ещё «available» и ошибочно закрыть доступ (флейк, см. PR).
+    await passCourse(u2, c1, async () => (await stateOf(e2, t.ids.get('b')!))?.status === 'available' && await hasCourseEnrollment(u2, c2))
+    await passCourse(u2, c2, async () => (await enrOf(e2)).status === 'done')
     const [st2] = await admin`select id from trajectory_node_states where enrollment_id = ${e2} and node_id = ${t.ids.get('sd')!}`
     await tr.fireTimer(tenantId, st2!.id as string)
     expect((await enrOf(e2)).status).toBe('done')
@@ -254,11 +289,11 @@ describe('движок прохождения', () => {
       [edge('start', 'q'), edge('q', 'br'), edge('br', 'n', { op: 'passed' }), edge('br', 'x', { op: 'else' }), edge('x', 'n'), edge('n', 'finish')])
     const loser = await makePerson('Провалив'), winner = await makePerson('Здав')
     const eL = await enroll(t.id, loser), eW = await enroll(t.id, winner)
-    await takeQuiz(loser, quiz, false)
+    await takeQuiz(loser, quiz, false, async () => (await stateOf(eL, t.ids.get('q')!))?.status === 'failed')
     expect(await stateOf(eL, t.ids.get('q')!)).toMatchObject({ status: 'failed', passed: false })
     expect((await stateOf(eL, t.ids.get('x')!))!.status).toBe('available')
     expect((await stateOf(eL, t.ids.get('n')!))!.status).toBe('locked') // «далі» закрыт, откроется после доп. курса
-    await takeQuiz(winner, quiz, true)
+    await takeQuiz(winner, quiz, true, async () => (await stateOf(eW, t.ids.get('n')!))?.status === 'available')
     expect((await stateOf(eW, t.ids.get('n')!))!.status).toBe('available')
     expect(await stateOf(eW, t.ids.get('x')!)).toMatchObject({ status: 'skipped', reason: 'branch_not_taken' })
     const my = (await tr.myTrajectory(ctx(winner), eW))!
@@ -353,7 +388,7 @@ describe('assign_mode, правило с измерениями, preview/usages,
     expect((await runRules(tenantId, 'user.placement_changed', cook)).find(x => x.ruleId === rule.id)!.status).toBe('skipped:conditions')
 
     // Завершил → повторно под правило → нет нового назначения
-    await passCourse(u, c1)
+    await passCourse(u, c1, async () => (await enrOf(e!.id as string)).status === 'done')
     expect((await enrOf(e!.id as string)).status).toBe('done')
     const r2 = await runRules(tenantId, 'user.placement_changed', u)
     expect(r2.find(x => x.ruleId === rule.id)!.actions).toEqual([expect.objectContaining({ type: 'assign_trajectory', skipped: 'finished_no_reassign' })])

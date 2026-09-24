@@ -34,6 +34,22 @@ const stamp = Date.now()
 const ctx = (actorId = adminId) => ({ tenantId, actorId })
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const hours = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString()
+/**
+ * Опрос условия вместо фиксированной паузы. Хуки программы/траектории идут вне транзакции
+ * completeLesson — fire-and-forget `import('./trajectories').then(...)` / `import('./programs').then(...)`
+ * (server/services/learning.ts:817–818), без await со стороны вызывающего. Время их применения не
+ * гарантировано: под нагрузкой (несколько файлов тестов параллельно, медленная машина) фиксированная
+ * пауза иногда заканчивалась раньше, чем хук успевал дописать `pass_events` — флейк D-045
+ * («started» вместо «completed»). Теперь ждём факт, а не время.
+ */
+async function waitFor(cond: () => Promise<boolean>, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await cond()) return
+    if (Date.now() >= deadline) throw new Error(`тайм-аут ожидания (${timeoutMs}ms) — хук курса не успел обновить состояние`)
+    await sleep(20)
+  }
+}
 
 async function makePerson(name: string, pos = posId) {
   const phone = `+38077${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
@@ -51,8 +67,13 @@ async function makeCourse(title: string) {
   await publishCourse(ctx(), c.id, 'v1')
   return c.id
 }
-async function passCourse(userId: string, courseId: string) {
-  const [enr] = await admin`select id from enrollments where user_id = ${userId} and subject_id = ${courseId} and cancelled_at is null order by created_at desc limit 1`
+async function passCourse(userId: string, courseId: string, until: () => Promise<boolean>) {
+  const findEnrollment = () => admin`select id from enrollments where user_id = ${userId} and subject_id = ${courseId} and cancelled_at is null order by created_at desc limit 1`
+  // Запись о зачислении раскрывается вне транзакции хука узла (applyEffects/expandAssignment,
+  // server/services/trajectories.ts:614–668) — на случай, если её ещё нет, ждём опросом.
+  let rows = await findEnrollment()
+  if (!rows[0]) await waitFor(async () => { rows = await findEnrollment(); return !!rows[0] })
+  const enr = rows[0]
   if (!enr) throw new Error('нет записи на курс')
   const tree = await enrollmentTree(ctx(userId), enr.id as string)
   const lessonId = tree!.modules[0]!.lessons[0]!.id
@@ -60,7 +81,7 @@ async function passCourse(userId: string, courseId: string) {
   await readThrough(admin, enr.id as string, lessonId)
   const r = await completeLesson(ctx(userId), enr.id as string, lessonId)
   expect(r.ok).toBe(true)
-  await sleep(300) // хуки программы и траектории — вне транзакции
+  await waitFor(until) // хук программы/траектории — вне транзакции; ждём его результат опросом
 }
 async function makeNotice(title: string) {
   const n = await nt.createNotice(ctx(), { title: `${title} ${stamp}`, body: [{ id: 'b', type: 'text' as const, html: '<p>Ознайомтесь.</p>' }], kind: 'acknowledge', publish: true })
@@ -139,7 +160,9 @@ describe('D-027: узел-объявление траектории проход
     // Узел создал назначение объявления → человек в аудитории и может подтвердить
     const ack = await nt.acknowledge(ctx(u), noticeId)
     expect(ack.ok).toBe(true)
-    await sleep(400)
+    // acknowledge() тоже дёргает хук траектории fire-and-forget (notices.ts:201) — та же гонка,
+    // что и в D-045 ниже; чиним тем же способом, раз уж всё равно правим этот файл.
+    await waitFor(async () => (await stateOf(e, t.ids.get('n')!))?.status === 'done')
     expect(await stateOf(e, t.ids.get('n')!)).toMatchObject({ status: 'done', passed: true })
     expect((await stateOf(e, t.ids.get('c')!))!.status).toBe('available')
     // Повторное подтверждение идемпотентно и хук не дублирует
@@ -163,7 +186,7 @@ describe('D-045: протокол статусов программ и трае�
     const u = await makePerson('Журнальний')
     const e = await enroll(t.id, u)
     expect(await events(e)).toEqual([{ event: 'created', to: 'not_started' }, { event: 'started', to: 'in_progress' }])
-    await passCourse(u, courseId)
+    await passCourse(u, courseId, async () => (await events(e)).at(-1)?.event === 'completed')
     expect((await events(e)).at(-1)).toEqual({ event: 'completed', to: 'done' })
 
     const w = await makePerson('Знятий')
@@ -194,7 +217,7 @@ describe('D-045: протокол статусов программ и трае�
     expect(await events(enr.enrollmentId)).toEqual([{ event: 'created', to: 'not_started' }])
     expect((await pg.openNode(ctx(u), enr.enrollmentId, node.id)).ok).toBe(true)
     expect((await events(enr.enrollmentId)).at(-1)).toEqual({ event: 'started', to: 'in_progress' })
-    await passCourse(u, courseId)
+    await passCourse(u, courseId, async () => (await events(enr.enrollmentId)).at(-1)?.event === 'completed')
     expect((await events(enr.enrollmentId)).at(-1)).toEqual({ event: 'completed', to: 'done' })
     const log = await readLog(ctx(), 'task-status', { userId: u, contentType: 'training_program' })
     expect(log.map(r => r.event)).toEqual(['completed', 'started', 'created'])

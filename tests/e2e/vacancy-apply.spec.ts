@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import postgres from 'postgres'
+import { VACANCY_NONCE_MIN_SEC } from '../../shared/enums'
 import { ADMIN_PHONE, api, apiLogin, resetOtp } from './helpers'
 
 /**
@@ -10,6 +11,12 @@ import { ADMIN_PHONE, api, apiLogin, resetOtp } from './helpers'
  * объявление, заполняет форму, подтверждает номер кодом и видит, что отклик принят. Ширина
  * окна — 320 px: кандидат приходит с телефона и второго устройства чаще всего не имеет
  * (сквозная проверка 24).
+ *
+ * Сценарий ведёт себя **как человек и по времени**: форма отправляется не раньше
+ * `VACANCY_NONCE_MIN_SEC` после выдачи `form_nonce`. Быстрее отправляет только скрипт — такой
+ * отклик по §7.6 получает `fast_submit` и уходит на модерацию, а не в кандидаты (к. 3; его
+ * проверяет `tests/integration/v2-vacancy-apply.spec.ts`). Ответ формы при этом тот же
+ * «Ваш відгук прийнято» (§7.3), так что без паузы тест падал только на выборке `users`.
  */
 
 const TITLE = 'E2E Вакансія публічна'
@@ -66,7 +73,12 @@ test('16. Публічний контур: відгук без входу — ф
 
   // Телефон: кандидат приходит с него, и это не «ещё один размер экрана», а основной.
   await page.setViewportSize({ width: 320, height: 720 })
+  // Ответ этой ручки несёт подписанный `form_nonce`: от момента его выдачи сервер отсчитывает
+  // время заполнения формы (§7.6).
+  const issued = page.waitForResponse(r => r.url().includes(`/public/j/${token}`) && r.request().method() === 'GET')
   await page.goto(`/j/${token}`)
+  await issued
+  const formIssuedAt = Date.now()
 
   // §13 к. 2: объявление видно, вилка показана (salary_visible), внутренних имён нет.
   await expect(page.getByRole('heading', { name: TITLE })).toBeVisible()
@@ -82,6 +94,10 @@ test('16. Публічний контур: відгук без входу — ф
   await page.getByLabel('Ім’я та прізвище').fill('Оксана Відгукнулась')
   await page.getByLabel('Телефон').fill(PHONE)
   await page.getByText(/Я даю згоду на обробку/).click()
+  // Живой человек не заполняет форму быстрее минимума §7.6 — выжидаем остаток (с запасом на
+  // округление секунд на сервере), иначе это сценарий к. 3, а не к. 7.
+  const humanPause = VACANCY_NONCE_MIN_SEC * 1000 + 500 - (Date.now() - formIssuedAt)
+  if (humanPause > 0) await page.waitForTimeout(humanPause)
   const applied = page.waitForResponse(r => r.url().includes('/apply') && r.request().method() === 'POST')
   await page.getByRole('button', { name: 'Надіслати відгук' }).click()
   const body = await (await applied).json() as { data: { devCode?: string } }
@@ -93,8 +109,14 @@ test('16. Публічний контур: відгук без входу — ф
   await page.getByRole('button', { name: 'Підтвердити' }).click()
   await expect(page.getByText(/Ваш відгук прийнято/)).toBeVisible()
 
-  // §13 к. 7: кандидат создан, источник — публичная ссылка, назначение ровно одно.
+  // §13 к. 7: отклик стал кандидатом. Сначала — сам отклик: если он осел на модерации, его
+  // `spam_reasons` объясняют падение, а пустая выборка людей — нет.
+  const [application] = await admin`select state, spam_reasons from vacancy_applications where vacancy_id = ${vacancy.id}`
+  expect(application?.state, `отклик не стал кандидатом: ${JSON.stringify(application)}`).toBe('accepted')
+
+  // Кандидат создан, источник — публичная ссылка, назначение ровно одно.
   const [person] = await admin`select id, kind, source, vacancy_id from users where phone = ${PHONE}`
+  expect(person, 'кандидат с номером из формы не найден').toBeTruthy()
   expect(person!.kind).toBe('candidate')
   expect(person!.source).toBe('vacancy_link')
   expect(person!.vacancy_id).toBe(vacancy.id)

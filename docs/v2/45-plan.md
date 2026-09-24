@@ -607,9 +607,10 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 
 #### PR-21 · `v2-time-21` · Учёт времени биениями
 
-- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0077_v2_learning_time.sql`.
+- **Модель:** opus. **Оценка:** 3 сессии. **М:** `0078_v2_learning_time.sql`.
   > [исправлено, фактическая нумерация при rebase] Ранее: «`0072_v2_learning_time.sql`»:
-  > к моменту rebase в `main` были `0072`–`0076` (PR-15, PR-10, PR-16, PR-30 и геймификация #114).
+  > к моменту rebase в `main` были `0072`–`0076` (PR-15, PR-10, PR-16, PR-30 и геймификация #114),
+  > а `0077` — PR-24 (#117, `0077_v2_content_routing`), смерженный перед этим PR.
 - **Входит:** `learning_time_sessions`, `learning_time_totals`; биения вместо разницы
   «открыл — закрыл», запись пачками, агрегат фоном; `alter lesson_progress` +
   `content_seconds`, `discarded_seconds`, `sessions_count`; `alter attempts` + `net_seconds`,
@@ -619,7 +620,7 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 - **Условия выхода:** сквозная проверка 22 (`42` §5) зелёная; нагрузочная проверка на 200
   одновременных прохождениях входит в приёмку.
 - **Приёмка:** `37` §13 критерии 7, 8, 9, 10.
-- **Сделано** (24.09, ветка `v2-time-21`): миграция `0077_v2_learning_time` (две таблицы,
+- **Сделано** (24.09, ветка `v2-time-21`): миграция `0078_v2_learning_time` (две таблицы,
   четыре `alter`, скоуп `time.metrics.view` наставнику и руководителю), правила в
   `shared/domain/learningTime.ts`, групповая запись биений и три ручки `/learning/time/*` в
   `server/services/learningTime.ts`, свёртка `time.rollup` и `time.close_stale_sessions`

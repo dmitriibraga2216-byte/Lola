@@ -1412,7 +1412,7 @@ create unique index uq_review_queue_items_source on review_queue_items (tenant_i
 фоновая задача `time.rollup` — горячий путь биения их не трогает.
 
 ```sql
--- Миграция 0077_v2_learning_time. Пишет только server/services/learningTime*.ts.
+-- Миграция 0078_v2_learning_time. Пишет только server/services/learningTime*.ts.
 create table learning_time_sessions (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),

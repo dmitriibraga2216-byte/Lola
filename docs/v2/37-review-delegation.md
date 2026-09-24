@@ -269,7 +269,7 @@ create index idx_learning_time_totals_tenant on learning_time_totals (tenant_id,
 `credited_seconds` — зачтённое время сегмента (потолок 5400 с = 90 мин, §7.11); `discarded_seconds` — выброшенный простой и непринятая офлайн-догрузка; `closed_reason` — одна из семи причин закрытия (§4).
 
 > [исправлено, PR-21: DDL не давал выполнить §10, §12 и §7.11 — решение Р-21.1 в `46-progress.md`]
-> Ранее: DDL §3.6 без перечисленного ниже. Миграция `0077_v2_learning_time` добавляет к
+> Ранее: DDL §3.6 без перечисленного ниже. Миграция `0078_v2_learning_time` добавляет к
 > `learning_time_sessions` общие `created_at`/`updated_at` (`docs/02`, преамбула; по
 > `updated_at` свёртка находит изменившиеся пары), `last_seq` и `last_credit` —
 > идемпотентность по `(session_key, seq)` (§10, §12): уникальность `(session_key, segment_no)`

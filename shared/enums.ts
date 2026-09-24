@@ -420,6 +420,77 @@ export const VACANCY_APPLY_CAP_MAX = 5000
 export const VACANCY_REOPEN_DAYS = 90
 
 /**
+ * Состояние отклика (`vacancy_applications.state`, docs/v2/29 §3.9, §4).
+ *
+ * Отклик — **отдельная сущность, а не сразу кандидат** (§3.9 [решение]): подозрительный
+ * отклик надо уметь придержать, не засоряя воронку и не занимая место в оплачиваемой оси
+ * `candidates_active`. `pending` — ждёт подтверждения контакта кодом; `pending_review` —
+ * сработала хотя бы одна проверка §7.6–§7.7, решение за человеком; `accepted` — кандидат
+ * создан; `merged` — человек уже есть в тенанте (§7.20, §12.6), второго профиля не будет;
+ * `expired` — код не введён за сутки, место в лимите не занято (§13 к. 6).
+ */
+export const VACANCY_APPLICATION_STATES = ['pending', 'pending_review', 'accepted', 'merged', 'rejected', 'spam', 'expired'] as const
+export type VacancyApplicationState = typeof VACANCY_APPLICATION_STATES[number]
+
+/**
+ * Исход обращения к публичному контуру (`public_apply_attempts.outcome`, `29` §3.9, §7.4).
+ * Журнал попыток нужен ровно затем, чтобы **блокировка была доказуема**: ответ публичной
+ * формы одинаков при успехе и при отказе (§7.3), и без этой строки «почему не приняли»
+ * не восстановить ни рекрутеру, ни поддержке.
+ */
+export const PUBLIC_APPLY_OUTCOMES = ['view', 'submit_ok', 'submit_blocked', 'otp_sent', 'otp_failed'] as const
+export type PublicApplyOutcome = typeof PUBLIC_APPLY_OUTCOMES[number]
+
+/**
+ * Частотные пороги публичного контура (`29` §7.4) — **вместо внешней капчи** (§7.5
+ * [решение]: капча отдаёт поведение посетителей третьей стороне на странице, где собираются
+ * ПД). Единицы: откликов с одного `ip_hash` за час и за сутки на тенант, откликов на одну
+ * вакансию с одного `ip_hash` за сутки, просмотров публичной страницы за десять минут.
+ */
+export const VACANCY_APPLY_LIMITS = {
+  ipHour: 3,
+  ipDay: 10,
+  perVacancyDay: 1,
+  viewPer10Min: 30,
+} as const
+
+/** Слагаемые `spam_score` (`29` §7.7). Чёрного списка контактов в продукте нет — см. `publicApply.ts`. */
+export const VACANCY_APPLY_SPAM_SCORES = {
+  honeypot: 60,
+  fastSubmit: 40,
+  nonceReplay: 100,
+  commentLinks: 30,
+  consonantName: 20,
+  ipMarkedSpam: 50,
+} as const
+
+/** Порог ручной модерации и порог немого отсева (`29` §7.7). */
+export const VACANCY_APPLY_REVIEW_SCORE = 50
+export const VACANCY_APPLY_SPAM_SCORE = 100
+
+/** Окно жизни подписанного `form_nonce` (`29` §6.3, §7.6): раньше 4 с — бот, позже часа — протух. */
+export const VACANCY_NONCE_MIN_SEC = 4
+export const VACANCY_NONCE_TTL_SEC = 3600
+
+/** Подтверждение контакта кодом (`29` §7.5): 10 минут жизни, сутки на ввод, 3 отправки в час. */
+export const VACANCY_APPLY_OTP_TTL_SEC = 600
+export const VACANCY_APPLY_OTP_SENDS_PER_HOUR = 3
+export const VACANCY_APPLY_EXPIRE_HOURS = 24
+
+/**
+ * Версия текста согласия на обработку ПД, записываемая в `vacancy_applications`
+ * и далее в карточку человека (`29` §7.23).
+ *
+ * [гипотеза] §7.23 говорит «сам текст версионируется в настройках тенанта», но ни экрана,
+ * ни колонки под редактируемый текст согласия в продукте нет. [решение] Версия зафиксирована
+ * константой продукта: смысл колонки — «по какой редакции текста человек дал согласие», и
+ * выдуманная колонка настроек не сделала бы её честнее. Когда текст станет редактируемым
+ * (`docs/32`), константа сменится на значение из настроек — колонка уже на месте, и
+ * переписывать выданные согласия не придётся.
+ */
+export const PUBLIC_CONSENT_TEXT_VERSION = 'consent-2026-09'
+
+/**
  * Вид работы в очереди проверки (`review_queue_items.task_type`, docs/v2/37 §3.1,
  * решение docs/v2/44 В-2). Он же «Тип завдання» — колонка, фильтр и таб экрана «Черга
  * перевірки» (`37` §5.1).
@@ -580,4 +651,6 @@ export const ENUMS: Record<string, readonly string[]> = {
   vacancy_language_level: VACANCY_LANGUAGE_LEVELS,
   vacancy_criterion_origin: VACANCY_CRITERION_ORIGINS,
   vacancy_close_reason: VACANCY_CLOSE_REASONS,
+  vacancy_application_state: VACANCY_APPLICATION_STATES,
+  public_apply_outcome: PUBLIC_APPLY_OUTCOMES,
 }

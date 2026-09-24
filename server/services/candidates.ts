@@ -433,6 +433,22 @@ export type CreateResult =
  * согласия нельзя принимать из тела запроса, иначе срок стирания назначает себе сам клиент.
  */
 export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Promise<CreateResult> {
+  const blocked = await precheckCandidate(ctx, input)
+  if (blocked) return blocked
+  return withTenant(ctx.tenantId, ctx.actorId, tx => createCandidateTx(tx, ctx, input))
+}
+
+/**
+ * Проверки **до** транзакции: контакт, человек уже работает (§12.1), дубликат без
+ * подтверждения (§7.2), лимит тарифа (§7.1). Возвращает отказ или `null`, если путь открыт.
+ *
+ * Вынесено отдельно, потому что у создания кандидата два входа — форма рекрутера и отклик
+ * по публичной ссылке (§7.20, PR-16), — и второй обязан идти **одной транзакцией** вместе
+ * с назначением. Обе проверки, которые ходят мимо транзакции тенанта (`findDuplicates`
+ * своим `withTenant`, лимит — подключением платформы), поэтому стоят перед ней, а не внутри:
+ * вложенная транзакция другого подключения всё равно не откатилась бы вместе с внешней.
+ */
+export async function precheckCandidate(ctx: Ctx, input: { phone?: string | null, email?: string | null, confirmDuplicate?: boolean }): Promise<Exclude<CreateResult, { ok: true }> | null> {
   const phone = input.phone?.trim() || null
   const email = input.email?.trim() || null
   if (!phone && !email) return { ok: false, code: 'contact_required' }
@@ -450,15 +466,34 @@ export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Pr
   const { checkPlanLimit } = await import('./platform')
   const limit = await checkPlanLimit(ctx.tenantId, 'candidates')
   if (!limit.ok) return { ok: false, code: 'limit_exceeded', limit: limit.limit, current: limit.current }
+  return null
+}
 
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+/**
+ * Тело создания кандидата в **уже открытой** транзакции тенанта. Единственная точка, где
+ * появляется строка `users` с `kind = 'candidate'`; проверки перед ней — `precheckCandidate()`.
+ *
+ * `opts.consentGivenAt` — единственное отступление от правила «дату согласия ставит сервер»:
+ * отклик по публичной ссылке уже записал момент галочки в `vacancy_applications`
+ * (`29` §7.23), и подставлять сюда время транзакции найма нельзя — срок стирания ПД
+ * отсчитывался бы не от реального согласия. Значение приходит из строки БД, а не из тела
+ * запроса: в `candidateCreateSchema` такого поля нет и не появится.
+ */
+export async function createCandidateTx(tx: TenantTx, ctx: Ctx, input: CandidateCreateInput, opts: { consentGivenAt?: Date, automatic?: boolean } = {}): Promise<CreateResult> {
+  const phone = input.phone?.trim() || null
+  const email = input.email?.trim() || null
+  {
     const status = input.statusId
       ? (await tx.select().from(candidateStatuses).where(eq(candidateStatuses.id, input.statusId)))[0]
       : (await tx.select().from(candidateStatuses).where(eq(candidateStatuses.code, 'new')))[0]
     if (!status) return { ok: false, code: 'status_not_found' } as CreateResult
 
     const parts = splitName({ lastName: input.lastName, firstName: input.firstName, middleName: input.middleName ?? null })
-    const expires = new Date()
+    // Срок стирания ПД считается **от момента согласия**, а не от момента записи (§7.9,
+    // `29` §7.23): у отклика по ссылке между галочкой и транзакцией проходят сутки ожидания
+    // кода, и отсчёт от найма молча продлил бы хранение данных человека.
+    const consentGivenAt = opts.consentGivenAt ?? new Date()
+    const expires = new Date(consentGivenAt)
     expires.setUTCMonth(expires.getUTCMonth() + CANDIDATE_CONSENT_MONTHS)
 
     const [person] = await tx.insert(users).values({
@@ -480,7 +515,7 @@ export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Pr
       accessUntil: input.accessUntil ?? null,
       commLanguage: input.commLanguage,
       resumeAssetId: input.resumeAssetId ?? null,
-      consentGivenAt: new Date(),
+      consentGivenAt,
       consentExpiresAt: expires.toISOString().slice(0, 10),
     }).returning({ id: users.id })
 
@@ -490,7 +525,7 @@ export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Pr
       fromStatusId: null,
       toStatusId: status.id,
       actorId: ctx.actorId,
-      isAutomatic: false,
+      isAutomatic: opts.automatic ?? false,
       requestContext: currentRequestContext(),
     })
 
@@ -500,12 +535,12 @@ export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Pr
       action: 'candidate.create',
       entity: 'user',
       entityId: person!.id,
-      after: { fullName: parts.fullName, source: input.source ?? 'manual', statusCode: status.code },
+      after: { fullName: parts.fullName, source: input.source ?? 'manual', statusCode: status.code, automatic: opts.automatic ?? false },
     })
 
     const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, person!.id)) as unknown as CandidateRow[]
     return { ok: true, candidate: row! } as CreateResult
-  })
+  }
 }
 
 export type UpdateResult =

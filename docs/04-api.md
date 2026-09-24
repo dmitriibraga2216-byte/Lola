@@ -512,8 +512,22 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | POST | `/vacancy-templates/from-vacancy/:id` | «Зберегти шаблон» из формы: без точки и рекрутера, вместе с критериями и языками |
 | POST | `/vacancies/from-template/:tid` | вакансия-черновик из шаблона: точка и рекрутер приходят телом (`vacancy.edit`) |
 
-Публичный контур отклика (`/public/j/:token` и его производные), AI-генерация текста и
-критериев, площадки и журнал публикаций — PR-16 и PR-17 плана `docs/v2/45-plan.md`.
+| GET | `/vacancies/:id/applications` | отклики вакансии, фильтр `state` (`vacancy.view`); вкладка «На модерації» — это `state=pending_review` |
+| POST | `/vacancies/:id/applications/:aid/accept` | принять придержанный отклик вручную (`candidate.edit`): создаётся кандидат и назначение; `409 limit.candidates_exceeded`, `409 application.wrong_state` |
+| POST | `/vacancies/:id/applications/:aid/reject` | отказ с причиной (`candidate.edit`); `422 validation_failed` |
+| POST | `/vacancies/:id/applications/:aid/spam` | пометка «спам» (`candidate.edit`): человеку ничего не уходит |
+
+**Публичный контур вакансии** (`29` §10, решение `docs/v2/44` В-9) — префикс `/api/v1/public/*`,
+без сессии, тенант из токена ссылки, правило контура — `docs/27-gateway-public.md` §27.8.1.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/public/j/:token` | публичная страница вакансии и `formNonce`; вилка — только при `salary_visible`, курса, рекрутера и внутренних идентификаторов в ответе нет. `404 vacancy.not_found` (чужой и несуществующий токен неразличимы, время выровнено), `410 vacancy.paused`, `429 rate.too_many` |
+| POST | `/public/j/:token/apply` | отклик: `{fullName, phone?, email?, comment?, consent, formNonce, website, s?}`. **`202` при любом исходе проверок §7.6–§7.7** — форма не сообщает отправителю, какая сработала; `422 consent.required` и `422 form.stale` — единственные исключения, оба про человека, а не про спам |
+| POST | `/public/j/:token/apply/:aid/confirm` | подтверждение контакта кодом: `200 {status:"accepted"}`; `400 otp.invalid`, `429 otp.too_many`, `410 application.expired` |
+
+AI-генерация текста и критериев, площадки и журнал публикаций — PR-17 плана
+`docs/v2/45-plan.md`. Приём резюме из публичного контура — там же (`29` §6.3, пометка PR-16).
 
 ### Жалоба на материал (`docs/v2/36-content-feedback.md` §10, PR-23)
 

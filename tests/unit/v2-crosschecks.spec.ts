@@ -161,4 +161,49 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('[ok]   6.')
   })
+  /**
+   * Сквозная проверка 16 (`docs/v2/42` §5, решение В-9 п. 2): главный риск публичного
+   * контура. Три фикстуры: обработчик, сам лезущий в БД; обработчик без частотного
+   * ограничения; и правильный обработчик — тонкий и с `hitRateLimit`.
+   */
+  it('8. обработчик публичного контура обращается к БД сам', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/api/v1/public/j'), { recursive: true })
+    writeFileSync(join(dir, 'server/api/v1/public/j/bad.get.ts'), `
+      import { db } from '../../../../db/client'
+      import { hitRateLimit } from '../../../../services/rateLimit'
+      export default defineEventHandler(async () => { await hitRateLimit('k', 1, 1); return db.select() })
+    `)
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('8. публичный контур')
+  })
+
+  it('8. обработчик публичного контура без hitRateLimit', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/api/v1/public/j'), { recursive: true })
+    writeFileSync(join(dir, 'server/api/v1/public/j/bad.get.ts'), `
+      import { publicVacancy } from '../../../../services/publicApply'
+      export default defineEventHandler(async () => publicVacancy('t', { ip: '1' }))
+    `)
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('8. публичный контур')
+  })
+
+  it('8. тонкий обработчик с частотным ограничением нарушением не считается', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/api/v1/public/j'), { recursive: true })
+    writeFileSync(join(dir, 'server/api/v1/public/j/ok.get.ts'), `
+      import { publicVacancy } from '../../../../services/publicApply'
+      import { hitRateLimit } from '../../../../services/rateLimit'
+      export default defineEventHandler(async () => {
+        if (!await hitRateLimit('k', 30, 600)) return null
+        return publicVacancy('t', { ip: '1' })
+      })
+    `)
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   8.')
+  })
 })

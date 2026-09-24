@@ -4,7 +4,7 @@ import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
 import { users } from './people'
 import { locations, orgUnits, positions } from './org'
-import { courseCategories, courseVersions, courses } from './content'
+import { courseCategories, courseVersions, courses, mediaAssets } from './content'
 
 /**
  * Вакансии (docs/v2/29-vacancies.md §3, миграции 0071_v2_vacancies, 0072_v2_users_vacancy_fk).
@@ -97,6 +97,13 @@ export const vacancies = pgTable('vacancies', {
   assignmentTemplate: jsonb('assignment_template').notNull().default(sql`'{}'::jsonb`),
   publicToken: text('public_token'),
   publicEnabled: boolean('public_enabled').notNull().default(false),
+  /**
+   * Язык публичной страницы и писем откликнувшемуся (`29` §7.20 «`comm_language` = язык
+   * публичной страницы»). `null` — язык пространства (`tenants.locale`). Колонки в `29`
+   * §3.1 не было: язык администратора, открывшего форму, к посетителю отношения не имеет,
+   * а §7.20 требует назвать язык явно — см. пометку-исправление в `29` §3.1.
+   */
+  publicLanguage: text('public_language'),
   publicApplyOtp: boolean('public_apply_otp').notNull().default(true),
   applyDailyCap: integer('apply_daily_cap').notNull().default(200),
   sourceBudget: numeric('source_budget', { precision: 12, scale: 2 }),
@@ -121,6 +128,7 @@ export const vacancies = pgTable('vacancies', {
   check('vacancies_salary_chk', sql`${t.salaryFrom} is null or ${t.salaryTo} is null or ${t.salaryFrom} <= ${t.salaryTo}`),
   check('vacancies_title_chk', sql`length(${t.title}) between 3 and 200`),
   check('vacancies_cap_chk', sql`${t.applyDailyCap} between 10 and 5000`),
+  check('vacancies_public_language_chk', sql`${t.publicLanguage} is null or ${t.publicLanguage} in ('uk', 'en', 'ru')`),
   check('vacancies_public_chk', sql`not ${t.publicEnabled} or (${t.courseId} is not null and ${t.locationId} is not null and ${t.publicToken} is not null)`),
 ])
 
@@ -184,4 +192,80 @@ export const vacancyCriterionScores = pgTable('vacancy_criterion_scores', {
 }, t => [
   unique('vacancy_criterion_scores_unique').on(t.tenantId, t.candidateId, t.criterionId, t.authorId),
   index('idx_vacancy_criterion_scores_tenant').on(t.tenantId, t.candidateId),
+])
+
+/**
+ * Отклик по публичной ссылке (`29` §3.9, миграция `0074_v2_vacancy_apply`).
+ *
+ * **Отклик — не кандидат.** Сырые данные из публичного интернета не попадают в `users` без
+ * единой точки проверки: подозрительный отклик придерживается в `pending_review`, не
+ * засоряет воронку и не занимает место в оплачиваемой оси `candidates_active` (§3.9
+ * [решение]). Конверсия — одна транзакция §7.20, и её единственный вход —
+ * `server/services/publicApply.ts`.
+ *
+ * `ip_hash` — HMAC-SHA256 от адреса с посолью тенанта: сырой IP не хранится нигде, а
+ * сравнивать «тот же ли это адрес» частотные правила §7.4 всё равно умеют.
+ *
+ * Персональные данные живут по тому же правилу, что у кандидата: `consent_given_at`
+ * переносится в `users` без изменения, а стирание идёт единственным механизмом
+ * `candidate.consent_sweep` (PR-14) — второго срока хранения здесь не заводится.
+ */
+export const vacancyApplications = pgTable('vacancy_applications', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  vacancyId: uuid('vacancy_id').notNull().references(() => vacancies.id, { onDelete: 'cascade' }),
+  /** Одно из `VACANCY_APPLICATION_STATES`. */
+  state: text('state').notNull().default('pending'),
+  fullName: text('full_name').notNull(),
+  phone: text('phone'),
+  email: text('email'),
+  comment: text('comment'),
+  resumeAssetId: uuid('resume_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
+  /** Одно из `CANDIDATE_SOURCES`: `vacancy_link` без метки площадки, `job_board` с ней (§7.19). */
+  source: text('source').notNull().default('vacancy_link'),
+  sourceDetail: text('source_detail'),
+  utm: jsonb('utm').notNull().default(sql`'{}'::jsonb`),
+  /** Момент согласия **из формы**, а не из транзакции найма: от него считается срок стирания ПД (§7.23). */
+  consentGivenAt: timestamp('consent_given_at', { withTimezone: true }).notNull(),
+  consentTextVersion: text('consent_text_version').notNull(),
+  candidateId: uuid('candidate_id').references(() => users.id, { onDelete: 'set null' }),
+  spamScore: integer('spam_score').notNull().default(0),
+  spamReasons: text('spam_reasons').array().notNull().default(sql`'{}'::text[]`),
+  ipHash: text('ip_hash').notNull(),
+  userAgentHash: text('user_agent_hash'),
+  formNonce: text('form_nonce').notNull(),
+  fillSeconds: integer('fill_seconds'),
+  otpConfirmedAt: timestamp('otp_confirmed_at', { withTimezone: true }),
+  reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  rejectReason: text('reject_reason'),
+}, t => [
+  index('idx_vacancy_applications_tenant').on(t.tenantId, t.vacancyId, t.state, t.createdAt.desc()),
+  index('idx_vacancy_applications_ip').on(t.tenantId, t.ipHash, t.createdAt.desc()),
+  check('vacancy_applications_state_chk', sql`${t.state} in ('pending', 'pending_review', 'accepted', 'merged', 'rejected', 'spam', 'expired')`),
+  check('vacancy_applications_contact_chk', sql`${t.phone} is not null or ${t.email} is not null`),
+  check('vacancy_applications_name_chk', sql`length(${t.fullName}) between 2 and 120`),
+])
+
+/**
+ * Журнал обращений к публичной форме (`29` §3.9, §7.4).
+ *
+ * Пишется **и на отказ, и на успех**: ответ формы одинаков в обоих случаях (§7.3 — форма
+ * никогда не сообщает боту, какая проверка сработала), поэтому единственное место, где
+ * видно «почему не приняли», — эта строка. Она же кормит всплеск §7.8 и отчёт §9.1.
+ * Строки старше 30 дней убирает `vacancy.attempts_gc` (§11).
+ */
+export const publicApplyAttempts = pgTable('public_apply_attempts', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  vacancyId: uuid('vacancy_id').references(() => vacancies.id, { onDelete: 'cascade' }),
+  ipHash: text('ip_hash').notNull(),
+  /** Одно из `PUBLIC_APPLY_OUTCOMES`. */
+  outcome: text('outcome').notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  index('idx_public_apply_attempts_tenant').on(t.tenantId, t.ipHash, t.createdAt.desc()),
+  index('idx_public_apply_attempts_vacancy').on(t.tenantId, t.vacancyId, t.createdAt.desc()),
+  check('public_apply_attempts_outcome_chk', sql`${t.outcome} in ('view', 'submit_ok', 'submit_blocked', 'otp_sent', 'otp_failed')`),
 ])

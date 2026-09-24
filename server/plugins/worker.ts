@@ -3,6 +3,7 @@ import { timedJob } from '../utils/metrics'
 import { processMedia, type MediaProcessJob } from '../jobs/mediaProcess'
 import { dueScanTenant } from '../jobs/dueScanTenant'
 import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs/candidateScan'
+import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
 import { expandAssignment, syncAssignments } from '../services/assignments'
@@ -91,6 +92,16 @@ export default defineNitroPlugin(async () => {
     await work('candidate.consent_sweep', () => runPerTenant('candidate.consent_sweep', async (tenantId) => {
       const s = await candidateConsentSweepTenant(tenantId)
       if (s.erased || s.warned || s.stale) console.log(`[candidate.consent_sweep] ${tenantId}:`, s)
+    }, recruitingTenantIds))
+    // docs/v2/29 §11 (PR-16): публичный контур вакансии. Круг — тенанты с включённым
+    // рекрутингом: у остальных вакансий нет вовсе, и проход по ним — пустая работа.
+    await work('vacancy.application_expire', () => runPerTenant('vacancy.application_expire', async (tenantId) => {
+      const n = await vacancyApplicationExpireTenant(tenantId)
+      if (n) console.log(`[vacancy.application_expire] ${tenantId}: прострочено ${n}`)
+    }, recruitingTenantIds))
+    await work('vacancy.attempts_gc', () => runPerTenant('vacancy.attempts_gc', async (tenantId) => {
+      const n = await vacancyAttemptsGcTenant(tenantId)
+      if (n) console.log(`[vacancy.attempts_gc] ${tenantId}: прибрано ${n}`)
     }, recruitingTenantIds))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {

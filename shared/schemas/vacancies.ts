@@ -89,6 +89,13 @@ const vacancyFields = {
   salaryVisible: z.boolean().default(false),
   assignmentTemplate: vacancyAssignmentTemplateSchema.optional(),
   publicApplyOtp: z.boolean().default(true),
+  /**
+   * Язык публичной страницы и писем откликнувшемуся (`29` §7.20, PR-16). `null` — язык
+   * пространства. Это **не** язык требований к кандидату (`languages` ниже) и не язык
+   * администратора: набор ведёт компания, и её объявление не должно переводиться от
+   * настроек браузера посетителя.
+   */
+  publicLanguage: z.enum(['uk', 'en', 'ru']).nullable().optional(),
   applyDailyCap: z.number().int().min(10).max(5000).default(200),
   sourceBudget: z.number().min(0).max(9_999_999_999).nullable().optional(),
   languages: z.array(vacancyLanguageSchema).max(10).optional(),

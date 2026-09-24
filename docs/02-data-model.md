@@ -430,6 +430,45 @@ create table vacancy_criterion_scores (       -- балл одного авто�
 -- Свёртка баллов — одна строка candidate_scores с kind='recruiter', source_type='vacancy_criteria':
 -- каждый балл нормируется к 0–10 как (value − min)/(max − min) × 10, итог — Σ(норм × weight)/Σ(weight).
 
+create table vacancy_applications (           -- отклик по публичной ссылке (`v2/29` §3.9, миграция 0074)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid not null references vacancies(id) on delete cascade,
+  state text not null default 'pending',      -- vacancy_application_state
+  full_name text not null,                    -- 2–120
+  phone text, email text, comment text,       -- телефон ИЛИ почта обязательны
+  resume_asset_id uuid references media_assets(id) on delete set null,
+  source text not null default 'vacancy_link', -- candidate_source: метка площадки даёт job_board
+  source_detail text, utm jsonb not null default '{}'::jsonb,
+  consent_given_at timestamptz not null,      -- момент ИЗ ФОРМЫ: от него считается срок стирания ПД
+  consent_text_version text not null,
+  candidate_id uuid references users(id) on delete set null,
+  spam_score int not null default 0,          -- слагаемые `v2/29` §7.7
+  spam_reasons text[] not null default '{}',
+  ip_hash text not null,                      -- HMAC-SHA256 адреса с посолью тенанта; сырой IP не хранится
+  user_agent_hash text, form_nonce text not null, fill_seconds int,
+  otp_confirmed_at timestamptz,
+  reviewed_by uuid references users(id) on delete set null,
+  reviewed_at timestamptz, reject_reason text,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+
+create table public_apply_attempts (          -- журнал обращений к публичной форме (`v2/29` §7.4)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid references vacancies(id) on delete cascade,
+  ip_hash text not null,
+  outcome text not null,                      -- public_apply_outcome
+  reason text,                                -- причина блокировки: ip_hour, ip_day, daily_cap…
+  created_at timestamptz not null default now()
+);
+-- Ответ публичной формы одинаков при успехе и при отказе (`v2/29` §7.3), поэтому «почему не
+-- приняли» видно только здесь. Строки старше 30 дней убирает задача vacancy.attempts_gc.
+
+-- Язык публичной страницы вакансии — колонка vacancies.public_language (`v2/29` §7.20,
+-- миграция 0074), null = язык пространства: язык администратора, открывшего форму, к
+-- посетителю отношения не имеет, а §7.20 требует записать откликнувшемуся comm_language.
+
 -- Развязка цикла «кандидаты ↔ вакансии» (`v2/44` В-13, миграция 0071): колонка users.vacancy_id
 -- и её ключ users_vacancy_id_fk (on delete set null) заводятся ОТДЕЛЬНОЙ миграцией после
 -- vacancies — порядка создания таблиц, снимающего цикл, не существует. Плюс частичный индекс
@@ -2028,6 +2067,16 @@ vacancy_criterion_origin: manual | ai | template
 -- выведен из причин отказа кандидату (`v2/28` §6.2) и колонки отчёта §9.2 — свободная
 -- строка в отчёте не группируется (`docs/28-implementation-notes.md` §28.17)
 vacancy_close_reason: filled | no_need | budget | postponed | other
+
+-- Состояние отклика по публичной ссылке (`vacancy_applications.state`, `v2/29` §3.9).
+-- Отклик — отдельная сущность, а не сразу кандидат: подозрительный придерживается
+-- (pending_review) и не занимает места в оплачиваемой оси candidates_active; merged —
+-- человек уже есть в тенанте, второго профиля не будет; expired — код не введён за сутки
+vacancy_application_state: pending | pending_review | accepted | merged | rejected | spam | expired
+
+-- Исход обращения к публичной форме (`public_apply_attempts.outcome`, `v2/29` §7.4):
+-- журнал нужен затем, что ответ формы одинаков при успехе и при отказе (§7.3)
+public_apply_outcome: view | submit_ok | submit_blocked | otp_sent | otp_failed
 ```
 
 ## Что проверяет тест схемы

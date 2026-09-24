@@ -56,6 +56,12 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // 35. Оплата, смена тарифа, экраны (PR-10, миграция 0073_v2_billing_payments)
   'tenant_payments',
   'plan_change_requests',
+  // 29. Публичный контур и отклик (PR-16, миграция 0074_v2_vacancy_apply). Обе таблицы
+  // тенантные, несмотря на то что пишутся **без сессии**: тенант выводится из токена ссылки
+  // (`vacancy_public_lookup`), и дальше запись идёт внутри `withTenant()` — политика RLS
+  // здесь не формальность, а единственное, что отделяет отклики разных пространств.
+  'vacancy_applications',
+  'public_apply_attempts',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

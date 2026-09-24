@@ -48,7 +48,15 @@ export default defineEventHandler(async (event) => {
   })
   if (r.ok) {
     setResponseStatus(event, 202)
-    return apiData({ applicationId: r.applicationId, otpRequired: r.otpRequired, channel: r.channel })
+    return apiData({
+      applicationId: r.applicationId,
+      otpRequired: r.otpRequired,
+      channel: r.channel,
+      // Только dev и CI (`OTP_DEBUG=1`): в проде переменной нет, и поля в ответе тоже.
+      // Тем же способом отдаёт код вход по телефону (`/auth/otp/request`) — иначе ни один
+      // сценарий с подтверждением контакта не проверить автотестом.
+      ...(r.devCode ? { devCode: r.devCode } : {}),
+    })
   }
   switch (r.code) {
     case 'nonce_stale':

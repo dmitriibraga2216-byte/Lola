@@ -207,6 +207,11 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   storage_pending_upload_done: 'Ваш файл до завдання «{{task}}» відправлено',
   storage_pending_upload_expired: 'Файл до завдання «{{task}}» не вдалося відправити за 14 днів. Робота залишається зарахованою',
   storage_bulk_delete_done: 'Видалено {{n}} файлів, звільнено {{size}}. Пропущено: {{skipped}}',
+  // docs/v2/29 §8 (PR-17): публікація і генерація тексту. Шаблони цих кодів уже завела PR-37
+  // (нижче, разом з рештою «недостающих кодів пакета») — реалізація PR-17 шле саме їх, з
+  // полем `platform` у payload (а не `provider`), щоб не заводити другий, дублюючий набір.
+  // `vacancy.ai_quota` з документа сюди свідомо не входить — рішення В-16 зводить його до
+  // звичайного `limit_exceeded` з `axis=ai_generate_ops` (той самий код, що вже шле `billing.limit_scan`).
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',

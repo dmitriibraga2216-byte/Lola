@@ -657,7 +657,8 @@ draft ──archive──→ archived
 
 > [исправлено, PR-17] Три поправки к таблице выше, по прецеденту PR-14 (`docs/v2/28` §8: «точка
 > в коде уведомления означала бы второе соглашение об именах рядом с полусотней существующих
-> кодов»):
+> кодов») и PR-37 (`v2-notify-37`, влилась в `main` раньше этой ветки и завела шаблоны шести
+> кодов ниже тем же именованием — эта ветка переиспользует их текст, а не заводит второй):
 > 1. **Коды — `snake_case`, не через точку**: `vacancy_application_review`, `vacancy_spam_burst`,
 >    `vacancy_published_external`, `vacancy_publication_failed`, `vacancy_account_revoked`,
 >    `vacancy_closed_with_candidates` (плюс уже сданные PR-16 `vacancy_applied_welcome`,
@@ -667,9 +668,9 @@ draft ──archive──→ archived
 >    `ai_ops_exhausted` — один `limit_exceeded` с `axis=ai_generate_ops`». Уведомление админу
 >    уже шлёт `billing.limit_scan` (PR-09) для любой исчерпанной оси, включая эту, — второй код
 >    о том же факте только дал бы второе письмо.
-> 3. **`vacancy.publication_expiring` и `vacancy.subscriber_reopened` не реализованы** — их
->    фоновые задачи (`vacancy.publication_expiry`, подписка на странице 410) вне объёма PR-17,
->    см. `docs/v2/46-progress.md`, запись PR-17, «Что осталось».
+> 3. **`vacancy.publication_expiring` и `vacancy.subscriber_reopened` заведены только шаблоном**
+>    (текст уже добавлен PR-37) — их фоновые задачи (`vacancy.publication_expiry`, подписка на
+>    странице 410) вне объёма PR-17, см. `docs/v2/46-progress.md`, запись PR-17, «Что осталось».
 > `vacancy.apply_otp` — не отдельный код: контакт подтверждается тем же `otp_code`
 > (`server/services/otpChannel.ts`), что и вход в систему (PR-16, `otp.ts#issueContactCode()`).
 

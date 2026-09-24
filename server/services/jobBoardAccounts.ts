@@ -198,7 +198,8 @@ export async function revokeAccount(tenantId: string, accountId: string): Promis
     for (const userId of recipients) {
       await enqueueNotification(tx, {
         tenantId, userId, code: 'vacancy_account_revoked',
-        payload: { provider: row.provider },
+        // Ключ `platform` — шаблон уже завела PR-37 (`notifications.ts` DEFAULT_TEMPLATES).
+        payload: { platform: row.provider },
         // dedupKey несёт userId — иначе второй получатель в цикле молча теряет уведомление.
         dedupKey: `vacancy_account_revoked:${accountId}:${day}:${userId}`,
       }).catch(() => false)

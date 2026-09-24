@@ -204,7 +204,8 @@ export async function attemptPublish(tenantId: string, publicationId: string): P
       })
       await enqueueNotification(tx, {
         tenantId, userId: pub.requestedBy, code: 'vacancy_published_external',
-        payload: { vacancy: vac.title, provider: account.provider },
+        // Ключ `platform` — шаблон уже завела PR-37 (`notifications.ts` DEFAULT_TEMPLATES).
+        payload: { vacancy: vac.title, platform: account.provider },
         dedupKey: `vacancy_published_external:${publicationId}`,
       }).catch(() => false)
     })
@@ -232,7 +233,7 @@ export async function attemptPublish(tenantId: string, publicationId: string): P
     for (const userId of recipients) {
       await enqueueNotification(tx, {
         tenantId, userId, code: 'vacancy_publication_failed',
-        payload: { vacancy: vac.title, provider: account.provider, error: result.error },
+        payload: { vacancy: vac.title, platform: account.provider, error: result.error },
         // dedupKey несёт userId — цикл на несколько адресатов, ключ обязан быть per-user
         // (иначе второй получатель молча теряет уведомление, найдено при тестировании PR-17).
         dedupKey: `vacancy_publication_failed:${publicationId}:${day}:${userId}`,

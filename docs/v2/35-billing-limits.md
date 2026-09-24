@@ -160,10 +160,17 @@ create table usage_events (    -- журнал расхода, хранение 
   occurred_at timestamptz not null default now());
 create index usage_events_axis_idx on usage_events (tenant_id, axis, occurred_at desc);
 
+> [исправлено фазой 3, реализовано PR-10 — миграция `0073_v2_billing_payments.sql`] Ранее:
+> `plan_id uuid references plans(id)` в `tenant_payments`, `from_plan_id`/`to_plan_id uuid
+> references plans(id)` в `plan_change_requests`. Фактически `plans` не имеет колонки `id`
+> (PK по `code`, В-5) — то же исправление, что уже внесено выше для `plan_prices` и для
+> `tenant_usage.plan_code` (`45` PR-08, PR-09): обе таблицы ссылаются на `plan_code`(s) text.
+
 create table tenant_payments (
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id) on delete cascade,
   kind text not null check (kind in ('subscription','addon','adjustment')),
-  plan_id uuid references plans(id), addon_code text, billing_period text, period_from date, period_to date,
+  plan_code text references plans(code), addon_code text references plan_addons(code), billing_period text,
+  period_from date, period_to date,
   amount_minor bigint not null, currency char(3) not null default 'EUR', paid_at timestamptz,
   status text not null default 'pending' check (status in ('pending','paid','failed','refunded','written_off')),
   method text check (method in ('bank_transfer','card','manual')), invoice_number text, invoice_media_id uuid,
@@ -172,7 +179,7 @@ create index tenant_payments_recent_idx on tenant_payments (tenant_id, created_a
 
 create table plan_change_requests (   -- blockers: [{axis,current,new_limit,excess}]
   id uuid primary key default gen_random_uuid(), tenant_id uuid not null references tenants(id) on delete cascade,
-  from_plan_id uuid references plans(id), to_plan_id uuid not null references plans(id), billing_period text not null,
+  from_plan_code text references plans(code), to_plan_code text not null references plans(code), billing_period text not null,
   status text not null default 'preflight' check (status in ('preflight','blocked','scheduled','applied','cancelled')),
   blockers jsonb not null default '[]'::jsonb, effective_at date, requested_by uuid, decided_by uuid,
   decided_at timestamptz, created_at timestamptz not null default now());
@@ -219,6 +226,17 @@ RLS** по правилу `25` §3.2 (`enable` + `force` + политика `ten
 
 ## 5. Экраны
 
+> [уточнено, реализовано PR-10] Путь экранов — `/admin/settings/billing` и
+> `/admin/settings/billing/history`, а не `/settings/billing*`: все тенантные экраны настроек
+> этого репозитория живут под `/admin/settings/*` (тот же префикс, что уже занял
+> `/admin/settings/usage`, PR-09) — отдельного пространства путей `/settings/*` в кодовой базе
+> нет. «Продовжити тариф», «Змінити тариф», «Продовжити ШІ», «Докупити пакет ШІ-операцій» на
+> `5.1` в этом PR не отправляют форму: самообслуживание (preflight/blocked, `/billing/plan-change*`,
+> экран `§5.2`) не входит в «Входит» плана PR-10 (`45-plan.md`) и не встречается в других PR —
+> кнопки показывают подсказку обратиться к менеджеру, который принимает платёж вручную
+> (`POST /platform/tenants/:id/payments`). Полноценный self-service — отдельный PR, см.
+> `docs/v2/46-progress.md`, запись «Фаза 3, PR-10».
+
 **5.1 `/settings/billing` — «Тариф і ліміти»** (owner, admin). «Поточний тариф»: название плана, «Вартість на
 місяць», «Період оплати» («Помісячно» / «Річно»), «Доступ оплачено до: DD.MM.YYYY · Залишилось N днів», кнопки
 «Продовжити тариф» и «Змінити тариф»; у `admin` цена скрыта. «Використання» — строка на ось в формате эталона:
@@ -237,8 +255,18 @@ RLS** по правилу `25` §3.2 (`enable` + `force` + политика `ten
 текущий тариф — метка «Підключено»; тир ниже текущего с превышением — кнопка неактивна, кораллом «Перевищено:
 Співробітників 42 із 25».
 
+> [решение, PR-10] Этот экран не построен в PR-10: он часть самообслуживания владельца
+> (preflight/blocked, `/billing/plan-change*`), которого нет в «Входит» плана. Таблица
+> `plan_change_requests` заведена и используется прямой сменой тарифа оператором (§7.10,
+> `/platform/tenants/:id/plan-change`) — статус сразу `applied`, без предпросмотра превышений.
+
 **5.3 `/settings/billing/history`** (owner): «Дата», «Призначення», «Період», «Сума», «Статус», «Рахунок»
 (файл); фильтры период, тип, статус; пусто — «Платежів ще не було».
+
+> [уточнено, PR-10] Колонка «Рахунок» показывает номер счёта текстом (`invoice_number`), а не
+> ссылку на файл: приём платежа в этом PR не имеет формы загрузки — `invoice_media_id` заведён
+> в схеме, но никто его не заполняет. Прикрепление файла счёта — вместе с формой загрузки в
+> будущем PR.
 
 **5.4 `/settings/storage`** (admin, owner), снято с эталона: «Використовується: X Гб / Y Гб», разбивка по
 категориям треков, кнопка «Збільшити сховище», фильтры «Категорія» и «Вибрати період», таблица «Файл»,
@@ -254,6 +282,15 @@ RLS** по правилу `25` §3.2 (`enable` + `force` + политика `ten
 плана / переопределение / факт», кнопки «Змінити тариф», «Переозначити ліміт», «Продовжити доступ», «Продовжити
 ШІ», «Видати пакет операцій», «Відзначити платіж»; каждое действие требует комментарий 10–500 знаков и пишется в
 `platform_audit` (`25` §7.5).
+
+> [уточнено, реализовано PR-10] Панель оператора не отдельная страница `/platform/tenants/:id/billing`
+> — она диалоги над существующей таблицей тенантов `/ops` (мокап PlatformTenants, `docs/24` §4.1):
+> «Ліміти» (уже была, PR-08/09), «Тариф і оплата» (новый диалог — статус подписки, історія
+> платежів, форма «Записати платіж»), и підтвердження зміни тарифу через випадаючий список
+> плану в тій самій таблиці. «Продовжити доступ» і «Продовжити ШІ» отдельных кнопок не имеют —
+> это тот же `kind='subscription'` платёж (продлевает `paid_until`) и переопределение `ai_until`
+> через существующий `/limits`; «Видати пакет операцій» — существующий `grantTenantAddon`
+> (PR-08), диалог для него в этом PR не добавлен, вызывается тем же механизмом покупки аддона.
 
 ## 6. Формы
 
@@ -473,7 +510,17 @@ downgrade, ошибка «Підтвердьте, що ознайомились 
 | GET/POST | `/billing/notices`, `/notices/:id/dismiss` | активные записи; закрытие → `dismissed_until` | `409` при `level=exceeded` |
 | GET/PUT | `/platform/plans/:id` | тарифная сетка и цены | только `platform_admin` |
 | GET/PUT | `/platform/tenants/:id/limits` | `{overrides, reason}` | `422` без причины |
-| POST | `/platform/tenants/:id/extend` \| `/ai` \| `/payments` | `{paid_until\|ai_until, ops_grant, reason}`, платёж вручную | `422` без причины |
+| POST | `/platform/tenants/:id/payments` | `{kind, planCode?, addonCode?, qty?, billingPeriod?, amountMinor, currency, method?, invoiceNumber?, status?, comment}` | `422` без причины / без валидной опции |
+| POST | `/platform/tenants/:id/plan-change` | `{toPlanCode, billingPeriod, comment}` — прямая смена, без preflight (§7.10) | `422` без причины / без такого тарифа |
+
+> [реализовано PR-10] Строка `/platform/tenants/:id/extend | /ai | /payments` документа —
+> три задачи одной ручкой. Реализована только `/payments` (продление тарифа — оплата
+> `kind='subscription'` через неё же, §7.8 п. 6); отдельных `/extend` и `/ai` не завёл: продление
+> `paid_until`/`ai_until` без платежа уже покрыто существующим `/platform/tenants/:id/limits`
+> (PUT принимает `paidUntil`/`aiUntil` наравне с прочими переопределениями — доработка вне
+> схемы `tenantLimitsSchema` не потребовалась). `/billing/plan-change*`, `/billing/plans`,
+> `/billing/addons`, `/platform/plans/:id` — самообслуживание владельца и каталог, не входят
+> в «Входит» плана PR-10, см. пометки у §5.1–5.2.
 
 Мутации идемпотентны по `Idempotency-Key`. Отказ по жёсткому лимиту в **любом** эндпоинте системы возвращает
 единый вид `{error:{code:"limit_exceeded", message:"Ліміт вичерпано", details:{axis, used, limit}}}` со статусом

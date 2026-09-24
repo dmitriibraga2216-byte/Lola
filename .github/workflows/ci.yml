@@ -64,7 +64,18 @@ jobs:
       # MinIO для тестов S3 (PDF сертификата, медиа): у образа quay нет команды по умолчанию, поэтому не через services
       - name: MinIO
         run: |
-          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          # quay.io периодически отдаёт анонимным клиентам 401 (24.09.2026 — все ветки разом);
+          # тот же образ лежит на docker.io, поэтому тянем с запасным адресом, а не падаем.
+          tag=RELEASE.2024-12-18T13-15-44Z
+          image=""
+          for src in quay.io/minio/minio docker.io/minio/minio; do
+            for attempt in 1 2 3; do
+              if docker pull "$src:$tag"; then image="$src:$tag"; break 2; fi
+              sleep $((attempt * 5))
+            done
+          done
+          test -n "$image" || { echo "::error::не удалось получить образ MinIO ни с quay.io, ни с docker.io"; exit 1; }
+          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin "$image" server /data
           for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
 
       # Mailpit для тестов почты (OTP на e-mail, SMTP тенанта): порт 1025, как в docker/docker-compose.yml
@@ -152,7 +163,18 @@ jobs:
 
       - name: MinIO
         run: |
-          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z server /data
+          # quay.io периодически отдаёт анонимным клиентам 401 (24.09.2026 — все ветки разом);
+          # тот же образ лежит на docker.io, поэтому тянем с запасным адресом, а не падаем.
+          tag=RELEASE.2024-12-18T13-15-44Z
+          image=""
+          for src in quay.io/minio/minio docker.io/minio/minio; do
+            for attempt in 1 2 3; do
+              if docker pull "$src:$tag"; then image="$src:$tag"; break 2; fi
+              sleep $((attempt * 5))
+            done
+          done
+          test -n "$image" || { echo "::error::не удалось получить образ MinIO ни с quay.io, ни с docker.io"; exit 1; }
+          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin "$image" server /data
           for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
 
       - name: Migrate + сид

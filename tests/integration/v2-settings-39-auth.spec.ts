@@ -61,6 +61,7 @@ async function cleanup() {
   const ids = (await admin`select id from users where phone in ${admin(PHONES)}`).map(r => r.id as string)
   if (ids.length) {
     await admin`delete from rate_limits where key like any(${ids.map(id => `2fa:%${id}`)})`
+    await admin`delete from user_notes where user_id in ${admin(ids)} or author_id in ${admin(ids)}`
     await admin`delete from user_totp_recovery_codes where user_id in ${admin(ids)}`
     await admin`delete from user_totp where user_id in ${admin(ids)}`
     await admin`delete from sessions where user_id in ${admin(ids)}`
@@ -365,6 +366,8 @@ describe('политика «двухфакторность для админо�
   it('сброс администратором: не себе; другому — фактор снят, сессии закрыты, two_factor.reset (critical)', async () => {
     expect(await TF.resetByAdmin({ tenantId, actorId: adminA }, adminA)).toEqual({ ok: false, code: 'self' })
     expect(await TF.resetByAdmin({ tenantId, actorId: adminA }, '00000000-0000-0000-0000-000000000000')).toEqual({ ok: false, code: 'not_found' })
+    expect(await TF.resetByAdmin({ tenantId, actorId: adminA }, 'не-uuid')).toEqual({ ok: false, code: 'not_found' })
+    expect(await TF.resetByPlatform('не-uuid', adminB, 'Помилковий шлях, перевірка', { adminId: 'ops', email: 'ops@lola.local' })).toEqual({ ok: false, code: 'not_found' })
     const live = await createSession({ tenantId, userId: adminB, loginMethod: 'otp_sms' })
     expect(await TF.resetByAdmin({ tenantId, actorId: adminA }, adminB)).toEqual({ ok: true })
     expect(await validateSession(live.token)).toBeNull()
@@ -443,6 +446,26 @@ describe('Bearer: флаг sessionOnly на скоупе (docs/v2/44 В-20)', ()
       const err = await thrown(async () => requirePlatform(e as never))
       expect(err?.statusCode, path).toBe(401)
     }
+  })
+
+  it('заметки о людях по Bearer закрыты целиком: и чужие (скоуп вычеркнут), и «свои открытые» создателя токена', async () => {
+    const { listPersonNotes, noteViewerOf } = await import('../../server/services/personNotes')
+    await admin`insert into user_notes (tenant_id, user_id, author_id, body, visibility) values (${tenantId}, ${adminA}, ${adminB}, 'PR-39: відкрита людині нотатка', 'shared_with_person')`
+    // Человек в своей сессии свою открытую заметку видит (docs/v2/38 §7.4)
+    const person = { userId: adminA, tenantId, grants: [], activeRole: null, roles: [] }
+    const own = await listPersonNotes({ tenantId, actorId: adminA }, await noteViewerOf(person), adminA)
+    expect(own.ok && own.items.length).toBe(1)
+    // Токен, выпущенный этим человеком, — нет: заметки о людях только в сессии (В-20)
+    const raw = `lola_pr39n_${Date.now()}`
+    const { createHash } = await import('node:crypto')
+    await admin`insert into api_tokens (tenant_id, name, token_hash, prefix, scopes, created_by)
+      values (${tenantId}, 'PR-39 нотатки', ${createHash('sha256').update(raw).digest('hex')}, ${raw.slice(0, 12)}, ${['people.view', 'person.note.read']}, ${adminA})`
+    const e = ev(`/api/v1/people/${adminA}/notes`, { bearer: raw })
+    await sessionMiddleware(e)
+    const viaToken = (await getAccess(e as never))!
+    expect(viaToken.viaToken).toBe(true)
+    expect(await listPersonNotes({ tenantId, actorId: adminA }, await noteViewerOf(viaToken), adminA)).toEqual({ ok: false, code: 'forbidden' })
+    expect(await listPersonNotes({ tenantId, actorId: adminA }, await noteViewerOf(viaToken), adminB)).toEqual({ ok: false, code: 'forbidden' })
   })
 
   it('ручки второго фактора по Bearer не открываются: у токена нет человека за экраном', async () => {

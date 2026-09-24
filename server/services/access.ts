@@ -33,6 +33,12 @@ export interface Access {
   activeRole: RoleRef | null
   /** Все действующие роли — для переключателя и аудита */
   roles: RoleRef[]
+  /**
+   * Доступ API-токена интеграции (Bearer), а не сессии человека (docs/v2/44 В-20). Права
+   * токена — его скоупы без `sessionOnly`; «право по данным» без скоупа (свои заметки,
+   * docs/v2/38 §7.4) — право человека, и токену, выпущенному этим человеком, оно не переходит.
+   */
+  viaToken?: true
 }
 
 export async function loadAccess(auth: AuthContext): Promise<Access | null> {
@@ -97,7 +103,7 @@ export async function getAccess(event: H3Event): Promise<Access | null> {
     // (docs/v2/44 В-20) вычёркиваются — второй рубеж для токенов, выданных до появления флага:
     // `requireScope` на такой скоуп отвечает 403 `forbidden` независимо от содержимого токена.
     // Список не путей, а прав: разграничение Bearer живёт здесь и в реестре скоупов, больше нигде.
-    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes.filter(s => !isSessionOnlyScope(s)), scopeType: 'tenant', scopeId: null }], activeRole: null, roles: [] }
+    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes.filter(s => !isSessionOnlyScope(s)), scopeType: 'tenant', scopeId: null }], activeRole: null, roles: [], viaToken: true }
   }
   else {
     access = await loadAccess(auth)

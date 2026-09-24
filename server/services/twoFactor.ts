@@ -39,6 +39,8 @@ interface Ctx { tenantId: string, actorId: string }
 
 type Factor = typeof userTotp.$inferSelect
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const FAIL_KEY = (userId: string) => `2fa:fail:${userId}`
 const BLOCK_KEY = (userId: string) => `2fa:block:${userId}`
 
@@ -395,6 +397,7 @@ async function resetTx(tx: TenantTx, userId: string): Promise<'not_found' | 'not
  * своим кодом (`disableOwn`), иначе администраторская сессия была бы способом обойти проверку.
  */
 export async function resetByAdmin(ctx: Ctx, userId: string): Promise<ResetResult> {
+  if (!UUID_RE.test(userId)) return { ok: false, code: 'not_found' }
   if (userId === ctx.actorId) return { ok: false, code: 'self' }
   const r = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const err = await resetTx(tx, userId)
@@ -415,6 +418,8 @@ export async function resetByAdmin(ctx: Ctx, userId: string): Promise<ResetResul
  * журнал платформы. Идёт через `withTenant()` тенанта, а не ролью BYPASSRLS.
  */
 export async function resetByPlatform(tenantId: string, userId: string, reason: string, operator: { adminId: string, email: string }): Promise<Exclude<ResetResult, { code: 'self' }>> {
+  // Идентификаторы — из пути оператора: не-uuid в `app.tenant_id` уронил бы политику RLS кастом
+  if (!UUID_RE.test(tenantId) || !UUID_RE.test(userId)) return { ok: false, code: 'not_found' }
   const r = await withTenant(tenantId, null, tx => resetTx(tx, userId))
   if (r) return { ok: false, code: r }
   await logSecurity({ tenantId, userId, event: 'two_factor.reset', meta: { by: 'platform', operator: operator.email, reason } })

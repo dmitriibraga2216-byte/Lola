@@ -54,6 +54,11 @@ export interface NoteViewer {
   write: Area
   /** Надзор: чужая заметка, архив по ссылке, заметка уволенного автора. */
   admin: boolean
+  /**
+   * Смотрит токен интеграции, а не человек (PR-39, docs/v2/44 В-20): заметки о людях —
+   * `sessionOnly`, и «свои открытые заметки без скоупа» (§7.4) токену создателя не достаются.
+   */
+  viaToken?: boolean
 }
 
 export async function noteViewerOf(access: Access): Promise<NoteViewer> {
@@ -62,6 +67,7 @@ export async function noteViewerOf(access: Access): Promise<NoteViewer> {
     read: await areaOf(access, 'person.note.read'),
     write: await areaOf(access, 'person.note.write'),
     admin: hasTenantGrant(access, 'person.note.write') && hasTenantGrant(access, 'audit.view'),
+    viaToken: access.viaToken === true,
   }
 }
 
@@ -71,6 +77,7 @@ type ReaderKind = 'subject' | 'tenant' | 'area' | 'author_only' | 'none'
 
 /** Как смотрящий видит заметки этого человека (§7.4). */
 function readerKind(v: NoteViewer, s: Subject): ReaderKind {
+  if (v.viaToken) return 'none' // заметки о людях — только в сессии человека (docs/v2/44 В-20)
   if (v.userId === s.id) return 'subject'
   if (v.read === 'none') return 'none'
   if (v.read === 'tenant') return 'tenant'

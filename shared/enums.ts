@@ -732,6 +732,42 @@ export type PointsEvent = typeof POINTS_EVENTS[number]
 export const SHOP_ORDER_STATUSES = ['reserved', 'ready', 'issued', 'cancelled'] as const
 export type ShopOrderStatus = typeof SHOP_ORDER_STATUSES[number]
 
+/**
+ * Библиотека переиспользуемых модулей (`v2/31` §3, §4; PR-25 плана `docs/v2/45`).
+ *
+ * Тип модуля своего перечня не имеет (`31` §7.7, Р-31.5): `library_modules.content_kind` —
+ * это `RESOURCE_KINDS` из `shared/schemas/resources.ts`, потому что тело модуля и есть
+ * материал (`31` §3.1 в редакции PR-25). Здесь — только то, чего у материала не бывает.
+ */
+
+/** Статус карточки модуля (`31` §4): из `archived` назад в `draft` дороги нет — у модуля уже есть версии. */
+export const LIBRARY_MODULE_STATUSES = ['draft', 'published', 'archived'] as const
+export type LibraryModuleStatus = typeof LIBRARY_MODULE_STATUSES[number]
+
+/** Статус версии (`31` §4): `retired` — ни одно активное место её не закрепляет; тело-снимок остаётся. */
+export const LIBRARY_VERSION_STATUSES = ['published', 'retired'] as const
+export type LibraryVersionStatus = typeof LIBRARY_VERSION_STATUSES[number]
+
+/** Кто держит ссылку на версию (`31` §3.4): узел графа траектории или урок курса. */
+export const LIBRARY_HOLDER_TYPES = ['trajectory_node', 'course_lesson'] as const
+export type LibraryHolderType = typeof LIBRARY_HOLDER_TYPES[number]
+
+/** Контейнер места использования (`31` §3.4) — строка «Трек/Курс» экрана «Де використовується». */
+export const LIBRARY_CONTAINER_TYPES = ['trajectory', 'course'] as const
+export type LibraryContainerType = typeof LIBRARY_CONTAINER_TYPES[number]
+
+/**
+ * Режим закрепления версии (`31` §3.4, §7.2, §7.4). Версия закреплена **всегда**; режим
+ * отвечает только на вопрос, доезжает ли «Критичне виправлення» само. По умолчанию —
+ * `hotfix_auto` (Р-31.4 и критерий приёмки 6; DDL `31` §3.6 исправлен PR-25).
+ */
+export const LIBRARY_PIN_MODES = ['fixed', 'hotfix_auto'] as const
+export type LibraryPinMode = typeof LIBRARY_PIN_MODES[number]
+
+/** Предложение урока в библиотеку (`31` §3.5, §4): все три исхода конечные. */
+export const LIBRARY_PROPOSAL_STATUSES = ['pending', 'accepted', 'rejected', 'withdrawn'] as const
+export type LibraryProposalStatus = typeof LIBRARY_PROPOSAL_STATUSES[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -808,4 +844,10 @@ export const ENUMS: Record<string, readonly string[]> = {
   points_currency: POINTS_CURRENCIES,
   points_event: POINTS_EVENTS,
   shop_order_status: SHOP_ORDER_STATUSES,
+  library_module_status: LIBRARY_MODULE_STATUSES,
+  library_version_status: LIBRARY_VERSION_STATUSES,
+  library_holder_type: LIBRARY_HOLDER_TYPES,
+  library_container_type: LIBRARY_CONTAINER_TYPES,
+  library_pin_mode: LIBRARY_PIN_MODES,
+  library_proposal_status: LIBRARY_PROPOSAL_STATUSES,
 }

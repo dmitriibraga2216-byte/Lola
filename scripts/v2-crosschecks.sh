@@ -64,7 +64,7 @@ check1_stage_codes() {
   # модуль появился в базовом ТЗ задолго до пакета docs/v2 и переименовывать его не входит
   # в план (docs/v2/45-plan.md ничего об этом не говорит).
   local allow=(
-    "server/db/schema/content.ts:104" # строка сдвинулась на 1 в v2 PR-11/12 (импорт enrollments в схеме media_assets), ещё на 1 в PR-24 (course_categories.owner_id)
+    "server/db/schema/content.ts:105" # сдвиги: +1 в v2 PR-11/12 (импорт enrollments в схеме media_assets), +1 в PR-24 (course_categories.owner_id), +1 в PR-25 (импорт схемы библиотеки)
     "server/api/v1/access-groups/index.get.ts:7"
     # Номера сдвинулись дважды: fix-keyset-cursor (+2, импорт keyset) и PR-30 (+1 импорт
     # orgManager, −2 на сжатии локального managerOf()). Сами строки не менялись: 29 → 32, 89 → 90.
@@ -72,7 +72,7 @@ check1_stage_codes() {
     "server/services/comments.ts:90"
     "server/services/modules.ts:34"
     "server/services/modules.ts:60" # 54→60: маршруты модуля «Бонуси і магазин» выше в MODULE_ROUTES (gamification)
-    "server/services/resources.ts:479"
+    "server/services/resources.ts:485" # 479→485 в PR-25: тело модуля библиотеки скрыто из списков ресурсов (`listed()`)
     "shared/schemas/resources.ts:89"
     "shared/schemas/settings.ts:17" # 14→17: импорт умолчаний правил нарахування (gamification)
     "shared/schemas/catalog.ts:35" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)

@@ -110,6 +110,17 @@ export default defineNitroPlugin(async () => {
       const s = await shopReserveExpireTenant(tenantId)
       if (s.expired || s.drift) console.log(`[shop.reserve_expire] ${tenantId}:`, s)
     }))
+    // docs/v2/31 §11: эмбеддинг тела последней версии — после публикации версии (батч 20;
+    // без moduleId — все модули с пустым вектором или вектором другой модели)
+    await perTenant<{ tenantId: string, moduleId?: string }>('library.embedding_refresh', async (data) => {
+      const { refreshLibraryEmbeddings } = await import('../services/library')
+      await refreshLibraryEmbeddings(data.tenantId, data.moduleId ? [data.moduleId] : undefined)
+    })
+    await work('library.usage_recalc', () => runPerTenant('library.usage_recalc', async (tenantId) => {
+      const { usageRecalc } = await import('../services/libraryUsages')
+      const s = await usageRecalc(tenantId)
+      if (s.detached || s.staleFixed || s.countsFixed) console.log(`[library.usage_recalc] ${tenantId}:`, s)
+    }))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

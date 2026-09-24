@@ -634,6 +634,28 @@ AI-генерация текста и критериев, площадки и ж
 до 60 секунд на жалобу и не больше 180 за попытку (§7.7). Очередь «Звіт про помилки», карточка
 жалобы, маршрутизация и пересчёт результатов — PR-24 (строки выше с `/content-issues` без `reports`).
 
+### Библиотека модулей (`docs/v2/31-module-library.md` §10, PR-25)
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/library/modules` | список и палитра (`library.view`): `?q=&kind=&categoryId=&tag=&ownerId=&status=active\|draft\|published\|archived\|all&onlyUnused=&onlyStale=&cursor=&limit=25\|50\|100`; по умолчанию `active` — архив скрыт, палитра просит `published`. Ответ — `{items, nextCursor, total}`, у карточки `usageCount`, `staleUsages`, `currentVersion` |
+| POST | `/library/modules` | создать черновик (`library.publish`): поля `31` §6.1 плюс `body`/`mediaId`/`externalUrl` тела. `422 validation_failed` (текст — из формы §6.1), `409 slug_taken`, `422 owner_forbidden` («У цієї людини немає прав на бібліотеку») |
+| GET/PATCH/DELETE | `/library/modules/:id` | карточка + черновик тела + `canEdit`; правка — автор из `author_ids` или `library.manage` (иначе `403 forbidden`, `details.reason = 'not_author'`), архивный — `409 module_archived`; удаление — только `library.manage`, используемый модуль — **`409 library_module.in_use`** с `details = {reason, usages[≤50], total, detached, versions, suggest: 'archive'}`; удалён — `204`. Чужой тенант — `404` |
+| POST | `/library/modules/:id/archive`, `/restore`, `/duplicate` | архив `{reason}` (без причины — `422 reason_required`), возврат из архива, копия-черновик `{title?}` |
+| GET/POST | `/library/modules/:id/versions` | список версий (changelog, `isHotfix`, `diff` с предыдущей, мест на версии); публикация `{changelog, isHotfix, notify, expectedVersion?}` — места на прежних версиях помечаются `isStale`, не переключаются. `422 changelog_required`, `422 empty_body`, `409 module_archived`, `409 version_conflict` |
+| GET | `/library/modules/:id/versions/:version` | тело закреплённой версии — им читает себя место на v2, когда вышла v3 |
+| GET | `/library/modules/:id/usages` | «Де використовується»: `{active, detached}` (`?includeDetached=true`), у места — `version`, `latestVersion`, `isStale`, `pinMode` |
+| POST | `/library/usages` | вставить модуль (`library.use` + `course.edit` для урока / `program.manage` для узла, иначе `403 container.forbidden`): `{libraryModuleId, holderType, holderId, containerType, containerId, pinMode}`. `409 already_attached`, `409 module_archived`, `409 module_not_published`, `409 container.published`, `422 holder_not_content` |
+| POST | `/library/usages/:id/detach` | отвязать: урок курса получает копию тела закреплённой версии (`{lessonId}`), у узла трека до PR-26 закрывается строка реестра |
+| GET/POST | `/library/proposals` | предложения (куратор видит все, остальные — свои); подать `{sourceLessonId, proposedTitle?, proposedCategoryId?, comment}` (`library.use`) — `pending`, модуль не создаётся; повтор — `409 proposal_pending` |
+| POST | `/library/proposals/:id/accept`, `/reject`, `/withdraw` | принять `{categoryId?, ownerId?}` → `{libraryModuleId}` (черновик с копией тела урока), отклонить `{decisionComment}` (`422 comment_required`), отозвать своё; повторное решение — `409 proposal.already_decided` |
+
+Урок-ссылка на библиотеку в плане курса: `PATCH /lessons/:id` с `body` — `409 lesson.library_reference`
+(тело читает закреплённую версию); урок-тело модуля по `/lessons/:id` — `404`. Файл, который
+держит опубликованная версия модуля: `DELETE /media/:id` — `409 media.in_library_version` со
+списком версий. Обновление мест до новой версии, массовое обновление, `diff` между версиями,
+хотфикс и поиск по телу — PR-26.
+
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом
 `server/api/v1/public/` → `/api/v1/public/*` (префикс задаёт дерево каталогов Nitro, а не

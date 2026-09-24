@@ -247,6 +247,13 @@ export async function putGraph(ctx: Ctx, id: string, input: TrajectoryGraphInput
       }
     }
     const gone = existing.nodes.filter(n => !keep.has(n.id)).map(n => n.id)
+    // docs/v2/31 §12: узел удалён с полотна (или перестал быть заданием) — его место
+    // использования модуля библиотеки закрывается, usage_count модуля уменьшается
+    const notTask = input.nodes.filter(n => n.kind !== 'task' && n.id && existing.byId.get(n.id)?.kind === 'task').map(n => n.id!)
+    if (gone.length || notTask.length) {
+      const { detachHolders } = await import('./libraryUsages')
+      await detachHolders(tx, ctx, 'trajectory_node', [...gone, ...notTask])
+    }
     if (gone.length) await tx.delete(trajectoryNodes).where(inArray(trajectoryNodes.id, gone))
 
     await tx.delete(trajectoryEdges).where(eq(trajectoryEdges.trajectoryId, id))

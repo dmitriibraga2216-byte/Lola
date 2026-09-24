@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
   assignments, courseVersions, courses, lessons, meetups, mediaAssets, modules, resourceVersions, resources, users,
@@ -178,6 +178,7 @@ export async function ensureDraftVersion(ctx: Ctx, courseId: string): Promise<st
     const oldModules = await tx.select().from(modules)
       .where(eq(modules.courseVersionId, latest.id))
       .orderBy(asc(modules.sort))
+    const repointed: { from: string, to: string }[] = []
     for (const mod of oldModules) {
       const [newMod] = await tx.insert(modules).values({
         tenantId: ctx.tenantId,
@@ -188,21 +189,33 @@ export async function ensureDraftVersion(ctx: Ctx, courseId: string): Promise<st
       const oldLessons = await tx.select().from(lessons)
         .where(eq(lessons.moduleId, mod.id))
         .orderBy(asc(lessons.sort))
-      if (oldLessons.length) {
-        await tx.insert(lessons).values(oldLessons.map(l => ({
-          tenantId: ctx.tenantId,
-          moduleId: newMod!.id,
-          title: l.title,
-          sort: l.sort,
-          itemType: l.itemType,
-          itemId: l.itemId,
-          isRequired: l.isRequired,
-          minSeconds: l.minSeconds,
-          videoThresholdPct: l.videoThresholdPct,
-          passScorePct: l.passScorePct,
-          resourceVersionId: l.resourceVersionId,
-        })))
+      const copyOf = (l: typeof lessons.$inferSelect) => ({
+        tenantId: ctx.tenantId,
+        moduleId: newMod!.id,
+        title: l.title,
+        sort: l.sort,
+        itemType: l.itemType,
+        itemId: l.itemId,
+        isRequired: l.isRequired,
+        minSeconds: l.minSeconds,
+        videoThresholdPct: l.videoThresholdPct,
+        passScorePct: l.passScorePct,
+        resourceVersionId: l.resourceVersionId,
+        libraryVersionId: l.libraryVersionId,
+      })
+      const plain = oldLessons.filter(l => !l.libraryVersionId)
+      if (plain.length) await tx.insert(lessons).values(plain.map(copyOf))
+      // Урок-ссылка на библиотеку (docs/v2/31 §3.1) копируется поштучно: место использования
+      // следует за черновиком, его правит автор, а урок опубликованной версии хранит свою
+      // ссылку для тех, кто уже учится (Р-31.2)
+      for (const l of oldLessons.filter(x => !!x.libraryVersionId)) {
+        const [copy] = await tx.insert(lessons).values(copyOf(l)).returning({ id: lessons.id })
+        repointed.push({ from: l.id, to: copy!.id })
       }
+    }
+    if (repointed.length) {
+      const { repointCourseLessonUsages } = await import('./libraryUsages')
+      await repointCourseLessonUsages(tx, repointed)
     }
     return newDraft!.id
   })
@@ -237,6 +250,29 @@ export async function getCourseEditor(ctx: Ctx, courseId: string) {
       : []
     const resourceById = new Map(resourceRows.map(r => [r.id, r]))
 
+    // Урок-ссылка на библиотеку (docs/v2/31 §3.1, §5.4): своего материала нет — показывается
+    // закреплённый снимок версии, а не рабочая редакция модуля, плюс «Бібліотека · v2» и
+    // признак «Доступна нова версія» для баннера
+    const refLessons = lessonRows.filter(l => l.libraryVersionId && l.resourceVersionId)
+    const snapshots = refLessons.length
+      ? await tx.select().from(resourceVersions).where(inArray(resourceVersions.id, refLessons.map(l => l.resourceVersionId!)))
+      : []
+    const snapshotById = new Map(snapshots.map(s => [s.id, s]))
+    const { lessonLibraryRefs } = await import('./libraryUsages')
+    const refs = await lessonLibraryRefs(tx, refLessons.map(l => l.libraryVersionId!))
+
+    const materialOf = (l: typeof lessons.$inferSelect) => {
+      const snap = l.libraryVersionId && l.resourceVersionId ? snapshotById.get(l.resourceVersionId) : undefined
+      if (snap) {
+        return { body: snap.body, resource: { kind: snap.kind, status: 'published', estimatedMinutes: resourceById.get(l.itemId)?.estimatedMinutes ?? null, version: snap.version, mediaId: snap.mediaId, externalUrl: snap.externalUrl } }
+      }
+      const r = l.itemType === 'resource' ? resourceById.get(l.itemId) : undefined
+      return {
+        body: l.itemType === 'resource' ? (r?.body ?? []) : [],
+        resource: r ? { kind: r.kind, status: r.status, estimatedMinutes: r.estimatedMinutes, version: r.version, mediaId: r.mediaId, externalUrl: r.externalUrl } : null,
+      }
+    }
+
     return {
       course,
       version,
@@ -244,10 +280,8 @@ export async function getCourseEditor(ctx: Ctx, courseId: string) {
         ...m,
         lessons: lessonRows.filter(l => l.moduleId === m.id).map(l => ({
           ...l,
-          body: l.itemType === 'resource' ? (resourceById.get(l.itemId)?.body ?? []) : [],
-          resource: l.itemType === 'resource' && resourceById.get(l.itemId)
-            ? { kind: resourceById.get(l.itemId)!.kind, status: resourceById.get(l.itemId)!.status, estimatedMinutes: resourceById.get(l.itemId)!.estimatedMinutes, version: resourceById.get(l.itemId)!.version, mediaId: resourceById.get(l.itemId)!.mediaId, externalUrl: resourceById.get(l.itemId)!.externalUrl }
-            : null,
+          ...materialOf(l),
+          library: l.libraryVersionId ? refs.get(l.libraryVersionId) ?? null : null,
         })),
       })),
     }
@@ -337,10 +371,22 @@ export async function addLesson(ctx: Ctx, input: z.infer<typeof lessonCreateSche
   })
 }
 
-export async function updateLesson(ctx: Ctx, lessonId: string, input: z.infer<typeof lessonUpdateSchema>) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [lesson] = await tx.select().from(lessons).where(eq(lessons.id, lessonId))
-    if (!lesson) return null
+export type UpdateLessonResult
+  = | { ok: true, lesson: typeof lessons.$inferSelect }
+    | { ok: false, code: 'not_found' | 'library_reference' }
+
+/**
+ * Правка урока плана. Только урок **курса** (`module_id is not null`): урок-тело модуля
+ * библиотеки правится сервисом библиотеки с её правами и версиями (docs/v2/31 §7.12, П-11),
+ * и по прямой ссылке `/lessons/:id` он «не найден». У урока-ссылки на библиотеку тела нет —
+ * он читает закреплённую версию, поэтому правка тела отвергается (`library_reference`,
+ * «Це посилання на модуль бібліотеки», §5.4): иначе она ушла бы в черновик чужого модуля.
+ */
+export async function updateLesson(ctx: Ctx, lessonId: string, input: z.infer<typeof lessonUpdateSchema>): Promise<UpdateLessonResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<UpdateLessonResult> => {
+    const [lesson] = await tx.select().from(lessons).where(and(eq(lessons.id, lessonId), isNotNull(lessons.moduleId)))
+    if (!lesson) return { ok: false, code: 'not_found' }
+    if (lesson.libraryVersionId && input.body !== undefined) return { ok: false, code: 'library_reference' }
 
     if (input.body !== undefined && lesson.itemType === 'resource') {
       const cleanBody = sanitizeBody(input.body as ContentBlock[])
@@ -361,16 +407,26 @@ export async function updateLesson(ctx: Ctx, lessonId: string, input: z.infer<ty
       updatedAt: new Date(),
     }).where(eq(lessons.id, lessonId)).returning()
 
-    if (input.title !== undefined && lesson.itemType === 'resource') {
+    // Название материала-тела библиотеки урок курса не переименовывает: оно принадлежит модулю
+    if (input.title !== undefined && lesson.itemType === 'resource' && !lesson.libraryVersionId) {
       await tx.update(resources).set({ title: input.title }).where(eq(resources.id, lesson.itemId))
     }
-    return updated!
+    return { ok: true, lesson: updated! }
   })
 }
 
+/**
+ * Удаление урока из плана. Только урок курса (урок-тело модуля библиотеки удаляется вместе с
+ * модулем, docs/v2/31 §7.5). Урок-ссылка на библиотеку закрывает своё место использования в
+ * той же транзакции (§12: «место получает detached_at, usage_count уменьшается»).
+ */
 export async function deleteLesson(ctx: Ctx, lessonId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [lesson] = await tx.delete(lessons).where(eq(lessons.id, lessonId)).returning()
+    const [lesson] = await tx.delete(lessons).where(and(eq(lessons.id, lessonId), isNotNull(lessons.moduleId))).returning()
+    if (lesson?.libraryVersionId) {
+      const { detachHolders } = await import('./libraryUsages')
+      await detachHolders(tx, ctx, 'course_lesson', [lesson.id])
+    }
     return lesson ?? null
   })
 }
@@ -378,10 +434,11 @@ export async function deleteLesson(ctx: Ctx, lessonId: string) {
 export async function reorderLessons(ctx: Ctx, items: { id: string, moduleId?: string, sort: number }[]) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     for (const item of items) {
+      // Только уроки курса: урок-тело модуля библиотеки в раздел не переносится (lessons_owner_ck)
       await tx.update(lessons).set({
         sort: item.sort,
         ...(item.moduleId ? { moduleId: item.moduleId } : {}),
-      }).where(eq(lessons.id, item.id))
+      }).where(and(eq(lessons.id, item.id), isNotNull(lessons.moduleId)))
     }
     return true
   })
@@ -506,10 +563,12 @@ export async function publishCourse(ctx: Ctx, courseId: string, changelog: strin
 
 /** Снимки ресурсов для уроков версии курса: закрепить существующий или сделать новый, если редакция изменилась. */
 async function pinResourceVersions(tx: TenantTx, ctx: Ctx, courseVersionId: string, changelog: string) {
+  // Уроки-ссылки на библиотеку (docs/v2/31 §7.2) уже закреплены за снимком своей версии:
+  // перезакрепить их за «последним» значило бы молча обновить место использования (Р-31.2)
   const rows = await tx.select({ lesson: lessons, resource: resources }).from(lessons)
     .innerJoin(modules, eq(modules.id, lessons.moduleId))
     .innerJoin(resources, eq(resources.id, lessons.itemId))
-    .where(and(eq(modules.courseVersionId, courseVersionId), eq(lessons.itemType, 'resource')))
+    .where(and(eq(modules.courseVersionId, courseVersionId), eq(lessons.itemType, 'resource'), isNull(lessons.libraryVersionId)))
   for (const { lesson, resource } of rows) {
     let versionId = resource.publishedVersionId
     let changed = !versionId

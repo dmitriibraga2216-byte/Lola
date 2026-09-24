@@ -8,6 +8,7 @@ import {
 import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
+import { notLibraryBody } from './libraryBody'
 import { blocksToText } from './knowledge'
 import { enqueueNotification } from './notifications'
 import { sanitizeBody } from './sanitize'
@@ -33,6 +34,11 @@ type CreateInput = z.infer<typeof resourceCreateSchema>
 type UpdateInput = z.infer<typeof resourceUpdateSchema>
 
 const notDeleted = () => isNull(resources.deletedAt)
+/**
+ * Ресурс библиотеки ресурсов: не удалён и не является телом модуля библиотеки (docs/v2/31 §3.1,
+ * PR-25) — тело живёт по правам и версиям библиотеки, а не отсюда (см. `libraryBody.ts`).
+ */
+const listed = () => and(notDeleted(), notLibraryBody(resources.id))
 
 // ── Библиотека ──────────────────────────────────────────────────────────────────────
 
@@ -53,7 +59,7 @@ async function usageByResource(tx: TenantTx, ids: string[]): Promise<Map<string,
 export async function listResources(ctx: Ctx, q: z.infer<typeof resourceListQuerySchema>) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const where = and(
-      notDeleted(),
+      listed(),
       q.status === 'all' ? undefined : eq(resources.status, q.status),
       q.kind ? eq(resources.kind, q.kind) : undefined,
       q.authorId ? sql`${q.authorId}::uuid = any(${resources.authorIds})` : undefined,
@@ -72,7 +78,7 @@ export async function listResources(ctx: Ctx, q: z.infer<typeof resourceListQuer
     const nameOf = new Map(authors.map(a => [a.id, a.fullName]))
     const usage = await usageByResource(tx, rows.map(r => r.id))
     const counts = await tx.select({ status: resources.status, n: sql<number>`count(*)::int` }).from(resources)
-      .where(notDeleted()).groupBy(resources.status)
+      .where(listed()).groupBy(resources.status)
 
     return {
       total: total!,
@@ -98,7 +104,7 @@ export async function listResources(ctx: Ctx, q: z.infer<typeof resourceListQuer
 
 export async function getResource(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), listed()))
     if (!r) return null
     const groups = await tx.select({ groupId: contentAccessGroups.groupId }).from(contentAccessGroups)
       .where(and(eq(contentAccessGroups.contentType, 'resource'), eq(contentAccessGroups.contentId, id)))
@@ -179,7 +185,7 @@ export type UpdateResult
 /** Правка рабочей редакции. Опубликованная версия не меняется до следующей публикации (Г-11.3). */
 export async function updateResource(ctx: Ctx, id: string, input: UpdateInput): Promise<UpdateResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [before] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [before] = await tx.select().from(resources).where(and(eq(resources.id, id), listed()))
     if (!before) return { ok: false as const, code: 'not_found' as const }
     if (before.status === 'archived') return { ok: false as const, code: 'archived' as const }
 
@@ -249,7 +255,7 @@ export type PublishResourceResult
  */
 export async function publishResource(ctx: Ctx, id: string, input: z.infer<typeof resourcePublishSchema>): Promise<PublishResourceResult> {
   const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), listed()))
     if (!r) return { ok: false as const, code: 'not_found' as const }
     const checks = await resourcePublishChecks(tx, r)
     if (checks.some(c => !c.ok)) return { ok: false as const, code: 'not_publishable' as const, checks }
@@ -321,7 +327,7 @@ export async function publishResource(ctx: Ctx, id: string, input: z.infer<typeo
 
 export async function listResourceVersions(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select({ id: resources.id }).from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [r] = await tx.select({ id: resources.id }).from(resources).where(and(eq(resources.id, id), listed()))
     if (!r) return null
     return tx.select().from(resourceVersions).where(eq(resourceVersions.resourceId, id)).orderBy(desc(resourceVersions.version))
   })
@@ -342,7 +348,7 @@ export async function currentVersion(tx: TenantTx, resourceId: string, versionId
 /** draft → published → archived; из archived можно вернуть в draft (docs/11 §4). */
 export async function setResourceStatus(ctx: Ctx, id: string, status: 'archived' | 'draft') {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [before] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [before] = await tx.select().from(resources).where(and(eq(resources.id, id), listed()))
     if (!before) return null
     if (status === 'draft' && before.status !== 'archived') return before
     const [after] = await tx.update(resources).set({ status, updatedAt: new Date() }).where(eq(resources.id, id)).returning()
@@ -359,7 +365,7 @@ export type DeleteResult = { ok: true } | { ok: false, code: 'not_found' | 'in_u
 /** Мягкое удаление; ресурс в курсах не удаляется — сначала убрать из планов (docs/11 §7.8 по аналогии с медиа). */
 export async function deleteResource(ctx: Ctx, id: string): Promise<DeleteResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), listed()))
     if (!r) return { ok: false as const, code: 'not_found' as const }
     const used = (await usageByResource(tx, [id])).get(id) ?? 0
     if (used > 0) return { ok: false as const, code: 'in_use' as const, usedInCourses: used }
@@ -371,7 +377,7 @@ export async function deleteResource(ctx: Ctx, id: string): Promise<DeleteResult
 
 export async function duplicateResource(ctx: Ctx, id: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
+    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), listed()))
     if (!r) return null
     const [copy] = await tx.insert(resources).values({
       tenantId: ctx.tenantId,

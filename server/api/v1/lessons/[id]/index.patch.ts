@@ -9,11 +9,17 @@ export default defineEventHandler(async (event) => {
   if (!parsed.success) {
     return apiError(event, 400, 'validation_failed', 'Перевірте поля уроку', { issues: parsed.error.issues })
   }
-  const lesson = await updateLesson(
+  const r = await updateLesson(
     { tenantId: access.tenantId, actorId: access.userId },
     getRouterParam(event, 'id')!,
     parsed.data,
   )
-  if (!lesson) return apiError(event, 404, 'not_found', 'Урок не знайдено')
-  return apiData(lesson)
+  if (!r.ok) {
+    if (r.code === 'library_reference') {
+      // docs/v2/31 §5.4: тело урока-ссылки не редактируется — оно читает закреплённую версию модуля
+      return apiError(event, 409, 'lesson.library_reference', 'Це посилання на модуль бібліотеки — відкрийте модуль у бібліотеці або відʼєднайте урок і зробіть копією')
+    }
+    return apiError(event, 404, 'not_found', 'Урок не знайдено')
+  }
+  return apiData(r.lesson)
 })

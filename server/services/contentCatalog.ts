@@ -5,6 +5,7 @@ import {
 import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
 import { can, type Access } from './access'
+import { notLibraryBody } from './libraryBody'
 import type { ContentType } from '../../shared/enums'
 
 /**
@@ -37,8 +38,9 @@ const TYPES: TypeDef[] = [
   {
     type: 'resource',
     scope: 'course.view',
+    // Тело модуля библиотеки — не самостоятельный ресурс (docs/v2/31 §3.1, `libraryBody.ts`)
     fetch: (tx, like) => tx.select({ id: resources.id, title: resources.title, status: resources.status, updatedAt: resources.updatedAt }).from(resources)
-      .where(and(isNull(resources.deletedAt), ...(like ? [ilike(resources.title, like)] : []))),
+      .where(and(isNull(resources.deletedAt), notLibraryBody(resources.id), ...(like ? [ilike(resources.title, like)] : []))),
   },
   {
     type: 'test',

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
-import { courses, mediaAssets, resources } from '../db/schema'
+import { courses, libraryModuleVersions, libraryModules, mediaAssets, resources } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
 import type { MediaOrigin } from '../../shared/enums'
@@ -312,6 +312,7 @@ export type DeleteMediaResult
   = | { ok: true, lifecycle: 'pending_delete', purgeAfter: Date }
     | { ok: false, code: 'not_found' }
     | { ok: false, code: 'file_not_deletable' | 'evidence_locked' | 'already_deleted', message: string }
+    | { ok: false, code: 'in_library_version', message: string, versions: { libraryModuleId: string, title: string, version: number }[] }
 
 /**
  * Мягкое удаление файла — `DELETE /media/:id`, **единственная** одиночная ручка удаления
@@ -341,6 +342,17 @@ export async function softDeleteMedia(ctx: Ctx, mediaId: string, input: { reason
     // ограничение может только заявка на массовое удаление, у которой есть свой подсчёт.
     if (row.isEvidence && (!input.reason?.trim() || input.confirmPhrase !== CONFIRM_DELETE_PHRASE)) {
       return { ok: false, code: 'evidence_locked', message: `Це доказ проходження. Вкажіть причину та введіть «${CONFIRM_DELETE_PHRASE}»` }
+    }
+    // docs/v2/31 §7.13: файл, который держит хоть одна опубликованная версия модуля библиотеки
+    // (а не только последняя), не удаляется — на старой версии ещё доучиваются (Р-31.2)
+    const held = await tx.select({ libraryModuleId: libraryModules.id, title: libraryModules.title, version: libraryModuleVersions.version })
+      .from(libraryModuleVersions)
+      .innerJoin(libraryModules, eq(libraryModules.id, libraryModuleVersions.libraryModuleId))
+      .where(sql`${mediaId}::uuid = any(${libraryModuleVersions.mediaIds})`)
+      .orderBy(libraryModules.title, libraryModuleVersions.version)
+      .limit(50)
+    if (held.length) {
+      return { ok: false, code: 'in_library_version', message: 'Файл використовується у версіях модулів бібліотеки — спершу опублікуйте версії без нього', versions: held }
     }
 
     const deletedAt = new Date()

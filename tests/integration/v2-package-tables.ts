@@ -86,6 +86,13 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // витрина «человек × элемент × запись». Нормы времени (`content_time_norms`) — PR-22.
   'learning_time_sessions',
   'learning_time_totals',
+  // 31. Библиотека модулей и версии (PR-25, миграция 0081_v2_library). Тело модуля — не своя
+  // таблица, а `lessons` с владельцем-модулем (`lessons_owner_ck`, П-11): базовая `lessons` в
+  // этот список не входит, её RLS и индекс проверяют базовые `rls.spec.ts` и `schema-parity.spec.ts`.
+  'library_modules',
+  'library_module_versions',
+  'library_module_usages',
+  'library_module_proposals',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

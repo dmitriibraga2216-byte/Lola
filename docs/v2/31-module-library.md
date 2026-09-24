@@ -53,28 +53,59 @@ mentor и manager получают `library.view` + `library.use` (вставл�
 ### 3.1 Стыковка с `lessons` и `modules` базового ТЗ
 
 `[решение] Р-31.1` **Третью сущность контента не заводим.** Тело библиотечного модуля — обычная
-запись `lessons` с тем же `body jsonb` и тем же перечнем блоков (`11` §3.3), просто без
-родительского раздела курса. В базовые таблицы вносятся `alter`:
+запись `lessons` с тем же перечнем блоков (`11` §3.3), просто без родительского раздела курса:
+её владелец — модуль. В базовые таблицы вносятся `alter`:
+
+> [исправлено, PR-25: у урока в репозитории своего `body` нет — «урок ссылается на материал,
+> тест или практикум; собственного тела у урока нет» (`docs/11` §3.2), блоки живут в
+> `resources.body` и в неизменяемых снимках `resource_versions`. Принцип Р-31.1 соблюдён
+> буквально — третьей сущности нет, один редактор, один санитайзер, один плеер, — а «тело
+> урока» в этом репозитории и есть материал, на который урок ссылается. Отсюда три отличия
+> DDL: `lessons_library_ref_ck` сверяет, что место использования читает закреплённый снимок, а
+> не `body is null`; добавлен `lessons_library_body_ck` (в R1 телом модуля бывает только
+> материал, Р-31.7); `library_version_id` — `on delete set null`, а не `restrict`: иначе удаление
+> тенанта (`tenant.purge`, удаление таблицами с повтором) упирается в цикл «урок курса → версия
+> → урок-снимок → версия» и не сходится, а версию, на которую ссылается урок, приложение не
+> удаляет никогда (§7.5). `trajectory_nodes.library_version_id` и его индекс — PR-26 (`45` §5:
+> две ветки одну таблицу не трогают); до него место узла живёт только в
+> `library_module_usages`.] Ранее: «с тем же `body jsonb`»; `check (library_version_id is null
+> or (module_id is not null and body is null))`; `lessons.library_version_id … on delete
+> restrict`; `alter table trajectory_nodes` в этом же блоке.
 
 ```sql
 alter table lessons alter column module_id drop not null;
 alter table lessons add column library_module_id  uuid references library_modules(id) on delete cascade;
-alter table lessons add column library_version_id uuid references library_module_versions(id) on delete restrict;
+alter table lessons add column library_version_id uuid references library_module_versions(id) on delete set null;
 alter table lessons add constraint lessons_owner_ck
   check ((module_id is not null)::int + (library_module_id is not null)::int = 1);
 alter table lessons add constraint lessons_library_ref_ck
-  check (library_version_id is null or (module_id is not null and body is null));
-alter table trajectory_nodes
-  add column library_version_id uuid references library_module_versions(id) on delete restrict;
+  check (library_version_id is null
+         or (module_id is not null and item_type = 'resource' and resource_version_id is not null));
+alter table lessons add constraint lessons_library_body_ck
+  check (library_module_id is null or item_type = 'resource');
 create index idx_lessons_tenant_library on lessons (tenant_id, library_module_id)
   where library_module_id is not null;
+create index idx_lessons_tenant_library_version on lessons (tenant_id, library_version_id)
+  where library_version_id is not null;
+-- PR-26:
+alter table trajectory_nodes
+  add column library_version_id uuid references library_module_versions(id) on delete restrict;
 create index idx_trajectory_nodes_tenant_library on trajectory_nodes (tenant_id, library_version_id)
   where library_version_id is not null;
 ```
 
-Читается так: `lessons` с непустым `library_module_id` — черновик или неизменяемый снимок версии
-библиотечного модуля; `lessons` или `trajectory_nodes` с непустым `library_version_id` — **место
-использования**, у которого собственного `body` нет, оно читает тело закреплённой версии.
+Читается так: `lessons` с непустым `library_module_id` — тело модуля: **черновик**
+(`library_modules.draft_lesson_id`; `resource_version_id` пуст, урок читает рабочую редакцию
+материала, статус материала всегда `draft`) или **неизменяемый снимок версии**
+(`library_module_versions.lesson_id`; `resource_version_id` → снимок в `resource_versions`).
+`lessons` с непустым `library_version_id` — **место использования** в курсе: своего материала у
+него нет, `item_id` — материал-тело модуля, `resource_version_id` — снимок закреплённой версии,
+и публикация курса его не перезакрепляет. Узел траектории станет местом использования тем же
+способом в PR-26.
+
+Материал-тело — внутренность модуля, а не самостоятельный ресурс: библиотека ресурсов, каталог,
+поиск базы знаний и `/resources/:id` его не видят (признак — ссылающийся урок с
+`library_module_id`), правится он только через библиотеку с её правами и версиями.
 
 Обоснование. Альтернатива — своя таблица тела (`library_module_body`) — означала бы второй
 редактор, второй санитайзер HTML, второй расчёт `estimated_minutes` и вторую ветку в плеере
@@ -89,7 +120,7 @@ create index idx_trajectory_nodes_tenant_library on trajectory_nodes (tenant_id,
 | --- | --- | :-: | --- | --- | --- |
 | `title` | text | ✓ | | 3–200 | колонка «Назва» |
 | `slug` | text | ✓ | из `title` | `^[a-z0-9-]{3,80}$`, уникален в тенанте | |
-| `content_kind` | text | ✓ | `article` | `article` \| `file` \| `video` \| `link` \| `scorm` | перечень из `11` §3.1, свой не заводим |
+| `content_kind` | text | ✓ | `article` | `article` \| `file` \| `video` \| `link` | перечень `resources.kind` (`11` §3.1), свой не заводим |
 | `category_id` | uuid | — | null | FK `course_categories` | общий справочник, не отдельный |
 | `tags` | text[] | ✓ | `{}` | ≤20 меток | |
 | `summary` | text | — | null | ≤300 | подсказка в палитре вставки |
@@ -101,6 +132,14 @@ create index idx_trajectory_nodes_tenant_library on trajectory_nodes (tenant_id,
 | `status` | text | ✓ | `draft` | `draft` \| `published` \| `archived` | см. §4 |
 | `usage_count` | int | ✓ | 0 | ≥0 | активных мест использования |
 | `archived_at` / `archived_by` / `archive_reason` | timestamptz / uuid / text | — | null | причина 5–500 | заполняются вместе |
+| `embedding` / `embedding_model` | vector(768) / text | — | null | | тело последней версии (§7.8); чем посчитан — `provider:model:dims` |
+
+> [исправлено, PR-25: `scorm` из перечня снят — тело модуля и есть материал, а у материала SCORM
+> отложен до R3 (`11` Г-11.6); вернётся в оба перечня одновременно. `embedding_model` — сверх
+> пакета: провайдер модели без ключа работает заглушкой (`HANDOFF` §6, `server/services/embeddings.ts`),
+> векторы разных моделей несравнимы, и смена провайдера должна находить строки чужой модели,
+> а не молча смешивать их в поиске PR-26] Ранее: «`article` \| `file` \| `video` \| `link` \|
+> `scorm`», строки `embedding_model` не было.
 
 ### 3.3 `library_module_versions` — закреплённые версии
 
@@ -123,10 +162,18 @@ create index idx_trajectory_nodes_tenant_library on trajectory_nodes (tenant_id,
 ### 3.4 `library_module_usages` — «де використовується»
 
 `library_module_id`, `version_id` (закреплённая версия **этого** места), `holder_type`
-(`trajectory_node` \| `course_lesson`), `holder_id`, `container_type` (`trajectory` \| `course`),
-`container_id`, `container_title` (денормализация ради экрана §5.3), `pin_mode`
-(`fixed` \| `hotfix_auto`), `is_stale` (есть версия новее), `latest_version_seen` (какую версию
-автору уже показывали), `attached_by`, `attached_at`, `detached_at`.
+(`trajectory_node` \| `course_lesson`), `holder_id`, `holder_title`, `container_type`
+(`trajectory` \| `course`), `container_id`, `container_title` (денормализация ради экрана §5.3),
+`pin_mode` (`fixed` \| `hotfix_auto`, по умолчанию `hotfix_auto`), `is_stale` (есть версия
+новее), `latest_version_seen` (какую версию автору уже показывали), `attached_by`,
+`attached_at`, `detached_at`.
+
+> [исправлено, PR-25: `holder_title` — снимок названия узла/урока по решению `44` В-11 (у каждой
+> мягкой ссылки — снимок названия): «Вузол/Урок» на экране §5.3 и в «Відключені раніше»
+> переживает удаление узла. `pin_mode` по умолчанию `hotfix_auto` — так требуют Р-31.4
+> («значение по умолчанию») и критерий приёмки 6; `'fixed'` в §7.2 описывал закрепление
+> версии, которое действует при любом режиме] Ранее: `holder_title` не было; DDL §3.6 —
+> `pin_mode … default 'fixed'`.
 
 ### 3.5 `library_module_proposals` — предложение в библиотеку
 
@@ -147,7 +194,7 @@ create table library_modules (
   tenant_id          uuid not null references tenants(id) on delete cascade,
   title              text not null,
   slug               text not null,
-  content_kind       text not null default 'article',  -- article | file | video | link | scorm
+  content_kind       text not null default 'article',  -- article | file | video | link (resources.kind)
   category_id        uuid references course_categories(id) on delete set null,
   tags               text[] not null default '{}',
   language           text not null default 'uk',
@@ -162,15 +209,15 @@ create table library_modules (
   archived_at        timestamptz,
   archived_by        uuid references users(id),
   archive_reason     text,
-  search_tsv         tsvector generated always as (to_tsvector('simple',
-                       coalesce(title,'')||' '||coalesce(summary,'')||' '||array_to_string(tags,' '))) stored,
+  search_tsv         tsvector,                         -- ведёт триггер library_modules_tsv_trg: title (A), summary и tags (B)
   embedding          vector(768),
+  embedding_model    text,                             -- provider:model:dims — чем посчитан embedding
   created_by         uuid not null references users(id) on delete restrict,
   unique (tenant_id, slug),
   check (status in ('draft','published','archived')),
-  check (content_kind in ('article','file','video','link','scorm')),
+  check (content_kind in ('article','file','video','link')),
   check (status <> 'archived' or (archived_at is not null and archive_reason is not null)),
-  check (array_length(author_ids,1) >= 1)
+  check (cardinality(author_ids) between 1 and 10)
 );
 
 create table library_module_versions (
@@ -200,10 +247,11 @@ create table library_module_usages (
   version_id          uuid not null references library_module_versions(id) on delete restrict,
   holder_type         text not null check (holder_type in ('trajectory_node','course_lesson')),
   holder_id           uuid not null,
+  holder_title        text,                              -- снимок названия узла/урока (В-11)
   container_type      text not null check (container_type in ('trajectory','course')),
   container_id        uuid not null,
   container_title     text not null,
-  pin_mode            text not null default 'fixed' check (pin_mode in ('fixed','hotfix_auto')),
+  pin_mode            text not null default 'hotfix_auto' check (pin_mode in ('fixed','hotfix_auto')),
   is_stale            boolean not null default false,
   latest_version_seen int,
   attached_by         uuid not null references users(id) on delete restrict,
@@ -251,6 +299,20 @@ create unique index idx_library_module_proposals_pending on library_module_propo
 
 RLS на всех четырёх таблицах — как в `02` §2.12: `enable` + `force`, политика `tenant_isolation`
 с `using` и `with check` по `current_setting('app.tenant_id', true)::uuid`.
+
+> [исправлено, PR-25: фактический DDL — `server/db/migrations/0081_v2_library.sql`. Отличия
+> от редакции пакета: (1) `search_tsv` ведёт триггер, как у
+> `resources` и `knowledge_articles` (0008) — `array_to_string` в Postgres STABLE, и
+> `generated always as` с ним не принимается; (2) `array_length(author_ids,1) >= 1` заменён на
+> `cardinality(author_ids) between 1 and 10`: `array_length('{}', 1)` — NULL, и CHECK пропустил
+> бы пустой массив, а верхняя граница 10 названа в §3.2; (3) `scorm` снят из `content_kind`
+> (§3.2); (4) `embedding_model`, `holder_title` и `pin_mode default 'hotfix_auto'` — §3.2, §3.4;
+> (5) сверх пакета CHECK-и длины полей из §3.2 и §3.5 (`title` 3–200, `slug`, `summary` ≤300,
+> `estimated_minutes` 1–600, `archive_reason` 5–500, `usage_count >= 0`, `comment` 1–500,
+> `decision_comment` 5–500, `proposed_title` 3–200) и `holder_type`↔`container_type`: узел
+> живёт в траектории, урок — в курсе; (6) полный индекс `idx_library_module_usages_module_all
+> (tenant_id, library_module_id, attached_at desc)` — «Відключені раніше» частичный индекс по
+> `detached_at is null` не обслуживает] Ранее: DDL блока выше без этих правок.
 
 ## 4. Состояния и переходы
 
@@ -361,8 +423,11 @@ mentor и manager видят таблицу только на чтение, бе
    а не копию тела. Библиотека придумана ради того, чтобы правка «Використання хімії» дошла до
    всех треков; снимок-копия убивает это в момент вставки.
 2. **Версия закрепляется `[решение] Р-31.2`.** При вставке в `library_module_usages.version_id`
-   пишется `current_version_id` на момент вставки, `pin_mode='fixed'`; публикация новой версии не
-   меняет ни одного существующего места. Правка модуля не имеет права менять содержание трека,
+   пишется `current_version_id` на момент вставки; публикация новой версии не
+   меняет ни одного существующего места.
+   > [исправлено, PR-25: `pin_mode` при вставке берётся из запроса, по умолчанию `hotfix_auto`
+   > (§3.4, Р-31.4); закреплена версия при любом режиме — режим решает только, доезжает ли
+   > «Критичне виправлення» само] Ранее: «`pin_mode='fixed'`». Правка модуля не имеет права менять содержание трека,
    который человек проходит сейчас, — иначе аттестация идёт по одному тексту, а оспаривается
    по другому.
 3. **Обновление — только явное.** Кнопка «Оновити до останньої версії» (§5.5) доступна носителю
@@ -390,12 +455,21 @@ mentor и manager видят таблицу только на чтение, бе
    векторный поиск по `embedding` (pgvector, 768) по телу последней версии. Запрос длиннее трёх
    слов уходит в гибрид, результаты сливаются по RRF, лимит 50. Поиск по телу нужен потому, что
    модуль «Використання хімії» ищут словом «розведення», которого нет в названии.
+   PR-25 заводит полнотекстовую часть списка (`q` — `search_tsv` плюс `ilike` по названию) и
+   сам вектор: `library.embedding_refresh` считает его по телу последней версии через
+   `server/services/embeddings.ts` — OpenAI-совместимый провайдер при `EMBEDDINGS_URL`, без ключа
+   детерминированная заглушка (`HANDOFF` §6). Векторная часть запроса и RRF — PR-26.
 9. **Пересчёт.** При публикации версии транзакция ставит `is_stale=true` всем активным местам,
    где `version_id <> current_version_id`; `usage_count` = `count(*) where detached_at is null`,
    считается в той же транзакции при attach/detach и сверяется ночью (§11).
 10. **Отвязка в копию.** «Відʼєднати і зробити копією» создаёт обычный `lessons` с телом
     закреплённой версии, обнуляет `library_version_id`, ставит `detached_at`. Обратно — только
     повторной вставкой из библиотеки.
+    > [исправлено, PR-25: у урока курса отвязка **всегда** делает копию — урок не может остаться
+    > без материала, а «убрать урок из курса» — это `DELETE /lessons/:id`, который закрывает место
+    > сам (§12). У узла траектории до PR-26 ссылки в самом узле нет, и отвязка закрывает только
+    > строку реестра; `makeCopy` для узла появится вместе с `trajectory_nodes.library_version_id`]
+    > Ранее: флаг `makeCopy` для обоих видов держателя.
 11. **Кто может класть `[решение] Р-31.6`.** `library.publish` — author и admin; носитель
     `library.use` без него подаёт предложение (§6.3), куратор принимает, и только тогда
     появляется `library_modules`. Общий ресурс тенанта без модерации за полгода наполняется
@@ -405,6 +479,11 @@ mentor и manager видят таблицу только на чтение, бе
 13. **Медиа.** `media_assets.used_in` дополняется записью `{"library_module_version_id": "…"}`;
     правило `11` §7.8 (нельзя удалить используемое медиа) действует на все опубликованные версии,
     а не только на последнюю.
+    > [исправлено, PR-25: колонки `media_assets.used_in` в репозитории нет (`docs/11` §3.4
+    > описывает её, схема — нет). Правило держится проверкой в единственной ручке удаления
+    > `DELETE /media/:id` (`softDeleteMedia`, В-17): файл, чей id есть в `media_ids` хоть одной
+    > версии, не удаляется — `409 media.in_library_version` со списком версий (§12)] Ранее:
+    > «`media_assets.used_in` дополняется записью `{"library_module_version_id": "…"}`».
 14. **Что в библиотеку не кладётся `[решение] Р-31.7`.** В R1 библиотечным может быть только
     контентный модуль (`lessons` с `body`): у теста переиспользование уже решено банками вопросов
     (`12`), а у практикума, опроса, очного занятия и вебинара есть собственные правила проверки,
@@ -425,6 +504,11 @@ mentor и manager видят таблицу только на чтение, бе
 | `library_stale_digest` | еженедельный дайджест | in-app | «У ваших треках {n} посилань на застарілі версії модулів» | авторам контейнеров |
 
 Шаблоны регистрируются в `notification_templates`, отправка — по `23-notifications.md`.
+
+PR-25 заводит четыре кода — `library_module_updated`, `library_module_archived`,
+`library_proposal_created`, `library_proposal_decided` (шаблоны по умолчанию —
+`server/services/notifications.ts`, подписи — `notif.code.*` в трёх словарях). Коды хотфикса и
+дайджест устаревших ссылок приходят с PR-26 вместе с обновлением мест использования.
 
 ## 9. Отчёты и выгрузки
 
@@ -470,6 +554,25 @@ mentor и manager видят таблицу только на чтение, бе
 | GET / POST | `/library/proposals` | фильтры / `{sourceLessonId, proposedTitle, proposedCategoryId, comment}` | список / предложение | `409 proposal_pending` |
 | POST | `/library/proposals/:id/accept` | `{categoryId, ownerId}` | `{libraryModuleId}` | `403`, `409 proposal.already_decided` |
 | POST | `/library/proposals/:id/reject` | `{decisionComment}` | предложение | `422 comment_required` |
+| GET | `/library/modules/:id/versions/:version` | — | версия + тело снимка | `404` |
+| POST | `/library/proposals/:id/withdraw` | — | предложение `withdrawn` | `404`, `409 proposal.already_decided` |
+
+> [исправлено, PR-25: (1) добавлены две ручки — тело закреплённой версии (им читает своё тело
+> место на v2, когда вышла v3, критерий 1, и «Порівняти з v3») и отзыв предложения (статус
+> `withdrawn` в §4 есть, а войти в него было нечем); (2) удаление физическое (§7.5), поэтому
+> `restore` удалённого модуля его не находит — `404`, а `409 module_deleted` не возникает; (3)
+> добавлены коды, без которых отказ молчал бы о причине: `409 module_not_published` (вставлять
+> нечего — у черновика нет версии), `409 container.published` (опубликованный трек и
+> опубликованную версию курса не меняют — правится черновик), `422 holder_not_content` (модуль
+> вставляется в узел-задание, а не в И/АБО или таймер), `409 already_detached`,
+> `422 owner_forbidden` («У цієї людини немає прав на бібліотеку», §6.1), `422 empty_body`,
+> `422 media_not_ready`, `422 category_not_found`; (4) `POST /library/modules/:id/versions`
+> принимает необязательный `expectedVersion` — `409 version_conflict` приходит и тогда, когда
+> автор публиковал со страницы, устаревшей на версию (§12), а не только при гонке двух
+> транзакций; (5) «нет скоупа» — одно `forbidden`, отказ «чужой модуль» несёт
+> `details.reason = 'not_author'` (В-16 §8.2.7); (6) `update-version`, `update-all-usages` и
+> `diff` между версиями — PR-26 (критерии 2 и 6); `diff` с предыдущей версией уже лежит в
+> каждой строке `GET …/versions`] Ранее: таблица без двух ручек, с `409 module_deleted`.
 
 ## 11. Фоновые задачи
 
@@ -481,6 +584,11 @@ mentor и manager видят таблицу только на чтение, бе
 | `library.embedding_refresh` | по событию публикации версии, очередь pg-boss | пересчёт `embedding` по телу последней версии, батч 20 |
 | `library.orphan_scan` | еженедельно | ищет `lessons` с `library_module_id` без карточки или без версии (следы оборванных транзакций), отчёт админу |
 | `library.version_retire` | ежедневно 03:40 | переводит в `retired` версии, которые никто не закрепляет дольше 90 дней |
+
+PR-25 заводит `library.embedding_refresh` (по событию публикации; без `moduleId` — все модули с
+пустым вектором или вектором другой модели) и `library.usage_recalc` (плюс закрывает места,
+чей держатель исчез мимо редактора — раздел курса удалён целиком, узел удалён не через полотно).
+`hotfix_propagate` и `stale_digest` — PR-26, `orphan_scan` и `version_retire` — вместе с отчётами §9.
 
 ## 12. Крайние случаи
 

@@ -3453,7 +3453,11 @@
       "review_sla_breach": "Review is overdue",
       "review_escalated": "Review escalated",
       "review_queue_moved": "A review queue was handed over to you",
-      "review_overloaded": "Reviewer is overloaded"
+      "review_overloaded": "Reviewer is overloaded",
+      "library_module_updated": "Library module updated",
+      "library_module_archived": "Library module archived",
+      "library_proposal_created": "Library proposal submitted",
+      "library_proposal_decided": "Decision on a library proposal"
     }
   },
   "ntpl": {

@@ -5,7 +5,8 @@
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
+const { formatShortDate } = useFormat()
 const { api } = useApi()
 
 type Kind = 'tasks' | 'trajectories'
@@ -43,7 +44,7 @@ const counts = computed(() => ({
   trajectories: tab.value === 'trajectories' ? rows.value.filter(r => r.status === 'pending').length : null,
 }))
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale.value === 'ru' ? 'ru-RU' : locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const fmtDate = (iso: string) => formatShortDate(new Date(iso))
 
 function decidePath(r: Row): string {
   if (r.kind === 'course') return `/enrollments/${r.id}/decide`

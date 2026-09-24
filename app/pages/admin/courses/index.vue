@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { COURSE_RESULT_MODES } from '#shared/schemas/content'
+const { formatShortDate } = useFormat()
 
 /**
  * Курсы по мокапу ContentCourses (docs/11 §14.1): фильтры Автор · Мітки · Опубліковано, таблица
@@ -129,7 +130,7 @@ const shortName = (n: string | null) => (n ? n.split(' ').map((p, i) => (i === 0
             <td>{{ c.durationDays ? t('course.daysN', { n: c.durationDays }) : '—' }}</td>
             <td>{{ t(`course.resultMode.${c.resultMode}`) }}</td>
             <td class="muted">{{ shortName(c.authorName) }}</td>
-            <td class="muted">{{ new Date(c.updatedAt).toLocaleDateString('uk') }}</td>
+            <td class="muted">{{ formatShortDate(new Date(c.updatedAt)) }}</td>
             <td><span :class="['badge upper', c.status]">{{ t(`course.status.${c.status}`) }}</span></td>
           </tr>
           <tr v-if="visible.length === 0"><td colspan="6" class="empty">{{ t('course.empty') }}</td></tr>

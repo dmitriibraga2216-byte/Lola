@@ -3,6 +3,7 @@
  * «Моя історія навчання» (docs/22 §13.5, docs/mockups/screens/StudyHistory.html): рейтинг
  * (свій/зовнішній ряд наростаючим підсумком) і список пройденого зі статусом. Телефон — перш за все.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -20,7 +21,7 @@ onMounted(async () => {
 })
 
 const maxCount = computed(() => Math.max(1, ...(data.value?.series.map(s => Math.max(s.mine, s.external)) ?? [1])))
-const fmt = (iso: string) => new Date(iso).toLocaleDateString('uk')
+const fmt = (iso: string) => formatShortDate(new Date(iso))
 const statusLabel = (s: string) => t(`studyHistory.status.${s}`)
 </script>
 

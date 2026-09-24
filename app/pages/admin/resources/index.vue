@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RESOURCE_KINDS } from '#shared/schemas/resources'
+const { formatShortDate } = useFormat()
 
 /**
  * Библиотека ресурсов по мокапу ContentResources (docs/11 §5.1, §14): «Знайдено N ресурсів»,
@@ -139,7 +140,7 @@ const pages = computed(() => (list.value ? Math.max(1, Math.ceil(list.value.tota
             <td>{{ t(`resource.kind.${r.kind}`) }}</td>
             <td class="muted">{{ r.authors.map(a => shortName(a.fullName)).join(', ') }}</td>
             <td><span v-for="tg in r.tags" :key="tg" class="badge muted tag">{{ tg }}</span></td>
-            <td class="muted">{{ new Date(r.updatedAt).toLocaleDateString('uk') }}</td>
+            <td class="muted">{{ formatShortDate(new Date(r.updatedAt)) }}</td>
             <td><span :class="['badge upper', r.status]">{{ t(`resource.status.${r.status}`) }}</span></td>
           </tr>
           <tr v-if="list && list.items.length === 0"><td colspan="6" class="empty">{{ t('resource.empty') }}</td></tr>

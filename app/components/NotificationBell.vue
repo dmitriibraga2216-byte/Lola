@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Колокольчик (docs/23 §5.5): последние 50, непрочитанные выделены, клик ведёт к предмету, «Позначити все прочитаним». */
+const { formatDateTime } = useFormat()
 const { t } = useI18n()
 const { api } = useApi()
 const { me } = useAuth()
@@ -11,7 +12,7 @@ async function load() { if (!me.value) return; try { const r = await api<{ items
 onMounted(() => { load(); const t = setInterval(load, 60_000); onUnmounted(() => clearInterval(t)) })
 async function readAll() { await api('/notifications/inbox/read', { method: 'POST', body: {} }); await load() }
 async function go(i: Item) { if (!i.readAt) await api('/notifications/inbox/read', { method: 'POST', body: { ids: [i.id] } }).catch(() => null); open.value = false; if (i.url) navigateTo(i.url); else load() }
-const fmt = (d: string) => new Date(d).toLocaleString('uk', { dateStyle: 'short', timeStyle: 'short' })
+const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' })
 </script>
 <template>
   <div class="bell-wrap">

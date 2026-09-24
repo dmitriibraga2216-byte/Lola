@@ -3,6 +3,7 @@
  * Навчальні програми по мокапу ContentPrograms: НАЗВА (N елементів) · ТРИВАЛІСТЬ · АВТОР · ДАТА ЗМІНИ · ОПУБЛІКОВАНО,
  * кнопка «Додати». Программа — упорядоченный набор без условий (docs/17 Г-17.3); маршруты с условиями — траектории.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'program.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -16,7 +17,7 @@ onMounted(load)
 async function create() {
   try { const p = await api<{ id: string }>('/programs', { method: 'POST', body: { title: title.value, mode: 'linear' } }); await navigateTo(`/admin/programs/${p.id}`) } catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk-UA') : '—'
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 function shortName(name: string | null) {
   if (!name) return '—'
   const [last, first] = name.split(' ')

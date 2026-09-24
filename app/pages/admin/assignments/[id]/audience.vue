@@ -4,6 +4,7 @@
  * фильтры-чипы, «Призначити вибраним», «Призначити через CSV» (Г-15.4), таблица с «Призначити» по строке
  * и колонкой «Спосіб призначення»; конструктор аудитории — четыре измерения с «Всі, окрім».
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
 
 const { t } = useI18n()
@@ -139,7 +140,7 @@ function onFile(e: Event) { csvFile.value = (e.target as HTMLInputElement).files
 
 const allSelected = computed(() => items.value.length > 0 && items.value.every(i => selected.value.includes(i.userId)))
 function toggleAll() { selected.value = allSelected.value ? [] : items.value.map(i => i.userId) }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '—'
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 </script>
 
 <template>

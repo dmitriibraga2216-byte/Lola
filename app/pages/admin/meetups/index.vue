@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'meetup.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -28,7 +29,7 @@ async function create() {
     await navigateTo(`/admin/meetups/${m.id}`)
   } catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })
+const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' })
 </script>
 <template>
   <div>

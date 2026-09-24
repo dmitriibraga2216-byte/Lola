@@ -7,6 +7,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'peo
  * или закрыть одно из размещений («людина у двох підрозділах»).
  */
 const { t } = useI18n()
+const { formatShortDate } = useFormat()
 const { api } = useApi()
 const route = useRoute()
 
@@ -54,7 +55,7 @@ async function resolve() {
 }
 
 const parseDate = (v: string) => new Date(v.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'))
-const dateOf = (v: string | null) => v ? parseDate(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const dateOf = (v: string | null) => v ? formatShortDate(parseDate(v)) : '—'
 /** Деталі — коротко по виду конфликта (мокап: «Б9 Лазарева, Б12 Меркурій», «Б14 (немає)») */
 function detailsOf(r: Row): string {
   const d = r.details

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
 import { COVER_MIMES, RESOURCE_KINDS } from '#shared/schemas/resources'
+const { formatShortDate } = useFormat()
 
 /**
  * Форма ресурса по мокапу ResourceForm (docs/11 §14, §14.2, Г-11.3): тип, название, вміст,
@@ -308,11 +309,11 @@ async function remove() {
           <dl class="kv">
             <dt>{{ t('resource.statusLabel') }}</dt><dd><span :class="['badge upper', meta?.status ?? 'draft']">{{ t(`resource.status.${meta?.status ?? 'draft'}`) }}</span></dd>
             <dt>{{ t('resource.version') }}</dt><dd>{{ meta?.publishedVersionId ? meta.version : '—' }}<span v-if="meta?.hasUnpublishedChanges" class="sub">{{ t('resource.unpublishedChanges') }}</span></dd>
-            <dt>{{ t('resource.updated') }}</dt><dd>{{ meta ? new Date(meta.updatedAt).toLocaleDateString('uk') : '—' }}</dd>
+            <dt>{{ t('resource.updated') }}</dt><dd>{{ meta ? formatShortDate(new Date(meta.updatedAt)) : '—' }}</dd>
           </dl>
           <p v-if="meta?.usedInCourses" class="help">{{ t('resource.usedIn', { n: meta.usedInCourses }) }}</p>
           <ul v-if="meta?.versions.length" class="versions">
-            <li v-for="v in meta.versions" :key="v.id"><b>v{{ v.version }}</b> · {{ new Date(v.publishedAt).toLocaleDateString('uk') }}<span v-if="v.changelog" class="sub">{{ v.changelog }}</span></li>
+            <li v-for="v in meta.versions" :key="v.id"><b>v{{ v.version }}</b> · {{ formatShortDate(new Date(v.publishedAt)) }}<span v-if="v.changelog" class="sub">{{ v.changelog }}</span></li>
           </ul>
           <div v-if="meta && hasScope('course.archive')" class="side-actions">
             <button v-if="meta.status !== 'archived'" class="chip" @click="setStatus('archive')">{{ t('resource.archive') }}</button>

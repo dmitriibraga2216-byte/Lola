@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 
 const { t } = useI18n()
@@ -109,7 +110,7 @@ const exportUrl = computed(() => {
 })
 
 const columns = computed(() => rows.value[0] ? Object.keys(rows.value[0]).filter(k => !k.endsWith('_id') && k !== 'id') : [])
-const fmtCell = (v: unknown) => v === null || v === undefined ? '—' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleDateString('uk') : typeof v === 'boolean' ? (v ? '✓' : '✕') : String(v)
+const fmtCell = (v: unknown) => v === null || v === undefined ? '—' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? formatShortDate(new Date(v)) : typeof v === 'boolean' ? (v ? '✓' : '✕') : String(v)
 </script>
 
 <template>

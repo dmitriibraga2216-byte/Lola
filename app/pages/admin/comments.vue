@@ -2,7 +2,8 @@
 /** Єдина стрічка коментарів (мокап Comments, докс/10 §14.2): джерело · автор · дата · коментар · стан. */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'course.view' })
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
+const { formatShortDate } = useFormat()
 const { api } = useApi()
 
 type SourceType = 'task' | 'course' | 'program' | 'knowledge' | 'notice'
@@ -43,7 +44,7 @@ async function load() {
 onMounted(load)
 watch([sourceFilter, readFilter], load)
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale.value === 'ru' ? 'ru-RU' : locale.value === 'uk' ? 'uk-UA' : 'en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const fmtDate = (iso: string) => formatShortDate(new Date(iso))
 
 async function markRead(r: Row) {
   if (r.isRead) return

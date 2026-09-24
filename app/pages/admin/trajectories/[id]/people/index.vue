@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Люди на траектории: статус, текущий шаг, заявки из каталога (рішення), снятие. */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'program.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -33,7 +34,7 @@ async function cancel(r: Row) {
   try { await api(`/trajectories/enrollments/${r.enrollmentId}/cancel`, { method: 'POST', body: { reason } }); await load() }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk-UA') : '—'
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 const stateOf = (r: Row) => r.cancelledAt ? 'cancelled' : r.requestedAt && r.status === 'not_assigned' ? 'requested' : r.status
 </script>
 

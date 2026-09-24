@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
+const { formatShortDate } = useFormat()
 
 /**
  * Практикуми за мокапом ContentWorkshops (docs/31): шапка «Практикуми» з «Додати», таблиця
@@ -58,7 +59,7 @@ async function create() {
             </td>
             <td class="muted">{{ w.authorNames.length ? w.authorNames.join(', ') : '—' }}</td>
             <td>{{ w.criteriaCount }}</td>
-            <td class="muted">{{ new Date(w.updatedAt).toLocaleDateString('uk') }}</td>
+            <td class="muted">{{ formatShortDate(new Date(w.updatedAt)) }}</td>
             <td><span :class="['badge upper', w.status]">{{ t(`course.status.${w.status}`) }}</span></td>
           </tr>
           <tr v-if="items.length === 0"><td colspan="5" class="empty">{{ t('workshop.empty') }}</td></tr>

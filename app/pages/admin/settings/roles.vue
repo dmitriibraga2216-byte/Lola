@@ -3,6 +3,7 @@
  * Ролі та права (мокап Roles, docs/24 §3.5, Г-24.1): слева таблица ролей (Скоупів · Людей · Тип),
  * справа редактор — группы скоупов чекбоксами с кодами, «Створити роль». Защиты объясняет сервер.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -165,7 +166,7 @@ async function previewAs(r: Role) {
           <b>{{ ownerCard.owner.fullName }}</b>
           <span v-if="iAmOwner" class="badge teal">{{ t('settings.roles.owner.you') }}</span>
         </p>
-        <p class="help">{{ t('settings.roles.owner.since', { date: new Date(ownerCard.owner.since).toLocaleDateString('uk') }) }}</p>
+        <p class="help">{{ t('settings.roles.owner.since', { date: formatShortDate(new Date(ownerCard.owner.since)) }) }}</p>
         <template v-if="canTransfer && iAmOwner">
           <p class="help">{{ t('settings.roles.owner.transferHint') }}</p>
           <button v-if="!transferOpen" class="btn ghost small" type="button" :disabled="ownerBusy" @click="transferOpen = true">{{ t('settings.roles.owner.transfer') }}</button>

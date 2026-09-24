@@ -12,6 +12,7 @@
  */
 import { CANDIDATE_REJECT_REASONS, CANDIDATE_SCORE_KINDS } from '#shared/enums'
 import type { CandidateScoreKind, CandidateState } from '#shared/enums'
+const { formatDate } = useFormat()
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'candidate.view' })
 
@@ -219,7 +220,7 @@ async function archive() {
   finally { busy.value = '' }
 }
 
-const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 </script>
 
 <template>

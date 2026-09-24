@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /** Дні народження (мокап Birthdays, docs/21 §14.7): чипы Майбутні · Минулі, карточки, календарь месяца, подпись про нагадування керівнику. */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'people.view' })
-const { t, locale } = useI18n()
+const { t } = useI18n()
+const { formatDate } = useFormat()
 const { api } = useApi()
 interface B { id: string, fullName: string, date: string, city: string | null, location: string | null, orgUnit: string | null, position: string | null }
 const tab = ref<'upcoming' | 'past'>('upcoming')
@@ -10,9 +11,9 @@ const error = ref('')
 async function load() { try { data.value = await api('/birthdays', { query: { tab: tab.value } }) } catch (err) { error.value = apiErrorOf(err).message } }
 watch(tab, load, { immediate: true })
 const initials = (name: string) => name.split(' ').slice(0, 2).map(w => w[0] ?? '').join('').toUpperCase()
-const dayWord = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(locale.value === 'en' ? 'en-GB' : locale.value === 'ru' ? 'ru-RU' : 'uk-UA', { day: 'numeric', month: 'long' })
+const dayWord = (iso: string) => formatDate(new Date(`${iso}T00:00:00`), { day: 'numeric', month: 'long' })
 const monthStart = computed(() => { const d = new Date(`${data.value.from || new Date().toISOString().slice(0, 10)}T00:00:00`); return new Date(d.getFullYear(), d.getMonth(), 1) })
-const monthName = computed(() => monthStart.value.toLocaleDateString(locale.value === 'en' ? 'en-GB' : locale.value === 'ru' ? 'ru-RU' : 'uk-UA', { month: 'long' }))
+const monthName = computed(() => formatDate(monthStart.value, { month: 'long' }))
 const days = computed(() => { const n = new Date(monthStart.value.getFullYear(), monthStart.value.getMonth() + 1, 0).getDate(); return Array.from({ length: n }, (_, i) => i + 1) })
 const marked = computed(() => new Set(data.value.items.filter(i => i.date.slice(0, 7) === `${monthStart.value.getFullYear()}-${String(monthStart.value.getMonth() + 1).padStart(2, '0')}`).map(i => Number(i.date.slice(8, 10)))))
 </script>

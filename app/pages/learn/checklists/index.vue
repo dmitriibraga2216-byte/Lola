@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'learner', middleware: 'admin-scope', requiredScope: 'checklist.run' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -30,7 +31,7 @@ function go(checklistId: string) {
   const key = crypto.randomUUID()
   navigateTo({ path: `/learn/checklists/run/${key}`, query: { checklistId, locationId: locationId.value || undefined, locationName: locations.value.find(l => l.id === locationId.value)?.name } })
 }
-const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })
+const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' })
 </script>
 <template>
   <div>

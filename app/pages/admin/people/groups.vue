@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'people.view' })
 const { t } = useI18n()
 const { api, apiRaw } = useApi()
@@ -83,7 +84,7 @@ async function remove(g: Group) {
   try { await api(`/user-groups/${g.id}`, { method: 'DELETE' }); await load() }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk') : '—'
+const fmt = (d: string | null) => d ? formatDateTime(new Date(d)) : '—'
 </script>
 
 <template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -14,7 +15,7 @@ async function open(s: Step) {
   try { const r = await api<{ to: string }>(`/learning/programs/${route.params.id}/open`, { method: 'POST', body: { nodeId: s.id } }); await navigateTo(r.to) }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('uk-UA') : ''
+const fmt = (d: string | null | undefined) => d ? formatShortDate(new Date(d)) : ''
 </script>
 <template>
   <div>

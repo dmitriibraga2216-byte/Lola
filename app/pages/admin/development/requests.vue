@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'request.decide' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -44,7 +45,7 @@ const allRows = computed<Row[]>(() => {
   return [...ext, ...car].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
 })
 const rows = computed<Row[]>(() => filters.kind ? allRows.value.filter(r => r.kind === filters.kind) : allRows.value)
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
+const fmt = (d: string) => formatShortDate(new Date(d))
 const kindCount = (k: 'external' | 'career') => allRows.value.filter(r => r.kind === k).length
 </script>
 <template>

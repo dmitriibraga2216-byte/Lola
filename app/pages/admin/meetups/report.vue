@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FrameRow } from '~/components/ReportFrame.vue'
+const { formatDateTime, formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -8,8 +9,8 @@ interface Rep { meetups: { id: string, title: string, starts_at: string, status:
 const rep = ref<Rep | null>(null)
 const error = ref('')
 onMounted(async () => { try { rep.value = await api('/reports/attendance') } catch (err) { error.value = apiErrorOf(err).message } })
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
-const fmtAt = (d: string | null) => d ? new Date(d).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+const fmt = (d: string) => formatShortDate(new Date(d))
+const fmtAt = (d: string | null) => d ? formatDateTime(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
 </script>
 <template>
   <div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime, formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope' })
 
 const { t, te } = useI18n()
@@ -134,8 +135,8 @@ const gdprReason = ref('')
 const gdpr = () => { if (confirm(t('person.gdprConfirm'))) act(() => api('/people/gdpr-erase', { method: 'POST', body: { userId: id, reason: gdprReason.value } }), t('person.gdprDone')) }
 const addNoteAction = () => act(async () => { await api(`/people/${id}/notes`, { method: 'POST', body: { body: noteBody.value } }); noteBody.value = ''; await loadTab('notes') }, t('common.saved'))
 
-const fmt = (d: unknown) => d ? new Date(String(d)).toLocaleDateString('uk') : '—'
-const fmtT = (d: unknown) => d ? new Date(String(d)).toLocaleString('uk') : '—'
+const fmt = (d: unknown) => d ? formatShortDate(new Date(String(d))) : '—'
+const fmtT = (d: unknown) => d ? formatDateTime(new Date(String(d))) : '—'
 const primary = computed(() => person.value?.placements.find(p => p.isPrimary && !p.endedAt) ?? person.value?.placements[0])
 </script>
 

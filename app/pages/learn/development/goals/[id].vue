@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -53,7 +54,7 @@ async function addComment() {
   try { await api(`/development/goals/${route.params.id}/comments`, { method: 'POST', body: { body: comment.value } }); comment.value = ''; await load() }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })
+const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' })
 </script>
 
 <template>

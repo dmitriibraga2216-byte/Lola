@@ -3,6 +3,7 @@
  * Переклади (мокап Translations, docs/24 §3.6): Мова · Тільки змінені · поиск; колонки Ключ · Стандартний ·
  * Свій · Хто · Дата; «Повернути стандартний» на строке и на всём наборе; экспорт и импорт json.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
 const { t, locale: uiLocale } = useI18n()
 const { api } = useApi()
@@ -67,7 +68,7 @@ async function importJson(e: Event) {
   catch (err) { error.value = apiErrorOf(err).message || t('settings.translations.badJson') }
   finally { if (fileInput.value) fileInput.value.value = '' }
 }
-const fmtDate = (s: string | null) => s ? new Date(s).toLocaleDateString('uk-UA') : ''
+const fmtDate = (s: string | null) => s ? formatShortDate(new Date(s)) : ''
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PER)))
 </script>
 

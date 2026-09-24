@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'people.import' })
 
 const { t } = useI18n()
@@ -107,7 +108,7 @@ async function openJob(id: string) {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 onMounted(() => { loadHistory(); const job = useRoute().query.job; if (typeof job === 'string') openJob(job) })
-const fmt = (d: string) => new Date(d).toLocaleString('uk')
+const fmt = (d: string) => formatDateTime(new Date(d))
 
 // Мокап Import (docs/16 §5.4): п'ять джерел вкладками — на R1 готові CSV і API, решта R2
 const SOURCES = ['csv', 'api', 'ad', 'azureAd', 'hrm'] as const

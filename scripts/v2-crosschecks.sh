@@ -249,22 +249,26 @@ check5_tokens() {
   hex_hits="$(grep -rnoE '#[0-9a-fA-F]{3,8}\b' app --include='*.vue' --include='*.css' 2>/dev/null \
     | grep -v 'app/assets/tokens.css' | grep -v 'app/assets/ui.css' || true)"
   # Allowlist — четыре хекс-литерала, найденных на момент написания проверки (main, 2026-09-23):
-  # - app/pages/learn/profile.vue:185 `#fff4c7` — дублирует существующий токен
+  # - app/pages/learn/profile.vue:186 `#fff4c7` — дублирует существующий токен
   #   --color-sun-soft: #fff4c7 (app/assets/tokens.css); реальная мелкая рассинхронизация,
   #   не исправляется в PR-01 (только тесты/скрипт/CI/документы) — заведена отдельная задача.
-  #   Номер строки сдвинулся с 166 на 185 в задаче про третий язык интерфейса (переключатель
-  #   языка добавил разметку и стили выше по файлу, сам хекс-литерал не трогали);
-  # - app/pages/learn/meetups/checkin.vue:82 `#000` — фон видео-плеера (letterbox), должен
-  #   быть буквально чёрным независимо от темы оформления, не элемент бренд-палитры;
-  # - app/pages/admin/settings/notifications.vue:347 `#fff` — фон превью HTML-письма: должен
-  #   быть буквально белым «листом бумаги», иначе превью не соответствует письму получателя;
-  # - app/pages/admin/meetups/[id].vue:221 `#fff` — фон под QR-кодом: контраст QR обязан быть
+  #   Номер строки сдвинулся 166→185 в задаче про третий язык интерфейса, затем 185→186 —
+  #   в задаче про единое форматирование дат (добавлена строка `const { formatDate,
+  #   formatShortDate } = useFormat()` в начале <script setup>); сам хекс-литерал не трогали;
+  # - app/pages/learn/meetups/checkin.vue:83 `#000` — фон видео-плеера (letterbox), должен
+  #   быть буквально чёрным независимо от темы оформления, не элемент бренд-палитры.
+  #   Строка 82→83 — тот же сдвиг на одну строку (задача про единое форматирование дат);
+  # - app/pages/admin/settings/notifications.vue:348 `#fff` — фон превью HTML-письма: должен
+  #   быть буквально белым «листом бумаги», иначе превью не соответствует письму получателя.
+  #   Строка 347→348 — тот же сдвиг;
+  # - app/pages/admin/meetups/[id].vue:222 `#fff` — фон под QR-кодом: контраст QR обязан быть
   #   чёрным/белым для сканирования, тон беж-фона токена --color-bg этого не гарантирует.
+  #   Строка 221→222 — тот же сдвиг.
   local allow=(
-    "app/pages/learn/profile.vue:185"
-    "app/pages/learn/meetups/checkin.vue:82"
-    "app/pages/admin/settings/notifications.vue:347"
-    "app/pages/admin/meetups/[id].vue:221"
+    "app/pages/learn/profile.vue:186"
+    "app/pages/learn/meetups/checkin.vue:83"
+    "app/pages/admin/settings/notifications.vue:348"
+    "app/pages/admin/meetups/[id].vue:222"
   )
   hex_hits="$(filter_allowlist "$hex_hits" "${allow[@]}")"
 

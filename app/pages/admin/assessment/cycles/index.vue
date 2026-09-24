@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RATER_KINDS, RATER_ROLE_DEFAULTS } from '#shared/enums'
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assessment.run' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -30,7 +31,7 @@ async function create() {
     await load()
   } catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
+const fmt = (d: string) => formatShortDate(new Date(d))
 </script>
 <template>
   <div>

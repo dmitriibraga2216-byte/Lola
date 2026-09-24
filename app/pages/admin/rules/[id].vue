@@ -4,6 +4,7 @@
  * «Будь-який / Тільки ці / Усі, крім», живая сводка «Буде призначено N людей на зараз» + «Показати список»,
  * «Відкладене призначення», «Використовується для». Дополнительно (docs/15 §3.6): тригеры по курсу, действия, запуск вручную.
  */
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -183,7 +184,7 @@ const usageLink = (u: { kind: string, id: string }) => u.kind === 'trajectory' ?
             <li v-for="u in usedBy" :key="u.id"><NuxtLink :to="usageLink(u)" class="link">{{ u.title }}</NuxtLink> <span class="muted">· {{ t(`rules.usage.${u.kind}`) }}</span></li>
           </ul>
           <p v-else class="help">{{ t('rules.notUsed') }}</p>
-          <p class="help">{{ t('rules.runs') }}: {{ stats.runs ?? 0 }}<template v-if="stats.lastRunAt"> · {{ t('rules.lastRun') }} {{ new Date(stats.lastRunAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }}</template></p>
+          <p class="help">{{ t('rules.runs') }}: {{ stats.runs ?? 0 }}<template v-if="stats.lastRunAt"> · {{ t('rules.lastRun') }} {{ formatDateTime(new Date(stats.lastRunAt), { dateStyle: 'short', timeStyle: 'short' }) }}</template></p>
           <button class="btn danger small" type="button" :disabled="usedBy.length > 0" @click="remove">{{ t('rules.delete') }}</button>
         </section>
       </aside>

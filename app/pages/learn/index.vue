@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
@@ -83,11 +84,10 @@ function dueBadge(card: Card): string {
 }
 
 function shortDate(iso: string) {
-  const d = new Date(iso)
-  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`
+  return formatDate(new Date(iso), { day: '2-digit', month: '2-digit' })
 }
 function longDate(iso: string) {
-  return new Date(iso).toLocaleDateString('uk', { day: 'numeric', month: 'long' })
+  return formatDate(new Date(iso), { day: 'numeric', month: 'long' })
 }
 
 function action(card: Card): string {

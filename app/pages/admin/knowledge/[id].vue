@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
+const { formatDateTime, formatTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
 const { t } = useI18n()
 const { api, apiRaw } = useApi()
@@ -36,7 +37,7 @@ async function save() {
   try {
     const rules = [...(draft.positionIds.length ? [{ type: 'position', ids: draft.positionIds }] : []), ...(draft.locationIds.length ? [{ type: 'location', ids: draft.locationIds }] : [])]
     await api(`/knowledge/${id}`, { method: 'PATCH', body: { title: draft.title, summary: draft.summary, body: draft.body, tags: draft.tags.split(',').map(s => s.trim()).filter(Boolean), ownerId: draft.ownerId || undefined, reviewAt: draft.reviewAt || null, relatedCourses: draft.relatedCourses, relatedArticles: draft.relatedArticles, attachments: draft.attachments, visibility: draft.scope === 'audience' && rules.length ? { scope: 'audience', audience: { rules, match: 'any' } } : { scope: 'tenant' } } })
-    savedAt.value = new Date().toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })
+    savedAt.value = formatTime(new Date(), { hour: '2-digit', minute: '2-digit' })
   } catch (err) { error.value = apiErrorOf(err).message }
 }
 async function setStatus(status: string) { await save(); await api(`/knowledge/${id}`, { method: 'PATCH', body: { status } }); await load() }
@@ -70,7 +71,7 @@ async function setStatus(status: string) { await save(); await api(`/knowledge/$
       <p class="sub">👍 {{ article.helpfulCount }} · 👎 {{ article.notHelpfulCount }}<span v-if="article.needsReview"> · ⚠ {{ t('kb.needsReview') }}</span></p>
     </section>
     <details class="revs"><summary>{{ t('kb.revisions', { n: revisions.length }) }}</summary>
-      <ul><li v-for="r in revisions" :key="r.version">v{{ r.version }} · {{ new Date(r.createdAt).toLocaleString('uk') }}{{ r.comment ? ` — ${r.comment}` : '' }}</li></ul>
+      <ul><li v-for="r in revisions" :key="r.version">v{{ r.version }} · {{ formatDateTime(new Date(r.createdAt)) }}{{ r.comment ? ` — ${r.comment}` : '' }}</li></ul>
     </details>
   </div>
   <p v-else-if="error" class="error">{{ error }}</p>

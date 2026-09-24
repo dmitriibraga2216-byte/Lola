@@ -6,6 +6,7 @@
  * динаміка по точках, список прогонів) і вкладку тайного покупця лишено окремими вкладками.
  */
 import type { FrameRow } from '~/components/ReportFrame.vue'
+const { formatDateTime } = useFormat()
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 const { t } = useI18n()
@@ -49,7 +50,7 @@ onMounted(async () => {
   await Promise.all([load(), loadMystery()])
 })
 watch(() => [filter.locationId, filter.checklistId], load)
-const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' })
+const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' })
 const subtitle = computed(() => tab.value === 'items' || tab.value === 'people' || tab.value === 'locations' ? t(`cl.reportSubtitle.${tab.value}`) : '')
 </script>
 <template>

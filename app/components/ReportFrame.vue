@@ -21,11 +21,12 @@ export interface FrameRow {
 }
 const props = withDefaults(defineProps<{ part: 'head' | 'cells', row?: FrameRow, tail?: boolean }>(), { tail: true, row: () => ({}) })
 const { t } = useI18n()
+const { formatShortDate } = useFormat()
 const tags = computed(() => Array.isArray(props.row.tags) ? props.row.tags : typeof props.row.tags === 'string' && props.row.tags ? props.row.tags.split(',').map(s => s.trim()) : [])
 const dateOf = (v: unknown) => {
   if (!v) return '—'
   const d = v instanceof Date ? v : new Date(String(v).replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'))
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return Number.isNaN(d.getTime()) ? '—' : formatShortDate(d)
 }
 const STATUSES = ['not_assigned', 'not_started', 'in_progress', 'done', 'failed']
 </script>

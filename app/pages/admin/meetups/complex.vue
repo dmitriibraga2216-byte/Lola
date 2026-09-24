@@ -7,6 +7,7 @@
  * Колонка «Теми» знята рішенням замовника 23.09.2026 (docs/33 D-075, docs/28): у складі
  * комплексного теста немає поняття «тема» (лише частини-тести `parts`, docs/12 §14.2) і не буде.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'complextest.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -58,7 +59,7 @@ async function save() {
             </td>
             <td>{{ t('cx.col.compositionN', { n: c.parts.length }) }}</td>
             <td class="muted">{{ c.authorName ?? '—' }}</td>
-            <td class="muted">{{ new Date(c.updatedAt).toLocaleDateString('uk') }}</td>
+            <td class="muted">{{ formatShortDate(new Date(c.updatedAt)) }}</td>
             <td><span :class="['badge upper', c.isActive ? 'published' : 'draft']">{{ c.isActive ? t('course.status.published') : t('course.status.draft') }}</span></td>
           </tr>
           <tr v-if="items.length === 0"><td colspan="5" class="empty">{{ t('cx.empty') }}</td></tr>

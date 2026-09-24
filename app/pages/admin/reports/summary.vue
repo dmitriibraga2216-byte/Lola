@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 
 /**
@@ -109,7 +110,7 @@ const cell = (r: Row, taskId: string) => r.tasks?.[taskId] ?? { status: 'not_ass
           <div class="table-wrap">
             <table v-if="users.rows.length" class="table">
               <thead><tr><ReportFrame part="head" :tail="false" /><th>{{ t('summary.col.registered') }}</th></tr></thead>
-              <tbody><tr v-for="r in users.rows" :key="r.user_id"><ReportFrame part="cells" :row="r" :tail="false" /><td>{{ new Date(String(r.registered_at)).toLocaleDateString('uk') }}</td></tr></tbody>
+              <tbody><tr v-for="r in users.rows" :key="r.user_id"><ReportFrame part="cells" :row="r" :tail="false" /><td>{{ formatShortDate(new Date(String(r.registered_at))) }}</td></tr></tbody>
             </table>
             <p v-else class="muted">{{ t('reports.noData') }}</p>
           </div>

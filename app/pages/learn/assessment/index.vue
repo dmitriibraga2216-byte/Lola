@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -11,7 +12,7 @@ onMounted(async () => {
   try { data.value = await api('/assessment/my-tasks') } catch (err) { error.value = apiErrorOf(err).message }
   if (data.value.rating.length === 0 && data.value.rated.length) tab.value = 'me'
 })
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
+const fmt = (d: string) => formatShortDate(new Date(d))
 </script>
 <template>
   <div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -63,8 +64,8 @@ async function createRequest() {
 }
 const isOverdue = (g: Goal) => !g.isFinal && g.dueAt < new Date().toISOString().slice(0, 10)
 // Мокап DevelopmentPlanMobile: дати людяно — «30 вересня» (ціль), «15.08.2026 — 15.02.2027» (період плану).
-const fmtDue = (d: string) => new Date(d).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })
-const fmtPeriod = (d: string) => new Date(d).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const fmtDue = (d: string) => formatDate(new Date(d), { day: 'numeric', month: 'long' })
+const fmtPeriod = (d: string) => formatDate(new Date(d), { day: '2-digit', month: '2-digit', year: 'numeric' })
 function levelText(c: GapItem, displayAs: 'label' | 'value', level: number) {
   return displayAs === 'label' && level === c.currentLevel && c.currentLevelLabel ? c.currentLevelLabel : String(level)
 }

@@ -2,6 +2,7 @@ import { withTenant } from '../utils/withTenant'
 import { sendEmail, type ChannelResult } from './channels'
 import { readSettings } from './settings'
 import { tenantOverrides } from './translations'
+import { resolveLocale } from '../../shared/utils/dateFormat'
 
 /**
  * Доставка OTP. Этап 1 (docs/07-stages.md): Telegram + SMS-заглушка в логе.
@@ -32,17 +33,20 @@ export async function sendOtpEmail(tenantId: string, email: string, code: string
   return withTenant(tenantId, null, async (tx) => {
     const { templateFor, renderTemplate } = await import('./notifications')
     const { buildEmailHtml } = await import('./emailRender')
-    const tpl = await templateFor(tx, tenantId, 'otp_code', 'email', locale)
+    // Нормалізована локаль (докс/28, долг PR-107): раніше тут було `locale === 'en' ? 'en' : 'uk'`,
+    // яке мовчки губило `ru` — тепер той самий resolveLocale(), що і в датах нижче.
+    const loc = resolveLocale(locale)
+    const tpl = await templateFor(tx, tenantId, 'otp_code', 'email', loc)
     if (!tpl) return { ok: false, skipped: true, error: 'template disabled' }
     const settings = await readSettings(tx, tenantId)
-    const trMap = await tenantOverrides(tenantId, locale === 'en' ? 'en' : 'uk')
+    const trMap = await tenantOverrides(tenantId, loc)
     const tr = (phrase: string) => trMap[phrase] ?? phrase
     const vars = { code, minutes: ttlMinutes }
-    const text = renderTemplate(tpl.body, vars, tr)
-    const subject = renderTemplate(tpl.subject ?? DEFAULT_OTP_SUBJECT, vars, tr)
+    const text = renderTemplate(tpl.body, vars, tr, loc)
+    const subject = renderTemplate(tpl.subject ?? DEFAULT_OTP_SUBJECT, vars, tr, loc)
     const mjmlSrc = tpl.bodyMjml ?? (tpl.scope === 'global' ? DEFAULT_OTP_MJML : null)
     const html = buildEmailHtml({
-      bodyMjml: mjmlSrc ? renderTemplate(mjmlSrc, vars, tr) : null,
+      bodyMjml: mjmlSrc ? renderTemplate(mjmlSrc, vars, tr, loc) : null,
       fallbackText: text,
       layout: { headerMjml: settings.emailLayout.headerMjml, footerMjml: settings.emailLayout.footerMjml },
     })

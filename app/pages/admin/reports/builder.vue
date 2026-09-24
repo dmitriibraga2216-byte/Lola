@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.builder' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -38,7 +39,7 @@ async function persist() {
 }
 async function remove(s: Saved) { await api(`/reports/builder/${s.id}`, { method: 'DELETE' }); if (editingId.value === s.id) editingId.value = null; await load() }
 const cols = computed(() => rows.value.length ? Object.keys(rows.value[0]!) : [])
-const fmt = (v: unknown) => v == null ? '—' : typeof v === 'boolean' ? (v ? '✓' : '✕') : /^\d{4}-\d{2}-\d{2}T/.test(String(v)) ? new Date(String(v)).toLocaleDateString('uk-UA') : String(v)
+const fmt = (v: unknown) => v == null ? '—' : typeof v === 'boolean' ? (v ? '✓' : '✕') : /^\d{4}-\d{2}-\d{2}T/.test(String(v)) ? formatShortDate(new Date(String(v))) : String(v)
 </script>
 <template>
   <div>

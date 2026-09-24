@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
 import { COURSE_RESULT_MODES } from '#shared/schemas/content'
+const { formatTime } = useFormat()
 
 /**
  * План курса по мокапу CoursePlan (docs/11 §5.3, §14.1): слева библиотека ресурсов и тестов с фильтрами
@@ -134,7 +135,7 @@ async function save() {
       method: 'PATCH',
       body: { title: draft.title, body: draft.body, isRequired: draft.isRequired, minSeconds: draft.minSeconds, passScorePct: draft.passScorePct || null },
     })
-    savedAt.value = new Date().toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' })
+    savedAt.value = formatTime(new Date(), { hour: '2-digit', minute: '2-digit' })
     const lesson = editor.value?.modules.flatMap(m => m.lessons).find(l => l.id === selected.value!.id)
     if (lesson) Object.assign(lesson, { title: draft.title, body: draft.body, isRequired: draft.isRequired, minSeconds: draft.minSeconds, passScorePct: draft.passScorePct })
   }

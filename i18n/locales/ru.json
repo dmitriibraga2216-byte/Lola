@@ -1038,7 +1038,17 @@
     "open": "Открыть",
     "share": "Поделиться",
     "copied": "Скопировано",
-    "downloadPdf": "Скачать PDF"
+    "downloadPdf": "Скачать PDF",
+    "pdf": {
+      "badge": "Сертификат",
+      "completed": "успешно завершил(а) обучение по программе",
+      "number": "Номер",
+      "issued": "Выдан",
+      "validUntil": "Действителен до",
+      "unlimited": "бессрочно",
+      "result": "Результат",
+      "verify": "Проверить подлинность"
+    }
   },
   "enrollment": {
     "not_assigned": "Не назначено",

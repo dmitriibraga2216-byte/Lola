@@ -5,6 +5,7 @@
  * Нижче — докс/33 D-065: список виданих сертифікатів (пошук/фільтри, відкликання з причиною) —
  * `GET /certificates` і `POST /certificates/:id/revoke` вже мали API, вітрини не було.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -15,7 +16,7 @@ const rows = ref<Row[]>([])
 const error = ref('')
 onMounted(async () => { try { rows.value = await api<Row[]>('/certificates/summary') } catch (err) { error.value = apiErrorOf(err).message } })
 const total = computed(() => rows.value.reduce((s, r) => s + r.issued, 0))
-const fmt = (s: string) => new Date(s).toLocaleDateString('uk-UA')
+const fmt = (s: string) => formatShortDate(new Date(s))
 
 // ── Видані сертифікати: пошук/фільтри, відкликання (D-065) ──
 const certs = ref<Cert[]>([])

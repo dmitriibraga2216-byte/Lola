@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import QRCode from 'qrcode'
+const { formatDateTime, formatTime } = useFormat()
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'meetup.attendance' })
 const { t } = useI18n()
@@ -83,7 +84,7 @@ const saveMinutes = () => act(() => api(`/meetups/${route.params.id}/participati
 const saveRecord = () => act(() => api(`/meetups/${route.params.id}`, { method: 'PATCH', body: { webinar: { recordUrl: recordUrl.value || null } } }))
 const active = computed(() => m.value?.participants.filter(p => !['cancelled'].includes(p.status)) ?? [])
 const attended = computed(() => active.value.filter(p => p.status === 'attended').length)
-const fmt = (d: string | null) => d ? new Date(d).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : ''
+const fmt = (d: string | null) => d ? formatTime(new Date(d), { hour: '2-digit', minute: '2-digit' }) : ''
 </script>
 <template>
   <div>
@@ -92,7 +93,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleTimeString('uk-UA', { 
     <p v-if="notice" class="notice">{{ notice }}</p>
     <template v-if="m">
       <div class="head"><h1>{{ m.title }}</h1><span :class="['badge', m.status]">{{ t(`mt.mstatus.${m.status}`) }}</span></div>
-      <p class="sub">{{ new Date(m.startsAt).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' }) }}<template v-if="m.location"> · {{ m.location.name }}</template><template v-if="m.room">, {{ m.room }}</template> · {{ t('mt.registeredN', { n: m.registered, cap: m.capacity ?? '∞' }) }}<template v-if="m.waitlist"> · {{ t('mt.queue') }}: {{ m.waitlist }}</template></p>
+      <p class="sub">{{ formatDateTime(new Date(m.startsAt), { dateStyle: 'medium', timeStyle: 'short' }) }}<template v-if="m.location"> · {{ m.location.name }}</template><template v-if="m.room">, {{ m.room }}</template> · {{ t('mt.registeredN', { n: m.registered, cap: m.capacity ?? '∞' }) }}<template v-if="m.waitlist"> · {{ t('mt.queue') }}: {{ m.waitlist }}</template></p>
       <div class="tabs">
         <button v-for="tb in tabs" :key="tb" :class="['tab', { on: tab === tb }]" :disabled="tb === 'qr' && m.attendanceMode === 'manual'" @click="tab = tb as never">{{ t(`mt.tab.${tb}`) }}</button>
         <span class="spacer" />
@@ -104,7 +105,7 @@ const fmt = (d: string | null) => d ? new Date(d).toLocaleTimeString('uk-UA', { 
           <thead><tr><th>{{ t('mt.when') }}</th><th>{{ t('assign.col.status') }}</th><th>{{ t('mt.participants') }}</th><th /></tr></thead>
           <tbody>
             <tr v-for="s in sessions" :key="s.id" :data-testid="`sess-${s.id}`">
-              <td>{{ new Date(s.starts_at).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }}<div class="sub">{{ s.location ?? '' }}{{ s.room ? `, ${s.room}` : '' }}</div></td>
+              <td>{{ formatDateTime(new Date(s.starts_at), { dateStyle: 'short', timeStyle: 'short' }) }}<div class="sub">{{ s.location ?? '' }}{{ s.room ? `, ${s.room}` : '' }}</div></td>
               <td><span :class="['badge', s.status]">{{ t(`mt.mstatus.${s.status}`) }}</span></td>
               <td>{{ s.registered }}<template v-if="s.capacity"> / {{ s.capacity }}</template></td>
               <td><button class="chip" @click="openSession(s.id)">{{ t('mt.markAttendance') }}</button></td>

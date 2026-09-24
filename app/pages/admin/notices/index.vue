@@ -3,6 +3,7 @@
  * Оголошення (мокап Notices, docs/21 §14.5): список слева, карточка с бейджами типа и режима призначення,
  * «Нагадати тим, хто не підтвердив», справа охват «Ознайомились N із M» с вкладками Не підтвердили / Підтвердили.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -19,7 +20,7 @@ const error = ref('')
 const notice = ref('')
 const busy = ref(false)
 const selected = computed(() => items.value.find(n => n.id === selectedId.value) ?? null)
-const d = (s: string | null) => s ? new Date(s).toLocaleDateString('uk-UA') : null
+const d = (s: string | null) => s ? formatShortDate(new Date(s)) : null
 const initials = (name: string) => name.split(' ').slice(0, 2).map(w => w[0] ?? '').join('').toUpperCase()
 
 async function load() {
@@ -104,7 +105,7 @@ const people = computed(() => (tab.value === 'notAcked' ? cov.value?.notAcked : 
           <li v-for="p in people" :key="p.id">
             <span class="avatar" aria-hidden="true">{{ initials(p.fullName) }}</span>
             <span class="who"><b>{{ p.fullName }}</b><span class="sub">{{ [p.position, p.location].filter(Boolean).join(' · ') || '—' }}</span></span>
-            <span class="muted when">{{ p.ackedAt ? new Date(p.ackedAt).toLocaleDateString('uk-UA') : '—' }}</span>
+            <span class="muted when">{{ p.ackedAt ? formatShortDate(new Date(p.ackedAt)) : '—' }}</span>
           </li>
           <li v-if="!people.length" class="faint">—</li>
         </ul>

@@ -5,6 +5,7 @@
  * «або Свій варіант відповіді», режим «з умовами» (перехід за варіантом), конфіденційно / анонімно.
  * Після першої відповіді питання і приватність заморожені — сервер відповідає 409.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'survey.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -73,7 +74,7 @@ async function save(activate = false) {
 }
 async function showReport(s: S) { try { report.value = await api(`/surveys/${s.id}/report`) } catch (err) { error.value = apiErrorOf(err).message } }
 async function setStatus(s: S, status: string) { try { await api(`/surveys/${s.id}`, { method: 'PATCH', body: { status } }); await load() } catch (err) { error.value = apiErrorOf(err).message } }
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk')
+const fmt = (d: string) => formatShortDate(new Date(d))
 const privacy = (s: S) => s.isAnonymous ? t('survey.privacy.anonymous') : s.isConfidential ? t('survey.privacy.confidential') : t('survey.privacy.open')
 </script>
 <template>
@@ -189,7 +190,7 @@ const privacy = (s: S) => s.isAnonymous ? t('survey.privacy.anonymous') : s.isCo
         </div>
         <div v-if="report.respondents?.length" class="rq">
           <b>{{ t('survey.respondents') }}</b>
-          <ul class="texts"><li v-for="r in report.respondents" :key="r.id">{{ r.name ?? t('survey.noName') }} · {{ new Date(r.submittedAt).toLocaleDateString('uk') }}</li></ul>
+          <ul class="texts"><li v-for="r in report.respondents" :key="r.id">{{ r.name ?? t('survey.noName') }} · {{ formatShortDate(new Date(r.submittedAt)) }}</li></ul>
         </div>
         <button class="chip" @click="report = null">{{ t('common.close') }}</button>
       </div>

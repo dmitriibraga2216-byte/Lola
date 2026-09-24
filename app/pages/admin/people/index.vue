@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope' })
 
 const { t } = useI18n()
@@ -141,7 +142,7 @@ async function runBulk() {
 function assignLearning() { navigateTo({ path: '/admin/assignments', query: { userIds: [...selected.value].join(',') } }) }
 
 const primary = (p: PersonRow) => p.placements.find(x => x.isPrimary) ?? p.placements[0]
-const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '—'
+const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 </script>
 
 <template>

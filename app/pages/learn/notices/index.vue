@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Мої оголошення: назначенные человеку с отметкой «Ознайомився» (docs/21 §14.5). */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -7,7 +8,7 @@ interface N { id: string, title: string, kind: string, priority: string, publish
 const items = ref<N[]>([])
 const simple = ref<{ id: string, title: string, body: unknown[], endsAt: string | null }[]>([])
 const error = ref('')
-const d = (s: string | null) => s ? new Date(s).toLocaleDateString('uk-UA') : ''
+const d = (s: string | null) => s ? formatShortDate(new Date(s)) : ''
 onMounted(async () => {
   try { items.value = await api<N[]>('/notices/mine'); simple.value = await api('/simple-notices') } catch (err) { error.value = apiErrorOf(err).message }
 })

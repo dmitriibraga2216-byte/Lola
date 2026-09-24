@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'learner', middleware: 'admin-scope', requiredScope: 'checklist.run' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -12,7 +13,7 @@ async function toggle(a: Run['actionPlan'][number]) {
   try { await api(`/checklist-runs/${route.params.runId}/actions/${a.id}`, { method: 'PATCH', body: { status: a.status === 'done' ? 'open' : 'done' } }); await load() } catch (err) { error.value = apiErrorOf(err).message }
 }
 const ans = (id: string) => run.value?.answers.find(a => a.itemId === id)
-const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' }) : '—'
 </script>
 <template>
   <div>

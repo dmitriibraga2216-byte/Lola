@@ -7,6 +7,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'rep
  * таблица людей с единым каркасом (ReportFrame) и правой частью по типу. У теста рядом с результатом — «Перерахувати».
  */
 const { t } = useI18n()
+const { formatDate, formatShortDate } = useFormat()
 const route = useRoute()
 const router = useRouter()
 const { api } = useApi()
@@ -72,7 +73,7 @@ const weeks = computed(() => {
   for (const a of report.value?.accesses ?? []) {
     const d = new Date(a.day); const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay() + 6) % 7))
     const key = day(monday)
-    const w = acc.get(key) ?? { label: monday.toLocaleDateString('uk', { day: '2-digit', month: '2-digit' }), hits: 0, users: 0 }
+    const w = acc.get(key) ?? { label: formatDate(monday, { day: '2-digit', month: '2-digit' }), hits: 0, users: 0 }
     w.hits += a.hits; w.users = Math.max(w.users, a.users)
     acc.set(key, w)
   }
@@ -103,7 +104,7 @@ async function recalcAll() {
   catch (err) { error.value = apiErrorOf(err).message }
   finally { recalculating.value = null }
 }
-const dateOf = (v: unknown) => v ? new Date(String(v).replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00')).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const dateOf = (v: unknown) => v ? formatShortDate(new Date(String(v).replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'))) : '—'
 const exportUrl = computed(() => `/api/v1/reports/tasks/${contentType.value}?${new URLSearchParams({ ...query(), format: 'xlsx' })}`)
 const title = computed(() => report.value?.task?.title ?? report.value?.subject?.title ?? t('taskReport.pick', { type: t(`contentType.${contentType.value}`).toLowerCase() }))
 </script>

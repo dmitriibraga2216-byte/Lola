@@ -161,6 +161,13 @@ worktree, `git status`/`git diff --stat` подтвердили целостно
 `candidate_stale` — коды PR-16 и мои строки просто идут подряд) и в `docs/v2/46-progress.md`
 (обе записи внизу файла). После ребейза `vacancy.application_received` подключён к реальному
 коду PR-16 (`convertApplication()`), а не оставлен контрактом на будущее — см. п. 3.
+**Вторая пауза** — хост перезагружался (перегрузка от ~8 параллельных агентов на 8 ГБ);
+worktree и оба коммита целы, `docker`/temp-БД `lola_v2_37` пережили рестарт (volume). За это
+время в `main` влился PR-30 (`v2-org-30`, #111, единый `resolveManager()`) и #113 (утилита
+keyset-курсора) — второй ребейз, конфликт снова в `scripts/v2-crosschecks.sh` и его спеке
+(PR-30 добавил «Проверку 9» — `resolveManager()`; моя стала «Проверкой 10»). Заодно
+координатор снял полный `typecheck`/`test:quiet`/`build`/e2e из локального гейта (несёт CI) —
+подробности в разделе «Гейт».
 **Результат:** 22 недостающих кода уведомлений зарегистрированы в `DEFAULT_TEMPLATES`, три новых
 события вебхуков добавлены в `WEBHOOK_EVENTS` (итого 10) с PII-free payload на реальных
 данных, тихие часы кандидата реализованы в `enqueueNotification()`. **Миграции нет** — см.
@@ -219,9 +226,10 @@ worktree, `git status`/`git diff --stat` подтвердили целостно
    `users.vacancy_id → vacancies.location_id → locations.timezone`, цепочка существующих FK,
    без новой колонки и без миграции. Без вакансии (кандидат заведён вручную) — таймзона
    тенанта, тот же порядок отказа, что у сотрудника.
-6. **Сквозная проверка 19** (`42` §5) добавлена в `scripts/v2-crosschecks.sh` как `check9`
-   (после ребейза на PR-16 — у него уже была своя «Проверка 8», публичный контур) —
-   статический инвариант (ветка кандидата не смотрит на `quietHours.enabled`, использует
+6. **Сквозная проверка 19** (`42` §5) добавлена в `scripts/v2-crosschecks.sh` как `check10`
+   (после двух ребейзов: PR-16 занял «Проверку 8» — публичный контур, PR-30 занял
+   «Проверку 9» — `resolveManager()`) — статический инвариант (ветка кандидата не смотрит
+   на `quietHours.enabled`, использует
    `CANDIDATE_QUIET_HOURS`) плюс три фикстуры в `tests/unit/v2-crosschecks.spec.ts` (по
    образцу check2/check6/check7: провал без ветки, провал с проверкой тумблера, проход).
    Полное поведение по времени (два примера проверки 19 — 22:10 и 20:30) — отдельный чистый
@@ -276,14 +284,25 @@ worktree, `git status`/`git diff --stat` подтвердили целостно
 
 ### Гейт
 
-`pnpm lint` — чисто. `pnpm typecheck` — см. ниже (запускался фоново из-за размера проекта).
-`pnpm test:quiet` — целевые файлы (`v2-notify-37.spec.ts`,
-`v2-notify-37-quiet-hours.spec.ts`, `v2-crosschecks.spec.ts`) и все файлы, которые правка
+**Правила гейта менялись по ходу дважды** (машина перегружалась параллельной работой ~8
+агентов на 8 ГБ памяти):
+- первый круг (до первого ребейза) — полный `pnpm typecheck` (фоном, `--max-old-space-size=8192`)
+  и один полный `pnpm test:quiet` по всему репозиторию: оба зелёные (typecheck exit 0; полный
+  прогон — 853 прошли, 26 упавших **все** из известных нестабильных файлов волны — `debts-6`,
+  `spec17-trajectories`, `v2-candidates-funnel` «Показати ще» — плюс каскад `CONNECTION_CLOSED
+  localhost:5432` / `the database system is in recovery mode` в середине прогона: Postgres-контейнер
+  ушёл в recovery от перегрузки хоста, не от кода (проверено логом контейнера);
+- координатор снял полный `typecheck`/`test:quiet`/`build`/e2e из локального гейта — их несёт
+  CI. Локально: `pnpm lint` (чисто) и таргетные тесты модуля c `--maxWorkers=2`.
+
+После **второго** ребейза (на `24d5aa0`, PR-30 #111 и PR-113) — финальный локальный прогон:
+`pnpm lint` чисто; `npx vitest run --maxWorkers=2` по `v2-notify-37.spec.ts`,
+`v2-notify-37-quiet-hours.spec.ts`, `v2-crosschecks.spec.ts` и всем файлам, которые правка
 задела напрямую (`notifications.spec.ts`, `v2-candidates-funnel.spec.ts`,
-`v2-offboarding.spec.ts`, `platform.spec.ts`) — 78 тестов, все зелёные. Полный `pnpm test:quiet`
-по всему репозиторию — перед пушем, одним прогоном (правило волны — не гонять тесты
-по нескольку раз «на всякий случай»). Своя база `lola_v2_37`, общую `lola` не трогали.
-E2e локально не гонялся (правило волны).
+`v2-offboarding.spec.ts`, `platform.spec.ts`, `v2-vacancy-apply.spec.ts`, `vacancy-apply.spec.ts`)
+— **9 файлов, 152 теста, все зелёные**. Своя база `lola_v2_37` (мигрирована дважды — на
+`0074_v2_vacancy_apply` и на `0075_v2_org_structure` — после каждого ребейза), общую `lola`
+не трогали. `pnpm typecheck`, полный `pnpm test:quiet`, `pnpm build` и e2e — на CI, не локально.
 
 ---
 

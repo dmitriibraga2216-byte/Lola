@@ -19,6 +19,7 @@ import { recordAudit } from './audit'
 import { assignFromVacancy } from './vacancies'
 import { createCandidateTx, precheckCandidate } from './candidates'
 import { enqueueNotification } from './notifications'
+import { emitWebhook } from './webhooks'
 
 /**
  * Публичный контур вакансии: страница по ссылке и приём отклика
@@ -620,6 +621,8 @@ export async function convertApplication(
           after: { personId: existing.id, kind: existing.kind, vacancyId, title: vacancy.title },
         })
         await notifyRecruiter(tx, tenantId, vacancy.recruiterId, vacancy.title, 'merged')
+        // Вебхук наружу (докс/v2/44 В-18): только идентификаторы и время отклика, без ФИО и контактов.
+        await emitWebhook(tx, tenantId, 'vacancy.application_received', { vacancyId, applicationId, receivedAt: app.createdAt.toISOString() })
       })
       return { ok: true, state: 'merged', candidateId: existing.id }
     }
@@ -679,6 +682,8 @@ export async function convertApplication(
       dedupKey: `vacancy_applied_welcome:${applicationId}`,
     }).catch(() => false)
     await notifyRecruiter(tx, tenantId, vacancy.recruiterId, vacancy.title, 'accepted')
+    // Вебхук наружу (докс/v2/44 В-18): только идентификаторы и время отклика, без ФИО и контактов.
+    await emitWebhook(tx, tenantId, 'vacancy.application_received', { vacancyId, applicationId, receivedAt: app.createdAt.toISOString() })
 
     return { ok: true, state: 'accepted', candidateId: created.candidate.id, assignmentId: assigned.assignmentId }
   }).catch((err) => {

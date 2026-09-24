@@ -240,4 +240,64 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('[ok]   9.')
   })
+
+  /**
+   * Сквозная проверка 19 (`docs/v2/42-stages-delta.md` §5, П-23): тихие часы кандидата
+   * безусловны (не смотрят на тумблер тенанта) и используют его собственное окно
+   * 09:00–20:00, а не сотрудницкое. Полное поведение по времени — интеграционный тест
+   * (нужна БД); здесь — статический инвариант на исходник enqueueNotification().
+   */
+  it('10. ветка кандидата отсутствует вовсе', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/notifications.ts'), `
+export async function enqueueNotification(tx, input) {
+  const settings = readSettings()
+  if (settings.quietHours.enabled) scheduledFor = scheduleWithQuietHours(now, tz, settings.quietHours)
+  else scheduledFor = now
+}
+`)
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('10. тихие часы кандидата')
+    expect(res.stdout).toContain('не различает kind==candidate')
+  })
+
+  it('10. ветка кандидата проверяет тумблер тенанта quietHours.enabled', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/notifications.ts'), `
+export async function enqueueNotification(tx, input) {
+  const settings = readSettings()
+  if (recipient?.kind === 'candidate') {
+    if (settings.quietHours.enabled) scheduledFor = scheduleWithQuietHours(now, tz, CANDIDATE_QUIET_HOURS)
+    else scheduledFor = now
+  }
+  else {
+    scheduledFor = now
+  }
+}
+`)
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('обязаны быть безусловными')
+  })
+
+  it('10. ветка кандидата безусловна и использует своё окно — проходит', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/notifications.ts'), `
+export async function enqueueNotification(tx, input) {
+  if (recipient?.kind === 'candidate') {
+    scheduledFor = scheduleWithQuietHours(now, tz, CANDIDATE_QUIET_HOURS)
+  }
+  else {
+    scheduledFor = now
+  }
+}
+`)
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   10.')
+  })
 })

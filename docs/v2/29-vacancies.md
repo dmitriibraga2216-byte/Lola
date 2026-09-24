@@ -721,6 +721,14 @@ draft ──archive──→ archived
 | POST | `/j/:token/apply/:aid/resume` | multipart | `{asset_id}` | `413 media.too_big`, `415 file.type` |
 | POST | `/j/:token/subscribe` | `{email}` | `202` | `429` |
 
+**Вебхук `vacancy.application_received`** (докс/v2/44 В-18, реализован в PR-37): новый отклик
+(`POST /j/:token/apply`, он же попадает в `GET /vacancies/:id/applications`) шлёт наружу
+событие `vacancy.application_received` с `payload.data = {vacancyId, applicationId,
+receivedAt}` — без ФИО и контактов откликнувшегося. Вызов `emitWebhook()` стоит в
+`convertApplication()` (`server/services/publicApply.ts`), в обеих ветках конверсии —
+`accepted` и `merged` (§7.20); `receivedAt` — момент подачи формы (`vacancy_applications
+.created_at`), а не момент конверсии, который может быть отложен модерацией §7.7.
+
 [решение] Публичный контур живёт в собственном каталоге `server/api/v1/public/`, а не спрятан
 за обычными скоупами: здесь нет сессии, `tenant_id` выводится из токена, действуют отдельные
 лимиты и запрещены любые операции чтения списков. Правило контура, обязательное для каждой

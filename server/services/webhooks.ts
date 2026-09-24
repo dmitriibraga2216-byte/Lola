@@ -19,6 +19,10 @@ interface Ctx { tenantId: string, actorId: string }
 export const WEBHOOK_EVENTS = [
   'enrollment.completed', 'attempt.passed', 'attempt.failed', 'certificate.issued', 'assignment.overdue', 'user.created',
   'notice.acknowledged', // docs/04 §4.15 (Spec 21)
+  // docs/v2/44-decisions.md В-18 (докс/v2/41 §8.7.3, патч 39 П-23): ровно три новых события,
+  // ни одного сверх. Payload — идентификаторы и время, без персональных данных (правило
+  // распространяется и на существующие выше события — docs/09-integrations.md §9.5).
+  'candidate.hired', 'vacancy.application_received', 'offboarding.completed',
 ] as const
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number]
 

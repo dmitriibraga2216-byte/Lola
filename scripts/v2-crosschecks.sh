@@ -410,6 +410,53 @@ check9_resolve_manager() {
   report "9. руководитель человека мимо resolveManager() (docs/v2/39 П-16.4)" "$hits"
 }
 
+# ── Проверка 10. Тихие часы кандидата — безусловны и по его собственному окну ───────────────
+# docs/v2/42-stages-delta.md §5 проверка 19, docs/v2/39-patches.md П-23.
+# Полная проверка расписания (22:10 → завтра 09:00; 20:30 → завтра 09:00, не немедленно) —
+# тест tests/integration/v2-notify-37.spec.ts (нужна БД: кандидат с вакансией и точкой).
+# Здесь — узкий, но самый важный инвариант: ветка кандидата в enqueueNotification() (a) не
+# проверяет тумблер settings.quietHours.enabled тенанта (правило абсолютное — «вне тихих
+# часов тенанта» из П-23 в буквальном смысле: тенантский тумблер тут не при чём) и
+# (б) действительно использует CANDIDATE_QUIET_HOURS, а не таймзону/окно сотрудника.
+check10_candidate_quiet_hours() {
+  # Фикстуры остальных проверок в tests/unit/v2-crosschecks.spec.ts создают минимальные
+  # каталоги без server/services/notifications.ts вовсе — как и check2 при отсутствии
+  # репозиторного слоя, это не нарушение, а условие «проверке нечего проверять».
+  if [ ! -f "server/services/notifications.ts" ]; then
+    echo "[skip] 8. тихие часы кандидата (server/services/notifications.ts не найден)"
+    return
+  fi
+  local hits
+  hits="$(python3 - <<'PYEOF'
+import re
+import pathlib
+
+f = pathlib.Path('server/services/notifications.ts')
+if not f.is_file():
+    print('server/services/notifications.ts:0: файл не найден')
+else:
+    s = f.read_text(encoding='utf-8')
+    m = re.search(r'export async function enqueueNotification\b[\s\S]*?\n}\n', s)
+    if not m:
+        print('server/services/notifications.ts:0: enqueueNotification не найдена')
+    else:
+        body = m.group(0)
+        cand = re.search(r"kind\s*===\s*'candidate'", body)
+        if not cand:
+            print('server/services/notifications.ts: enqueueNotification не различает kind==candidate — тихие часы кандидата не могут применяться')
+        else:
+            branch = body[cand.start():]
+            else_pos = branch.find('\n  else')
+            branch = branch[:else_pos] if else_pos != -1 else branch
+            if 'quietHours.enabled' in branch:
+                print('server/services/notifications.ts: ветка кандидата смотрит на settings.quietHours.enabled — тихие часы кандидата обязаны быть безусловными (П-23)')
+            if 'CANDIDATE_QUIET_HOURS' not in branch:
+                print('server/services/notifications.ts: ветка кандидата не использует CANDIDATE_QUIET_HOURS (09:00–20:00 його часу)')
+PYEOF
+)"
+  report "10. тихие часы кандидата — безусловны, своим окном (docs/v2/42 §5 проверка 19)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -419,5 +466,6 @@ check6_review_queue_rebuild
 check7_vacancy_not_rules_carrier
 check8_public_contour
 check9_resolve_manager
+check10_candidate_quiet_hours
 
 exit $overall

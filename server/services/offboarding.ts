@@ -12,6 +12,7 @@ import { logSecurity } from './securityLog'
 import { createAssignmentTx, expandAssignment } from './assignments'
 import { enterStageByCodeTx, enterStageTx, stageByCode } from './lifecycleState'
 import { isLastAdmin, isLastOwner, splitName } from './people'
+import { emitWebhook } from './webhooks'
 
 /**
  * Офбординг и повторный найм (docs/v2/33-lifecycle.md §3.6, §4.2, §7.7, §7.8).
@@ -340,6 +341,8 @@ export async function completeOffboarding(ctx: Ctx, id: string): Promise<Complet
       before: { state: c.state },
       after: { state: 'done', cancelled: cancelled.length, sessionsClosed: closed.length },
     })
+    // Вебхук наружу (докс/v2/44 В-18): только идентификаторы и время, без ФИО и причины увольнения.
+    await emitWebhook(tx, ctx.tenantId, 'offboarding.completed', { userId: c.userId, caseId: id, completedAt: now.toISOString() })
     await logSecurity({ tenantId: ctx.tenantId, userId: c.userId, event: 'user.archived', meta: { by: ctx.actorId, reason: REASON_OFFBOARDING } })
     if (closed.length) await logSecurity({ tenantId: ctx.tenantId, userId: c.userId, event: 'session.revoked', meta: { by: ctx.actorId, reason: REASON_OFFBOARDING, closed: closed.length } })
 

@@ -442,6 +442,10 @@ offboarding ──отменён─────────────→ пр�
 | GET | `/reports/lifecycle` | фильтры | агрегаты | — |
 | GET | `/reports/offboarding` | фильтры | агрегаты | — |
 
+**Вебхук `offboarding.completed`** (докс/v2/44 В-18, реализован в PR-37): `POST
+/offboarding/:id/complete` шлёт наружу событие `offboarding.completed` с `payload.data =
+{userId, caseId, completedAt}` — без ФИО и причины увольнения.
+
 ---
 
 ## 11. Фоновые задачи

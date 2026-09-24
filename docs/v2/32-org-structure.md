@@ -88,13 +88,32 @@
 
 **`org_structure_snapshots` — снимки дерева**: `label`, `kind` (`manual` \| `auto_daily` \| `pre_import` \|
 `pre_bulk_move`), `tree jsonb` (узлы и активные держатели), `node_count`, `created_by`; нужны для отката
-реорганизации и сравнения «что изменилось за месяц». **`org_structure_conflicts` — журнал конфликтов**,
-стыкуется с «Протокол конфліктів в оргструктурі» базового ТЗ (`16` §14): система не падает на конфликте, а
-пишет строку и продолжает. Поля: `code`, `severity` (`error` \| `warning`), `user_id`, `node_id`, `details jsonb`, `source` (`validator` \| `import` \| `move` \| `dismissal`), `status` (`open` \| `resolved` \|
-`ignored`), `resolved_by`, `resolved_at`, `detected_at`. Перечень `code`: `no_manager`, `manager_mismatch`
-(дерево и `locations.manager_id` дают разных людей), `self_manager`, `orphan_user` (активный человек вне
-дерева), `multi_primary`, `depth_exceeded`, `dismissed_holder` (держатель архивирован, узел числится
-занятым), `position_mismatch`.
+реорганизации и сравнения «что изменилось за месяц».
+
+> [исправлено, реализация PR-30 по решению `44` В-7: таблица уже существует под именем
+> `org_conflicts` (миграция 0033, перечень расширен в 0038) и уже наполняется импортом людей.
+> Новая таблица дала бы один конфликт двумя строками в отчёте, поэтому заводится **`alter table
+> org_conflicts`** на две колонки: `severity` (`info | warning | critical` — как у существующего
+> `security_severity`, а не своя пара `error | warning`) и `node_id`. `detected_at` не
+> добавляется — это `created_at` из общих колонок; `status` не добавляется — состояние уже
+> выражено парой `resolved_at` / `resolved_by`, и третье место для того же факта с ней
+> разойдётся. Колонка называется `kind`, а не `code`. Перечень — **один список из десяти**:
+> пять существующих (`double_unit`, `placement_replaced`, `manager_self`, `manager_cycle`,
+> `unit_missing`) плюс пять новых (`no_manager`, `manager_mismatch`, `depth_exceeded`,
+> `dismissed_holder`, `position_mismatch`). Три имени этого документа отброшены как
+> переименования существующих: `self_manager` → `manager_self`, `multi_primary` →
+> `double_unit`, `orphan_user` → `unit_missing`. Перечень зарегистрирован в
+> `docs/02-data-model.md` §«Перечисления» и в `shared/enums.ts`]
+> Ранее: «**`org_structure_conflicts` — журнал конфликтов**, … Поля: `code`, `severity`
+> (`error` | `warning`), `user_id`, `node_id`, `details jsonb`, `source`, `status`
+> (`open` | `resolved` | `ignored`), `resolved_by`, `resolved_at`, `detected_at`. Перечень
+> `code`: `no_manager`, `manager_mismatch`, `self_manager`, `orphan_user`, `multi_primary`,
+> `depth_exceeded`, `dismissed_holder`, `position_mismatch`»
+
+**Журнал конфликтов** стыкуется с «Протокол конфліктів в оргструктурі» базового ТЗ (`16` §14):
+система не падает на конфликте, а пишет строку и продолжает. Смысл значений: `manager_mismatch` —
+дерево и `locations.manager_id` дают разных людей; `unit_missing` — активный человек вне дерева;
+`dismissed_holder` — держатель архивирован, узел числится занятым.
 
 ### 3.4 DDL
 
@@ -163,26 +182,29 @@ create table org_structure_snapshots (
   constraint org_structure_snapshots_kind_chk check (kind in ('manual','auto_daily','pre_import','pre_bulk_move'))
 );
 create index idx_org_structure_snapshots_tenant on org_structure_snapshots (tenant_id, created_at desc);
-create table org_structure_conflicts (
-  id uuid primary key default gen_random_uuid(),
-  tenant_id uuid not null references tenants(id) on delete cascade,
-  code text not null, severity text not null default 'warning',
-  user_id uuid references users(id) on delete cascade,
-  node_id uuid references org_nodes(id) on delete cascade,
-  details jsonb not null default '{}', source text not null default 'validator',
-  status text not null default 'open', resolved_by uuid references users(id),
-  resolved_at timestamptz, detected_at timestamptz not null default now(),
-  constraint org_structure_conflicts_code_chk check (code in ('no_manager','manager_mismatch',
-    'self_manager','orphan_user','multi_primary','depth_exceeded','dismissed_holder','position_mismatch')),
-  constraint org_structure_conflicts_sev_chk check (severity in ('error','warning')),
-  constraint org_structure_conflicts_src_chk check (source in ('validator','import','move','dismissal')),
-  constraint org_structure_conflicts_status_chk check (status in ('open','resolved','ignored'))
-);
-create index idx_org_structure_conflicts_tenant on org_structure_conflicts (tenant_id, status, detected_at desc);
+-- Вместо новой таблицы — расширение существующей (решение `44` В-7, миграция 0075).
+alter table org_conflicts add column severity text not null default 'warning';
+alter table org_conflicts add column node_id uuid references org_nodes(id) on delete cascade;
+alter table org_conflicts add constraint org_conflicts_severity_check
+  check (severity in ('info','warning','critical'));
+alter table org_conflicts drop constraint org_conflicts_kind_check;
+alter table org_conflicts add constraint org_conflicts_kind_check check (kind in (
+  'double_unit','placement_replaced','manager_self','manager_cycle','unit_missing',
+  'no_manager','manager_mismatch','depth_exceeded','dismissed_holder','position_mismatch'));
+create index idx_org_conflicts_open on org_conflicts (tenant_id, severity, created_at desc)
+  where resolved_at is null;
 ```
 
-RLS на всех пяти таблицах — `enable` + `force`, политика с `using` и `with check` по
-`tenant_id`, доступ только через `withTenant()`.
+RLS на всех **четырёх** новых таблицах — `enable` + `force`, политика с `using` и `with check`
+по `tenant_id`, доступ только через `withTenant()`. Пятой таблицы нет: `org_conflicts`
+существует с миграции 0033 и свою политику уже имеет.
+
+> [исправлено, реализация PR-30: целостность дерева стоит триггером `org_nodes_guard`
+> (`deferrable initially deferred`), а не только в сервисе. Он проверяет, что путь ребёнка —
+> это путь родителя плюс метка, ровно на уровень глубже, и что дети лежат под новым путём
+> родителя. Этого достаточно, чтобы петля была невозможна: в строгом порядке по длине пути
+> кольца не бывает. Отложенный, потому что перемещение ветки переписывает пути узла и всех
+> потомков одним `update`, и немедленная проверка краснела бы на корректном перемещении]
 
 ## 4. Состояния и переходы
 
@@ -251,7 +273,8 @@ RLS на всех пяти таблицах — `enable` + `force`, полити
    «керуючу компанію» и операционную ветку. **Глубина ≤ 12**: 13-й уровень — ошибка
    «Максимальна глибина структури — 12 рівнів». **Запрет циклов**: узел нельзя подчинить себе
    или своему потомку, проверка `new_parent.path <@ node.path` → отказ, сработавший триггер
-   пересчёта `path` пишет конфликт `self_manager`.
+   пересчёта `path` пишет конфликт `manager_self` (`self_manager` этого документа — то же
+   значение под существующим именем, решение `44` В-7).
 2. **Путь уникален** (`unique (tenant_id, path)`), перемещение пересчитывает путь поддерева
    одним `update … set path = new_prefix || subpath(path, nlevel(old_prefix))`.
    **Перетаскивание переносит поддерево целиком**, альтернатива диалога §6.2 — дети поднимаются
@@ -368,11 +391,11 @@ RLS на всех пяти таблицах — `enable` + `force`, полити
 1. План 3, держателей пять: привязка не блокируется, счётчик «5 з 3» коралловым, в отчёте
    «Укомплектованість» — «Перебір».
 2. Держатель привязан совместителем внутри собственной ветки: разрешено, руководитель считается
-   по основному назначению, пишется `self_manager` (`warning`). Перемещение в вакантную ветку:
+   по основному назначению, пишется `manager_self` (`warning`). Перемещение в вакантную ветку:
    подчинённые остаются, руководитель берётся уровнем выше, `source` остаётся `org_tree`.
 3. Импорт принёс неизвестного родителя: строка в ошибки («Батьківський вузол {{key}}
    не знайдено»), остальные применяются; цикл A → B → A: обе строки в ошибки, конфликт
-   `self_manager` с `source='import'`.
+   `manager_self` с `source='import'`.
 4. Два администратора тащат один узел: побеждает первая транзакция, вторая получает
    `409 stale_tree` — «Структуру змінив інший користувач, оновіть сторінку».
 5. Удаление должности из `positions` запрещено (`on delete restrict`) — только деактивация.
@@ -397,7 +420,8 @@ RLS на всех пяти таблицах — `enable` + `force`, полити
 4. **Дано** человек с основным назначением, **коли** вызван `GET /org-structure/manager/:userId`,
    **тоді** возвращён держатель ближайшего узла с `is_manager_point=true`, `source='org_tree'`;
    **дано** человек вне дерева — руководитель взят из `locations.manager_id` с
-   `source='location'` и создан конфликт `orphan_user`.
+   `source='location'` и создан конфликт `unit_missing` (`orphan_user` этого документа —
+   то же значение под существующим именем, решение `44` В-7).
 5. **Дано** дерево и `locations.manager_id` дают разных людей, **тоді** уведомления уходят
    человеку из дерева, а в конфликтах есть строка `manager_mismatch`.
 6. **Дано** CSV на 120 строк, **коли** запущен импорт, **тоді** создан снимок `pre_import`,

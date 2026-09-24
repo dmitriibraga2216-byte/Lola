@@ -476,6 +476,28 @@
 Назначение курса этапа, у которого выключен `applies_to_candidate`, кандидату — `422
 lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7.9).
 
+### Оргструктура: дерево подчинения (`docs/v2/32-org-structure.md` §10, PR-30)
+
+Дерево подчинения — третья сущность рядом с `/org-units` («до якого шматка компанії
+належить») и `/positions` («як називається робота»): оно отвечает на «хто кому
+підпорядкований». Единственный публичный ответ о руководителе — `GET
+/org-structure/manager/:userId` (патч П-16.4): читать `locations.manager_id` мимо него
+запрещено, проверка 9 в `scripts/v2-crosschecks.sh`.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/org-structure/tree` | `?mode=admin\|view&includeArchived&includeVacant` — дерево (`org.structure.view`; `mode=admin` требует `org.structure.edit`). В ответе `canEditAll` и `branches` — ветки, которые человек вправе править |
+| POST | `/org-structure/nodes` | создание узла по форме `32` §6.1 (`org.structure.edit`); корневой — только с тенантным скоупом. `409 depth_exceeded`, `409 too_many_roots`, `409 parent_archived`, `422 validation_failed` |
+| PUT | `/org-structure/nodes/:id` | правка узла; `409 node_archived`, `422 validation_failed`; чужая ветка — `403 forbidden` с текстом «Ви можете змінювати лише свою гілку» |
+| POST | `/org-structure/nodes/:id/move` | `{parentId, sort?, keepChildren?}`; `409 cycle_detected`, `409 depth_exceeded` — дерево при отказе не меняется |
+| POST | `/org-structure/nodes/:id/archive` | архивация (физического удаления узла нет); `409 has_children`, `409 has_holders` |
+| POST | `/org-structure/nodes/:id/restore` | восстановление в течение 90 дней; `409 parent_archived` |
+| POST | `/org-structure/nodes/:id/assignments` | привязка человека: `{userId, isPrimary?, roleInNode?, startedAt?, makeNamed?, transferPrimary?}`; `409 primary_exists` (в деталях — узел, где основное подчинение уже есть), `422 user_archived`, `422 validation_failed` (`detail=kind` — кандидата в дерево не ставят) |
+| DELETE | `/org-structure/assignments/:id` | снятие с узла: `{endedReason?}`; строка журнала не удаляется, а закрывается |
+| GET | `/org-structure/manager/:userId` | `{managerUserId, source, nodeId, chain}` — ответ `resolveManager()`; заодно пишет `unit_missing`, `no_manager` и `manager_mismatch` в `org_conflicts` |
+| GET | `/org-structure/subordinates/:userId` | `?deep=true` — подчинённые по проекции `org_manager_map` |
+| GET/POST | `/org-structure/snapshots` | список и создание снимка (`org.structure.import`). **Откат к снимку и импорт CSV — PR-31**, в этом контракте их пока нет |
+
 ### Кандидаты и воронка (`docs/v2/28-recruiting-candidates.md` §10, PR-13)
 
 Кандидат — это `users` с `kind='candidate'` (`docs/v2/44` В-8), поэтому отдельного

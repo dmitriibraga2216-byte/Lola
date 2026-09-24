@@ -3,7 +3,7 @@ import { orgConflicts, taskAccessLog, userPlacements } from '../db/schema'
 import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
 import { currentRequestContext } from '../utils/requestContext'
-import type { ContentType, OrgConflictKind } from '../../shared/enums'
+import type { ContentType, OrgConflictKind, OrgConflictSeverity } from '../../shared/enums'
 import { recordAudit } from './audit'
 
 /**
@@ -45,12 +45,16 @@ export async function logTaskAccess(tx: TenantTx | null, input: TaskAccessInput)
   }
 }
 
-export type { OrgConflictKind }
+export type { OrgConflictKind, OrgConflictSeverity }
 
 export interface OrgConflictInput {
   tenantId: string
   userId?: string | null
   kind: OrgConflictKind
+  /** Важность (docs/v2/32 §3.3, решение В-7). По умолчанию `warning` — как в колонке. */
+  severity?: OrgConflictSeverity
+  /** Узел дерева, на котором конфликт найден (PR-30); null — конфликт про человека. */
+  nodeId?: string | null
   source?: 'manual' | 'import'
   importJobId?: string | null
   details?: Record<string, unknown>
@@ -64,6 +68,8 @@ export async function logOrgConflict(tx: TenantTx, input: OrgConflictInput): Pro
       tenantId: input.tenantId,
       userId: input.userId ?? null,
       kind: input.kind,
+      severity: input.severity ?? 'warning',
+      nodeId: input.nodeId ?? null,
       source: input.source ?? 'manual',
       importJobId: input.importJobId ?? null,
       details: input.details ?? {},

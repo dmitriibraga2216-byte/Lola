@@ -206,4 +206,38 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('[ok]   8.')
   })
+
+  /**
+   * Сквозная проверка 9 (`docs/v2/39-patches.md` П-16.4, `docs/v2/32` §7.8): руководитель
+   * человека берётся только `resolveManager()`. Три фикстуры: новое чтение
+   * `locations.manager_id` в сервисе — нарушение; то же чтение внутри самого
+   * `orgManager.ts` — не нарушение (там источник и живёт); объяснение правила
+   * в комментарии — тоже не нарушение.
+   */
+  it('9. руководитель человека читается мимо resolveManager()', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/bad.ts'), 'export const q = "select l.manager_id from locations l"\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('9. руководитель человека мимо resolveManager()')
+  })
+
+  it('9. то же чтение внутри orgManager.ts нарушением не считается', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/orgManager.ts'), 'export const q = "select l.manager_id from locations l"\n')
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   9.')
+  })
+
+  it('9. объяснение правила в комментарии не считается нарушением', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ok.ts'), '// адресат из resolveManager(), а не locations.manager_id\nexport const x = 1\n')
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   9.')
+  })
 })

@@ -12,6 +12,7 @@ import { emitWebhook } from './webhooks'
 import type { ContentBlock } from '../../shared/schemas/content'
 import type { Audience } from '../../shared/schemas/assignments'
 import type { NoticeInput, SimpleNoticeInput } from '../../shared/schemas/hub'
+import { managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -320,10 +321,15 @@ export async function noticeScan(tenantId: string): Promise<{ reminded: number, 
       for (const u of cov.notAcked) {
         if (await enqueueNotification(tx, { tenantId, userId: u.id, code: 'notice_not_acknowledged', payload: { title: n.title, noticeId: n.id, due: cov.dueAt!.toISOString() }, dedupKey: `notice_rem:${n.id}:${u.id}:${d}`, refType: 'notice', refId: n.id })) out.reminded++
       }
-      const mgrs = await tx.execute(sql`select distinct l.manager_id, l.name from users u join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null join locations l on l.id = up.location_id where l.manager_id is not null and u.id in (${sql.join(cov.notAcked.map(x => sql`${x.id}::uuid`), sql`, `)})`) as unknown as { manager_id: string, name: string }[]
-      for (const m of mgrs) {
-        const names = cov.notAcked.filter(x => x.location === m.name).map(x => x.fullName).join(', ')
-        if (await enqueueNotification(tx, { tenantId, userId: m.manager_id, code: 'announcement_overdue_manager', payload: { title: n.title, names }, dedupKey: `ann_over:${n.id}:${m.manager_id}:${d}` })) out.escalated++
+      // Руководители не подтвердивших — одним резолвом на всю пачку (П-16.4). Раньше здесь
+      // группировали по имени точки; теперь группировка идёт по самому руководителю, и
+      // человек, подчинённый внутри точки другому человеку, попадает в правильный список.
+      const byManager = new Map<string, string[]>()
+      for (const [uid, mid] of await managerIdsOf(tx, cov.notAcked.map(x => x.id))) {
+        byManager.set(mid, [...(byManager.get(mid) ?? []), cov.notAcked.find(x => x.id === uid)?.fullName ?? '?'])
+      }
+      for (const [mid, list] of byManager) {
+        if (await enqueueNotification(tx, { tenantId, userId: mid, code: 'announcement_overdue_manager', payload: { title: n.title, names: list.join(', ') }, dedupKey: `ann_over:${n.id}:${mid}:${d}` })) out.escalated++
       }
     })
   }

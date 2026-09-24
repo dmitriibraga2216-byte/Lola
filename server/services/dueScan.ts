@@ -1,11 +1,12 @@
 import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { assignments, courses, enrollmentEvents, enrollments, locations, tenants, userPlacements, users } from '../db/schema'
+import { assignments, courses, enrollmentEvents, enrollments, tenants, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { Reminders } from '../../shared/schemas/assignments'
+import { managerIdOf } from './orgManager'
 
 /**
  * due.scan (docs/10 §7.4, §11; docs/15 §3.4): ежедневно — напоминания за N дней,
@@ -17,12 +18,9 @@ function dayKey(d = new Date()) {
   return d.toISOString().slice(0, 10)
 }
 
+/** Руководитель человека — единственный источник истины `resolveManager()` (П-16.4, docs/v2/32 §7.8). */
 async function managerOf(tx: TenantTx, userId: string): Promise<string | null> {
-  const [row] = await tx.select({ managerId: locations.managerId })
-    .from(userPlacements)
-    .innerJoin(locations, eq(locations.id, userPlacements.locationId))
-    .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-  return row?.managerId ?? null
+  return managerIdOf(tx, userId)
 }
 
 export async function runDueScan(tenantId: string): Promise<{ activated: number, remindered: number, expired: number }> {

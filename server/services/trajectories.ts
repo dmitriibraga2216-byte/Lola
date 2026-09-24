@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
-  assignments, automationRules, enrollments, locations, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
-  trajectoryNodeStates, trajectoryNodes, userPlacements, users,
+  assignments, automationRules, enrollments, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
+  trajectoryNodeStates, trajectoryNodes, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -16,6 +16,7 @@ import type {
   BranchCondition, GraphProblem, TrajectoryGraphInput, trajectoryCreateSchema, trajectoryUpdateSchema,
 } from '../../shared/schemas/trajectories'
 import type { ContentType } from '../../shared/enums'
+import { managerIdOf } from './orgManager'
 
 /**
  * Траектории (docs/17 §14.1–14.3, §15; docs/32 Б.8): маршрут из узлов, где условия
@@ -486,12 +487,13 @@ async function setState(run: Run, nodeId: string, patch: Partial<NodeState>) {
   return row!
 }
 
+/**
+ * Наставник вузла: явний `mentor_id`, інакше керівник людини. Керівник береться
+ * з `resolveManager()` (П-16.4, docs/v2/32 §7.8) — не з `locations.manager_id`.
+ */
 async function mentorFor(tx: TenantTx, userId: string, explicit: string | null): Promise<string | null> {
   if (explicit) return explicit
-  const [row] = await tx.select({ managerId: locations.managerId }).from(userPlacements)
-    .innerJoin(locations, eq(locations.id, userPlacements.locationId))
-    .where(and(eq(userPlacements.userId, userId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
-  return row?.managerId ?? null
+  return managerIdOf(tx, userId)
 }
 
 /** Активировать узел: locked → available (или сразу done для start/finish/stop_delay/or/and-с-выполненными-входами). */

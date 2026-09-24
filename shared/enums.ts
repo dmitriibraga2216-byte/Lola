@@ -61,9 +61,59 @@ export type SecuritySeverity = typeof SECURITY_SEVERITIES[number]
 export const TAG_SCOPES = ['user', 'course', 'resource', 'question', 'task'] as const
 export type TagScope = typeof TAG_SCOPES[number]
 
-/** Вид конфликта оргструктуры (docs/16 §7, §14; Spec 22 + `unit_missing` по мокапу OrgConflicts). */
-export const ORG_CONFLICT_KINDS = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing'] as const
+/**
+ * Вид конфликта оргструктуры — **один список из десяти** (docs/16 §7, §14; Spec 22;
+ * docs/v2/32 §3.3 и решение docs/v2/44 В-7).
+ *
+ * Первые пять существуют с Spec 16 и уже лежат в данных. Пять последних добавил PR-30 вместе
+ * с деревом `org_nodes`. Три имени пакета в перечень не попали, потому что это переименования
+ * уже существующих значений, а не новые виды: `self_manager` → `manager_self`,
+ * `multi_primary` → `double_unit` (писатель `importPeople.ts` ставит его именно на «второе
+ * активное размещение»), `orphan_user` → `unit_missing` (человек без узла = узла нет).
+ * Заводить второе имя для того же конфликта значило бы показать его в отчёте дважды.
+ */
+export const ORG_CONFLICT_KINDS = [
+  'double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing',
+  'no_manager', 'manager_mismatch', 'depth_exceeded', 'dismissed_holder', 'position_mismatch',
+] as const
 export type OrgConflictKind = typeof ORG_CONFLICT_KINDS[number]
+
+/**
+ * Важность конфликта оргструктуры (`org_conflicts.severity`, docs/v2/32 §3.3, решение В-7).
+ * Пакет предлагал свою пару `error | warning`; взят существующий `security_severity` —
+ * один смысл не должен иметь в системе двух написаний.
+ */
+export const ORG_CONFLICT_SEVERITIES = ['info', 'warning', 'critical'] as const
+export type OrgConflictSeverity = typeof ORG_CONFLICT_SEVERITIES[number]
+
+/** Вид узла дерева подчинения (docs/v2/32 §3.2): штатная точка со счётчиком либо именная. */
+export const ORG_NODE_TYPES = ['position', 'employee'] as const
+export type OrgNodeType = typeof ORG_NODE_TYPES[number]
+
+/** Состояние узла (docs/v2/32 §4). Физического удаления узла нет — только архивация. */
+export const ORG_NODE_STATES = ['vacant', 'occupied', 'archived'] as const
+export type OrgNodeState = typeof ORG_NODE_STATES[number]
+
+/** Роль человека в узле (docs/v2/32 §3.3): держатель, в. о., заместитель. */
+export const ORG_ASSIGNMENT_ROLES = ['holder', 'acting', 'deputy'] as const
+export type OrgAssignmentRole = typeof ORG_ASSIGNMENT_ROLES[number]
+
+/** Почему назначение на узел закрыто (docs/v2/32 §3.3). Обратного перехода нет. */
+export const ORG_ASSIGNMENT_END_REASONS = ['moved', 'dismissed', 'node_archived', 'manual'] as const
+export type OrgAssignmentEndReason = typeof ORG_ASSIGNMENT_END_REASONS[number]
+
+/**
+ * Откуда взят руководитель — результат `resolveManager()` (docs/v2/32 §7.8, патч П-16.4).
+ * Строгий приоритет: дерево → точка → роль в области → никого. `functional` в цепочку
+ * не входит (функциональный руководитель — отдельная ось), но значение зарезервировано
+ * за отчётом «Підпорядкування людей», где источник показывается колонкой.
+ */
+export const ORG_MANAGER_SOURCES = ['org_tree', 'location', 'functional', 'role_scope', 'none'] as const
+export type OrgManagerSource = typeof ORG_MANAGER_SOURCES[number]
+
+/** Вид снимка дерева (docs/v2/32 §3.3). Откат по снимку — PR-31, здесь только таблица. */
+export const ORG_SNAPSHOT_KINDS = ['manual', 'auto_daily', 'pre_import', 'pre_bulk_move'] as const
+export type OrgSnapshotKind = typeof ORG_SNAPSHOT_KINDS[number]
 
 /** Коды событий журнала безопасности (docs/16 §15 Г-16.2) — единственный список, писатель `logSecurity` принимает только их. */
 export const SECURITY_EVENTS = [
@@ -609,6 +659,13 @@ export const ENUMS: Record<string, readonly string[]> = {
   attempt_request_status: ATTEMPT_REQUEST_STATUSES,
   tag_scope: TAG_SCOPES,
   org_conflict_kind: ORG_CONFLICT_KINDS,
+  org_conflict_severity: ORG_CONFLICT_SEVERITIES,
+  org_node_type: ORG_NODE_TYPES,
+  org_node_state: ORG_NODE_STATES,
+  org_assignment_role: ORG_ASSIGNMENT_ROLES,
+  org_assignment_end_reason: ORG_ASSIGNMENT_END_REASONS,
+  org_manager_source: ORG_MANAGER_SOURCES,
+  org_snapshot_kind: ORG_SNAPSHOT_KINDS,
   security_event: SECURITY_EVENTS,
   assessment_kind: ASSESSMENT_KINDS,
   poll_mode: POLL_MODES,

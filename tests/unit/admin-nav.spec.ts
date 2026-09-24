@@ -128,6 +128,10 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/settings/billing': "hasScope('billing.view')",
   '/admin/settings/billing/history': "hasScope('billing.payments.view')",
   '/admin/settings/usage': "hasScope('billing.usage.view')",
+  // PR-30 (docs/v2/32 «Оргструктура»): дерево подчинения. Пункт новый — снимок пополнен
+  // тем же порядком, что и `/admin/vacancies` в #106: состав меню меняется только вместе
+  // с этой строкой, молча пункт не появится.
+  '/org-structure': "hasScope('org.structure.edit')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

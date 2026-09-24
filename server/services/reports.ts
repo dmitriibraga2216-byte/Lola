@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import { EMPLOYEES_ONLY } from './repo/people'
+import { managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 /** `scope` — область видимости (docs/22 §2): null — вся сеть, массив — только эти точки; уже сужена фильтром `locationId`. */
@@ -97,23 +98,37 @@ export async function courseFunnel(ctx: Ctx, courseId: string, scope: string[] |
   return { funnel, lessons }
 }
 
-/** Просроченные: человек, курс, дней просрочки, руководитель, последняя активность. */
+/**
+ * Просроченные: человек, курс, дней просрочки, руководитель, последняя активность.
+ *
+ * Колонка «Керівник» больше не берётся соединением с `locations.manager_id` (П-16.4):
+ * имя подставляется по результату `resolveManager()` уже после выборки. Отчёт и уведомление
+ * об этой же просрочке (`dueScan`) обязаны называть одного и того же человека.
+ */
 export async function overdue(ctx: Ctx, f: Filter = {}) {
-  return q(ctx, sql`
+  const rows = await q(ctx, sql`
     select e.id, u.id as user_id, u.full_name, c.title as course, e.due_at,
            (current_date - e.due_at::date)::int as days_over, e.last_activity_at, e.progress_pct,
-           l.name as location, mgr.full_name as manager
+           l.name as location
     from enrollments e
     join users u on u.id = e.user_id
     join courses c on c.id = e.subject_id
     left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
     left join locations l on l.id = up.location_id
-    left join users mgr on mgr.id = l.manager_id
     where e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now()
       ${scopeSql(f.scope ?? null, sql`up.location_id`)}
       ${f.courseId ? sql`and e.subject_id = ${f.courseId}` : sql``}
     order by e.due_at
   `)
+  if (!rows.length) return rows
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<Row[]> => {
+    const managers = await managerIdsOf(tx, rows.map(r => String(r.user_id)))
+    const ids = [...new Set(managers.values())]
+    const names = ids.length
+      ? new Map(((await tx.execute(sql`select id, full_name from users where id in (${sql.join(ids.map(i => sql`${i}::uuid`), sql`, `)})`)) as unknown as { id: string, full_name: string }[]).map(r => [r.id, r.full_name]))
+      : new Map<string, string>()
+    return rows.map(r => ({ ...r, manager: names.get(managers.get(String(r.user_id)) ?? '') ?? null }))
+  })
 }
 
 /** Результаты аттестаций: попытки, баллы, проверяющие, время. */

@@ -8,6 +8,7 @@ import { recordAudit } from './audit'
 import { countRequired } from './learning'
 import { enqueueNotification } from './notifications'
 import { eventForTransition, logPassEvent } from './passEvents'
+import { managerIdOf, managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -470,8 +471,8 @@ export async function selfEnrollProgram(ctx: Ctx, programId: string): Promise<En
     if (p.assignmentMode.includes('catalog_request')) {
       const [req] = await tx.insert(programEnrollments).values({ tenantId: ctx.tenantId, programId, userId: ctx.actorId, programVersion: p.version, source: 'catalog', status: 'not_assigned', requestedAt: new Date() }).onConflictDoNothing().returning({ id: programEnrollments.id })
       if (req) await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: programId, enrollmentId: req.id, userId: ctx.actorId, event: 'created', payload: { from: null, to: 'not_assigned', source: 'catalog' }, actorId: ctx.actorId })
-      const mgr = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${ctx.actorId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
-      if (mgr[0]?.manager_id) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr[0].manager_id, code: 'program_request', payload: { title: p.title, programId }, dedupKey: `prog_req:${programId}:${ctx.actorId}` })
+      const mgr = await managerIdOf(tx, ctx.actorId) // П-16.4: адресат заявки — руководитель по дереву
+      if (mgr) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr, code: 'program_request', payload: { title: p.title, programId }, dedupKey: `prog_req:${programId}:${ctx.actorId}` })
       return { ok: false as const, code: 'requested' as const }
     }
     return { ok: false as const, code: 'not_in_catalog' as const }
@@ -551,11 +552,16 @@ export async function programScan(tenantId: string): Promise<{ opened: number, s
     for (const e of pending) { await openEnrollment(tx, tenantId, e.id); out.opened++ }
     const day = new Date().toISOString().slice(0, 10)
     const stuck = await tx.execute(sql`
-      select e.id, e.user_id, p.title, l.manager_id from program_enrollments e join programs p on p.id = e.program_id
-      left join user_placements up on up.user_id = e.user_id and up.is_primary and up.ended_at is null left join locations l on l.id = up.location_id
-      where e.status = 'in_progress' and coalesce(e.last_activity_at, e.started_at, e.created_at) < now() - interval '14 days' and l.manager_id is not null
-    `) as unknown as { id: string, user_id: string, title: string, manager_id: string }[]
-    for (const s of stuck) if (await enqueueNotification(tx, { tenantId, userId: s.manager_id, code: 'program_stuck', payload: { title: s.title, userId: s.user_id }, dedupKey: `prog_stuck:${s.id}:${day.slice(0, 7)}` })) out.stuck++
+      select e.id, e.user_id, p.title from program_enrollments e join programs p on p.id = e.program_id
+      where e.status = 'in_progress' and coalesce(e.last_activity_at, e.started_at, e.created_at) < now() - interval '14 days'
+    `) as unknown as { id: string, user_id: string, title: string }[]
+    // Руководители застрявших — одним резолвом (П-16.4); раньше условие «есть руководитель»
+    // стояло прямо в `where` по `locations.manager_id` и молча теряло людей без точки.
+    const stuckManagers = await managerIdsOf(tx, stuck.map(s => s.user_id))
+    for (const s of stuck) {
+      const mgr = stuckManagers.get(s.user_id)
+      if (mgr && await enqueueNotification(tx, { tenantId, userId: mgr, code: 'program_stuck', payload: { title: s.title, userId: s.user_id }, dedupKey: `prog_stuck:${s.id}:${day.slice(0, 7)}` })) out.stuck++
+    }
     const soon = await tx.execute(sql`select e.id, e.user_id, p.title, e.due_at from program_enrollments e join programs p on p.id = e.program_id where e.status in ('not_started','in_progress') and e.due_at between now() and now() + interval '3 days'`) as unknown as { id: string, user_id: string, title: string, due_at: string }[]
     for (const s of soon) if (await enqueueNotification(tx, { tenantId, userId: s.user_id, code: 'program_due_soon', payload: { title: s.title, due: s.due_at }, dedupKey: `prog_due:${s.id}:${day}` })) out.dueSoon++
     // Автозакрытие по сроку: failed через 14 дней просрочки (как у записей на курс, dueScan)

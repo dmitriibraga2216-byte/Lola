@@ -19,6 +19,8 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const { retentionScan } = await import('../services/logs')
   const { expireExports } = await import('../services/reportExports')
   const { expireRoles, roleExpiryScan } = await import('../services/positionRoleMap')
+  const { syncDismissals, validateStructure } = await import('../services/orgStructure')
+  const { withTenant } = await import('../utils/withTenant')
 
   const s = await runDueScan(tenantId)
   const inactive = await inactiveScan(tenantId) // docs/16 §11 people.inactive_scan
@@ -31,6 +33,11 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const expired = await expireExports(tenantId)
   const rolesExpiring = await roleExpiryScan(tenantId) // docs/28 «Паритет 4» отк. (3): предупреждение за 7 дней
   const rolesExpired = await expireRoles(tenantId) // 29 Б.15: снятие роли по сроку
+  // Оргструктура (docs/v2/32 §11): закрыть назначения уволенных и прогнать валидаторы.
+  // `org.validate_structure` заодно пересобирает `org_manager_map` целиком — проекция
+  // обновляется и точечно, в транзакции правки дерева, и раз в сутки целиком.
+  const orgDismissed = await withTenant(tenantId, null, tx => syncDismissals(tx, { tenantId, actorId: null }))
+  const orgConflicts = await validateStructure(tenantId)
   const g = await goalDueScan(tenantId)
   const a = await assessmentScan(tenantId)
   const ai = await actionDueScan(tenantId)
@@ -42,7 +49,7 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const prReminder = await programReminderScan(tenantId) // докс/33 D-049: клас сповіщень programReminder
   // trajectoryScan (docs/17: отложенные правилом прохождения, подстраховка таймеров) перенесён на щогодинний
   // assignment.sync (docs/33 D-026) — щоденний due.scan давав запізнення таймера до доби
-  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, anniversaries: av, programs: pr, programReminders: prReminder, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired }
+  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, anniversaries: av, programs: pr, programReminders: prReminder, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired, orgDismissed, orgConflicts }
   console.log(`[due.scan] ${tenantId}:`, stats)
   return stats
 }

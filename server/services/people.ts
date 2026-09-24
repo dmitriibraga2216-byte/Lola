@@ -23,6 +23,7 @@ import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 import { STAGE_ON_HIRE } from '../../shared/enums'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
+import { managerIdOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -319,8 +320,10 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
         .where(and(eq(sessions.userId, id), isNull(sessions.revokedAt)))
     }
     if (input.isBlocked && !before.isBlocked) {
-      const [mgr] = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${id}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
-      if (mgr?.manager_id) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr.manager_id, code: 'user_blocked', payload: { name: before.fullName }, dedupKey: `user_blocked:${id}:${Date.now()}` })
+      // Адресат — `resolveManager()` (П-16.4), а не `locations.manager_id`: иначе блокировку
+      // увидит руководитель точки, а не тот, кому человек подчинён по дереву.
+      const mgr = await managerIdOf(tx, id)
+      if (mgr) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr, code: 'user_blocked', payload: { name: before.fullName }, dedupKey: `user_blocked:${id}:${Date.now()}` })
     }
 
     // Аудит с diff по изменившимся полям (docs/16 §5.2 «Журнал»): before/after — только то, что поменялось
@@ -513,8 +516,8 @@ export async function setBlocked(ctx: Ctx, userId: string, blocked: boolean): Pr
     // docs/16 §15, Г-16.2: «Адміністратор заблокував користувача»
     await logSecurity({ tenantId: ctx.tenantId, userId, event: blocked ? 'user.blocked' : 'user.unblocked', meta: { by: ctx.actorId } })
     if (blocked) {
-      const [mgr] = await tx.execute(sql`select l.manager_id from user_placements up join locations l on l.id = up.location_id where up.user_id = ${userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { manager_id: string | null }[]
-      if (mgr?.manager_id && mgr.manager_id !== ctx.actorId) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr.manager_id, code: 'user_blocked', payload: { name: u.fullName }, dedupKey: `user_blocked:${userId}:${Date.now()}` })
+      const mgr = await managerIdOf(tx, userId)
+      if (mgr && mgr !== ctx.actorId) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: mgr, code: 'user_blocked', payload: { name: u.fullName }, dedupKey: `user_blocked:${userId}:${Date.now()}` })
     }
     return { ok: true as const }
   })

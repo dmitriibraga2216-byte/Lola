@@ -512,6 +512,13 @@
       "when": 1790233560000,
       "tag": "0074_v2_vacancy_apply",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790233620000,
+      "tag": "0075_v2_org_structure",
+      "breakpoints": true
     }
   ]
 }

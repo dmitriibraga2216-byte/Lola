@@ -189,3 +189,61 @@ describe('уведомления (docs/23)', () => {
     expect((await N.listPrefs({ tenantId, actorId: u })).find(p => p.code === 'news_published')?.enabled).toBe(false)
   })
 })
+
+/**
+ * Голодание очереди эскалаций (docs/23 §6.6, PR-30). Адресат известен только после
+ * `resolveManager()`, поэтому отбор берёт и тех, у кого руководителя нет. Раньше такие строки
+ * пропускались без отметки: выбирались снова каждый проход, и при двух сотнях таких строк окно
+ * `ESCALATION_BATCH` навсегда занимали они — до человека с руководителем очередь не доходила.
+ * Теперь каждая выбранная строка закрывается (`escalated_at`, «некому» — без `escalated_to_id`),
+ * и окно сдвигается от старых отправок к новым.
+ */
+describe('эскалация: строки без руководителя не занимают окно навсегда', () => {
+  it('больше ESCALATION_BATCH строк без руководителя и одна с руководителем — эскалация за два прохода', async () => {
+    const BACKLOG = N.ESCALATION_BATCH + 50
+    await admin`
+      insert into notification_templates (tenant_id, code, channel, locale, body, escalate_after_hours)
+      values (${tenantId}, 'enrollment_due_soon', 'telegram', 'uk', 'Скоро {{course}}', 1)
+      on conflict (tenant_id, code, channel, locale) do update set escalate_after_hours = 1`
+    // Без размещения: ни точки, ни роли в области, ни дерева — руководителя нет ни по одному шагу.
+    const phone = `+38095${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`
+    const [lonerRow] = await admin`insert into users (tenant_id, phone, full_name, first_name, status) values (${tenantId}, ${phone}, 'Без Керівника', 'Керівника', 'active') returning id`
+    const loner = lonerRow!.id as string
+    userIds.push(loner)
+    // Хвост старше — худший случай для разбора «от старых к новым»: человек с руководителем стоит
+    // в очереди последним.
+    await admin`
+      insert into notifications (tenant_id, user_id, code, channel, payload, status, sent_at, rendered_text, dedup_key)
+      select ${tenantId}, ${loner}, 'enrollment_due_soon', 'telegram', '{}'::jsonb, 'sent',
+             now() - interval '3 hours' - make_interval(secs => g), 'Скоро К', 'starve:' || ${loner}::text || ':' || g
+      from generate_series(1, ${BACKLOG}::int) g`
+    const managed = await makePerson('Має Керівника')
+    const [target] = await admin`
+      insert into notifications (tenant_id, user_id, code, channel, payload, status, sent_at, rendered_text, dedup_key)
+      values (${tenantId}, ${managed}, 'enrollment_due_soon', 'telegram', '{}', 'sent', now() - interval '2 hours', 'Скоро К', ${`starve:${managed}`})
+      returning id`
+    const lonerState = async () => (await admin`
+      select count(*) filter (where escalated_at is not null)::int as closed,
+             count(*) filter (where escalated_to_id is not null)::int as addressed
+      from notifications where user_id = ${loner}`)[0]!
+    const targetState = async () => (await admin`select escalated_at, escalated_to_id from notifications where id = ${target!.id}`)[0]!
+
+    // Проход 1: окно целиком — строки без руководителя, и все они закрыты как «некому».
+    await N.escalationScan(tenantId)
+    expect(await lonerState(), 'окно не закрылось — следующий проход выберет те же строки').toEqual({ closed: N.ESCALATION_BATCH, addressed: 0 })
+    expect((await targetState()).escalated_at).toBeNull()
+
+    // Проход 2: остаток хвоста и человек с руководителем — эскалация дошла.
+    await N.escalationScan(tenantId)
+    expect(await lonerState()).toEqual({ closed: BACKLOG, addressed: 0 })
+    const t = await targetState()
+    expect(t.escalated_at, 'до человека с руководителем очередь так и не дошла').not.toBeNull()
+    expect(t.escalated_to_id).toBe(adminId)
+    const [esc] = await admin`select user_id from notifications where tenant_id = ${tenantId} and dedup_key = ${`esc:${target!.id}`}`
+    expect(esc!.user_id).toBe(adminId)
+
+    // Проход 3: разбирать больше нечего — закрытые строки не возвращаются.
+    expect(await N.escalationScan(tenantId)).toBe(0)
+    expect(await lonerState()).toEqual({ closed: BACKLOG, addressed: 0 })
+  })
+})

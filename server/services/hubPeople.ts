@@ -6,6 +6,7 @@ import { enqueueNotification } from './notifications'
 import type { Access } from './access'
 import { can } from './access'
 import { EMPLOYEES_ONLY } from './repo/people'
+import { managerIdOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -130,11 +131,10 @@ export async function birthdayScan(tenantId: string): Promise<{ upcoming: number
       const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000)
       const label = d.toISOString().slice(5, 10)
       if (diff === days && r.location_id) {
-        if (!mgrOf.has(r.location_id)) {
-          const [l] = await tx.execute(sql`select manager_id from locations where id = ${r.location_id}::uuid`) as unknown as { manager_id: string | null }[]
-          mgrOf.set(r.location_id, l?.manager_id ?? null)
-        }
-        const mgr = mgrOf.get(r.location_id)
+        // П-16.4: поздравляет руководитель человека, а не руководитель точки. Кэш — по
+        // человеку, а не по точке: внутри одной точки у людей руководители разные.
+        if (!mgrOf.has(r.id)) mgrOf.set(r.id, await managerIdOf(tx, r.id))
+        const mgr = mgrOf.get(r.id)
         if (mgr && mgr !== r.id && await enqueueNotification(tx, { tenantId, userId: mgr, code: 'birthday_upcoming', payload: { name: r.full_name, date: label, days }, dedupKey: `bday_up:${r.id}:${year}` })) out.upcoming++
       }
       if (diff === 0 && r.location_id) {
@@ -186,11 +186,10 @@ export async function anniversaryScan(tenantId: string): Promise<{ upcoming: num
       const d = birthdayIn(year, r.started_at)
       const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000)
       if (diff === days && r.location_id) {
-        if (!mgrOf.has(r.location_id)) {
-          const [l] = await tx.execute(sql`select manager_id from locations where id = ${r.location_id}::uuid`) as unknown as { manager_id: string | null }[]
-          mgrOf.set(r.location_id, l?.manager_id ?? null)
-        }
-        const mgr = mgrOf.get(r.location_id)
+        // П-16.4: поздравляет руководитель человека, а не руководитель точки. Кэш — по
+        // человеку, а не по точке: внутри одной точки у людей руководители разные.
+        if (!mgrOf.has(r.id)) mgrOf.set(r.id, await managerIdOf(tx, r.id))
+        const mgr = mgrOf.get(r.id)
         if (mgr && mgr !== r.id && await enqueueNotification(tx, { tenantId, userId: mgr, code: 'anniversary_upcoming', payload: { name: r.full_name, years, days }, dedupKey: `anniv_up:${r.id}:${year}` })) out.upcoming++
       }
       if (diff === 0 && r.location_id) {

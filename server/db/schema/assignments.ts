@@ -228,7 +228,11 @@ export const notifications = pgTable('notifications', {
   refType: text('ref_type'),
   refId: uuid('ref_id'),
   templateVersion: integer('template_version'),
+  // docs/23 §6.6: `escalated_at` — эскалация по строке обработана, `escalated_to_id` — кому ушла.
+  // `escalated_at` без `escalated_to_id` — «эскалировать некому» (у человека нет руководителя по
+  // `resolveManager()`): строка закрыта и больше не выбирается (миграция 0075, PR-30).
   escalatedAt: timestamp('escalated_at', { withTimezone: true }),
+  escalatedToId: uuid('escalated_to_id').references(() => users.id, { onDelete: 'set null' }),
   urgent: boolean('urgent').notNull().default(false),
 }, t => [
   index().on(t.tenantId, t.status, t.scheduledFor),

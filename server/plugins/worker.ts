@@ -63,8 +63,9 @@ export default defineNitroPlugin(async () => {
     })
 
     await work('attempt.expire', () => runPerTenant('attempt.expire', async (tenantId) => {
-      const n = await expireStaleAttempts(tenantId)
-      if (n) console.log(`[attempt.expire] ${tenantId}: закрыто ${n}`)
+      const s = await expireStaleAttempts(tenantId)
+      // docs/12 §7 п. 8: опоздавшие больше чем на сутки закрываются без уведомлений и вебхуков
+      if (s.closed) console.log(`[attempt.expire] ${tenantId}: закрыто ${s.closed}, из них тихо ${s.quiet}`)
     }, tenantsWithActiveAttempts))
     // docs/25 §14 п. 8: квота на тенанта за круг — 5000 уведомлений одного не задерживают 5 другого
     await work('notification.dispatch', () => runPerTenant('notification.dispatch', async (tenantId, quota) => {

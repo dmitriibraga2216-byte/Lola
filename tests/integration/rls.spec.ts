@@ -80,8 +80,30 @@ describe('полнота RLS', () => {
 })
 
 describe('изоляция тенантов', () => {
-  it('роль приложения не имеет BYPASSRLS', async () => {
-    const [role] = await app`select rolbypassrls from pg_roles where rolname = current_user`
+  it('«двери» сквозь RLS (SECURITY DEFINER): выполнять может только app_user, search_path закреплён', async () => {
+    // Функция SECURITY DEFINER работает правами владельца-суперпользователя, поэтому EXECUTE
+    // у PUBLIC — дверь для любой роли базы. Так было у трёх *_lookup до миграции 0079.
+    const rows = await admin<{ name: string, forPublic: boolean, forApp: boolean, pinned: boolean }[]>`
+      select p.proname as name,
+        (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE')) as "forPublic",
+        has_function_privilege('app_user', p.oid, 'EXECUTE') as "forApp",
+        exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search_path=%') as pinned
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prosecdef
+      order by 1`
+    expect(rows.map(r => r.name)).toEqual(expect.arrayContaining([
+      'oauth_state_lookup', 'mystery_link_lookup', 'vacancy_public_lookup',
+      'tenants_with_queued_notifications', 'tenants_with_active_attempts', 'tenants_with_pending_webhooks',
+    ]))
+    const broken = rows.filter(r => r.forPublic || !r.forApp || !r.pinned)
+      .map(r => `${r.name} (PUBLIC=${r.forPublic}, app_user=${r.forApp}, search_path=${r.pinned})`)
+    expect(broken, `Двери без ограничений: ${broken.join(', ')}`).toEqual([])
+  })
+
+  it('роль приложения не суперпользователь и не имеет BYPASSRLS', async () => {
+    // Суперпользователь обходит RLS и с NOBYPASSRLS — одного rolbypassrls мало
+    const [role] = await app`select rolsuper, rolbypassrls from pg_roles where rolname = current_user`
+    expect(role!.rolsuper).toBe(false)
     expect(role!.rolbypassrls).toBe(false)
   })
 

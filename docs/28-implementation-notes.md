@@ -547,6 +547,16 @@
   `due.scan` стал планировщиком: ставит `due.scan.tenant` на каждый работающий тенант (singletonKey
   `due.scan:<tenant>:<день>`), обработчик — `jobs/dueScanTenant.ts` (`25` §5 «`due.scan` → N задач
   `due.scan:tenant`»; в pg-boss имя очереди не может содержать «:», поэтому точка).
+
+  > [исправлено 25.09.2026, ветка `fix-jobs-rls`] Источник круга (`source`) у `notification.dispatch`,
+  > `attempt.expire` и `webhook.deliver` — `tenantsWithQueued()`, `tenantsWithActiveAttempts()`,
+  > `tenantsWithPendingWebhooks()` — читал `select distinct tenant_id` из тенантной таблицы общим
+  > соединением. Под RLS без `app.tenant_id` это всегда пустой список: с 19.09 круг не обслуживал ни
+  > одного тенанта — уведомления стояли в `queued`, попытки не закрывались, вебхуки не уходили.
+  > Теперь список отдают функции `SECURITY DEFINER` (миграция `0079_jobs_tenant_sources`): только
+  > идентификаторы, обход `tenants` с `exists` по индексу `(tenant_id, status, …)`, выполнять может
+  > только `app_user`. Правило — `25` §5. Ранее: `select distinct tenant_id from <таблица>` с общего
+  > соединения.
 - **Задачи приостановленного тенанта пропускаются, а не откладываются.** Сканы по расписанию перезапустятся сами;
   задача с сущностью, поставленная до приостановки (например, `media.process`), завершится с
   `{skipped: 'tenant_inactive'}` и после resume не повторится. Принято осознанно: в suspended никто не входит,

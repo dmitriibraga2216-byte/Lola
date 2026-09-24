@@ -4,6 +4,7 @@ import { db } from '../db/client'
 import { webhookDeliveries, webhookEndpoints } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
+import { newsSuppressed } from '../utils/withoutNews'
 import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
 import { effectiveLimits } from './tenantLimits'
@@ -76,8 +77,12 @@ export async function updateEndpoint(ctx: Ctx, id: string, input: { isActive?: b
   return e
 }
 
-/** Постановка события в доставку — вызывается из доменных сервисов внутри их транзакции. */
+/**
+ * Постановка события в доставку — вызывается из доменных сервисов внутри их транзакции.
+ * Внутри `withoutNews()` не ставит ничего: так закрывается попытка, опоздавшая больше чем на сутки (docs/12 §7 п. 8).
+ */
 export async function emitWebhook(tx: TenantTx, tenantId: string, event: WebhookEvent, payload: Record<string, unknown>) {
+  if (newsSuppressed()) return 0
   const endpoints = await tx.select({ id: webhookEndpoints.id }).from(webhookEndpoints)
     .where(and(eq(webhookEndpoints.isActive, true), sql`${event} = any(${webhookEndpoints.events})`))
   if (!endpoints.length) return 0
@@ -156,7 +161,14 @@ export async function retryDelivery(ctx: Ctx, deliveryId: string) {
   })
 }
 
+/**
+ * Тенанты с доставками, чей срок наступил, — источник круга `webhook.deliver`.
+ *
+ * Не `select distinct tenant_id from webhook_deliveries`: таблица под RLS, и с общего соединения
+ * без `app.tenant_id` запрос видит ноль строк — вебхуки не уходили ни у кого (найдено 24.09.2026).
+ * Функция `SECURITY DEFINER` (миграция 0079) отдаёт только идентификаторы.
+ */
 export async function tenantsWithPendingWebhooks(): Promise<string[]> {
-  const rows = await db.execute(sql`select distinct tenant_id from webhook_deliveries where status = 'pending' and next_attempt_at <= now()`)
+  const rows = await db.execute(sql`select tenant_id from tenants_with_pending_webhooks()`)
   return (rows as unknown as { tenant_id: string }[]).map(r => r.tenant_id)
 }

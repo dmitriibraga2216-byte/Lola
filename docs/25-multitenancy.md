@@ -108,6 +108,17 @@ export async function withTenant<T>(
 Очередь общая, но с ключом справедливости: один тенант с 5000 уведомлений не должен
 задерживать остальных — берём партиями по тенантам по кругу (round-robin) `[решение]`.
 
+Список тенантов для круга берётся либо из платформенной таблицы `tenants` (все работающие),
+либо из функции `SECURITY DEFINER`, которая отдаёт только идентификаторы тенантов с работой
+(`tenants_with_queued_notifications()`, `tenants_with_active_attempts()`,
+`tenants_with_pending_webhooks()`). Запрещено строить его запросом к таблице с `tenant_id`
+через общее соединение вне `withTenant()`: без `app.tenant_id` политика RLS не пропускает ни
+одной строки, запрос не падает, а возвращает пустой список — и круг не обслуживает никого.
+Проверяется `tests/integration/job-tenant-sources.spec.ts` (источники под ролью `app_user`) и
+сторожем `tests/unit/shared-db-guard.spec.ts` (общее соединение не касается таблиц с
+`tenant_id`). `[добавлено 25.09.2026: так с 19.09 не работали notification.dispatch,
+attempt.expire и webhook.deliver]`
+
 ## 6. Изоляция в приложении
 
 | Слой | Что обязано |
@@ -335,3 +346,54 @@ SMS и API — то, что стоит денег платформе.
 Чего не делаем: копирования боевых данных в отдельный тенант. Если клиент попросит —
 предлагаем обезличенный слепок (имена заменяются, телефоны и почты вычищаются,
 результаты сохраняются) как отдельную платную операцию, а не как кнопку в интерфейсе.
+
+## 17. Эксплуатация
+
+### 17.1 Сбой фоновых задач с 19.09.2026: что сделала выкатка и что осталось владельцу
+
+С 19.09.2026 до выката миграции `0079_jobs_tenant_sources` круги `notification.dispatch`,
+`attempt.expire` и `webhook.deliver` не обслуживали ни одного тенанта (§5, docs/v2/46). Решение
+владельца продукта 25.09.2026: **старое не отправлять**. Выкатка делает это сама:
+
+1. Миграция, до старта приложения и первого круга воркера: уведомления в `queued` со
+   `scheduled_for` старше суток и доставки вебхуков в `pending` с `next_attempt_at` старше суток
+   переводятся в `failed` с причиной «Не надіслано: збій фонової доставки з 19.09.2026; …» в
+   `notifications.error` / `webhook_deliveries.response_body` — существующий статус и поле, нового
+   значения перечисления нет. В колокольчике их нет: он показывает `sent`, `skipped` и `read`.
+   Свежее, моложе суток, уходит как обычно.
+2. Попытки миграция не трогает: их закрывает `attempt.expire` по постоянному правилу docs/12 §7
+   п. 8 — результат, очередь проверки и журналы появляются, а закрытие, опоздавшее больше чем на
+   сутки, не порождает ни уведомлений, ни вебхуков. Правило действует и при любом будущем простое
+   воркера.
+
+Осталось владельцу — переслать приглашения, которые не дошли. Запрос выполняется на проде ролью
+`lola` (под `app_user` RLS не покажет ни одной строки), только чтение; повторный запуск
+показывает тех, кому ещё не переслали:
+
+```sql
+-- Пропущенные приглашения: кому переслать «Надіслати запрошення» (docs/25 §17.1)
+select t.name as space, t.slug, p.full_name, p.phone, p.email, p.invited_at
+from (
+  select distinct on (n.user_id) n.tenant_id, n.user_id, u.full_name, u.phone, u.email,
+         n.created_at as invited_at
+  from notifications n
+  join users u on u.id = n.user_id
+  where n.code = 'user_invited'
+    and n.status = 'failed'
+    and n.error like 'Не надіслано: збій фонової доставки%'
+    and u.kind = 'employee'
+    and u.status = 'invited'
+    and not exists (select 1 from invitations i where i.user_id = u.id and i.accepted_at is not null)
+    and not exists (
+      select 1 from notifications later
+      where later.user_id = n.user_id and later.code = 'user_invited'
+        and later.created_at > n.created_at and later.status in ('queued', 'sent', 'read'))
+  order by n.user_id, n.created_at desc
+) p
+join tenants t on t.id = p.tenant_id
+order by t.name, p.full_name;
+```
+
+Каждому из списка — карточка человека → «Надіслати запрошення»: создаётся новое приглашение с
+новой ссылкой. Повтор старого уведомления из журнала не годится — в нём ссылка, срок которой
+(48 часов) истёк. Запрос проверяется `tests/integration/job-backlog.spec.ts` вместе с уборкой.

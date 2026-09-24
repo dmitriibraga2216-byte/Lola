@@ -213,7 +213,3 @@ export async function oauthStatus(ctx: { tenantId: string, actorId: string }, pr
 export async function oauthDisconnect(ctx: { tenantId: string, actorId: string }, provider: OAuthProvider) {
   await revokeSecrets(ctx, provider)
 }
-
-export function cleanupStates(): Promise<unknown> {
-  return db.execute(sql`delete from oauth_states where expires_at < now() - interval '1 day'`)
-}

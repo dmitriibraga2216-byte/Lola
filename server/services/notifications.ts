@@ -3,6 +3,7 @@ import { currentRequestContext } from '../utils/requestContext'
 import { db } from '../db/client'
 import { notificationTemplates, notifications, tenants, userNotificationPrefs, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { newsSuppressed } from '../utils/withoutNews'
 import { business } from '../utils/metrics'
 import type { TenantTx } from '../utils/withTenant'
 import { sendTelegram } from './telegram'
@@ -366,8 +367,12 @@ async function candidateTimezone(tx: TenantTx, userId: string): Promise<string |
   return row?.timezone ?? null
 }
 
-/** Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален). */
+/**
+ * Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален).
+ * Внутри `withoutNews()` не кладёт ничего: так закрывается попытка, опоздавшая больше чем на сутки (docs/12 §7 п. 8).
+ */
 export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Promise<boolean> {
+  if (newsSuppressed()) return false
   const [tenant] = await db.select({ timezone: tenants.timezone, settings: tenants.settings }).from(tenants).where(eq(tenants.id, input.tenantId))
   const settings = await readSettings(tx, input.tenantId)
   const [recipient] = await tx.select({ kind: users.kind }).from(users).where(eq(users.id, input.userId))
@@ -781,7 +786,14 @@ export async function listNotifications(ctx: { tenantId: string, actorId: string
   })
 }
 
+/**
+ * Тенанты с уведомлениями к отправке — источник круга `notification.dispatch`.
+ *
+ * Не `select distinct tenant_id from notifications`: таблица под RLS, и с общего соединения без
+ * `app.tenant_id` запрос видит ноль строк — круг не обслуживал никого, очередь не разбиралась
+ * (найдено 24.09.2026). Функция `SECURITY DEFINER` (миграция 0079) отдаёт только идентификаторы.
+ */
 export async function tenantsWithQueued(): Promise<string[]> {
-  const rows = await db.execute(sql`select distinct tenant_id from notifications where status = 'queued' and scheduled_for <= now()`)
+  const rows = await db.execute(sql`select tenant_id from tenants_with_queued_notifications()`)
   return (rows as unknown as { tenant_id: string }[]).map(r => r.tenant_id)
 }

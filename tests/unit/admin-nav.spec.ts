@@ -123,9 +123,11 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/settings/lifecycle': "hasScope('lifecycle.view')",
   '/admin/settings/recruiting': "hasScope('settings.tenant')",
   '/admin/settings/translations': "hasScope('settings.tenant')",
-  // #104 «Власник»: тариф і ліміти бачать `admin` і `owner` — окремий скоуп, не «налаштування простору».
-  '/admin/settings/usage': "hasScope('billing.usage.view')",
   '/admin/certificates': "hasScope('report.team')",
+  // PR-10 (docs/v2/35): тариф і ліміти бачать `admin` і `owner` — окремий скоуп, не «налаштування простору».
+  '/admin/settings/billing': "hasScope('billing.view')",
+  '/admin/settings/billing/history': "hasScope('billing.payments.view')",
+  '/admin/settings/usage': "hasScope('billing.usage.view')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

@@ -110,7 +110,10 @@ export const tenantAddons = pgTable('tenant_addons', {
   validFrom: date('valid_from').notNull().default(sql`current_date`),
   validUntil: date('valid_until'), // null = до отключения оператором
   source: text('source').notNull().default('purchase'), // purchase | grant | compensation
-  paymentId: uuid('payment_id'), // FK на tenant_payments — PR-10
+  // FK на tenant_payments заведён миграцией PR-10 (0073_v2_billing_payments) — таблица
+  // `tenant_payments` определена ниже в этом же файле, forward-ссылка безопасна (drizzle
+  // резолвит `references()` лениво, не в момент объявления модуля).
+  paymentId: uuid('payment_id').references(() => tenantPayments.id, { onDelete: 'set null' }),
   createdBy: uuid('created_by'),
 }, t => [
   index().on(t.tenantId, t.addonCode, t.validUntil),
@@ -216,6 +219,59 @@ export const tenantLimits = pgTable('tenant_limits', {
 }, t => [
   index().on(t.tenantId),
   unique().on(t.tenantId),
+])
+
+/**
+ * История платежей тенанта (docs/v2/35 §3.5, §9, §10): приём денег провайдером не подключён
+ * (`44` §8, `HANDOFF` §6) — платёж принимает оператор платформы вручную,
+ * `POST /platform/tenants/:id/payments` (PR-10). `planCode`, а не `plan_id uuid` (то же
+ * исправление, что у `plan_prices` и `tenant_usage.plan_code`, В-5): у `plans` нет колонки `id`.
+ * Тенантная таблица под RLS — история своего тенанта видна только `owner` (`billing.payments.view`).
+ */
+export const tenantPayments = pgTable('tenant_payments', {
+  ...baseColumns,
+  tenantId: tenantId(),
+  kind: text('kind').notNull(), // subscription | addon | adjustment
+  planCode: text('plan_code').references(() => plans.code, { onDelete: 'set null', onUpdate: 'cascade' }),
+  addonCode: text('addon_code').references(() => planAddons.code, { onDelete: 'set null', onUpdate: 'cascade' }),
+  billingPeriod: text('billing_period'), // month | year — только для kind='subscription'
+  periodFrom: date('period_from'),
+  periodTo: date('period_to'),
+  amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(), // деньги целым числом (§3.4)
+  currency: char('currency', { length: 3 }).notNull().default('EUR'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  status: text('status').notNull().default('pending'), // pending | paid | failed | refunded | written_off
+  method: text('method'), // bank_transfer | card | manual
+  invoiceNumber: text('invoice_number'),
+  invoiceMediaId: uuid('invoice_media_id'),
+  comment: text('comment'),
+  createdBy: uuid('created_by'), // platformAdmins.id — оператор, принявший платёж вручную
+}, t => [
+  index().on(t.tenantId, t.createdAt.desc()),
+  unique().on(t.tenantId, t.invoiceNumber),
+])
+
+/**
+ * Заявка на смену тарифа (docs/v2/35 §3.5, §4, §7.6). `fromPlanCode`/`toPlanCode`, а не
+ * `*_plan_id uuid` (то же исправление В-5, что у `tenant_payments.planCode` выше): `plans`
+ * не имеет колонки `id`. `blockers` — снимок превышений на момент последнего пересчёта:
+ * `[{axis, current, newLimit, excess}]` (§6.1).
+ */
+export const planChangeRequests = pgTable('plan_change_requests', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  tenantId: tenantId(),
+  fromPlanCode: text('from_plan_code').references(() => plans.code, { onDelete: 'set null', onUpdate: 'cascade' }),
+  toPlanCode: text('to_plan_code').notNull().references(() => plans.code, { onDelete: 'restrict', onUpdate: 'cascade' }),
+  billingPeriod: text('billing_period').notNull(), // month | year
+  status: text('status').notNull().default('preflight'), // preflight | blocked | scheduled | applied | cancelled
+  blockers: jsonb('blockers').notNull().default(sql`'[]'::jsonb`),
+  effectiveAt: date('effective_at'),
+  requestedBy: uuid('requested_by'),
+  decidedBy: uuid('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, t => [
+  index().on(t.tenantId, t.status),
 ])
 
 /**

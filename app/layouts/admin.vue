@@ -126,9 +126,12 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/lifecycle', label: t('admin.nav.lifecycle'), show: hasScope('lifecycle.view'), group: t('admin.group.platform') },
     { to: '/admin/settings/recruiting', label: t('admin.nav.recruitingSettings'), show: hasScope('settings.tenant'), group: t('admin.group.platform') },
     { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant'), group: t('admin.group.platform') },
-    // Тариф і ліміти (docs/v2/35 §2, роль «Власник»): лічильники бачать `admin` і `owner` — скоуп, а не «налаштування простору»
-    { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('billing.usage.view'), group: t('admin.group.platform') },
     { to: '/admin/certificates', label: t('admin.nav.certificates'), show: hasScope('report.team'), group: t('admin.group.platform') },
+    // Тариф і ліміти (docs/v2/35 §2, роль «Власник»): лічильники бачать `admin` і `owner` — скоуп, а не «налаштування простору».
+    // Своя підгрупа, а не «Платформа» (тест admin-nav.spec.ts: не більше 10 пунктів у пачці) — і змістовно логічніше.
+    { to: '/admin/settings/billing', label: t('admin.nav.billing'), show: hasScope('billing.view'), group: t('admin.group.billing') },
+    { to: '/admin/settings/billing/history', label: t('admin.nav.billingHistory'), show: hasScope('billing.payments.view'), group: t('admin.group.billing') },
+    { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('billing.usage.view'), group: t('admin.group.billing') },
   ] },
 ].map(s => ({ ...s, items: s.items.filter((i) => {
   const m = moduleOfPage(i.to)

@@ -1,6 +1,9 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { mediaAssets, planAddons, platformAudit, plans, tenantAddons, tenantLimits, tenantSecrets, tenants } from '../db/schema'
+import {
+  mediaAssets, planAddons, planChangeRequests, platformAudit, plans, tenantAddons, tenantLimits,
+  tenantPayments, tenantSecrets, tenants,
+} from '../db/schema'
 import { currentRequestContext } from '../utils/requestContext'
 import { platformDb, type PlatformAuth } from './platform'
 import { invalidateTenant } from './tenantResolve'
@@ -8,6 +11,7 @@ import { effectiveLimits, invalidateLimits } from './tenantLimits'
 import { enqueueForTenant } from './tenantQueue'
 import { enqueueMediaProcess } from './queue'
 import type { TenantLimitsInput } from '../../shared/schemas/platform'
+import type { TenantPaymentInput } from '../../shared/schemas/billing'
 
 /**
  * Жизненный цикл тенанта в панели оператора (docs/25 §7, §8; docs/24 §7 п. 5, §10):
@@ -270,6 +274,185 @@ export async function grantTenantAddon(
   await recordPlatformAudit(actor, { action: 'tenant.addon_grant', tenantId, entity: 'tenant_addons', entityId: row!.id, after: { addonCode: addon.code, qty: input.qty, unitStep: addon.unitStep, axis: addon.axis, source: input.source ?? 'purchase' } })
   invalidateLimits(tenantId)
   return { ok: true, id: row!.id }
+}
+
+// ── Оплата и смена тарифа (docs/v2/35 §3.5, §7.6, §7.8 п. 6, §10 — PR-10) ────────────────
+
+/**
+ * `date` (YYYY-MM-DD) + один биллинговый период, с зажимом дня в границы результирующего
+ * месяца (31.01 + месяц → 28/29.02, а не «перепрыгнутый» март). Без внешней даты-библиотеки —
+ * единственное место, где считается продление подписки (§7.8 п. 6).
+ */
+export function addBillingPeriod(dateIso: string, period: 'month' | 'year'): string {
+  const [y, m, d] = dateIso.slice(0, 10).split('-').map(Number) as [number, number, number]
+  const months = period === 'year' ? 12 : 1
+  const total = (m - 1) + months
+  const ny = y + Math.floor(total / 12)
+  const nm = total % 12 // 0-based
+  const lastDay = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate()
+  const nd = Math.min(d, lastDay)
+  return `${ny}-${String(nm + 1).padStart(2, '0')}-${String(nd).padStart(2, '0')}`
+}
+
+const isoDate = (d: Date) => d.toISOString().slice(0, 10)
+
+/**
+ * Приём платежа оператором вручную (`35` §10, `44` §8 — платёжный провайдер не подключён и
+ * не появится в этом PR; `.env.example` реальных ключей не получает). Единственный способ
+ * продвинуть `paid_until`/докупить аддон в системе сегодня.
+ *
+ * Правило §7.8 п. 6, критерий приёмки `35` §13 к. 6: продление считается **от прежней даты
+ * окончания**, а не от даты платежа — даже если тенант десятый день в `readonly`. Это и
+ * защищает оплаченные дни: пропуск платежа не даёт бесплатную отсрочку (дни просрочки не
+ * возвращаются), но и не крадёт дни, за которые уже заплачено вперёд.
+ */
+export async function recordTenantPayment(
+  tenantId: string,
+  input: TenantPaymentInput,
+  actor: PlatformAuth,
+): Promise<
+  | { ok: true, payment: typeof tenantPayments.$inferSelect, subscription: Awaited<ReturnType<typeof effectiveLimits>>['subscription'] }
+  | { ok: false, code: 'not_found' | 'addon_unknown' }
+> {
+  const db = platformDb()
+  const t = await loadTenant(tenantId)
+  if (!t) return { ok: false, code: 'not_found' }
+
+  let periodFrom: string | null = null
+  let periodTo: string | null = null
+
+  if (input.kind === 'subscription') {
+    const [row] = await db.select({ paidUntil: tenantLimits.paidUntil }).from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId))
+    const period = input.billingPeriod ?? 'month'
+    // «От прежней даты окончания» (§7.8 п. 6): даже просроченный paid_until — точка отсчёта,
+    // а не «сегодня». Только первая оплата тенанта (paid_until никогда не было) считается от сегодня.
+    periodFrom = row?.paidUntil ?? isoDate(new Date())
+    periodTo = addBillingPeriod(periodFrom, period)
+    await db.insert(tenantLimits).values({
+      tenantId, billingPeriod: period, status: 'active', paidUntil: periodTo, graceUntil: null, updatedBy: actor.adminId,
+    }).onConflictDoUpdate({
+      target: tenantLimits.tenantId,
+      set: { billingPeriod: period, status: 'active', paidUntil: periodTo, graceUntil: null, updatedBy: actor.adminId, updatedAt: new Date() },
+    })
+  }
+
+  if (input.kind === 'addon') {
+    if (!input.addonCode) return { ok: false, code: 'addon_unknown' }
+    const [addon] = await db.select().from(planAddons).where(eq(planAddons.code, input.addonCode))
+    if (!addon) return { ok: false, code: 'addon_unknown' }
+  }
+
+  const [payment] = await db.insert(tenantPayments).values({
+    tenantId,
+    kind: input.kind,
+    planCode: input.kind === 'subscription' ? (input.planCode ?? t.plan) : null,
+    addonCode: input.kind === 'addon' ? input.addonCode : null,
+    billingPeriod: input.kind === 'subscription' ? (input.billingPeriod ?? 'month') : null,
+    periodFrom,
+    periodTo,
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    paidAt: input.status === 'paid' ? new Date() : null,
+    status: input.status,
+    method: input.method ?? 'manual',
+    invoiceNumber: input.invoiceNumber ?? null,
+    comment: input.comment,
+    createdBy: actor.adminId,
+  }).returning()
+
+  // Аддон покупается той же ручкой, что и грант оператора (`grantTenantAddon`), но со
+  // `source='purchase'` и ссылкой на платёж — снимок `unit_step` берётся так же, из каталога.
+  if (input.kind === 'addon' && input.addonCode) {
+    const [addon] = await db.select().from(planAddons).where(eq(planAddons.code, input.addonCode))
+    await db.insert(tenantAddons).values({
+      tenantId,
+      addonCode: addon!.code,
+      qty: input.qty ?? 1,
+      unitStep: addon!.unitStep,
+      // `period` продлевается вместе с тарифом (§7.8 п. 1); без задачи автопродления (не
+      // построена в этом PR) даём один оплаченный период от сегодня, `perpetual` — без срока.
+      validUntil: addon!.term === 'period' ? addBillingPeriod(isoDate(new Date()), input.billingPeriod ?? 'month') : null,
+      source: 'purchase',
+      paymentId: payment!.id,
+    })
+  }
+
+  await recordPlatformAudit(actor, {
+    action: 'tenant.payment',
+    tenantId,
+    entity: 'tenant_payments',
+    entityId: payment!.id,
+    after: { kind: input.kind, amountMinor: input.amountMinor, currency: input.currency, periodFrom, periodTo, status: input.status },
+  })
+  invalidateLimits(tenantId)
+  const eff = await effectiveLimits(tenantId)
+  return { ok: true, payment: payment!, subscription: eff.subscription }
+}
+
+/** История платежей для панели оператора (`35` §5.6) — без пагинации, тенантов достаточно мало платежей. */
+export async function listTenantPaymentsForOperator(tenantId: string) {
+  return platformDb().select().from(tenantPayments).where(eq(tenantPayments.tenantId, tenantId)).orderBy(desc(tenantPayments.createdAt))
+}
+
+/**
+ * Прямая смена тарифа оператором (§7.10 «может назначить любой план, включая
+ * `is_public=false`»): в отличие от самообслуживания владельца (`35` §6.1, экран §5.2 —
+ * отдельный PR, см. `docs/v2/46-progress.md`), preflight не считается — оператор берёт на
+ * себя ответственность за превышения. `plan_change_requests` заводится сразу `applied`, для
+ * той же истории, что видит владелец на `/settings/billing`.
+ */
+export async function changeTenantPlan(
+  tenantId: string,
+  input: { toPlanCode: string, billingPeriod: 'month' | 'year', comment: string },
+  actor: PlatformAuth,
+): Promise<{ ok: true, id: string } | { ok: false, code: 'not_found' | 'plan_unknown' }> {
+  const db = platformDb()
+  const t = await loadTenant(tenantId)
+  if (!t) return { ok: false, code: 'not_found' }
+  const [plan] = await db.select().from(plans).where(eq(plans.code, input.toPlanCode))
+  if (!plan) return { ok: false, code: 'plan_unknown' }
+  const fromPlanCode = t.plan
+  await db.update(tenants).set({ plan: input.toPlanCode }).where(eq(tenants.id, tenantId))
+  await db.update(tenantLimits).set({ billingPeriod: input.billingPeriod, updatedBy: actor.adminId, updatedAt: new Date() }).where(eq(tenantLimits.tenantId, tenantId))
+  const [row] = await db.insert(planChangeRequests).values({
+    tenantId,
+    fromPlanCode,
+    toPlanCode: input.toPlanCode,
+    billingPeriod: input.billingPeriod,
+    status: 'applied',
+    effectiveAt: isoDate(new Date()),
+    decidedBy: actor.adminId,
+    decidedAt: new Date(),
+  }).returning({ id: planChangeRequests.id })
+  await recordPlatformAudit(actor, { action: 'tenant.plan_change', tenantId, entity: 'plan_change_requests', entityId: row!.id, before: { plan: fromPlanCode }, after: { plan: input.toPlanCode, billingPeriod: input.billingPeriod, comment: input.comment } })
+  invalidateLimits(tenantId)
+  return { ok: true, id: row!.id }
+}
+
+/**
+ * Точечное продление дат подписки без платежа (§5.6 «Продовжити доступ», «Продовжити ШІ»,
+ * §7.10). В отличие от `setTenantLimits` (полная замена всех переопределений осей — форма
+ * шлёт все поля разом), здесь трогается только то, что явно передано: `'paidUntil' in input`
+ * отличает «не трогать» от «поставить null» (снять дату), а не считает и то и то отсутствием.
+ */
+export async function extendTenantDates(
+  tenantId: string,
+  input: { paidUntil?: string | null, graceUntil?: string | null, aiUntil?: string | null },
+  actor: PlatformAuth,
+): Promise<{ ok: true } | { ok: false, code: 'not_found' }> {
+  const db = platformDb()
+  const t = await loadTenant(tenantId)
+  if (!t) return { ok: false, code: 'not_found' }
+  const set: Record<string, unknown> = {}
+  if ('paidUntil' in input) set.paidUntil = input.paidUntil ?? null
+  if ('graceUntil' in input) set.graceUntil = input.graceUntil ?? null
+  if ('aiUntil' in input) set.aiUntil = input.aiUntil ?? null
+  const [row] = await db.select({ tenantId: tenantLimits.tenantId }).from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId))
+  if (row) await db.update(tenantLimits).set({ ...set, updatedBy: actor.adminId, updatedAt: new Date() }).where(eq(tenantLimits.tenantId, tenantId))
+  else await db.insert(tenantLimits).values({ tenantId, ...set, updatedBy: actor.adminId })
+  await recordPlatformAudit(actor, { action: 'tenant.extend', tenantId, entity: 'tenant_limits', entityId: tenantId, after: set })
+  invalidateLimits(tenantId)
+  return { ok: true }
 }
 
 /**

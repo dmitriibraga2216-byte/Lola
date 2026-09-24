@@ -53,6 +53,9 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'vacancy_languages',
   'vacancy_criteria',
   'vacancy_criterion_scores',
+  // 35. Оплата, смена тарифа, экраны (PR-10, миграция 0073_v2_billing_payments)
+  'tenant_payments',
+  'plan_change_requests',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

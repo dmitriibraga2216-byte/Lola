@@ -143,7 +143,9 @@
       "candidates": "Candidates",
       "funnelReport": "Funnel report",
       "recruitingSettings": "Recruiting",
-      "vacancies": "Vacancies"
+      "vacancies": "Vacancies",
+      "billing": "Plan and limits",
+      "billingHistory": "Payment history"
     },
     "section": {
       "learning": "Learning",
@@ -165,7 +167,8 @@
       "coreReports": "Core reports",
       "moduleReports": "Module reports",
       "notifications": "Notifications & integrations",
-      "platform": "Platform"
+      "platform": "Platform",
+      "billing": "Plan and billing"
     },
     "menu": {
       "learner": "My cabinet",
@@ -1855,7 +1858,10 @@
       "purge": "Deletion of “{name}” scheduled. It can be cancelled before the date",
       "cancelPurge": "Deletion of “{name}” cancelled, workspace stays suspended",
       "limits": "Limits for “{name}” saved",
-      "domain": "Domain for “{name}” saved"
+      "domain": "Domain for “{name}” saved",
+      "payment": "Payment for {name} recorded",
+      "planChange": "Plan for {name} changed",
+      "extend": "Dates for {name} extended"
     },
     "domain": {
       "title": "Domain",
@@ -1903,6 +1909,65 @@
       "aiReviewOps": "AI reviews per period",
       "aiInterviewOps": "AI interviews per period",
       "exportRows": "Rows per export"
+    },
+    "billing": {
+      "title": "Plan and payment",
+      "status": "Subscription status",
+      "paidUntil": "Paid until",
+      "aiUntil": "AI until",
+      "period": "Billing period",
+      "periodOf": {
+        "month": "Monthly",
+        "year": "Annual"
+      },
+      "newPayment": "Record a payment",
+      "kind": "Payment type",
+      "kindOf": {
+        "subscription": "Plan",
+        "addon": "Add-on",
+        "adjustment": "Adjustment"
+      },
+      "addonCode": "Add-on code",
+      "qty": "Quantity",
+      "amount": "Amount",
+      "currency": "Currency",
+      "method": "Method",
+      "methodOf": {
+        "bank_transfer": "Bank transfer",
+        "card": "Card",
+        "manual": "Manual"
+      },
+      "invoiceNumber": "Invoice number",
+      "record": "Record payment",
+      "history": "Payment history",
+      "empty": "No payments yet",
+      "until": "until {date}",
+      "state": {
+        "trial": "Trial",
+        "active": "Active",
+        "grace": "Grace period",
+        "readonly": "Read-only",
+        "suspended": "Suspended"
+      },
+      "aiState": {
+        "active": "active",
+        "expired": "expired",
+        "off": "off"
+      },
+      "paymentStatus": {
+        "pending": "Pending",
+        "paid": "Paid",
+        "failed": "Failed",
+        "refunded": "Refunded",
+        "written_off": "Written off"
+      },
+      "extendTitle": "Extend dates without a payment",
+      "extendOk": "Save dates"
+    },
+    "planChange": {
+      "title": "Change plan",
+      "hint": "The plan will change from «{from}» to «{to}» immediately, without an overage check (§7.10).",
+      "ok": "Change plan"
     }
   },
   "integrations": {
@@ -4728,6 +4793,75 @@
       "background_job": "the export goes to a background job with a link to the file",
       "retry_after": "429 with Retry-After",
       "observe": "observation only, delivery is not stopped"
+    },
+    "screen": {
+      "title": "Plan and limits",
+      "loadError": "Failed to load billing data",
+      "retry": "Retry",
+      "trialNotice": "You're on a trial period until {date}. Choose a plan to keep working after that date.",
+      "graceNotice": "Access is paid until {date}. {days} days of grace period left.",
+      "readonlyNotice": "Read-only mode. Renew the plan to restore full access.",
+      "currentPlan": "Current plan",
+      "billingPeriod": "Billing period",
+      "paidUntil": "Paid until",
+      "daysLeft": "{n} days left",
+      "extend": "Renew plan",
+      "change": "Change plan",
+      "contactManager": "Contact your Lola account manager to renew the plan or buy an add-on — payment is accepted manually.",
+      "aiBlock": "Artificial intelligence",
+      "aiUntil": "Available until",
+      "aiExpiredNotice": "AI subscription ended on {date}. Content generation and AI review are disabled; training and manual review still work.",
+      "extendAi": "Renew AI",
+      "addonsBlock": "Add-ons",
+      "addonsEmpty": "No add-ons",
+      "buyAddon": "Buy an add-on",
+      "until": "until {date}",
+      "historyLink": "Payment history"
+    },
+    "status": {
+      "trial": "Trial",
+      "active": "Active",
+      "grace": "Grace period",
+      "readonly": "Read-only",
+      "suspended": "Suspended"
+    },
+    "period": {
+      "month": "Monthly",
+      "year": "Annual"
+    },
+    "history": {
+      "title": "Payment history",
+      "from": "From",
+      "to": "To",
+      "kind": "Type",
+      "status": "Status",
+      "anyKind": "Any type",
+      "anyStatus": "Any status",
+      "apply": "Apply",
+      "empty": "No payments yet",
+      "kindOf": {
+        "subscription": "Plan",
+        "addon": "Add-on",
+        "adjustment": "Adjustment"
+      },
+      "statusOf": {
+        "pending": "Pending",
+        "paid": "Paid",
+        "failed": "Failed",
+        "refunded": "Refunded",
+        "written_off": "Written off"
+      },
+      "col": {
+        "date": "Date",
+        "purpose": "Purpose",
+        "period": "Period",
+        "amount": "Amount",
+        "status": "Status",
+        "invoice": "Invoice"
+      },
+      "purposeSubscription": "Plan payment «{plan}»",
+      "purposeAddon": "Add-on «{addon}»",
+      "purposeAdjustment": "Adjustment"
     }
   },
   "offboarding": {

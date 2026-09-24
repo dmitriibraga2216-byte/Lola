@@ -23,7 +23,17 @@ interface Plan { code: string, name: string, maxUsers: number | null, priceUah: 
 interface Limits {
   plan: { code: string, users: number | null, storageGb: number | null, smsPerMonth: number | null, candidates: number | null, aiGenerateOps: number | null, aiReviewOps: number | null, aiInterviewOps: number | null, exportRows: number | null }
   overrides: { users: number | null, storageGb: number | null, smsPerMonth: number | null, apiPerMinute: number | null, webhooks: number | null, activeJobs: number | null, candidates: number | null, aiGenerateOps: number | null, aiReviewOps: number | null, aiInterviewOps: number | null, exportRows: number | null }
+  /** Состояние подписки (docs/v2/35 §3.2, §5.6) — PR-10, панель «Тариф і оплата». */
+  subscription: { billingPeriod: 'month' | 'year', status: string, paidUntil: string | null, graceUntil: string | null, aiUntil: string | null, autorenew: boolean, currency: string, aiStatus: string }
 }
+/** История платежей тенанта (docs/v2/35 §3.5, §5.6, PR-10): без пагинации, платежей у тенанта немного. */
+interface Payment {
+  id: string, kind: 'subscription' | 'addon' | 'adjustment', planCode: string | null, addonCode: string | null
+  billingPeriod: string | null, periodFrom: string | null, periodTo: string | null, amountMinor: number | string, currency: string
+  status: string, method: string | null, invoiceNumber: string | null, comment: string | null, createdAt: string
+}
+/** Пять кодов каталога опций §3.4 — фиксированный перечень схемы, не выдуманный (seed 0059_v2_billing_plans). */
+const ADDON_CODES = ['storage_pack', 'ai_ops_pack', 'sms_pack', 'candidates_pack', 'ai_term']
 type LimitKey = keyof Limits['overrides']
 type PlanLimitKey = keyof Limits['plan']
 const LIMIT_KEYS: LimitKey[] = ['users', 'candidates', 'storageGb', 'smsPerMonth', 'aiGenerateOps', 'aiReviewOps', 'aiInterviewOps', 'exportRows', 'apiPerMinute', 'webhooks', 'activeJobs']
@@ -53,6 +63,24 @@ const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: ''
 /** Собственный домен клиента (докс/33 D-059): CNAME на платформу, сертификат — вручную, docs/27. */
 const domainFor = ref<Tenant | null>(null)
 const domainForm = reactive({ value: '' })
+/**
+ * «Тариф і оплата» (docs/v2/35 §5.6, PR-10): підписка, історія платежів, приймання платежу
+ * вручну — провайдера немає (`44` §8). `qty` — тільки для kind='addon' (кількість кроків §3.4).
+ */
+const billingFor = ref<Tenant | null>(null)
+const payments = ref<Payment[]>([])
+const paymentForm = reactive({
+  kind: 'subscription' as 'subscription' | 'addon' | 'adjustment',
+  billingPeriod: 'month' as 'month' | 'year',
+  addonCode: '', qty: '1', amount: '', currency: 'EUR',
+  method: 'bank_transfer' as 'bank_transfer' | 'card' | 'manual',
+  invoiceNumber: '', comment: '',
+})
+/** Точечное продление дат без платежа (§5.6 «Продовжити доступ» / «Продовжити ШІ», §7.10). */
+const extendForm = reactive({ paidUntil: '', aiUntil: '', comment: '' })
+/** Заявка на зміну тарифу (`plan_change_requests`, §7.10): оператор призначає план напряму, без preflight, але з причиною. */
+const planChangeFor = ref<{ tenant: Tenant, toPlanCode: string } | null>(null)
+const planChangeForm = reactive({ billingPeriod: 'month' as 'month' | 'year', comment: '' })
 function openDomain(tn: Tenant) { domainFor.value = tn; domainForm.value = tn.custom_domain ?? ''; error.value = '' }
 async function saveDomain() {
   if (!domainFor.value) return
@@ -64,6 +92,82 @@ async function saveDomain() {
     await load()
   }
   catch (err) { error.value = apiErrorOf(err).message }
+}
+
+/**
+ * «Тариф і оплата» (docs/v2/35 §5.6): підписка з `/limits` (те саме `effectiveLimits().subscription`,
+ * що й на екрані власника), історія платежів з `/payments`. Одна точка правди — сервер.
+ */
+async function openBilling(tn: Tenant) {
+  error.value = ''
+  billingFor.value = tn
+  ;[limits.value, payments.value] = await Promise.all([ops<Limits>(`/tenants/${tn.id}/limits`), ops<Payment[]>(`/tenants/${tn.id}/payments`)])
+  Object.assign(paymentForm, { kind: 'subscription', billingPeriod: limits.value.subscription.billingPeriod, addonCode: '', qty: '1', amount: '', currency: limits.value.subscription.currency, method: 'bank_transfer', invoiceNumber: '' })
+  paymentForm.comment = ''
+  Object.assign(extendForm, { paidUntil: limits.value.subscription.paidUntil ?? '', aiUntil: limits.value.subscription.aiUntil ?? '', comment: '' })
+}
+const extendReady = computed(() => extendForm.comment.trim().length >= 10)
+async function submitExtend() {
+  if (!billingFor.value || !extendReady.value || busy.value) return
+  error.value = ''
+  busy.value = true
+  try {
+    await ops(`/tenants/${billingFor.value.id}/extend`, { method: 'POST', body: { paidUntil: extendForm.paidUntil || null, aiUntil: extendForm.aiUntil || null, comment: extendForm.comment.trim() } })
+    notice.value = t('ops.done.extend', { name: billingFor.value.name })
+    await openBilling(billingFor.value)
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+const paymentReady = computed(() => paymentForm.comment.trim().length >= 10 && paymentForm.amount !== '' && Number(paymentForm.amount) >= 0 && (paymentForm.kind !== 'addon' || paymentForm.addonCode !== ''))
+async function submitPayment() {
+  if (!billingFor.value || !paymentReady.value || busy.value) return
+  error.value = ''
+  busy.value = true
+  try {
+    await ops(`/tenants/${billingFor.value.id}/payments`, {
+      method: 'POST',
+      body: {
+        kind: paymentForm.kind,
+        billingPeriod: paymentForm.kind === 'subscription' ? paymentForm.billingPeriod : undefined,
+        addonCode: paymentForm.kind === 'addon' ? paymentForm.addonCode : undefined,
+        qty: paymentForm.kind === 'addon' ? Number(paymentForm.qty) : undefined,
+        amountMinor: Math.round(Number(paymentForm.amount) * 100),
+        currency: paymentForm.currency,
+        method: paymentForm.method,
+        invoiceNumber: paymentForm.invoiceNumber.trim() || undefined,
+        comment: paymentForm.comment.trim(),
+      },
+    })
+    notice.value = t('ops.done.payment', { name: billingFor.value.name })
+    await openBilling(billingFor.value)
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+
+/** Зміна тарифу з причиною (§7.10) — замінює миттєвий `setPlan` діалогом підтвердження. */
+function openPlanChange(tn: Tenant, toPlanCode: string) {
+  if (toPlanCode === tn.plan) return
+  error.value = ''
+  planChangeFor.value = { tenant: tn, toPlanCode }
+  planChangeForm.billingPeriod = 'month'
+  planChangeForm.comment = ''
+}
+async function submitPlanChange() {
+  if (!planChangeFor.value || planChangeForm.comment.trim().length < 10 || busy.value) return
+  error.value = ''
+  busy.value = true
+  try {
+    await ops(`/tenants/${planChangeFor.value.tenant.id}/plan-change`, { method: 'POST', body: { toPlanCode: planChangeFor.value.toPlanCode, billingPeriod: planChangeForm.billingPeriod, comment: planChangeForm.comment.trim() } })
+    notice.value = t('ops.done.planChange', { name: planChangeFor.value.tenant.name })
+    planChangeFor.value = null
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
 }
 
 // Нетипизированный вызов: типизированные роуты Nitro при сотнях эндпоинтов дают TS2589
@@ -100,12 +204,6 @@ async function createTenant() {
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-async function setPlan(tn: Tenant, plan: string) {
-  error.value = ''
-  try { await ops(`/tenants/${tn.id}`, { method: 'PATCH', body: { plan } }); await load() }
-  catch (err) { error.value = apiErrorOf(err).message }
-}
-
 function openAction(kind: NonNullable<typeof action.value>['kind'], tenant: Tenant) {
   actionForm.reason = ''
   actionForm.confirmSlug = ''
@@ -226,7 +324,7 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
               <td data-label="tenant"><strong>{{ tn.name }}</strong><div class="sub">{{ hostOf(tn) }}</div></td>
               <td :data-label="t('ops.col.plan')">
                 <label class="sr-only" :for="`plan-${tn.id}`">{{ t('ops.col.plan') }}</label>
-                <select :id="`plan-${tn.id}`" :class="['badge', 'plan', tn.plan]" :value="tn.plan" @change="setPlan(tn, ($event.target as HTMLSelectElement).value)"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select>
+                <select :id="`plan-${tn.id}`" :class="['badge', 'plan', tn.plan]" :value="tn.plan" @change="openPlanChange(tn, ($event.target as HTMLSelectElement).value)"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select>
               </td>
               <td :data-label="t('ops.col.active')">
                 <button type="button" class="link" :title="t('ops.limits.title')" @click="openLimits(tn)">{{ tn.active_users }} / {{ tn.users_limit ?? '∞' }}<span v-if="tn.has_overrides" class="star" :title="t('ops.limits.overridden')">*</span></button>
@@ -244,6 +342,7 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
                 <button v-if="tn.status === 'suspended'" type="button" class="chip warn" @click="openAction('purge', tn)">{{ t('ops.purge') }}</button>
                 <button v-if="tn.status === 'archived'" type="button" class="chip" @click="openAction('cancelPurge', tn)">{{ t('ops.cancelPurge') }}</button>
                 <button type="button" class="chip" @click="openLimits(tn)">{{ t('ops.limits.title') }}</button>
+                <button type="button" class="chip" @click="openBilling(tn)">{{ t('ops.billing.title') }}</button>
                 <button type="button" class="chip" @click="openDomain(tn)">{{ t('ops.domain.title') }}</button>
                 <button v-if="tn.status === 'active'" type="button" class="chip warn" @click="openImpersonate(tn)">{{ t('ops.impersonate') }}</button>
               </td>
@@ -287,6 +386,79 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
         <label class="field"><span>{{ t('ops.domain.value') }}</span><input v-model="domainForm.value" placeholder="navchannya.kappi.ua" autocomplete="off"></label>
         <p v-if="error" class="error">{{ error }}</p>
         <div class="actions"><button type="button" class="chip" @click="domainFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" @click="saveDomain">{{ t('common.save') }}</button></div>
+      </div>
+    </div>
+
+    <div v-if="billingFor && limits" class="modal-backdrop" @click.self="billingFor = null" @keydown.esc="billingFor = null">
+      <div class="modal wide" role="dialog" aria-modal="true" :aria-label="t('ops.billing.title')">
+        <h2>{{ t('ops.billing.title') }}: {{ billingFor.name }}</h2>
+        <dl class="kv">
+          <dt>{{ t('ops.billing.status') }}</dt><dd><span :class="['badge', limits.subscription.status]">{{ t(`ops.billing.state.${limits.subscription.status}`) }}</span></dd>
+          <dt>{{ t('ops.billing.paidUntil') }}</dt><dd>{{ fmt(limits.subscription.paidUntil) }}</dd>
+          <dt>{{ t('ops.billing.aiUntil') }}</dt><dd>{{ fmt(limits.subscription.aiUntil) }} <span class="sub">({{ t(`ops.billing.aiState.${limits.subscription.aiStatus}`) }})</span></dd>
+          <dt>{{ t('ops.billing.period') }}</dt><dd>{{ t(`ops.billing.periodOf.${limits.subscription.billingPeriod}`) }}</dd>
+        </dl>
+
+        <h3>{{ t('ops.billing.extendTitle') }}</h3>
+        <div class="grid two">
+          <label class="field"><span>{{ t('ops.billing.paidUntil') }}</span><input v-model="extendForm.paidUntil" type="date"></label>
+          <label class="field"><span>{{ t('ops.billing.aiUntil') }}</span><input v-model="extendForm.aiUntil" type="date"></label>
+        </div>
+        <label class="field"><span>{{ t('ops.confirm.reason') }}</span><input v-model="extendForm.comment" maxlength="500" placeholder="10–500"></label>
+        <div class="actions"><button type="button" class="primary" :disabled="!extendReady || busy" @click="submitExtend">{{ t('ops.billing.extendOk') }}</button></div>
+
+        <h3>{{ t('ops.billing.newPayment') }}</h3>
+        <div class="grid two">
+          <label class="field"><span>{{ t('ops.billing.kind') }}</span>
+            <select v-model="paymentForm.kind">
+              <option value="subscription">{{ t('ops.billing.kindOf.subscription') }}</option>
+              <option value="addon">{{ t('ops.billing.kindOf.addon') }}</option>
+              <option value="adjustment">{{ t('ops.billing.kindOf.adjustment') }}</option>
+            </select>
+          </label>
+          <label v-if="paymentForm.kind === 'subscription'" class="field"><span>{{ t('ops.billing.period') }}</span>
+            <select v-model="paymentForm.billingPeriod"><option value="month">{{ t('ops.billing.periodOf.month') }}</option><option value="year">{{ t('ops.billing.periodOf.year') }}</option></select>
+          </label>
+          <label v-if="paymentForm.kind === 'addon'" class="field"><span>{{ t('ops.billing.addonCode') }}</span>
+            <input v-model="paymentForm.addonCode" list="addon-codes" autocomplete="off">
+            <datalist id="addon-codes"><option v-for="c in ADDON_CODES" :key="c" :value="c" /></datalist>
+          </label>
+          <label v-if="paymentForm.kind === 'addon'" class="field"><span>{{ t('ops.billing.qty') }}</span><input v-model="paymentForm.qty" type="number" min="1" inputmode="numeric"></label>
+          <label class="field"><span>{{ t('ops.billing.amount') }}</span><input v-model="paymentForm.amount" type="number" min="0" step="0.01" inputmode="decimal"></label>
+          <label class="field"><span>{{ t('ops.billing.currency') }}</span><input v-model="paymentForm.currency" maxlength="3" style="text-transform: uppercase;"></label>
+          <label class="field"><span>{{ t('ops.billing.method') }}</span>
+            <select v-model="paymentForm.method"><option value="bank_transfer">{{ t('ops.billing.methodOf.bank_transfer') }}</option><option value="card">{{ t('ops.billing.methodOf.card') }}</option><option value="manual">{{ t('ops.billing.methodOf.manual') }}</option></select>
+          </label>
+          <label class="field"><span>{{ t('ops.billing.invoiceNumber') }}</span><input v-model="paymentForm.invoiceNumber" autocomplete="off"></label>
+        </div>
+        <label class="field"><span>{{ t('ops.confirm.reason') }}</span><input v-model="paymentForm.comment" maxlength="500" placeholder="10–500"></label>
+        <p v-if="error" class="error">{{ error }}</p>
+        <div class="actions"><button type="button" class="chip" @click="billingFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" :disabled="!paymentReady || busy" @click="submitPayment">{{ t('ops.billing.record') }}</button></div>
+
+        <h3>{{ t('ops.billing.history') }}</h3>
+        <p v-if="!payments.length" class="sub">{{ t('ops.billing.empty') }}</p>
+        <ul v-else class="payments">
+          <li v-for="p in payments" :key="p.id" class="payment">
+            <span class="badge">{{ t(`ops.billing.kindOf.${p.kind}`) }}</span>
+            <span>{{ (Number(p.amountMinor) / 100).toFixed(2) }} {{ p.currency }}</span>
+            <span class="sub">{{ fmt(p.createdAt) }}</span>
+            <span :class="['badge', p.status]">{{ t(`ops.billing.paymentStatus.${p.status}`) }}</span>
+            <span v-if="p.periodTo" class="sub">{{ t('ops.billing.until', { date: fmt(p.periodTo) }) }}</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div v-if="planChangeFor" class="modal-backdrop" @click.self="planChangeFor = null" @keydown.esc="planChangeFor = null">
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="t('ops.planChange.title')">
+        <h2>{{ t('ops.planChange.title') }}: {{ planChangeFor.tenant.name }}</h2>
+        <p class="sub">{{ t('ops.planChange.hint', { from: planName(planChangeFor.tenant.plan), to: planName(planChangeFor.toPlanCode) }) }}</p>
+        <label class="field"><span>{{ t('ops.billing.period') }}</span>
+          <select v-model="planChangeForm.billingPeriod"><option value="month">{{ t('ops.billing.periodOf.month') }}</option><option value="year">{{ t('ops.billing.periodOf.year') }}</option></select>
+        </label>
+        <label class="field"><span>{{ t('ops.confirm.reason') }}</span><input v-model="planChangeForm.comment" maxlength="500" placeholder="10–500"></label>
+        <p v-if="error" class="error">{{ error }}</p>
+        <div class="actions"><button type="button" class="chip" @click="planChangeFor = null">{{ t('common.cancel') }}</button><button type="button" class="primary" :disabled="planChangeForm.comment.trim().length < 10 || busy" @click="submitPlanChange">{{ t('ops.planChange.ok') }}</button></div>
       </div>
     </div>
 
@@ -361,6 +533,17 @@ select.badge { width: auto; min-height: 0; border: none; padding-right: 22px; ap
 .notice { color: var(--color-teal-ink); padding: var(--space-2) var(--space-5); margin: 0; font-weight: 700; }
 .modal-backdrop { position: fixed; inset: 0; background: rgb(12 15 20 / 55%); display: grid; place-items: center; padding: var(--space-4); z-index: 10; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(520px, 100%); display: grid; gap: var(--space-3); max-height: 90dvh; overflow: auto; }
+.modal.wide { width: min(720px, 100%); }
+.modal h3 { margin: var(--space-2) 0 0; font-size: var(--font-size-body); font-weight: 800; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
+.kv dt { color: var(--color-ink-muted); font-weight: 700; }
+.kv dd { margin: 0; font-weight: 800; }
+.payments { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.payment { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; background: var(--color-bg); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
+.badge.paid, .badge.applied { background: var(--color-teal); color: var(--color-ink); }
+.badge.failed, .badge.refunded { background: var(--color-coral); color: var(--color-coral-deep); }
+.badge.pending, .badge.written_off, .badge.grace { background: var(--color-sun); color: var(--color-ink); }
+.badge.readonly, .badge.blocked { background: var(--color-coral); color: var(--color-coral-deep); }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (max-width: 720px) {

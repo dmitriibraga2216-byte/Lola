@@ -16,6 +16,7 @@ definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
 const { hasScope, me } = useAuth()
+const { formatDateTime } = useFormat()
 
 interface Holder { userId: string, fullName: string, email: string | null, roleInNode: string, isPrimary: boolean }
 interface Node {
@@ -135,7 +136,11 @@ async function snapshot() {
   busy.value = true
   error.value = ''
   try {
-    await api('/org-structure/snapshots', { method: 'POST', body: { label: new Date().toISOString().slice(0, 16).replace('T', ' ') } })
+    // Подпись снимка — его имя для человека: её покажут список снимков и письмо об откате
+    // (`32` §8 `org_structure_rollback`), в журнале она лежит в `audit_log.after`. Поэтому это
+    // местное время в языке интерфейса (`useFormat()`), а не UTC-строка `toISOString()`,
+    // которая для Киева отставала на два-три часа.
+    await api('/org-structure/snapshots', { method: 'POST', body: { label: formatDateTime(new Date()) } })
     notice.value = t('orgStructure.snapshotDone')
   }
   catch (err) { fail(err) }

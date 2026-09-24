@@ -396,7 +396,7 @@ check9_resolve_manager() {
     "server/services/checklists.ts:415"           # (б) точка не выполнила норму прогонов → руководителю точки
     "server/services/checklists.ts:418"           # (б) то же, условие выборки
     "server/services/checklists.ts:419"           # (б) то же, тип строки
-    "server/services/reportsExtra.ts:299"         # (б) недельный дайджест по точке (docs/22 §8): цифры тоже по точке; 283→299 — рейтинг на книге балів (gamification, D-069)
+    "server/services/reportsExtra.ts:303"         # (б) недельный дайджест по точке (docs/22 §8): цифры тоже по точке; 283→299 — рейтинг на книге балів (gamification, D-069); 299→303 — срок из review_queue_items (PR-20)
     "server/services/assessment.ts:400"           # (б) «какими точками человек руководит» — вопрос о точках
     "server/services/importPeople.ts:622"         # (в) запись user_placements.manager_id из файла
     "server/services/platform.ts:172"             # (в) посев нового тенанта: администратор — руководитель точки

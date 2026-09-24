@@ -1,7 +1,9 @@
-import { and, desc, eq, gte, lt, lte, or, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { planAddons, planPrices, plans, tenantAddons, tenantPayments, tenants } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { keysetAfter, keysetAt } from '../utils/keyset'
+import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { effectiveLimits } from './tenantLimits'
 import type { TenantPaymentsQuery } from '../../shared/schemas/billing'
 
@@ -76,7 +78,14 @@ export interface TenantPaymentRow {
   createdAt: string
 }
 
-/** «Історія платежів» (`35` §5.3, §9): только `owner` (`billing.payments.view`). */
+/**
+ * «Історія платежів» (`35` §5.3, §9): только `owner` (`billing.payments.view`).
+ *
+ * Курсор — `(created_at, id)` последней строки, момент текстом из Postgres с микросекундами
+ * (`shared/domain/keyset.ts`). Прежний курсор был голым `createdAt` в миллисекундах без
+ * второго ключа: строки той же миллисекунды — и тем более той же транзакции, где у всех один
+ * `created_at`, — пропадали со следующей страницы.
+ */
 export async function listTenantPayments(tenantId: string, query: TenantPaymentsQuery): Promise<{ items: TenantPaymentRow[], nextCursor: string | null }> {
   const limit = query.limit
   const conditions = [
@@ -84,13 +93,13 @@ export async function listTenantPayments(tenantId: string, query: TenantPayments
     query.to ? lt(tenantPayments.createdAt, new Date(new Date(query.to).getTime() + 86_400_000)) : undefined,
     query.kind ? eq(tenantPayments.kind, query.kind) : undefined,
     query.status ? eq(tenantPayments.status, query.status) : undefined,
-    query.cursor ? lt(tenantPayments.createdAt, new Date(query.cursor)) : undefined,
+    keysetAfter(KEYSETS.payments, query.cursor, [tenantPayments.createdAt, tenantPayments.id], 'desc'),
   ].filter((c): c is NonNullable<typeof c> => c !== undefined)
 
   const rows = await withTenant(tenantId, null, tx => tx
-    .select().from(tenantPayments)
+    .select({ ...getTableColumns(tenantPayments), cursorAt: keysetAt(tenantPayments.createdAt) }).from(tenantPayments)
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(desc(tenantPayments.createdAt))
+    .orderBy(desc(tenantPayments.createdAt), desc(tenantPayments.id))
     .limit(limit + 1))
 
   const items = rows.slice(0, limit).map(r => ({
@@ -109,6 +118,7 @@ export async function listTenantPayments(tenantId: string, query: TenantPayments
     comment: r.comment,
     createdAt: r.createdAt.toISOString(),
   }))
-  const nextCursor = rows.length > limit ? items[items.length - 1]!.createdAt : null
+  const last = rows.length > limit ? rows[limit - 1] : undefined
+  const nextCursor = last ? encodeKeyset(KEYSETS.payments, [last.cursorAt, last.id]) : null
   return { items, nextCursor }
 }

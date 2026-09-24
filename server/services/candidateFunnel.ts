@@ -1,6 +1,8 @@
-import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { candidateStatusHistory, candidateStatuses, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import { keysetAfter, keysetAt } from '../utils/keyset'
+import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { currentRequestContext } from '../utils/requestContext'
 import type { CandidateState } from '../../shared/enums'
 import type {
@@ -25,6 +27,10 @@ import { recordAudit } from './audit'
  * прямо во время просмотра: смещение `offset` при этом показывает одну и ту же карточку
  * дважды или теряет её. Пара «дата создания + id» уникальна и устойчива к перемещениям,
  * и ровно под неё заведён индекс `idx_users_candidate_board` (миграция 0068).
+ *
+ * Момент в курсоре — текстом из Postgres с микросекундами (`shared/domain/keyset.ts`). Прежний
+ * курсор `<toISOString()>|<id>` резал его до миллисекунд, и «Показати ще» молча теряло все
+ * карточки, созданные в ту же миллисекунду, что и последняя показанная.
  */
 
 export interface BoardCard {
@@ -69,6 +75,8 @@ const CARD = {
   recruiterId: users.recruiterId,
   accessUntil: users.accessUntil,
   createdAt: users.createdAt,
+  // Позиция карточки для курсора — текстом из базы, с микросекундами; наружу не отдаётся.
+  cursorAt: keysetAt(users.createdAt),
   recruiterName: sql<string | null>`(select u2.full_name from users u2 where u2.id = ${users.recruiterId})`,
   // «Днів у статусі» — от последней записи истории (§7.11). Подзапрос, а не соединение:
   // карточек на странице полсотни, а соединение с историей дало бы дубли строк.
@@ -90,23 +98,17 @@ type CardRow = {
   recruiterName: string | null
   accessUntil: string | null
   createdAt: Date
+  cursorAt: string
   statusSince: Date | null
   scoreManual: string | null
   scoreTask: string | null
   scoreRecruiter: string | null
 }
 
-/** «<createdAt ISO>|<id>» — позиция последней показанной карточки колонки. */
-export function encodeCursor(row: { createdAt: Date, id: string }): string {
-  return `${new Date(row.createdAt).toISOString()}|${row.id}`
-}
-
-export function decodeCursor(cursor?: string): { createdAt: Date, id: string } | null {
-  if (!cursor) return null
-  const [at, id] = cursor.split('|')
-  if (!at || !id) return null
-  const date = new Date(at)
-  return Number.isNaN(date.getTime()) ? null : { createdAt: date, id }
+/** Курсор следующей страницы колонки — позиция последней показанной карточки, либо `null`. */
+function columnCursor(rows: CardRow[], limit: number): string | null {
+  const last = rows.length > limit ? rows[limit - 1] : undefined
+  return last ? encodeKeyset(KEYSETS.candidateBoard, [last.cursorAt, last.id]) : null
 }
 
 function toCard(v: Viewer, r: CardRow): BoardCard {
@@ -147,21 +149,19 @@ export async function boardColumn(v: Viewer, statusId: string, f: CandidateBoard
   return withTenant(v.tenantId, v.actorId, async (tx) => {
     const [status] = await tx.select({ id: candidateStatuses.id }).from(candidateStatuses).where(eq(candidateStatuses.id, statusId))
     if (!status) return null
-    const after = decodeCursor(f.cursor)
     const conds = [
       ...boardFilters(v, f),
       eq(users.candidateStatusId, statusId),
       // Курсор по паре (created_at, id): строгий лексикографический «меньше» при сортировке desc.
-      after ? or(lt(users.createdAt, after.createdAt), and(eq(users.createdAt, after.createdAt), lt(users.id, after.id))) : undefined,
+      keysetAfter(KEYSETS.candidateBoard, f.cursor, [users.createdAt, users.id], 'desc'),
     ]
     const rows = await candidatesQuery(tx, CARD, ...conds)
       .orderBy(desc(users.createdAt), desc(users.id))
       .limit(f.limit + 1) as unknown as CardRow[]
     const [count] = await candidatesQuery(tx, { n: sql<number>`count(*)::int` }, ...boardFilters(v, f), eq(users.candidateStatusId, statusId)) as unknown as { n: number }[]
-    const page = rows.slice(0, f.limit)
     return {
-      cards: page.map(r => toCard(v, r)),
-      nextCursor: rows.length > f.limit && page.length ? encodeCursor(page[page.length - 1]!) : null,
+      cards: rows.slice(0, f.limit).map(r => toCard(v, r)),
+      nextCursor: columnCursor(rows, f.limit),
       total: Number(count?.n ?? 0),
     }
   })
@@ -187,7 +187,6 @@ export async function board(v: Viewer, f: CandidateBoardFilter): Promise<BoardCo
       const rows = s.mapsTo === 'active'
         ? await candidatesQuery(tx, CARD, ...conds).orderBy(desc(users.createdAt), desc(users.id)).limit(f.limit + 1) as unknown as CardRow[]
         : []
-      const page = rows.slice(0, f.limit)
       out.push({
         statusId: s.id,
         code: s.code,
@@ -196,8 +195,8 @@ export async function board(v: Viewer, f: CandidateBoardFilter): Promise<BoardCo
         color: s.color,
         mapsTo: s.mapsTo as CandidateState,
         total,
-        cards: page.map(r => toCard(v, r)),
-        nextCursor: rows.length > f.limit && page.length ? encodeCursor(page[page.length - 1]!) : null,
+        cards: rows.slice(0, f.limit).map(r => toCard(v, r)),
+        nextCursor: columnCursor(rows, f.limit),
       })
     }
     return out

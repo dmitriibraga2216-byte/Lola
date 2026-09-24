@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { CONTENT_TYPES, ENROLLMENT_STATUSES, SECURITY_SEVERITIES } from '../enums'
+import { KEYSETS } from '../domain/keyset'
+import { keysetCursorSchema } from './keyset'
 
 /**
  * Контракты отчётов и журналов (docs/22 §13.3–13.4, Г-22.1; docs/04 §4.14).
@@ -72,7 +74,7 @@ export const logFilterSchema = z.object({
   contentType: z.enum(CONTENT_TYPES).optional(),
   contentId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
-  cursor: z.string().optional(),
+  cursor: keysetCursorSchema(KEYSETS.logs).optional(), // выдаёт сервер в ответе журнала, не момент времени
   format: z.enum(['json', 'xlsx']).default('json'),
 })
 export type LogFilter = Partial<z.infer<typeof logFilterSchema>>

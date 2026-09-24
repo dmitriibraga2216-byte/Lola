@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { KEYSETS } from '../domain/keyset'
+import { keysetCursorSchema } from './keyset'
 
 /**
  * Каталог навчання (docs/10-catalog-learning.md §14.1): режим доступу задаётся на стороне
@@ -46,6 +48,6 @@ export const commentReplySchema = z.object({
 export const commentsQuerySchema = z.object({
   sourceType: z.enum(COMMENT_SOURCE_TYPES).optional(),
   isRead: z.enum(['read', 'unread']).optional(),
-  cursor: z.string().optional(),
+  cursor: keysetCursorSchema(KEYSETS.comments).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 })

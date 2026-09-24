@@ -66,14 +66,14 @@ check1_stage_codes() {
   local allow=(
     "server/db/schema/content.ts:103" # строка сдвинулась на 1 в v2 PR-11/12 (импорт enrollments в схеме media_assets)
     "server/api/v1/access-groups/index.get.ts:7"
-    "server/services/comments.ts:29"
-    "server/services/comments.ts:89"
+    "server/services/comments.ts:31" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
+    "server/services/comments.ts:91" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
     "server/services/modules.ts:34"
     "server/services/modules.ts:54"
     "server/services/resources.ts:479"
     "shared/schemas/resources.ts:89"
     "shared/schemas/settings.ts:14"
-    "shared/schemas/catalog.ts:33"
+    "shared/schemas/catalog.ts:35" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
   )
   hits="$(filter_allowlist "$hits" "${allow[@]}")"
   report "1. коды этапов вне справочника/миграций" "$hits"

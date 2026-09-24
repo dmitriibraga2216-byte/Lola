@@ -3,6 +3,8 @@ import { alias } from 'drizzle-orm/pg-core'
 import { attempts, locations, positions, reviewQueueItems, userPlacements, users, workshops } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
+import { keysetAfter, keysetAt } from '../utils/keyset'
+import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { personById } from './repo/people'
 import type { ReviewQueueQuery } from '../../shared/schemas/review'
 import type { ReviewTaskType } from '../../shared/enums'
@@ -221,6 +223,11 @@ export interface ReviewQueueRow {
  *
  * Ответ несёт `total` (счётчик на табе «Мої» из `37` §5.1) и ключевой курсор: прежние очереди
  * отдавали голый массив с жёстким `limit 200`, на котором экран `37` §5 не рисуется.
+ *
+ * Курсор — `(-priority, submitted_at, id)` последней строки, момент текстом из Postgres с
+ * микросекундами (`shared/domain/keyset.ts`). Прежний курсор нёс `submitted_at` в миллисекундах:
+ * на возрастании усечённый момент оказывался *раньше* последней строки, и следующая страница
+ * начиналась заново с тех же работ — «Показати ще» крутило одну страницу по кругу.
  */
 export async function listReviewQueue(ctx: Ctx, filter: ReviewQueueQuery): Promise<{ items: ReviewQueueRow[], total: number, cursor: string | null }> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -265,14 +272,11 @@ export async function listReviewQueue(ctx: Ctx, filter: ReviewQueueQuery): Promi
 
     const [counted] = await tx.select({ total: sql<number>`count(*)::int` }).from(reviewQueueItems).where(and(...conds))
 
-    const page = [...conds]
-    if (filter.cursor) {
-      const [priority, ms, id] = filter.cursor.split('_')
-      // Ключевой курсор по тому же ключу, что и сортировка: одинаковое направление всех
-      // колонок достигнуто знаком у priority — строчное сравнение иначе неприменимо.
-      page.push(sql`(-${reviewQueueItems.priority}, ${reviewQueueItems.submittedAt}, ${reviewQueueItems.id})
-        > (${-Number(priority)}, ${new Date(Number(ms)).toISOString()}::timestamptz, ${id}::uuid)`)
-    }
+    // Ключевой курсор по тому же ключу, что и сортировка: одинаковое направление всех
+    // колонок достигнуто знаком у priority — строчное сравнение иначе неприменимо.
+    const sortKey = [sql`-${reviewQueueItems.priority}`, reviewQueueItems.submittedAt, reviewQueueItems.id]
+    const after = keysetAfter(KEYSETS.reviewQueue, filter.cursor, sortKey, 'asc')
+    const page = after ? [...conds, after] : conds
 
     // Псевдоним `users` ради имени проверяющего — выборка по первичному ключу, вид человека
     // здесь не при чём (`repo/people.ts`, «Точечные выборки»).
@@ -294,6 +298,7 @@ export async function listReviewQueue(ctx: Ctx, filter: ReviewQueueQuery): Promi
       attemptSeconds: reviewQueueItems.attemptSeconds,
       timeConfidence: reviewQueueItems.timeConfidence,
       submittedAt: reviewQueueItems.submittedAt,
+      cursorAt: keysetAt(reviewQueueItems.submittedAt),
       completedAt: reviewQueueItems.completedAt,
       status: reviewQueueItems.status,
       priority: reviewQueueItems.priority,
@@ -310,22 +315,23 @@ export async function listReviewQueue(ctx: Ctx, filter: ReviewQueueQuery): Promi
       .leftJoin(positions, eq(positions.id, reviewQueueItems.positionId))
       .leftJoin(reviewer, eq(reviewer.id, reviewQueueItems.assignedReviewerId))
       .where(and(...page))
-      .orderBy(sql`-${reviewQueueItems.priority}`, reviewQueueItems.submittedAt, reviewQueueItems.id)
+      .orderBy(...sortKey)
       .limit(filter.limit + 1)
 
     const hasMore = rows.length > filter.limit
-    const items = (hasMore ? rows.slice(0, filter.limit) : rows).map(r => ({
+    const pageRows = hasMore ? rows.slice(0, filter.limit) : rows
+    const items = pageRows.map(({ cursorAt: _cursorAt, ...r }) => ({
       ...r,
       taskType: r.taskType as ReviewTaskType,
       hoursLeft: r.slaDueAt ? Math.round((r.slaDueAt.getTime() - Date.now()) / 3_600_000) : null,
       overdue: !!r.slaDueAt && r.slaDueAt.getTime() < Date.now() && r.status !== 'done',
     }))
-    const last = items[items.length - 1]
+    const last = pageRows[pageRows.length - 1]
 
     return {
       items,
       total: counted?.total ?? 0,
-      cursor: hasMore && last ? `${last.priority}_${last.submittedAt.getTime()}_${last.id}` : null,
+      cursor: hasMore && last ? encodeKeyset(KEYSETS.reviewQueue, [-last.priority, last.cursorAt, last.id]) : null,
     }
   })
 }

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { REVIEW_TASK_TYPES, USER_KINDS } from '../enums'
+import { KEYSETS } from '../domain/keyset'
+import { keysetCursorSchema } from './keyset'
 
 /**
  * Контракт единой очереди проверки — `GET /review/queue` (docs/v2/37 §10, решение
@@ -25,8 +27,8 @@ export const reviewQueueQuerySchema = z.object({
   from: z.string().date().optional(), // «Вибрати період», нижняя граница по submitted_at
   to: z.string().date().optional(),
   overdue: z.boolean().default(false), // «Лише прострочені»
-  /** Ключевой курсор: `<submitted_at в мс>_<id>`. Сортировка стабильна, страница не «съезжает». */
-  cursor: z.string().max(80).optional(),
+  /** Ключевой курсор `(-priority, submitted_at, id)` — непрозрачный, выдаёт сервер (`shared/domain/keyset.ts`). */
+  cursor: keysetCursorSchema(KEYSETS.reviewQueue).optional(),
   limit: z.number().int().min(1).max(200).default(50),
 })
 

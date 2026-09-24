@@ -223,6 +223,40 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.stdout).toContain('[ok]   12.')
   })
 
+  /**
+   * Проверка 13 скрипта (PR-22, `docs/v2/37` §7.14 б, критерий 11): норма времени и флаг
+   * отклонения не входят в балл. Три фикстуры: правило оценки, читающее флаг; сервис попытки,
+   * взявший из модуля норм больше, чем снимок для очереди; и законные места — сам модуль и
+   * снимок нормы у писателя очереди.
+   */
+  it('13. правило оценки читает флаг отклонения времени', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/grading.ts'), 'export const q = sql`select score * case when n.deviation_flag = \'too_slow\' then 0.9 else 1 end from content_time_norms n`\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('13. норма времени и флаг отклонения не входят в балл')
+  })
+
+  it('13. сервис попытки берёт из модуля норм не только снимок для очереди', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/attempts.ts'), 'import { plannedSecondsFor, recalcNorms } from \'./timeNorms\'\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('13. норма времени')
+  })
+
+  it('13. сам модуль норм и снимок нормы у писателя очереди нарушением не считаются', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/timeNorms.ts'), 'export const q = sql`select deviation_flag from content_time_norms`\n')
+    writeFileSync(join(dir, 'server/services/workshops.ts'), 'import { plannedSecondsFor } from \'./timeNorms\'\n// флаг deviation_flag сюда не попадает\n')
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   13.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

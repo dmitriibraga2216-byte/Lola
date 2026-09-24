@@ -313,14 +313,21 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | POST | `/learning/time/beat` | — (учащийся) | одно биение счётчика времени, идемпотентно по `(session_key, seq)` |
 | POST | `/learning/time/beats` | — (учащийся) | пакет до 200 биений, накопленных офлайн |
 | GET | `/learning/time/totals` | `time.metrics.view` | суммарное время по субъекту |
-| GET | `/content/time-norms/:subjectType/:subjectId` | `time.metrics.view` | норма времени на материал и её источник |
-| PUT | `/content/time-norms/:subjectType/:subjectId` | `time.metrics.view` | задать норму вручную |
-| POST | `/content/time-norms/:subjectType/:subjectId/apply-observed` | `time.metrics.view` | принять наблюдённую медиану как норму |
+| GET | `/content/time-norms/:subjectType/:subjectId` | `time.metrics.view` или `course.edit` | норма времени на материал и её источник |
+| PUT | `/content/time-norms/:subjectType/:subjectId` | `course.edit` | задать норму вручную |
+| POST | `/content/time-norms/:subjectType/:subjectId/apply-observed` | `course.edit` | принять наблюдённую медиану как норму |
 | GET | `/reports/reviewers` | `time.metrics.view` | «Робота перевіряючих» |
-| GET | `/reports/time-plan-fact` | `time.metrics.view` | «План і факт часу», обезличенный |
+| GET | `/reports/time-plan-fact` | `time.metrics.view` или `course.edit` | «План і факт часу», обезличенный |
 | GET | `/reports/delegations` | `review.workload.view` | журнал делегирований |
 
 **21 эндпоинт.** Четыре строки `/review/routing-rules` развёрнуты из записи `CRUD` (§8.5).
+
+> [исправлено, PR-22: `time.metrics.view` — скоуп поимённого времени, у автора его нет и быть не
+> должно (`37` §2, Р-21.15), а норма — свойство материала и ставится автором] Ранее: у трёх строк
+> `/content/time-norms/*` и у `/reports/time-plan-fact` — `time.metrics.view`. Читать норму и
+> обезличенный отчёт — `time.metrics.view` (наставник, руководитель — агрегаты по своей области)
+> или `course.edit` (автор, администратор — весь тенант); менять норму — только `course.edit`
+> (решение Р-22.5, `46-progress.md`).
 
 ### 2.11 Карточка человека: расширения — документ `38`
 

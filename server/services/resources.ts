@@ -14,6 +14,7 @@ import { enqueueNotification } from './notifications'
 import { sanitizeBody } from './sanitize'
 import { logTaskAccess } from './journals'
 import { slugify } from './courses'
+import { syncMaterialEstimate } from './timeNorms'
 import type { ContentBlock } from '../../shared/schemas/content'
 import {
   resourceKindComplete,
@@ -211,6 +212,8 @@ export async function updateResource(ctx: Ctx, id: string, input: UpdateInput): 
       updatedAt: new Date(),
     }).where(eq(resources.id, id)).returning()
     if (input.accessGroupIds !== undefined) await setAccessGroups(tx, ctx.tenantId, id, input.accessGroupIds)
+    // «Орієнтовний час» — поле автора: становится нормой уроков с этим материалом (docs/v2/37 §3.5, PR-22)
+    if (input.estimatedMinutes !== undefined && input.estimatedMinutes !== before.estimatedMinutes) await syncMaterialEstimate(tx, ctx, id, input.estimatedMinutes)
 
     await recordAudit(tx, {
       tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'resource.update', entity: 'resource', entityId: id,

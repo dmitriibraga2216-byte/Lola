@@ -10,6 +10,7 @@ import { enqueueNotification } from './notifications'
 import { claimReview, closeReview, enqueueReview, heldByOtherSql, releaseReview, reviewConflict, staleClaims } from './reviewQueue'
 import { CLAIM_TTL_MS } from './reviewRules'
 import { closeOpenSegments } from './learningTime'
+import { plannedSecondsFor } from './timeNorms'
 import type { ContentBlock, WorkshopFile } from '../../shared/schemas/content'
 import { managerIdOf, managerIdsOf } from './orgManager'
 
@@ -315,6 +316,8 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
       submittedAt: now,
       attemptNo: draft!.attemptNo,
       slaHours: w.slaHours,
+      // «Розрахунковий час» практикума — снимком на момент сдачи (docs/v2/37 §7.14, PR-22)
+      estimatedSeconds: await plannedSecondsFor(tx, { subjectType: 'workshop', subjectId: workshopId }),
     })
 
     // Сдача с недосланной записью (квота тенанта исчерпана, docs/v2/34 §7.5 п. 2): срок засчитан

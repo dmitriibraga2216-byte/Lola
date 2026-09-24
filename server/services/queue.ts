@@ -61,6 +61,8 @@ export async function getBoss(): Promise<PgBoss> {
       // docs/v2/34 §11 (PR-36): корзина хранилища и отложенные загрузки
       await b.createQueue('storage.purge', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/v2/37 §11 (PR-22): нормы времени — факт, флаг отклонения, уведомление автору
+      await b.createQueue('time.norms_recalc', { retryLimit: 2, expireInSeconds: 1800 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -111,6 +113,9 @@ export async function getBoss(): Promise<PgBoss> {
       // остаётся до решения владельца продукта, docs/v2/44 §8); отложенные загрузки — каждые 15 минут
       await b.schedule('storage.purge', '0 4 * * *', {}, { singletonKey: 'storage.purge', tz: 'Europe/Kyiv' })
       await b.schedule('storage.pending_upload_retry', '*/15 * * * *', {}, { singletonKey: 'storage.pending_upload_retry' })
+      // Нормы времени (docs/v2/37 §11): еженедельно, в ночь на воскресенье — медиана факта, флаг
+      // отклонения и уведомление автору. Свёртка идёт каждые 10 минут, витрина к этому часу свежая
+      await b.schedule('time.norms_recalc', '30 2 * * 0', {}, { singletonKey: 'time.norms_recalc', tz: 'Europe/Kyiv' })
       return b
     })
   }

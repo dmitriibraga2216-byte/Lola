@@ -255,6 +255,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   library_module_archived: 'Модуль «{{title}}» заархівовано. Причина: {{reason}}',
   library_proposal_created: '{{user}} пропонує додати «{{title}}» до бібліотеки',
   library_proposal_decided: 'Вашу пропозицію «{{title}}» {{decision}}.{{#comment}} {{comment}}{{/comment}}',
+  // docs/v2/37 §8 (PR-22): флаг отклонения времени при выборке ≥ 20 — автору материала, только
+  // колокольчик. `fact` и `plan` — минуты, отформатированные локалью адресата (`timeNorms.ts`)
+  content_time_deviation: 'Матеріал «{{title}}»: люди витрачають {{fact}} хв замість {{plan}} хв',
 }
 
 /**

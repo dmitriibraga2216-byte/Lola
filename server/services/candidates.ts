@@ -67,9 +67,9 @@ export interface Viewer extends Ctx {
  * Полный объём ПД даёт только `candidate.view` на весь тенант: HR, админ, рекрутер сети.
  * Роль с областью «точка» (керівник точки) видит контакты маскированными (§2 «✓ маскировано»).
  * Наставник `candidate.view` не имеет вовсе: ему карточка открыта в объёме проверки — без
- * контактов, резюме и комментариев (§2, критерий §13 к. 10). Разбор «какая именно проверка ему
- * назначена» появится вместе с очередью делегирования (`docs/v2/37`, PR-19): до тех пор
- * наставник видит обезличенную карточку и ничего сверх неё.
+ * контактов, резюме и комментариев (§2, критерий §13 к. 10). «Какая именно проверка ему
+ * назначена» решает очередь проверки (PR-19, `scopeCond`): делегированная работа карточку
+ * кандидата не открывает (сквозная проверка 20).
  */
 export function viewerOf(access: { userId: string, tenantId: string, grants: { scopes: string[], scopeType: string, scopeId: string | null }[] }): Viewer {
   const withView = access.grants.filter(g => g.scopes.includes('candidate.view'))
@@ -233,15 +233,22 @@ export const COLUMNS = {
  */
 export function scopeCond(v: Viewer) {
   // Наставник (§2 «только назначенную ему проверку») видит кандидата ровно тогда, когда есть
-  // что проверять: работа, взятая им, или несобранная очередь, из которой он берёт (docs/14
-  // §5.2, `workshop_submissions.reviewer_id`). Не «любой кандидат без контактов» — иначе
-  // критерий §13 к. 10 превратился бы в разрешение смотреть всю воронку.
+  // что проверять: открытая работа кандидата в очереди проверки (источник истины, docs/v2/44
+  // В-2), назначенная ему, взятая им или лежащая в общем пуле, из которого он берёт. Не «любой
+  // кандидат без контактов» — иначе критерий §13 к. 10 превратился бы в разрешение смотреть всю
+  // воронку.
+  //
+  // **Делегирование карточку кандидата не открывает** (сквозная проверка 20, `docs/v2/42` §5;
+  // `docs/v2/37` §1): работу, переданную по цепочке, делегат проверяет в карточке проверки
+  // (`GET /review/items/:id` — ответ, критерии, история попыток, без контактов), а сюда
+  // получает `404`. Доступ к записи о человеке выдаёт организация (роль, правило
+  // распределения), а не коллега передачей работы.
   if (v.reviewOnly) {
     return sql`exists (
-      select 1 from workshop_submissions ws
-       where ws.user_id = ${users.id}
-         and (ws.reviewer_id = ${v.actorId}::uuid
-              or (ws.reviewer_id is null and ws.status in ('submitted', 'in_review')))
+      select 1 from review_queue_items q
+       where q.user_id = ${users.id} and q.status <> 'done' and q.delegation_id is null
+         and (q.assigned_reviewer_id = ${v.actorId}::uuid or q.claimed_by = ${v.actorId}::uuid
+              or q.assigned_reviewer_id is null)
     )`
   }
   if (v.locations === null) return undefined

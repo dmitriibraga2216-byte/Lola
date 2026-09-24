@@ -38,6 +38,12 @@ const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
  *   (`36` §7.8). Счётчик выполненной работы, а не разрешённое число попыток: разрешённое
  *   по-прежнему только в `assignments.params.attemptsAllowed`.
  *
+ * - `review_delegations.due_at` — срок, к которому **делегат** обязан проверить переданную
+ *   работу (`37` §3.2, §6.1, §7.5), не позже срока проверки элемента. Это срок проверяющего,
+ *   а не дедлайн прохождения: проверяемый человек его не видит и на него не влияет.
+ * - `review_sla_events.due_at` — снимок `review_queue_items.sla_due_at` на момент события SLA
+ *   (`37` §3.4): журнал срока проверки, того же смысла, что и исключённый выше `sla_due_at`.
+ *
  * Колонки `attempts_count` из `docs/v2/37` §3.1 здесь нет: она заведена под именем
  * `attempt_no` — как в `workshop_submissions`, где тот же смысл («какая по счёту сдача»).
  *
@@ -47,6 +53,8 @@ const PACKAGE_COLUMN_EXCEPTIONS = new Set([
   'review_queue_items.sla_due_at',
   'content_issues.due_at',
   'content_issues.rescored_attempts',
+  'review_delegations.due_at',
+  'review_sla_events.due_at',
 ])
 
 const adminUrl = process.env.DATABASE_ADMIN_URL

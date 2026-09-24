@@ -1367,11 +1367,16 @@ create table review_queue_items (
   attempt_seconds int not null default 0, time_confidence text not null default 'ok',
   -- состояние очереди
   status text not null default 'waiting', priority int not null default 0,
-  -- маршрутизация и делегирование (наполняется PR-19; два FK ставит его же миграция)
+  -- маршрутизация и делегирование (PR-19): assigned_* — кто отвечает (null — общий пул),
+  -- claimed_* — у кого открыта карточка (30 минут, `13` §4.2); два FK — развязка 0080 (В-13)
   assigned_reviewer_id uuid references users(id) on delete set null,
-  assigned_at timestamptz, assigned_by_rule_id uuid, delegation_id uuid,
+  assigned_at timestamptz,
+  assigned_by_rule_id uuid,       -- rqi_assigned_by_rule_id_fk → review_routing_rules (set null)
+  delegation_id uuid,             -- rqi_delegation_id_fk → review_delegations (set null): самое глубокое активное звено
   origin_reviewer_id uuid references users(id) on delete set null,
   delegation_depth int not null default 0,
+  claimed_by uuid references users(id) on delete set null,
+  claimed_at timestamptz,
   -- сроки
   sla_hours int not null default 48, sla_due_at timestamptz,
   sla_warned_at timestamptz, sla_breached_at timestamptz,
@@ -1379,7 +1384,7 @@ create table review_queue_items (
   constraint rqi_task_type_chk check (task_type in
     ('quiz_open_answer','workshop','offline_confirm','survey_open','ai_interview_review')),
   constraint rqi_subject_kind_chk check (subject_kind in ('employee','candidate')),
-  constraint rqi_status_chk check (status in ('waiting','in_review','done')),
+  constraint rqi_status_chk check (status in ('waiting','in_review','delegated','escalated','done')),
   constraint rqi_time_confidence_chk check (time_confidence in ('ok','partial','unreliable')),
   constraint rqi_depth_chk check (delegation_depth between 0 and 2),
   constraint rqi_sla_hours_chk check (sla_hours between 1 and 720),
@@ -1390,8 +1395,76 @@ create table review_queue_items (
 create index idx_review_queue_items_tenant on review_queue_items (tenant_id, status, sla_due_at);
 create index idx_review_queue_items_reviewer on review_queue_items (tenant_id, assigned_reviewer_id, status) where status <> 'done';
 create index idx_review_queue_items_origin on review_queue_items (tenant_id, origin_reviewer_id) where delegation_id is not null;
+create index idx_review_queue_items_claimed on review_queue_items (tenant_id, claimed_by) where claimed_by is not null and status <> 'done';
+create index idx_review_queue_items_escalated on review_queue_items (tenant_id, escalated_to_id) where escalated_to_id is not null and status <> 'done';
 -- одна единица работы — одна строка: повторная сдача после доработки открывает ту же строку
 create unique index uq_review_queue_items_source on review_queue_items (tenant_id, task_type, source_id);
+```
+
+> [исправлено, PR-19 (`docs/v2/37` §4, §7): делегирование и эскалация] Ранее: три состояния
+> (`waiting | in_review | done`), захват карточки в `assigned_reviewer_id` / `assigned_at`, два
+> ключа без FK. Теперь пять состояний, захват — `claimed_by` / `claimed_at`, ключи поставлены.
+
+### Делегирование, распределение, SLA (`docs/v2/37` §3.2–3.4, миграция 0080)
+
+Все шесть таблиц тенантные: RLS `enable` + `force`, политика `tenant_isolation` с `using` и
+`with check`, FK на `tenants` с `cascade`, полный индекс с `tenant_id` первым. Пишет их только
+`server/services/review*.ts`.
+
+```sql
+-- Правила распределения (`37` §3.3, §7.16–7.17): выигрывает первое подошедшее по priority
+review_routing_rules(name_uk text 1..200, priority int default 100,   -- меньше — раньше
+  match_scope jsonb default '{}',          -- {location_ids, org_node_ids, position_ids, course_ids}; {} — весь тенант
+  match_subject_kind text,                 -- null | employee | candidate
+  match_task_types text[] default '{}',    -- ⊆ review_task_type; пусто — любые
+  strategy text default 'round_robin',     -- review_routing_strategy
+  reviewer_ids uuid[] default '{}', fallback_user_id → users (set null),
+  sla_hours_override int,                  -- 1..720; снимок при постановке
+  is_active boolean default true, created_by → users (set null))
+  index (tenant_id, priority) where is_active; index (tenant_id, priority)
+
+-- Журнал передач (`37` §3.2, §7.1–7.6): цепочка A→B→C — строка на звено, depth 1..2
+review_delegations(queue_item_id → review_queue_items (cascade),
+  from_user_id → users, to_user_id → users,           -- check from <> to
+  depth int default 1,                                -- 1..2
+  reason_code text,                                   -- review_delegation_reason; other → reason_text 10..500
+  reason_text text, due_at timestamptz,               -- срок делегата ≤ sla_due_at элемента
+  state text default 'active',                        -- review_delegation_state
+  accepted_at, resolved_at timestamptz, revoked_by → users (set null), revoke_reason text ≤ 500,
+  request_context jsonb)                              -- правило 14
+  unique (tenant_id, queue_item_id, depth) where state = 'active'   -- одно активное звено на уровень
+  index (tenant_id, from_user_id, state); index (tenant_id, to_user_id, state);
+  index (tenant_id, queue_item_id, created_at desc)
+
+-- Ёмкость проверяющего (`37` §3.4, §7.17): вход в распределение и триггер перегрузки, не запрет
+reviewer_capacity(user_id → users (cascade), max_open_items int default 20 (1..200),
+  daily_target int default 10 (1..200), accepts_delegation boolean default true,
+  task_types text[] default '{}',          -- ⊆ review_task_type; пусто — любые
+  rr_cursor int default 0)                 -- сколько работ человек получил по кругу
+  unique (tenant_id, user_id)
+
+-- Отсутствия и замещение (`37` §3.4, §6.2, §7.18)
+reviewer_absences(user_id → users (cascade), kind text,   -- reviewer_absence_kind
+  starts_on date, ends_on date,            -- ends_on ≥ starts_on; у dismissal — null
+  substitute_id → users (set null),        -- ≠ user_id
+  move_open_items boolean default true, created_by → users (set null))
+  index (tenant_id, user_id, starts_on)
+
+-- Журнал срока проверки (`37` §3.4, §7.17, §7.19)
+review_sla_events(queue_item_id → review_queue_items (cascade), reviewer_id → users (set null),
+  event text,                              -- review_sla_event
+  due_at timestamptz,                      -- снимок sla_due_at элемента
+  overdue_hours numeric(8,2), target_id → users (set null),
+  details jsonb default '{}',              -- правило, стратегия, пометка перегрузки, адресат эскалации
+  request_context jsonb)                   -- правило 14
+  index (tenant_id, queue_item_id, created_at desc)
+
+-- Суточная статистика проверяющего (`37` §3.4, §9.2) — заполняет review.stats_rollup
+reviewer_stats_daily(reviewer_id → users (cascade), day date,
+  reviewed_count, accepted_count, rejected_count, rework_count,
+  delegated_out, delegated_in, breached_count, own_content_count int default 0,
+  median_react_sec int, median_review_sec int)
+  unique (tenant_id, reviewer_id, day); index (tenant_id, day desc)
 ```
 
 `workshop_submissions.reviewer_id`, `claimed_at`, `sla_due_at` на переходный период остаются и
@@ -2235,11 +2308,36 @@ candidate_reject_reason: skills | experience | no_contact | conditions | vacancy
 -- интерфейсе, поэтому вторая колонка не заводится
 review_task_type: quiz_open_answer | workshop | offline_confirm | survey_open | ai_interview_review
 
--- Состояние элемента очереди проверки (`review_queue_items.status`, раздел «Очередь проверки» ниже).
--- done терминально; повторная сдача после доработки открывает ту же строку заново
--- (`enqueueReview()` через on conflict do update) — второй строки не появляется,
--- удаления не происходит
-review_queue_status: waiting | in_review | done
+-- Состояние элемента очереди проверки (`review_queue_items.status`, раздел «Очередь проверки» ниже,
+-- `v2/37` §4). delegated — есть активное делегирование, работа у делегата; escalated — срок
+-- нарушен на 150 %, работу видит и руководитель области (PR-19). done терминально; повторная
+-- сдача после доработки открывает ту же строку заново (`enqueueReview()` через on conflict
+-- do update) — второй строки не появляется, удаления не происходит
+review_queue_status: waiting | in_review | delegated | escalated | done
+
+-- Причина делегирования проверки (`review_delegations.reason_code`, `v2/37` §3.2, §6.1);
+-- при other пояснение 10–500 знаков обязательно
+review_delegation_reason: absence | workload | expertise | conflict_of_interest | location_change
+                        | other
+
+-- Состояние звена делегирования (`review_delegations.state`, `v2/37` §4): resolved — делегат
+-- принял решение, revoked_* — отозвано автором, руководителем или по сроку делегата (§7.5),
+-- cancelled — работа аннулирована раньше решения
+review_delegation_state: active | resolved | revoked_by_author | revoked_by_manager | revoked_sla
+                       | cancelled
+
+-- Стратегия правила распределения проверки (`review_routing_rules.strategy`, `v2/37` §3.3,
+-- §7.16); manual — никому, работа висит в общем пуле
+review_routing_strategy: location_mentor | course_author | specific_list | round_robin
+                       | least_loaded | manual
+
+-- Вид отсутствия проверяющего (`reviewer_absences.kind`, `v2/37` §3.4, §7.18); dismissal —
+-- бессрочно и с принудительным перебросом очереди
+reviewer_absence_kind: vacation | sick | training | dismissal | other
+
+-- Событие журнала SLA проверки (`review_sla_events.event`, `v2/37` §3.4, §7.17, §7.19)
+review_sla_event: assigned | warned | breached | escalated | reassigned | resolved
+                | delegation_expired
 
 -- Достоверность измерения времени (`review_queue_items.time_confidence`, `v2/37` §7.15):
 -- partial — биения дошли не все (офлайн-досылка), unreliable — в расчёт нормы не входит.

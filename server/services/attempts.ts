@@ -21,7 +21,7 @@ import type { AnswerInputMode, ScoringMethod } from '../../shared/enums'
 import { completeLesson, rollbackLessonCompletion, type RollbackResult } from './learning'
 import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
-import { closeReview, enqueueReview } from './reviewQueue'
+import { closeReview, enqueueReview, heldByOtherSql, reviewGuard } from './reviewQueue'
 import { closeOpenSegments } from './learningTime'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -874,7 +874,9 @@ export async function listReviewAnswers(ctx: Ctx, filter: ReviewAnswersFilter) {
       .where(and(
         eq(attemptAnswers.autoGraded, false),
         sql`${attempts.status} in ('review', 'passed', 'failed', 'expired')`,
-        ...(filter.checked === 'unchecked' ? [isNull(attemptAnswers.isCorrect)] : []),
+        // Непроверенный ответ, назначенный или делегированный другому, ушёл из «Мої»
+        // (docs/v2/37 §13 к. 1) — и из узкого списка тоже; состояние — из очереди (В-2).
+        ...(filter.checked === 'unchecked' ? [isNull(attemptAnswers.isCorrect), sql`not ${heldByOtherSql(ctx.actorId, 'quiz_open_answer', sql`${attemptAnswers.id}`)}`] : []),
         ...(filter.checked === 'checked' ? [sql`${attemptAnswers.isCorrect} is not null`] : []),
         ...(filter.tags.length ? [sql`${questions.tags} && ${textArray(filter.tags)}`] : []),
         ...(filter.quizId ? [eq(quizzes.id, filter.quizId)] : []),
@@ -935,7 +937,7 @@ export async function reviewQueue(ctx: Ctx) {
 
 export type GradeManualResult
   = | { ok: true, attemptStatus: string }
-    | { ok: false, code: 'not_found' | 'self_review' | 'already_graded' }
+    | { ok: false, code: 'not_found' | 'self_review' | 'already_graded' | 'already_claimed' | 'assigned_to_other' }
 
 /** Зачёт/незачёт ручного ответа; после проверки всех — пересчёт попытки (docs/03 §3.4). */
 export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect: boolean, score?: number, comment?: string }): Promise<GradeManualResult> {
@@ -947,6 +949,10 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
     if (!row) return { ok: false as const, code: 'not_found' as const }
     if (row.att.userId === ctx.actorId) return { ok: false as const, code: 'self_review' as const }
     if (row.a.isCorrect !== null) return { ok: false as const, code: 'already_graded' as const }
+    // Назначенный или делегированный другому ответ решает он (docs/v2/37 §7.1): состояние —
+    // в очереди, узкий список `/review/answers` его уже не показывает, а прямой вызов не проходит.
+    const guard = await reviewGuard(tx, { taskType: 'quiz_open_answer', sourceId: answerId, actorId: ctx.actorId })
+    if (!guard.ok) return { ok: false as const, code: guard.code }
 
     const snapshot = row.att.snapshot as SnapshotQuestion[]
     const q = snapshot.find(s => s.id === row.a.questionId)!
@@ -962,7 +968,7 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
     }).where(eq(attemptAnswers.id, answerId))
 
     // Решение по ответу принято — элемент очереди закрывается (не удаляется, проверка 21).
-    await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: [answerId], reviewerId: ctx.actorId })
+    await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: [answerId], reviewerId: ctx.actorId, decision: input.isCorrect ? 'зараховано' : 'не зараховано' })
 
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.grade', entity: 'attempt_answer', entityId: answerId, after: { isCorrect: input.isCorrect, score } })
 

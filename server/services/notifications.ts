@@ -180,6 +180,19 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   bonus_order_ready: 'Замовлення «{{title}}» готове — заберіть його{{#location}} на точці {{location}}{{/location}}',
   bonus_order_cancelled: 'Замовлення «{{title}}» скасовано: {{reason}}. Бонуси повернуто: {{amount}}',
   bonus_order_expired: 'Резерв на «{{title}}» закінчився — замовлення скасовано, бонуси повернуто: {{amount}}',
+  // docs/v2/37 §8 (PR-19): делегирование, распределение и срок проверки. `review_delegation_expired`
+  // уходит обоим (§7.5), поэтому текст различает, кому вернули работу: делегировавшему — «вам»,
+  // делегату — кому именно.
+  review_delegated: '{{name}} передав вам перевірку «{{task}}». Термін до {{due}}',
+  review_delegation_revoked: '{{name}} відкликав передану перевірку «{{task}}»',
+  review_delegation_resolved: '{{name}} перевірив «{{task}}»: {{decision}}',
+  review_delegation_expired: 'Термін делегування «{{task}}» минув. {{#toYou}}Роботу повернено вам{{/toYou}}{{#toOther}}Роботу повернено: {{toOther}}{{/toOther}}',
+  review_assigned: 'Вам призначено перевірку «{{task}}» — {{name}}{{#location}}, {{location}}{{/location}}',
+  review_sla_warning: 'Залишилось {{hours}} год на перевірку «{{task}}»',
+  review_sla_breach: 'Перевірка «{{task}}» прострочена на {{hours}} год',
+  review_escalated: 'Перевірку «{{task}}» ескальовано на вас{{#name}} — {{name}}{{/name}}',
+  review_queue_moved: 'Вам передано {{n}} робіт із черги {{name}} ({{reason}})',
+  review_overloaded: 'У {{name}} {{n}} робіт у черзі при ліміті {{m}}',
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',
@@ -241,6 +254,8 @@ export function emailDefaultEnabled(code: string): boolean {
   return code === 'security_alert'
     || code === 'content_issue_rescore_ready' // docs/v2/36 §8: in-app + e-mail администратору
     || /_manager$/.test(code)
+    // docs/v2/37 §8: нарушение срока проверки и эскалация — «push + e-mail» руководителю области
+    || /^review_(sla_breach|escalated)$/.test(code)
     || eventClassOf(code) === 'managerDigest'
     || /^(scheduled_report|report_export_)/.test(code)
 }

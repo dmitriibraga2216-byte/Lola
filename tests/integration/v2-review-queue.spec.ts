@@ -191,12 +191,16 @@ describe('практикум: постановка, захват, решение
     expect(c.ok).toBe(true)
     let row = (await queueRows('workshop', submissionId))[0]!
     expect(row.status).toBe('in_review')
-    expect(row.assigned_reviewer_id).toBe(mentorId)
-    expect(row.assigned_at).not.toBeNull()
+    // С PR-19 захват — отдельные колонки: кто держит карточку, а не кто отвечает за работу.
+    // Работа из общего пула назначения при захвате не получает (`37` §4, Р-19.2).
+    expect(row.claimed_by).toBe(mentorId)
+    expect(row.claimed_at).not.toBeNull()
+    expect(row.assigned_reviewer_id).toBeNull()
 
     await release(mentor(), submissionId)
     row = (await queueRows('workshop', submissionId))[0]!
     expect(row.status).toBe('waiting')
+    expect(row.claimed_by).toBeNull()
     expect(row.assigned_reviewer_id).toBeNull()
   })
 

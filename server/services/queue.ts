@@ -44,6 +44,13 @@ export async function getBoss(): Promise<PgBoss> {
       // docs/v2/37 §11: учёт времени биениями (PR-21) — закрытие зависших сегментов и свёртка
       await b.createQueue('time.close_stale_sessions', { retryLimit: 2, expireInSeconds: 300 })
       await b.createQueue('time.rollup', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/37 §11 (PR-19): срок проверки, возврат просроченных делегирований, отсутствия,
+      // перебалансировка и суточная статистика проверяющих
+      await b.createQueue('review.sla_scan', { retryLimit: 3, expireInSeconds: 600 })
+      await b.createQueue('review.delegation_expire', { retryLimit: 3, expireInSeconds: 600 })
+      await b.createQueue('review.absence_apply', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('review.rebalance', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('review.stats_rollup', { retryLimit: 2, expireInSeconds: 900 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -77,6 +84,14 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('time.close_stale_sessions', '*/5 * * * *', {}, { singletonKey: 'time.close_stale_sessions' })
       await b.schedule('time.rollup', '*/10 * * * *', { windowMinutes: 120 }, { singletonKey: 'time.rollup', key: 'frequent' })
       await b.schedule('time.rollup', '40 4 * * *', { windowMinutes: 2880 }, { singletonKey: 'time.rollup.daily', key: 'daily', tz: 'Europe/Kyiv' })
+      // Очередь проверки (docs/v2/37 §11): пороги SLA ежечасно, возврат делегирований каждые
+      // 15 минут, отсутствия в 06:00 (и сразу при создании записи), перебалансировка в 07:00,
+      // статистика за прошедшие сутки в 03:00 — суточные по времени Киева
+      await b.schedule('review.sla_scan', '10 * * * *', {}, { singletonKey: 'review.sla_scan' })
+      await b.schedule('review.delegation_expire', '*/15 * * * *', {}, { singletonKey: 'review.delegation_expire' })
+      await b.schedule('review.absence_apply', '0 6 * * *', {}, { singletonKey: 'review.absence_apply', tz: 'Europe/Kyiv' })
+      await b.schedule('review.rebalance', '0 7 * * *', {}, { singletonKey: 'review.rebalance', tz: 'Europe/Kyiv' })
+      await b.schedule('review.stats_rollup', '40 3 * * *', {}, { singletonKey: 'review.stats_rollup', tz: 'Europe/Kyiv' })
       return b
     })
   }

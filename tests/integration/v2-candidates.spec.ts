@@ -440,6 +440,11 @@ describe('доступ к карточке (§2, §7.10; критерии §13 �
       insert into workshop_submissions (tenant_id, workshop_id, user_id, criteria_snapshot, status, reviewer_id, submitted_at)
       values (${tenantId}, ${workshop!.id}, ${created[0]!}, '[]'::jsonb, 'in_review', ${recruiterId}, now())
       returning id`
+    // С PR-19 «какая проверка назначена наставнику» решает очередь проверки (источник истины,
+    // docs/v2/44 В-2): строка очереди с его захватом, а не зеркало `workshop_submissions`.
+    await admin`
+      insert into review_queue_items (tenant_id, task_type, source_id, user_id, subject_kind, status, claimed_by, claimed_at)
+      values (${tenantId}, 'workshop', ${sub!.id}, ${created[0]!}, 'candidate', 'in_review', ${recruiterId}, now())`
     try {
       await admin`update users set resume_asset_id = null where id = ${created[0]!}`
       const card = await getCandidate(mentor, created[0]!)
@@ -451,6 +456,7 @@ describe('доступ к карточке (§2, §7.10; критерии §13 �
       expect(card!.comments, 'комментарии рекрутеров ушли наставнику').toEqual([])
     }
     finally {
+      await admin`delete from review_queue_items where source_id = ${sub!.id}`
       await admin`delete from workshop_submissions where id = ${sub!.id}`
       await admin`delete from workshops where id = ${workshop!.id}`
     }

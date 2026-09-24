@@ -51,7 +51,12 @@ const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events'
   'content_issue_events',
   // `points_ledger` — книга баллов и бонусов (docs/02 §2.10, `gamification`): docs/02 заранее
   // включил её в список журналов («+ points_ledger, когда появится») — «это деньги» (docs/22 §11)
-  'points_ledger']
+  'points_ledger',
+  // `review_delegations` и `review_sla_events` — журнал передач проверки и журнал срока
+  // (docs/v2/37 §3.2, §3.4, §9.4; PR-19): тем же решением. В DDL документа колонки нет, но по
+  // ним разбирают, кто и откуда передал работу и почему она ушла руководителю
+  'review_delegations',
+  'review_sla_events']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

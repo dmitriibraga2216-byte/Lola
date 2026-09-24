@@ -73,6 +73,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await cleanup()
+  // Оператор теста: журнал платформы на него ссылается с `on delete set null` — строки журнала остаются
+  await admin`delete from platform_admins where email = 'v2-39-ops@lola.test'`
   await admin.end()
 })
 

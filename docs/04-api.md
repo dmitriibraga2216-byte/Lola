@@ -450,7 +450,8 @@
 | GET | `/platform/audit` | `?tenantId=&limit=` — журнал `platform_audit` (`25` §7 п. 5). Spec 25 |
 | GET/POST | `/platform/announcements` | объявления платформы (`v2/39` П-21, П-24.2, PR-39): список с числом прочтений; создание `{title 3–200, body ≤5000, audience: all\|plans\|tenants, planCodes, tenantIds, publish}` — адресация согласована с видом (400), тариф только из `plans` (`422 announcement.unknown_plan`). Пишет только оператор: у роли приложения на таблицу — только `select` |
 | PATCH | `/platform/announcements/:id` | правка текста и адресации (адресация — вместе с видом); снятое не правится — `409 announcement.archived` |
-| POST | `/platform/announcements/:id/publish` \| `/archive` | черновик — в ленту тенантов; снять с ленты (история и счёт прочтений остаются) |
+| POST | `/platform/announcements/:id/publish` | черновик — в ленту тенантов (повторная публикация ничего не меняет) |
+| POST | `/platform/announcements/:id/archive` | снять с ленты: тенанты больше не видят, история и счёт прочтений остаются |
 | POST | `/platform/tenants/:id/users/:userId/two-factor-reset` | `{reason 10–500}` — сброс второго фактора человеку тенанта (`24` §3.4, PR-39): последний способ вернуть вход администратору без телефона и кодов, когда другого нет; `two_factor.reset` (critical, с причиной) — в журнал безопасности тенанта, действие — в `platform_audit`; чужой или несуществующий человек — 404 |
 
 ## 4.18 Вебхуки наружу

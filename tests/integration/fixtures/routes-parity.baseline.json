@@ -226,6 +226,7 @@
   "POST /people/import/:id/apply",
   "POST /platform-announcements/:id/read",
   "POST /platform/announcements",
+  "POST /platform/announcements/:id/archive",
   "POST /platform/announcements/:id/publish",
   "POST /platform/tenants",
   "POST /platform/tenants/:id/impersonate",

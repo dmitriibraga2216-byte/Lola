@@ -93,6 +93,13 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'library_module_versions',
   'library_module_usages',
   'library_module_proposals',
+  // 38. Заметки и документы человека (PR-32, миграция v2_person_notes_docs). `user_notes` —
+  // пакетная `person_notes` под своим именем (docs/v2/43 §1.2): таблица не новая, но пакет
+  // считает её своей, и на неё распространяются те же контракты — RLS, полный tenant-first
+  // индекс рядом с частичным (`40` §7.1), ключ на tenants (его у неё не было с 0019).
+  'user_notes',
+  'person_document_types',
+  'person_documents',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

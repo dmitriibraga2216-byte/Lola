@@ -57,6 +57,11 @@ export const KEYSETS = {
   contentIssues: ['int', 'int', 'at', 'uuid'],
   /** Библиотека модулей и палитра вставки: `updated_at desc, id desc` (docs/v2/31 §5.1). */
   libraryModules: ['at', 'uuid'],
+  /**
+   * Лента заметок о человеке: `is_pinned desc, created_at desc, id desc` (docs/v2/38 §5.1, PR-32).
+   * Закреплённые (≤ 3) всегда первыми — договорённость о развитии не тонет под новыми записями.
+   */
+  personNotes: ['int', 'at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

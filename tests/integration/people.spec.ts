@@ -181,7 +181,7 @@ describe('люди (docs/16 §13)', () => {
     expect((await listMappingPresets(ctx())).default).toEqual(mapping)
   })
 
-  it('§3.4–3.5: динамическая группа пересчитывается; функциональный руководитель; заметки', async () => {
+  it('§3.4–3.5: динамическая группа пересчитывается; функциональный руководитель', async () => {
     const a = await makePerson('Група Один')
     const b = await makePerson('Група Два')
     const g = await G.upsertGroup(ctx(), { name: `Тест-група ${Date.now()}`, kind: 'dynamic', filter: { positionIds: [posId] } }) as { id: string, members: string[] }
@@ -200,10 +200,8 @@ describe('люди (docs/16 §13)', () => {
     const chiefs = await P.listChiefs(ctx(), a)
     expect(chiefs.length).toBe(1)
     expect(await P.removeChief(ctx(), chief!.id)).toBe(true)
-
-    await P.addNote(ctx(), a, 'Перша нотатка')
-    const notes = await P.listNotes(ctx(), a)
-    expect(notes[0]).toMatchObject({ body: 'Перша нотатка' })
+    // Заметки о человеке — отдельный модуль с видимостью и журналом чтения (docs/v2/38, PR-32):
+    // tests/integration/v2-person-notes.spec.ts
   })
 
   it('§3.3: справочники — переименование, перенос подразделения с пересчётом пути, удаление используемого запрещено, слияние', async () => {

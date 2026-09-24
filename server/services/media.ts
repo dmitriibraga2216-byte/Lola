@@ -6,6 +6,7 @@ import { courses, libraryModuleVersions, libraryModules, mediaAssets, resources 
 import { withTenant } from '../utils/withTenant'
 import type { ContentBlock } from '../../shared/schemas/content'
 import type { MediaOrigin } from '../../shared/enums'
+import { PERSON_DOCUMENT_LIMITS } from '../../shared/enums'
 import { GIB, effectiveLimits } from './tenantLimits'
 import { recordUsage, syncCounter } from './usageCounters'
 import { recordAudit } from './audit'
@@ -94,6 +95,23 @@ export function ensureBucket(): Promise<void> {
 
 interface Ctx { tenantId: string, actorId: string }
 
+/**
+ * Происхождения, которые человек загружает **себе сам** и для которых не нужен `media.upload`:
+ * свой документ типа `self_upload` (docs/v2/38 §2, §7.8). Остальные — только с `media.upload`.
+ */
+export const SELF_SERVICE_ORIGINS: readonly MediaOrigin[] = ['person_document']
+
+/**
+ * Правила файла по происхождению поверх общих лимитов вида: документ человека — PDF, JPG
+ * или PNG до 20 МБ (docs/v2/38 §6.2). Отказ — до начала передачи, как у общих лимитов.
+ */
+export function checkOriginRules(origin: MediaOrigin, mime: string, bytes: number): { ok: true } | { ok: false, code: 'mime_not_allowed' | 'too_big', message: string } {
+  if (origin !== 'person_document') return { ok: true }
+  if (!(PERSON_DOCUMENT_LIMITS.fileMimes as readonly string[]).includes(mime)) return { ok: false, code: 'mime_not_allowed', message: 'Дозволені формати: PDF, JPG, PNG' }
+  if (bytes > PERSON_DOCUMENT_LIMITS.fileMaxMb * 1024 * 1024) return { ok: false, code: 'too_big', message: `Файл завеликий. Максимум для документа людини — ${PERSON_DOCUMENT_LIMITS.fileMaxMb} МБ` }
+  return { ok: true }
+}
+
 export type UploadUrlResult
   = | { ok: true, mediaId: string, uploadUrl: string, key: string }
     | { ok: false, code: 'mime_not_allowed' | 'too_big' | 'resource_too_big' | 'storage_limit', message: string }
@@ -160,6 +178,8 @@ export async function createUploadUrl(ctx: Ctx, input: {
   const used = input.resourceId ? await resourceBytes(ctx, input.resourceId) : 0
   const check = checkFileLimits(input.mime, input.bytes, used)
   if (!check.ok) return check
+  const byOrigin = checkOriginRules(input.origin, input.mime, input.bytes)
+  if (!byOrigin.ok) return byOrigin
 
   // Жорсткий ліміт диска тенанта (docs/25 §10, docs/24 §4.4; докс/33 D-054): перевіряється в момент
   // операції по поточному об'єму, а не по нічному знімку `tenant_usage`. Навчання не зупиняється —

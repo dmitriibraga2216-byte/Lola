@@ -20,9 +20,13 @@ interface Person {
   sessions: { id: string, createdAt: string, updatedAt?: string, userAgent: string | null, ip: string | null, revokedAt: string | null }[]
 }
 interface Ref { id: string, name: string }
-// Вкладки мокапа PersonCard: Профіль · Ролі · Навчання · Безпека · Журнал (+ Атестації и Нотатки из docs/16 §5.2)
-type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity' | 'notes'
-const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity', 'notes']
+// Вкладки мокапа PersonCard: Профіль · Ролі · Навчання · Безпека · Журнал (+ Атестації и Нотатки из docs/16 §5.2,
+// Документи — docs/v2/38 §5.1). Нотатки и документы видны только носителям своих скоупов (docs/v2/38 §2)
+type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity' | 'notes' | 'documents'
+const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity', 'notes', 'documents']
+const visibleTabs = computed(() => TABS.filter(tb => tb === 'notes'
+  ? hasScope('person.note.read')
+  : tb === 'documents' ? hasScope('person.document.view_others') || hasScope('person.document.manage') : true))
 
 const person = ref<Person | null>(null)
 const error = ref('')
@@ -45,9 +49,7 @@ function editRole(r: Person['roles'][number]) {
 
 const learning = ref<{ enrollments: Record<string, unknown>[], attempts: Record<string, unknown>[], certificates: Record<string, unknown>[], assessments: Record<string, unknown>[], displayAs: 'label' | 'value', currentRating: number } | null>(null)
 const activity = ref<Record<string, unknown>[]>([])
-const notes = ref<{ id: string, body: string, created_at: string, author: string | null }[]>([])
 const chiefs = ref<Record<string, unknown>[]>([])
-const noteBody = ref('')
 // Безпека (мокап PersonCard): последний вход, активные сессии, Telegram, пароль (docs/16 §14.5 — отдельно от должности)
 const securityEvents = ref<Record<string, unknown>[]>([])
 const pwdForm = reactive({ open: false, password: '', repeat: '', mustChange: true })
@@ -79,7 +81,6 @@ async function loadTab(v: Tab) {
   try {
     if (v === 'learning' || v === 'assessment') learning.value ??= await api(`/people/${id}/learning`)
     if (v === 'activity') activity.value = await api(`/people/${id}/activity`)
-    if (v === 'notes' && hasScope('people.edit')) notes.value = await api(`/people/${id}/notes`)
     if (v === 'profile') { chiefs.value = await api('/functional-chiefs', { query: { userId: id } }); learning.value ??= await api<NonNullable<typeof learning.value>>(`/people/${id}/learning`).catch(() => null) }
     if (v === 'security' && hasScope('audit.view')) securityEvents.value = (await api<{ rows: Record<string, unknown>[] }>('/logs/security', { query: { userId: id, limit: 20 } })).rows
   }
@@ -133,7 +134,6 @@ const mergeId = ref('')
 const merge = () => act(async () => { await api('/people/merge', { method: 'POST', body: { primaryId: id, duplicateId: mergeId.value.trim() } }); mergeId.value = '' }, t('person.merged'))
 const gdprReason = ref('')
 const gdpr = () => { if (confirm(t('person.gdprConfirm'))) act(() => api('/people/gdpr-erase', { method: 'POST', body: { userId: id, reason: gdprReason.value } }), t('person.gdprDone')) }
-const addNoteAction = () => act(async () => { await api(`/people/${id}/notes`, { method: 'POST', body: { body: noteBody.value } }); noteBody.value = ''; await loadTab('notes') }, t('common.saved'))
 
 const fmt = (d: unknown) => d ? formatShortDate(new Date(String(d))) : '—'
 const fmtT = (d: unknown) => d ? formatDateTime(new Date(String(d))) : '—'
@@ -169,7 +169,7 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
     <p v-if="inviteUrl" class="invite-url">{{ t('person.inviteLink') }}: <code>{{ inviteUrl }}</code></p>
 
     <div class="tabs" role="tablist">
-      <button v-for="tb in TABS" :key="tb" role="tab" :aria-selected="tab === tb" :class="['tab', { on: tab === tb }]" @click="tab = tb">{{ t(`person.tabs.${tb}`) }}</button>
+      <button v-for="tb in visibleTabs" :key="tb" role="tab" :aria-selected="tab === tb" :class="['tab', { on: tab === tb }]" @click="tab = tb">{{ t(`person.tabs.${tb}`) }}</button>
     </div>
 
     <!-- Профіль -->
@@ -394,17 +394,14 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       </div>
     </section>
 
-    <!-- Нотатки -->
-    <section v-else-if="tab === 'notes'" class="panel card">
-      <p class="sub">{{ t('person.noteHint') }}</p>
-      <ul class="list">
-        <li v-for="n in notes" :key="n.id"><p class="note">{{ n.body }}</p><span class="sub">{{ n.author || '—' }} · {{ fmtT(n.created_at) }}</span></li>
-        <li v-if="notes.length === 0" class="sub">{{ t('person.noData') }}</li>
-      </ul>
-      <div v-if="hasScope('people.edit')" class="form-row">
-        <textarea v-model="noteBody" rows="2" maxlength="2000" :placeholder="t('person.notePlaceholder')" :aria-label="t('person.addNote')" />
-        <button class="btn primary" :disabled="!noteBody.trim() || busy" @click="addNoteAction">{{ t('person.addNote') }}</button>
-      </div>
+    <!-- Нотатки (docs/v2/38 §5.1): открыть вкладку и значит развернуть секцию — чтение пишется в журнал -->
+    <section v-else-if="tab === 'notes' && visibleTabs.includes('notes')" class="panel">
+      <PersonNotes :person-id="id" auto-open />
+    </section>
+
+    <!-- Документи (docs/v2/38 §5.1, §6.2) -->
+    <section v-else-if="tab === 'documents' && visibleTabs.includes('documents')" class="panel">
+      <PersonDocuments :person-id="id" auto-open />
     </section>
 
     <div v-if="showArchive" class="overlay" @click.self="showArchive = false">
@@ -465,7 +462,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); margin-left: var(--space-2); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
-.note { margin: 0; white-space: pre-wrap; }
 .form-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-start; }
 select, input, textarea { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); max-width: 100%; min-width: 0; box-sizing: border-box; }
 textarea { flex: 1; min-width: 200px; }

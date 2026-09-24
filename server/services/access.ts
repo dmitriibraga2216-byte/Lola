@@ -103,6 +103,19 @@ export async function getAccess(event: H3Event): Promise<Access | null> {
   return access
 }
 
+/**
+ * Только вход, без скоупа: для ручек, где право зависит от данных, а не от роли —
+ * человек читает **свои** заметки и документы без `person.note.read` (docs/v2/38 §2, §7.4),
+ * и решает это сервис, а не список скоупов.
+ */
+export async function requireAccess(event: H3Event): Promise<Access> {
+  const access = await getAccess(event)
+  if (!access) {
+    throw createError({ statusCode: 401, data: { code: 'auth_required', message: 'Потрібен вхід' } })
+  }
+  return access
+}
+
 /** Тонкая проверка для эндпоинтов: 401 без сессии, 403 без скоупа. */
 export async function requireScope(event: H3Event, scope: Scope | string, area?: ScopeArea): Promise<Access> {
   const access = await getAccess(event)
@@ -160,6 +173,31 @@ export async function areaForScope(access: Access, scope: Scope | string): Promi
     for (const r of rows) locs.add(r.id)
   }
   return [...locs]
+}
+
+/** Есть ли у скоупа грант на **весь тенант** — не на точку и не на подразделение. */
+export function hasTenantGrant(access: Access, scope: Scope | string): boolean {
+  return access.grants.some(g => g.scopeType === 'tenant' && g.scopes.includes(scope))
+}
+
+/**
+ * Область одного скоупа с различением «скоупа нет вовсе»: `'tenant'` — грант на весь тенант;
+ * массив — точки его ролей (напрямую или через подразделение, `areaForScope`); `'none'` — ни
+ * одной роли с этим скоупом. У `areaForScope` «нет скоупа» и «скоуп на подразделение без точек»
+ * — один и тот же пустой массив; правам карточки человека (docs/v2/38 §2) нужна разница:
+ * без скоупа чужие заметки — `403`, со скоупом на чужую точку — только свои как автора.
+ */
+export async function areaOf(access: Access, scope: Scope | string): Promise<'tenant' | 'none' | string[]> {
+  if (!access.grants.some(g => g.scopes.includes(scope))) return 'none'
+  const area = await areaForScope(access, scope)
+  return area === null ? 'tenant' : area
+}
+
+/** Покрывает ли область точку: вся сеть — да; иначе точка должна быть в списке. */
+export function areaCovers(area: 'tenant' | 'none' | string[], locationId: string | null | undefined): boolean {
+  if (area === 'tenant') return true
+  if (area === 'none' || !locationId) return false
+  return area.includes(locationId)
 }
 
 /**

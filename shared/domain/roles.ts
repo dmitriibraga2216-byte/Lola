@@ -20,7 +20,10 @@
  * `review.absence.manage` у `mentor` и `manager`, плюс `review.delegate.any`,
  * `review.routing.manage`, `review.workload.view` у `manager`. Пятое —
  * библиотека модулей (PR-25, `docs/v2/31` §2): `library.view` + `library.use` у `mentor` и
- * `manager`, плюс `library.publish` у `author`; `library.manage` — только у `admin`. Роль `owner`
+ * `manager`, плюс `library.publish` у `author`; `library.manage` — только у `admin`. Шестое —
+ * `person.note.read`, `person.note.write`, `person.document.view_others`,
+ * `person.document.manage` у `manager` (PR-32, `docs/v2/38` §2: заметки и документы людей
+ * своей точки). Роль `owner`
  * заведена (см. ниже) — `docs/v2/35` §2 ссылалась на неё как на существующую, хотя в `01` §1.2
  * её не было. Распределение по будущим ролям `recruiter` и `hr` — в PR, которые добавят
  * соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
@@ -179,6 +182,10 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'review.delegate', 'review.delegate.any', 'review.routing.manage', 'review.workload.view', 'review.absence.manage',
       // PR-25: как у наставника — видит библиотеку и предлагает урок (`docs/v2/31` §2)
       'library.view', 'library.use',
+      // PR-32 (`docs/v2/38` §2): заметки уровня `manager` о людях своей точки — читать, писать
+      // свои, открывать человеку; документы типов `visible_to_manager` — видеть и загружать.
+      // Всё в области роли: заметки `hr` и типы, скрытые от руководителя, ему не видны.
+      'person.note.read', 'person.note.write', 'person.document.view_others', 'person.document.manage',
     ],
   },
   author: {

@@ -55,6 +55,9 @@ export async function getBoss(): Promise<PgBoss> {
       // ночная сверка usage_count и is_stale с фактом
       await b.createQueue('library.embedding_refresh', { retryLimit: 3, retryBackoff: true, expireInSeconds: 300 })
       await b.createQueue('library.usage_recalc', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/38 §11: две ночные задачи карточки человека (PR-32)
+      await b.createQueue('notes.archive_scan', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('documents.expiry_scan', { retryLimit: 2, expireInSeconds: 900 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -98,6 +101,9 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('review.stats_rollup', '40 3 * * *', {}, { singletonKey: 'review.stats_rollup', tz: 'Europe/Kyiv' })
       // Библиотека модулей (docs/v2/31 §11): сверка мест использования ежедневно в 03:20
       await b.schedule('library.usage_recalc', '20 3 * * *', {}, { singletonKey: 'library.usage_recalc', tz: 'Europe/Kyiv' })
+      // Карточка человека (docs/v2/38 §11): архив заметок в 02:00, сроки документов в 06:00
+      await b.schedule('notes.archive_scan', '0 2 * * *', {}, { singletonKey: 'notes.archive_scan', tz: 'Europe/Kyiv' })
+      await b.schedule('documents.expiry_scan', '0 6 * * *', {}, { singletonKey: 'documents.expiry_scan', tz: 'Europe/Kyiv' })
       return b
     })
   }

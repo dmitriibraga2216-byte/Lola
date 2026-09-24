@@ -148,6 +148,16 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
       <NuxtLink to="/learn/shop" class="btn primary small">{{ t('bonuses.shop') }}</NuxtLink>
     </div>
 
+    <!-- Своя карточка (docs/v2/38 §5.1, §7.4): счётчик всех заметок и текст только открытых мне;
+         свои документы и загрузка себе типов self_upload. У кандидата этих блоков нет -->
+    <template v-if="me?.user.kind === 'employee'">
+      <h2 class="section-title">{{ t('profile.myRecords') }}</h2>
+      <div class="records">
+        <PersonNotes :person-id="me.user.id" />
+        <PersonDocuments :person-id="me.user.id" />
+      </div>
+    </template>
+
     <h2 class="section-title">{{ t('profile.more') }}</h2>
     <div class="links">
       <NuxtLink to="/learn/notifications" class="row-link">{{ t('notif.title') }}</NuxtLink>
@@ -190,6 +200,7 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
 </template>
 
 <style scoped>
+.records { display: grid; gap: var(--space-3); }
 .head { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-2) 0 var(--space-4); }
 .name { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: -0.01em; }
 .sub { margin: 2px 0 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }

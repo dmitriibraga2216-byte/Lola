@@ -5,6 +5,7 @@ import { dueScanTenant } from '../jobs/dueScanTenant'
 import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs/candidateScan'
 import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
 import { shopReserveExpireTenant } from '../jobs/shopReserveExpire'
+import { documentsExpiryScan, notesArchiveScanTenant } from '../jobs/personRecordsScan'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
 import { expandAssignment, syncAssignments } from '../services/assignments'
@@ -120,6 +121,16 @@ export default defineNitroPlugin(async () => {
       const { usageRecalc } = await import('../services/libraryUsages')
       const s = await usageRecalc(tenantId)
       if (s.detached || s.staleFixed || s.countsFixed) console.log(`[library.usage_recalc] ${tenantId}:`, s)
+    }))
+    // docs/v2/38 §11: карточка человека — архив заметок по сроку хранения (§7.6) и сроки
+    // документов с уведомлениями человеку, руководителю точки и HR (§4, §8)
+    await work('notes.archive_scan', () => runPerTenant('notes.archive_scan', async (tenantId) => {
+      const n = await notesArchiveScanTenant(tenantId)
+      if (n) console.log(`[notes.archive_scan] ${tenantId}: в архиве ${n}`)
+    }))
+    await work('documents.expiry_scan', () => runPerTenant('documents.expiry_scan', async (tenantId) => {
+      const s = await documentsExpiryScan(tenantId)
+      if (s.expiring || s.expired || s.notified) console.log(`[documents.expiry_scan] ${tenantId}:`, s)
     }))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {

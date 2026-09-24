@@ -33,8 +33,8 @@ jobs:
       S3_ENDPOINT: http://localhost:9000
       S3_REGION: us-east-1
       S3_BUCKET: lola-media
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: ci-access-key
+      S3_SECRET_KEY: ci-secret-key
 
     steps:
       - uses: actions/checkout@v4
@@ -61,22 +61,34 @@ jobs:
       - name: Сквозные проверки docs/v2
         run: scripts/v2-crosschecks.sh
 
-      # MinIO для тестов S3 (PDF сертификата, медиа): у образа quay нет команды по умолчанию, поэтому не через services
-      - name: MinIO
+      # Хранилище S3 для тестов (медиа, PDF сертификата, выгрузки отчётов).
+      #
+      # Почему не MinIO — чтобы следующий не «вернул как было»: 24.09.2026 образ пропал
+      # отовсюду разом. quay.io/minio/minio отдаёт анонимным клиентам 401 на любой тег,
+      # включая latest и наш пин RELEASE.2024-12-18T13-15-44Z; на Docker Hub репозитория
+      # minio/minio больше нет (404); прямая загрузка бинарника с dl.min.io — 410 Gone.
+      # Запасной реестр тут не помогает: образа нет ни по одному адресу, нужна замена.
+      #
+      # adobe/s3mock — S3-совместимый сервер для тестов. Проверено прогоном тех спек,
+      # что реально ходят в хранилище (v2-media-storage, debts-2, debts-8, attempts,
+      # spec22-reports, reports-scope, tenancy, extract-tenant): он держит весь набор,
+      # который нужен приложению, — presigned PUT и GET (SigV4, X-Amz-Expires,
+      # переопределение response-content-type/disposition для SVG, D-011), PutObject
+      # и GetObject с aws-chunked телом от AWS SDK v3, HeadObject, HeadBucket/CreateBucket,
+      # постраничный ListObjectsV2 и массовый DeleteObjects (purge тенанта, docs/25 §8).
+      # Multipart-загрузки в коде нет — ни один сервис не берёт @aws-sdk/lib-storage.
+      # Приложение подмены не видит: S3_* прежние, порт 9000 прежний, path-style прежний.
+      # Ключи не проверяются — S3_ACCESS_KEY/S3_SECRET_KEY здесь просто заполнены.
+      #
+      # Прод (docker/docker-compose.prod.yml) и демо-стенд (docker-compose.demo.yml)
+      # ссылаются на тот же недоступный образ MinIO — решение по ним принимает владелец
+      # продукта (HANDOFF §6), риск записан в docs/v2/46-progress.md.
+      - name: S3 для тестов (adobe/s3mock вместо MinIO — см. комментарий выше)
         run: |
-          # quay.io периодически отдаёт анонимным клиентам 401 (24.09.2026 — все ветки разом);
-          # тот же образ лежит на docker.io, поэтому тянем с запасным адресом, а не падаем.
-          tag=RELEASE.2024-12-18T13-15-44Z
-          image=""
-          for src in quay.io/minio/minio docker.io/minio/minio; do
-            for attempt in 1 2 3; do
-              if docker pull "$src:$tag"; then image="$src:$tag"; break 2; fi
-              sleep $((attempt * 5))
-            done
-          done
-          test -n "$image" || { echo "::error::не удалось получить образ MinIO ни с quay.io, ни с docker.io"; exit 1; }
-          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin "$image" server /data
-          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
+          docker run -d --name s3 -p 9000:9090 adobe/s3mock:5.2.3
+          for i in $(seq 1 60); do curl -sf http://localhost:9000/ >/dev/null && break; sleep 1; done
+          # Бакет заводится явно, тем же именем, что в S3_BUCKET; заодно это и проверка живости
+          curl -sf -o /dev/null -X PUT "http://localhost:9000/$S3_BUCKET"
 
       # Mailpit для тестов почты (OTP на e-mail, SMTP тенанта): порт 1025, как в docker/docker-compose.yml
       - name: Mailpit
@@ -144,8 +156,8 @@ jobs:
       S3_ENDPOINT: http://localhost:9000
       S3_REGION: us-east-1
       S3_BUCKET: lola-media
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: ci-access-key
+      S3_SECRET_KEY: ci-secret-key
 
     steps:
       - uses: actions/checkout@v4
@@ -161,21 +173,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: MinIO
+      # S3 для тестов — adobe/s3mock, не MinIO. Почему именно так и что проверено —
+      # в развёрнутом комментарии к такому же шагу в джобе `ci` выше.
+      - name: S3 для тестов (adobe/s3mock вместо MinIO)
         run: |
-          # quay.io периодически отдаёт анонимным клиентам 401 (24.09.2026 — все ветки разом);
-          # тот же образ лежит на docker.io, поэтому тянем с запасным адресом, а не падаем.
-          tag=RELEASE.2024-12-18T13-15-44Z
-          image=""
-          for src in quay.io/minio/minio docker.io/minio/minio; do
-            for attempt in 1 2 3; do
-              if docker pull "$src:$tag"; then image="$src:$tag"; break 2; fi
-              sleep $((attempt * 5))
-            done
-          done
-          test -n "$image" || { echo "::error::не удалось получить образ MinIO ни с quay.io, ни с docker.io"; exit 1; }
-          docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin "$image" server /data
-          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
+          docker run -d --name s3 -p 9000:9090 adobe/s3mock:5.2.3
+          for i in $(seq 1 60); do curl -sf http://localhost:9000/ >/dev/null && break; sleep 1; done
+          curl -sf -o /dev/null -X PUT "http://localhost:9000/$S3_BUCKET"
 
       - name: Migrate + сид
         run: |

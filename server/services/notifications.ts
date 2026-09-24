@@ -781,7 +781,14 @@ export async function listNotifications(ctx: { tenantId: string, actorId: string
   })
 }
 
+/**
+ * Тенанты с уведомлениями к отправке — источник круга `notification.dispatch`.
+ *
+ * Не `select distinct tenant_id from notifications`: таблица под RLS, и с общего соединения без
+ * `app.tenant_id` запрос видит ноль строк — круг не обслуживал никого, очередь не разбиралась
+ * (найдено 24.09.2026). Функция `SECURITY DEFINER` (миграция 0079) отдаёт только идентификаторы.
+ */
 export async function tenantsWithQueued(): Promise<string[]> {
-  const rows = await db.execute(sql`select distinct tenant_id from notifications where status = 'queued' and scheduled_for <= now()`)
+  const rows = await db.execute(sql`select tenant_id from tenants_with_queued_notifications()`)
   return (rows as unknown as { tenant_id: string }[]).map(r => r.tenant_id)
 }

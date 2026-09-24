@@ -156,7 +156,14 @@ export async function retryDelivery(ctx: Ctx, deliveryId: string) {
   })
 }
 
+/**
+ * Тенанты с доставками, чей срок наступил, — источник круга `webhook.deliver`.
+ *
+ * Не `select distinct tenant_id from webhook_deliveries`: таблица под RLS, и с общего соединения
+ * без `app.tenant_id` запрос видит ноль строк — вебхуки не уходили ни у кого (найдено 24.09.2026).
+ * Функция `SECURITY DEFINER` (миграция 0079) отдаёт только идентификаторы.
+ */
 export async function tenantsWithPendingWebhooks(): Promise<string[]> {
-  const rows = await db.execute(sql`select distinct tenant_id from webhook_deliveries where status = 'pending' and next_attempt_at <= now()`)
+  const rows = await db.execute(sql`select tenant_id from tenants_with_pending_webhooks()`)
   return (rows as unknown as { tenant_id: string }[]).map(r => r.tenant_id)
 }

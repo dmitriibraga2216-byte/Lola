@@ -1119,10 +1119,16 @@ export async function lessonQuizId(ctx: Ctx, lessonId: string): Promise<string |
   })
 }
 
-/** Тенанты с активными попытками — для фоновой задачи. */
+/**
+ * Тенанты с попытками `in_progress` — источник круга `attempt.expire`.
+ *
+ * Не `select distinct tenant_id from attempts`: таблица под RLS, и с общего соединения без
+ * `app.tenant_id` запрос видит ноль строк — просроченные попытки не закрывались ни у кого
+ * (найдено 24.09.2026). Функция `SECURITY DEFINER` (миграция 0079) отдаёт только идентификаторы.
+ */
 export async function tenantsWithActiveAttempts(): Promise<string[]> {
   const { db } = await import('../db/client')
-  const rows = await db.execute(sql`select distinct tenant_id from attempts where status = 'in_progress'`)
+  const rows = await db.execute(sql`select tenant_id from tenants_with_active_attempts()`)
   return (rows as unknown as { tenant_id: string }[]).map(r => r.tenant_id)
 }
 

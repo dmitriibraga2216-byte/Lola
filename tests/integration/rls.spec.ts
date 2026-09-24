@@ -80,8 +80,10 @@ describe('полнота RLS', () => {
 })
 
 describe('изоляция тенантов', () => {
-  it('роль приложения не имеет BYPASSRLS', async () => {
-    const [role] = await app`select rolbypassrls from pg_roles where rolname = current_user`
+  it('роль приложения не суперпользователь и не имеет BYPASSRLS', async () => {
+    // Суперпользователь обходит RLS и с NOBYPASSRLS — одного rolbypassrls мало
+    const [role] = await app`select rolsuper, rolbypassrls from pg_roles where rolname = current_user`
+    expect(role!.rolsuper).toBe(false)
     expect(role!.rolbypassrls).toBe(false)
   })
 

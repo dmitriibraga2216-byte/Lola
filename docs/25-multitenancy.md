@@ -108,6 +108,17 @@ export async function withTenant<T>(
 Очередь общая, но с ключом справедливости: один тенант с 5000 уведомлений не должен
 задерживать остальных — берём партиями по тенантам по кругу (round-robin) `[решение]`.
 
+Список тенантов для круга берётся либо из платформенной таблицы `tenants` (все работающие),
+либо из функции `SECURITY DEFINER`, которая отдаёт только идентификаторы тенантов с работой
+(`tenants_with_queued_notifications()`, `tenants_with_active_attempts()`,
+`tenants_with_pending_webhooks()`). Запрещено строить его запросом к таблице с `tenant_id`
+через общее соединение вне `withTenant()`: без `app.tenant_id` политика RLS не пропускает ни
+одной строки, запрос не падает, а возвращает пустой список — и круг не обслуживает никого.
+Проверяется `tests/integration/job-tenant-sources.spec.ts` (источники под ролью `app_user`) и
+сторожем `tests/unit/shared-db-guard.spec.ts` (общее соединение не касается таблиц с
+`tenant_id`). `[добавлено 25.09.2026: так с 19.09 не работали notification.dispatch,
+attempt.expire и webhook.deliver]`
+
 ## 6. Изоляция в приложении
 
 | Слой | Что обязано |

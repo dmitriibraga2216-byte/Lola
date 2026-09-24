@@ -589,6 +589,13 @@
       "when": 1790234220000,
       "tag": "0085_v2_time_norms",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1790234280000,
+      "tag": "0086_v2_vacancy_publish",
+      "breakpoints": true
     }
   ]
 }

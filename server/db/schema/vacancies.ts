@@ -5,6 +5,7 @@ import { tenants } from './tenants'
 import { users } from './people'
 import { locations, orgUnits, positions } from './org'
 import { courseCategories, courseVersions, courses, mediaAssets } from './content'
+import { tenantSecrets } from './platform'
 
 /**
  * Вакансии (docs/v2/29-vacancies.md §3, миграции 0071_v2_vacancies, 0072_v2_users_vacancy_fk).
@@ -113,6 +114,13 @@ export const vacancies = pgTable('vacancies', {
   /** Одно из `VACANCY_CLOSE_REASONS`; текст — в `audit_log` перехода. */
   closeReason: text('close_reason'),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * Всплеск блокировок публичной формы (`29` §7.8, PR-17): пока это поле в будущем — лимиты
+   * §7.4 для вакансии удвоены. Не пересчитывается на лету из `public_apply_attempts` — окно
+   * из шести часов должно помнить **момент обнаружения** всплеска, а не гаснуть от того, что
+   * скользящее окно в час опустело раньше него.
+   */
+  spamHardenedUntil: timestamp('spam_hardened_until', { withTimezone: true }),
 }, t => [
   unique('vacancies_tenant_id_public_token_unique').on(t.tenantId, t.publicToken),
   index('idx_vacancies_tenant').on(t.tenantId, t.state, t.updatedAt.desc()),
@@ -268,4 +276,105 @@ export const publicApplyAttempts = pgTable('public_apply_attempts', {
   index('idx_public_apply_attempts_tenant').on(t.tenantId, t.ipHash, t.createdAt.desc()),
   index('idx_public_apply_attempts_vacancy').on(t.tenantId, t.vacancyId, t.createdAt.desc()),
   check('public_apply_attempts_outcome_chk', sql`${t.outcome} in ('view', 'submit_ok', 'submit_blocked', 'otp_sent', 'otp_failed')`),
+])
+
+/**
+ * Аккаунт внешней площадки (`29` §3.7, план `45` PR-17).
+ *
+ * Три уровня владения — `company` (переживает увольнение любого сотрудника), `personal`
+ * (свой оплаченный доступ пользователя), `recruiter` (завела HR на конкретного рекрутера) —
+ * технически одна строка с `ownerUserId`; различает их то, кто ею распоряжается (§7.14).
+ *
+ * **Реальные аккаунты площадок не заводятся** (`v2/HANDOFF` §6): `secretRef` указывает на
+ * строку `tenant_secrets` с собственным `key = jobboard:<id аккаунта>` (не пересекается с
+ * `SECRET_KEYS.telegram` бота напоминаний — та же таблица, разные ключи), а значение в ней —
+ * токен детерминированной заглушки-адаптера (`server/services/jobBoardAdapter.ts`), а не
+ * секрет вендора.
+ */
+export const jobBoardAccounts = pgTable('job_board_accounts', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  /** Одно из `JOB_BOARD_PROVIDERS`. */
+  provider: text('provider').notNull(),
+  /** Одно из `JOB_BOARD_OWNER_TYPES`. */
+  ownerType: text('owner_type').notNull(),
+  ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+  label: text('label'),
+  /** Одно из `JOB_BOARD_ACCOUNT_STATUSES`. */
+  status: text('status').notNull().default('not_connected'),
+  secretRef: uuid('secret_ref').references(() => tenantSecrets.id, { onDelete: 'set null' }),
+  scopes: text('scopes').array().notNull().default(sql`'{}'::text[]`),
+  lastOkAt: timestamp('last_ok_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  connectedBy: uuid('connected_by').references(() => users.id, { onDelete: 'set null' }),
+  connectedAt: timestamp('connected_at', { withTimezone: true }),
+}, t => [
+  uniqueIndex('uq_job_board_accounts_owner').on(t.tenantId, t.provider, t.ownerType, sql`coalesce(${t.ownerUserId}, '00000000-0000-0000-0000-000000000000'::uuid)`),
+  index('idx_job_board_accounts_tenant').on(t.tenantId, t.provider, t.status),
+  check('job_board_accounts_provider_chk', sql`${t.provider} in ('work_ua', 'robota_ua', 'telegram')`),
+  check('job_board_accounts_owner_chk', sql`${t.ownerType} in ('company', 'personal', 'recruiter')`),
+  check('job_board_accounts_coherence_chk', sql`(${t.ownerType} = 'company' and ${t.ownerUserId} is null) or (${t.ownerType} <> 'company' and ${t.ownerUserId} is not null)`),
+  check('job_board_accounts_status_chk', sql`${t.status} in ('not_connected', 'connecting', 'active', 'failing', 'revoked', 'disabled')`),
+])
+
+/**
+ * Журнал публикаций (`29` §3.8, §4, §7.13–§7.17).
+ *
+ * > [исправлено, PR-17: `44` §8 предписывает рекрутеру публиковать вручную и вставлять
+ * > ссылку — состоянию нужно имя] Добавлено `manual` к перечню state из документа (см.
+ * > пометку у `VACANCY_PUBLICATION_STATES`, `shared/enums.ts`). Строка `manual` не несёт
+ * > `externalId`, обязательного для `update()`/`remove()` адаптера, и фоновые задачи её не
+ * > трогают — обходной путь `44` §8 живёт здесь, а не отдельной таблицей.
+ */
+export const vacancyPublications = pgTable('vacancy_publications', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  vacancyId: uuid('vacancy_id').notNull().references(() => vacancies.id, { onDelete: 'cascade' }),
+  accountId: uuid('account_id').notNull().references(() => jobBoardAccounts.id, { onDelete: 'restrict' }),
+  /** Одно из `VACANCY_PUBLICATION_STATES`. */
+  state: text('state').notNull().default('queued'),
+  externalId: text('external_id'),
+  externalUrl: text('external_url'),
+  payloadHash: text('payload_hash'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  removedAt: timestamp('removed_at', { withTimezone: true }),
+  attempts: integer('attempts').notNull().default(0),
+  lastErrorCode: text('last_error_code'),
+  lastError: text('last_error'),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id),
+}, t => [
+  /** Не более одной активной публикации той же вакансии в тот же аккаунт (§7.17). */
+  uniqueIndex('uq_vacancy_publications_active').on(t.tenantId, t.vacancyId, t.accountId)
+    .where(sql`${t.state} in ('queued', 'publishing', 'active', 'conflict', 'manual')`),
+  index('idx_vacancy_publications_tenant').on(t.tenantId, t.vacancyId, t.state),
+  check('vacancy_publications_state_chk', sql`${t.state} in ('queued', 'publishing', 'active', 'failed', 'removed', 'expired', 'conflict', 'manual')`),
+])
+
+/**
+ * Журнал ИИ-генераций текста и критериев (`29` §3.10, §7.10–§7.11).
+ *
+ * Списывает `ai_generate_ops` (`ops_charged`) **после успеха**, в той же транзакции, что и
+ * `recordUsage()` (`server/services/usageCounters.ts`) — провалившийся по вине заглушки
+ * вызов операцию не тратит (§7.10, критерий §13 к. 10). `input` — то, что реально ушло
+ * «модели»: без вилки зарплаты, контактов, названия курса и критериев оценки (§7.10).
+ */
+export const vacancyAiGenerations = pgTable('vacancy_ai_generations', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  vacancyId: uuid('vacancy_id').references(() => vacancies.id, { onDelete: 'cascade' }),
+  /** Одно из `VACANCY_AI_GENERATION_TARGETS`. */
+  target: text('target').notNull(),
+  input: jsonb('input').notNull(),
+  outputChars: integer('output_chars'),
+  model: text('model'),
+  opsCharged: integer('ops_charged').notNull().default(1),
+  /** Одно из `VACANCY_AI_GENERATION_STATUSES`. */
+  status: text('status').notNull().default('ok'),
+  errorCode: text('error_code'),
+  authorId: uuid('author_id').notNull().references(() => users.id),
+}, t => [
+  index('idx_vacancy_ai_generations_tenant').on(t.tenantId, t.createdAt.desc()),
+  check('vacancy_ai_generations_target_chk', sql`${t.target} in ('description', 'requirements', 'duties', 'extra', 'criteria')`),
+  check('vacancy_ai_generations_status_chk', sql`${t.status} in ('ok', 'failed', 'limited')`),
 ])

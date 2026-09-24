@@ -350,6 +350,24 @@ export function eventClassOf(code: string): keyof NotificationSchedule | null {
   return null
 }
 
+/**
+ * Держатели ролей `admin`/`owner` тенанта — адресат уведомлений «адміну» (`limitNotices.ts`,
+ * `docs/v2/29` §8, PR-17). `[решение]` (`docs/v2/46-progress.md`, запись PR-17): в `SYSTEM_ROLES`
+ * (`shared/domain/roles.ts`) нет отдельного кода роли «HR» — только `employee`, `mentor`,
+ * `manager`, `author`, `admin`, `owner`, «HR» и «Рекрутер» из документов пакета — кастомные
+ * роли тенанта со своим набором скоупов. Везде, где документ называет адресатом «HR», этой
+ * функцией берётся `admin`/`owner`; кастомная роль со скоупом действия получит уведомление,
+ * когда для неё завести отдельный путь — без миграции, отдельным PR.
+ */
+export async function tenantAdminIds(tx: TenantTx, tenantId: string): Promise<string[]> {
+  const rows = await tx.execute(sql`
+    select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
+    where ur.tenant_id = ${tenantId}::uuid and r.code in ('admin', 'owner') and (ur.valid_until is null or ur.valid_until > now())
+      and a.status = 'active' and not a.is_blocked ${EMPLOYEES_ONLY('a')}
+  `) as unknown as { user_id: string }[]
+  return rows.map(r => r.user_id)
+}
+
 export interface EnqueueInput {
   tenantId: string
   userId: string

@@ -13,6 +13,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'vac
 
 const { t } = useI18n()
 const { api } = useApi()
+const route = useRoute()
 
 interface Row {
   id: string
@@ -25,14 +26,23 @@ interface Row {
   createdAt: string
 }
 interface Template { id: string, name: string, usageCount: number }
+interface Account { id: string, provider: string, ownerType: string, ownerName: string | null, label: string | null, status: string }
 
 const rows = ref<Row[]>([])
 const templates = ref<Template[]>([])
-const tab = ref<'vacancies' | 'templates'>('vacancies')
+const accounts = ref<Account[]>([])
+const tab = ref<'vacancies' | 'templates' | 'integrations'>(route.query.tab === 'integrations' ? 'integrations' : 'vacancies')
 const q = ref('')
 const state = ref<'' | VacancyState>('')
 const error = ref('')
 const busy = ref(false)
+
+const connectForm = reactive({ provider: 'work_ua' as 'work_ua' | 'robota_ua' | 'telegram', ownerType: 'company' as 'company' | 'personal' | 'recruiter', label: '' })
+
+async function loadAccounts() {
+  try { accounts.value = (await api<{ items: Account[] }>('/job-board-accounts')).items }
+  catch { accounts.value = [] }
+}
 
 async function load() {
   error.value = ''
@@ -47,8 +57,32 @@ async function load() {
   }
   catch (err) { error.value = apiErrorOf(err).message }
   finally { busy.value = false }
+  await loadAccounts()
 }
 onMounted(load)
+
+/** Підключення (docs/v2/29 §7.14): синхронне, заглушка не робить мережевого виклику. */
+async function connectAccount() {
+  error.value = ''
+  busy.value = true
+  try {
+    await api('/job-board-accounts', { method: 'POST', body: { ...connectForm, label: connectForm.label || null } })
+    connectForm.label = ''
+    await loadAccounts()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+
+async function disconnectAccount(id: string) {
+  busy.value = true
+  try {
+    await api(`/job-board-accounts/${id}/disconnect`, { method: 'POST' })
+    await loadAccounts()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
 
 const router = useRouter()
 
@@ -97,6 +131,9 @@ const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ?
       <button role="tab" :aria-selected="tab === 'templates'" :class="['tab', { on: tab === 'templates' }]" @click="tab = 'templates'">
         {{ t('vacancies.tab.templates') }}
       </button>
+      <button role="tab" :aria-selected="tab === 'integrations'" :class="['tab', { on: tab === 'integrations' }]" @click="tab = 'integrations'">
+        {{ t('vacancies.tab.integrations') }}
+      </button>
     </div>
 
     <div v-if="tab === 'vacancies'" class="filters">
@@ -142,7 +179,7 @@ const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ?
       </table>
     </section>
 
-    <section v-else class="panel">
+    <section v-else-if="tab === 'templates'" class="panel">
       <table class="table">
         <thead>
           <tr>
@@ -165,6 +202,49 @@ const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ?
         </tbody>
       </table>
     </section>
+
+    <section v-else class="panel">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{ t('vacancies.pub.account') }}</th>
+            <th>{{ t('vacancies.integrations.ownerType') }}</th>
+            <th>{{ t('vacancies.col.state') }}</th>
+            <th><span class="sr-only">{{ t('vacancies.integrations.disconnect') }}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="a in accounts" :key="a.id">
+            <td>{{ t(`vacancy.jobBoardProvider.${a.provider}`) }}{{ a.label ? ` — ${a.label}` : '' }}</td>
+            <td>{{ t(`vacancy.jobBoardOwnerType.${a.ownerType}`) }}{{ a.ownerName ? ` (${a.ownerName})` : '' }}</td>
+            <td>{{ t(`vacancy.jobBoardStatus.${a.status}`) }}</td>
+            <td>
+              <button v-if="a.status !== 'disabled' && a.status !== 'revoked'" class="btn ghost" type="button" :disabled="busy" @click="disconnectAccount(a.id)">
+                {{ t('vacancies.integrations.disconnect') }}
+              </button>
+            </td>
+          </tr>
+          <tr v-if="!accounts.length"><td colspan="4" class="sub">{{ t('vacancies.integrations.empty') }}</td></tr>
+        </tbody>
+      </table>
+
+      <form class="grid connect-form" @submit.prevent="connectAccount">
+        <label>{{ t('vacancies.integrations.provider') }}
+          <select v-model="connectForm.provider">
+            <option v-for="p in (['work_ua', 'robota_ua', 'telegram'] as const)" :key="p" :value="p">{{ t(`vacancy.jobBoardProvider.${p}`) }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.pub.account') }}
+          <select v-model="connectForm.ownerType">
+            <option v-for="o in (['company', 'personal', 'recruiter'] as const)" :key="o" :value="o">{{ t(`vacancy.jobBoardOwnerType.${o}`) }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.integrations.label') }}
+          <input v-model="connectForm.label" maxlength="120">
+        </label>
+        <button class="btn primary" type="submit" :disabled="busy">{{ t('vacancies.integrations.connect') }}</button>
+      </form>
+    </section>
   </div>
 </template>
 
@@ -174,6 +254,8 @@ const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ?
 .tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { color: var(--color-ink); border-color: var(--color-ink); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-2); }
+.connect-form { align-items: end; margin-top: var(--space-3); }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--color-bg-line); }
 .badge { display: inline-block; padding: var(--space-1) var(--space-2); border-radius: var(--radius-pill); }
@@ -185,5 +267,6 @@ const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ?
 @media (max-width: 480px) {
   .filters { flex-direction: column; align-items: stretch; }
   .panel { overflow-x: auto; }
+  .grid { grid-template-columns: 1fr; }
 }
 </style>

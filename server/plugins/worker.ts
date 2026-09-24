@@ -6,6 +6,8 @@ import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs
 import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
 import { shopReserveExpireTenant } from '../jobs/shopReserveExpire'
 import { documentsExpiryScan, notesArchiveScanTenant } from '../jobs/personRecordsScan'
+import { vacancyPublicationHealthTenant, vacancySpamWatchTenant } from '../jobs/vacancyPublish'
+import { attemptPublish } from '../services/vacancyPublications'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
 import { expandAssignment, syncAssignments } from '../services/assignments'
@@ -132,6 +134,17 @@ export default defineNitroPlugin(async () => {
       const s = await documentsExpiryScan(tenantId)
       if (s.expiring || s.expired || s.notified) console.log(`[documents.expiry_scan] ${tenantId}:`, s)
     }))
+    // docs/v2/29 §11 (PR-17): публикация и генерация текста. Ретрай — по событию на строку
+    // публикации (`enqueuePublishRetry`), здоровье аккаунтов и всплеск — сканы по тенантам.
+    await perTenant<{ tenantId: string, publicationId: string }>('vacancy.publish_retry', data => attemptPublish(data.tenantId, data.publicationId))
+    await work('vacancy.publication_health', () => runPerTenant('vacancy.publication_health', async (tenantId) => {
+      const n = await vacancyPublicationHealthTenant(tenantId)
+      if (n) console.log(`[vacancy.publication_health] ${tenantId}: перевірено акаунтів ${n}`)
+    }, recruitingTenantIds))
+    await work('vacancy.spam_watch', () => runPerTenant('vacancy.spam_watch', async (tenantId) => {
+      const n = await vacancySpamWatchTenant(tenantId)
+      if (n) console.log(`[vacancy.spam_watch] ${tenantId}: посилено вакансій ${n}`)
+    }, recruitingTenantIds))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

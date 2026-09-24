@@ -20,7 +20,8 @@
     "confirmDelete": "Delete? This cannot be undone",
     "search": "Search",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "actions": "Actions"
   },
   "login": {
     "phoneLabel": "Phone number",
@@ -5265,7 +5266,8 @@
     },
     "tab": {
       "vacancies": "Vacancies",
-      "templates": "Templates"
+      "templates": "Templates",
+      "integrations": "Integrations"
     },
     "tpl": {
       "name": "Template name",
@@ -5277,6 +5279,7 @@
     },
     "sec": {
       "main": "About the vacancy",
+      "blocks": "Vacancy texts",
       "template": "Assignment parameters",
       "criteria": "Candidate criteria"
     },
@@ -5299,6 +5302,49 @@
       "min": "Scale min",
       "max": "Scale max",
       "empty": "No criteria yet"
+    },
+    "ai": {
+      "generate": "Create with AI",
+      "generating": "Generating…",
+      "unreviewed": "Review the generated text before publishing",
+      "acknowledge": "Text reviewed",
+      "criteriaGenerate": "Generate criteria (AI)",
+      "criteriaDraftHint": "Draft — review and add the criteria you need",
+      "addDraft": "Add",
+      "limitExceeded": "AI operations limit reached. Remaining: 0"
+    },
+    "pub": {
+      "title": "Publications",
+      "empty": "Not published on any board yet",
+      "account": "Account",
+      "publish": "Publish",
+      "manualTitle": "Add a link manually",
+      "manualUrl": "Link to the posting",
+      "removeAction": "Remove",
+      "linkExternal": "Link",
+      "noAccounts": "No integrations connected",
+      "goIntegrations": "Go to the Integrations tab"
+    },
+    "integrations": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "provider": "Job board",
+      "ownerType": "Owned by",
+      "label": "Label (optional)",
+      "empty": "No accounts connected"
+    },
+    "applications": {
+      "title": "Applications",
+      "empty": "No applications yet",
+      "accept": "Accept",
+      "reject": "Reject",
+      "spam": "Mark as spam",
+      "name": "Name",
+      "contact": "Contact",
+      "source": "Source",
+      "received": "Received",
+      "resume": "Resume",
+      "reasons": "Flags"
     }
   },
   "vacancy": {
@@ -5357,6 +5403,43 @@
       "requirements": "Requirements",
       "duties": "Responsibilities",
       "extra": "Additional"
+    },
+    "applicationState": {
+      "pending": "New",
+      "pending_review": "In review",
+      "accepted": "Accepted",
+      "merged": "Already a candidate",
+      "rejected": "Rejected",
+      "spam": "Spam",
+      "expired": "Expired"
+    },
+    "jobBoardProvider": {
+      "work_ua": "Work.ua",
+      "robota_ua": "Robota.ua",
+      "telegram": "Telegram"
+    },
+    "jobBoardOwnerType": {
+      "company": "Company",
+      "personal": "Personal",
+      "recruiter": "Recruiter"
+    },
+    "jobBoardStatus": {
+      "not_connected": "Not connected",
+      "connecting": "Connecting…",
+      "active": "Connected",
+      "failing": "Failing",
+      "revoked": "Revoked",
+      "disabled": "Disabled"
+    },
+    "publicationState": {
+      "queued": "Queued",
+      "publishing": "Publishing",
+      "active": "Active",
+      "failed": "Failed",
+      "removed": "Removed",
+      "expired": "Expired",
+      "conflict": "Conflict",
+      "manual": "Manual"
     }
   },
   "apply": {

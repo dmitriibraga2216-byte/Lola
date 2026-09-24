@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { assignmentParamsSchema, remindersSchema } from './assignments'
 import {
+  JOB_BOARD_OWNER_TYPES, JOB_BOARD_PROVIDERS,
   VACANCY_CLOSE_REASONS, VACANCY_CRITERION_ORIGINS, VACANCY_EDUCATION_LEVELS,
   VACANCY_EMPLOYMENT_TYPES, VACANCY_EXPERIENCE_LEVELS, VACANCY_LANGUAGE_LEVELS,
   VACANCY_STATES, VACANCY_WORK_FORMATS,
@@ -243,3 +244,68 @@ export const vacancyFromTemplateSchema = z
   .strict()
 
 export type VacancyFromTemplateInput = z.infer<typeof vacancyFromTemplateSchema>
+
+// ── Публикация и генерация текста (`29` §3.6–§3.10, §6.1, §10, план `45` PR-17) ───────────
+
+/**
+ * Подключение аккаунта площадки (`29` §3.7, §7.14, §10 `POST /job-board-accounts`).
+ * `ownerUserId` обязателен для `recruiter` (HR/админ называют, чей это кабинет), для
+ * `personal` сервис берёт текущего пользователя, если поле не пришло, для `company` —
+ * обнуляет пришедшее значение: право распоряжаться проверяет сервис (§7.14), не схема.
+ */
+export const jobBoardAccountCreateSchema = z
+  .object({
+    provider: z.enum(JOB_BOARD_PROVIDERS),
+    ownerType: z.enum(JOB_BOARD_OWNER_TYPES),
+    ownerUserId: z.string().uuid().nullable().optional(),
+    label: z.string().trim().max(120).nullable().optional(),
+  })
+  .strict()
+
+export type JobBoardAccountCreateInput = z.infer<typeof jobBoardAccountCreateSchema>
+
+/**
+ * Публикация на площадках (`29` §7.13, §10 `POST /vacancies/:id/publications`).
+ *
+ * `accountIds` — путь через адаптер (подключённые аккаунты, статус `active`), `manual` —
+ * обходной путь `44` §8: рекрутер уже опублікував об'яву сам і вставляє готове посилання,
+ * без жодного звернення до площадки. `confirm: true` — подтверждающее действие (§7.13):
+ * без него запрос отклоняется, а не молча выполняется с значением по умолчанию.
+ */
+export const vacancyPublicationCreateSchema = z
+  .object({
+    confirm: z.literal(true),
+    accountIds: z.array(z.string().uuid()).max(10).optional(),
+    manual: z
+      .object({
+        accountId: z.string().uuid(),
+        externalUrl: z.string().trim().min(3).max(2000),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine(v => (v.accountIds?.length ?? 0) > 0 || !!v.manual, { message: 'Оберіть майданчик' })
+
+export type VacancyPublicationCreateInput = z.infer<typeof vacancyPublicationCreateSchema>
+
+/** Привязка существующего объявления при конфликте (`29` §7.17, §10 `.../publications/:pid/link-external`). */
+export const vacancyPublicationLinkExternalSchema = z
+  .object({ externalId: z.string().trim().min(1).max(200) })
+  .strict()
+
+export type VacancyPublicationLinkExternalInput = z.infer<typeof vacancyPublicationLinkExternalSchema>
+
+/**
+ * Генерация текста блока (`29` §7.10, §10 `POST /vacancies/:id/ai-text`). `criteria` сюда не
+ * входит — у черновика критериев отдельная ручка без входа (`/criteria/generate`, §7.11).
+ */
+export const VACANCY_AI_TEXT_TARGETS = ['description', 'requirements', 'duties', 'extra'] as const
+export const vacancyAiTextRequestSchema = z
+  .object({
+    target: z.enum(VACANCY_AI_TEXT_TARGETS),
+    tone: z.string().trim().max(60).nullable().optional(),
+  })
+  .strict()
+
+export type VacancyAiTextRequestInput = z.infer<typeof vacancyAiTextRequestSchema>

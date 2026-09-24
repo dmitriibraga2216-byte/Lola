@@ -1,6 +1,7 @@
-import { createHmac, randomInt, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
+import { PutObjectCommand } from '@aws-sdk/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { publicApplyAttempts, users, vacancies, vacancyApplications, vacancyLanguages } from '../db/schema'
+import { mediaAssets, publicApplyAttempts, users, vacancies, vacancyApplications, vacancyLanguages } from '../db/schema'
 import { db } from '../db/client'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -8,7 +9,7 @@ import {
   PUBLIC_CONSENT_TEXT_VERSION, VACANCY_APPLY_EXPIRE_HOURS, VACANCY_APPLY_LIMITS,
   VACANCY_APPLY_OTP_SENDS_PER_HOUR, VACANCY_APPLY_OTP_TTL_SEC, VACANCY_APPLY_REVIEW_SCORE,
   VACANCY_APPLY_SPAM_SCORE, VACANCY_APPLY_SPAM_SCORES, VACANCY_NONCE_MIN_SEC,
-  VACANCY_NONCE_TTL_SEC,
+  VACANCY_NONCE_TTL_SEC, VACANCY_SPAM_BURST_HARDEN_DIVISOR,
 } from '../../shared/enums'
 import type { VacancyApplicationState } from '../../shared/enums'
 import type { PublicApplyInput } from '../../shared/schemas/publicApply'
@@ -18,8 +19,11 @@ import { issueContactCode, verifyContactCode } from './otp'
 import { recordAudit } from './audit'
 import { assignFromVacancy } from './vacancies'
 import { createCandidateTx, precheckCandidate } from './candidates'
-import { enqueueNotification } from './notifications'
+import { enqueueNotification, tenantAdminIds } from './notifications'
 import { emitWebhook } from './webhooks'
+import { ensureBucket, s3, S3_BUCKET, tenantStorageBytes } from './media'
+import { effectiveLimits } from './tenantLimits'
+import { recordUsage } from './usageCounters'
 
 /**
  * Публичный контур вакансии: страница по ссылке и приём отклика
@@ -59,6 +63,8 @@ interface LinkRow {
   state: string
   public_enabled: boolean
   owner_id: string | null
+  /** Всплеск §7.8 (PR-17): лимиты ниже удвоены, пока это в будущем. */
+  spam_hardened_until: string | null
 }
 
 export type LinkState =
@@ -372,7 +378,8 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
   // Одноразовость nonce держит счётчик частоты: первое применение проходит, второе — нет.
   const nonceReplay = !await hitRateLimit(`apply:nonce:${input.formNonce}`, 1, VACANCY_NONCE_TTL_SEC)
 
-  const blocked = await rateVerdict(tenantId, link.id, ipH)
+  const hardened = !!link.spam_hardened_until && new Date(link.spam_hardened_until) > new Date()
+  const blocked = await rateVerdict(tenantId, link.id, ipH, hardened)
   const ipMarkedSpam = await ipWasSpam(tenantId, ipH)
   const verdict = spamOf({
     website: input.website,
@@ -392,7 +399,7 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
   const created = await withTenant(tenantId, link.owner_id, async (tx) => {
     // Суточный потолок вакансии (§3.1, §7.3 проверка 2) — не про спам, а про ёмкость
     // рекрутера: выше потолка отклик не принимается, но ответ снаружи тот же.
-    const [row] = await tx.select({ cap: vacancies.applyDailyCap, otp: vacancies.publicApplyOtp, lang: vacancies.publicLanguage }).from(vacancies).where(eq(vacancies.id, link.id))
+    const [row] = await tx.select({ cap: vacancies.applyDailyCap, otp: vacancies.publicApplyOtp, lang: vacancies.publicLanguage, title: vacancies.title }).from(vacancies).where(eq(vacancies.id, link.id))
     const today = await tx.execute(sql`
       select count(*)::int as n from vacancy_applications
        where vacancy_id = ${link.id}::uuid and created_at > now() - interval '24 hours'
@@ -400,10 +407,11 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
     const overCap = (today[0]?.n ?? 0) >= (row?.cap ?? 0)
     if (overCap) verdict.reasons.push('daily_cap')
 
+    const persistedState = overCap ? 'pending_review' : state
     const [app] = await tx.insert(vacancyApplications).values({
       tenantId,
       vacancyId: link.id,
-      state: overCap ? 'pending_review' : state,
+      state: persistedState,
       fullName: input.fullName,
       phone,
       email,
@@ -430,6 +438,21 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
     await noteAttempt(tx, tenantId, link.id, ipH,
       blocked || overCap ? 'submit_blocked' : 'submit_ok',
       blocked ?? (overCap ? 'daily_cap' : null))
+
+    // `vacancy.application_review` (`29` §8): відгук пішов на модерацію — рекрутеру й
+    // HR/адміну, кандидату про це не повідомляють ніколи (§8 [решение]: підказка спамеру).
+    if (persistedState === 'pending_review') {
+      const recipients = new Set<string>(await tenantAdminIds(tx, tenantId))
+      if (link.owner_id) recipients.add(link.owner_id)
+      for (const userId of recipients) {
+        await enqueueNotification(tx, {
+          tenantId, userId, code: 'vacancy_application_review',
+          payload: { vacancy: row?.title ?? '' },
+          // dedupKey несёт userId — иначе второй получатель в цикле молча теряет уведомление.
+          dedupKey: `vacancy_application_review:${app!.id}:${userId}`,
+        }).catch(() => false)
+      }
+    }
 
     return { id: app!.id, otpRequired: row?.otp ?? true, language: row?.lang ?? null }
   })
@@ -468,11 +491,18 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
  * человека заполнять воронку, а не защитить сервер от нагрузки (для этого есть счётчик
  * просмотров). Каждое превышение оседает строкой `public_apply_attempts` — критерий
  * §13 к. 5 требует именно этого.
+ *
+ * `hardened` (§7.8, PR-17) — вакансия недавно поймала всплеск блокировок: пороги на эту
+ * вакансию удвоены (порог `hitRateLimit` вдвое ниже) на 6 часов от момента обнаружения
+ * (`vacancy.spam_watch`). Суточный потолок просмотров (`viewPer10Min`, `publicVacancy()`
+ * выше) хардненинга не знает — он проверяется до тенанта, отдельным решением PR-17
+ * (`docs/v2/46-progress.md`): не про приём отклика, а про нагрузку от популярной ссылки.
  */
-async function rateVerdict(tenantId: string, vacancyId: string, ipH: string): Promise<string | null> {
-  if (!await hitRateLimit(`apply:ip:h:${tenantId}:${ipH}`, VACANCY_APPLY_LIMITS.ipHour, 3600)) return 'ip_hour'
-  if (!await hitRateLimit(`apply:ip:d:${tenantId}:${ipH}`, VACANCY_APPLY_LIMITS.ipDay, 86_400)) return 'ip_day'
-  if (!await hitRateLimit(`apply:vac:${vacancyId}:${ipH}`, VACANCY_APPLY_LIMITS.perVacancyDay, 86_400)) return 'vacancy_day'
+async function rateVerdict(tenantId: string, vacancyId: string, ipH: string, hardened = false): Promise<string | null> {
+  const divisor = hardened ? VACANCY_SPAM_BURST_HARDEN_DIVISOR : 1
+  if (!await hitRateLimit(`apply:ip:h:${tenantId}:${ipH}`, Math.max(1, Math.floor(VACANCY_APPLY_LIMITS.ipHour / divisor)), 3600)) return 'ip_hour'
+  if (!await hitRateLimit(`apply:ip:d:${tenantId}:${ipH}`, Math.max(1, Math.floor(VACANCY_APPLY_LIMITS.ipDay / divisor)), 86_400)) return 'ip_day'
+  if (!await hitRateLimit(`apply:vac:${vacancyId}:${ipH}`, Math.max(1, Math.floor(VACANCY_APPLY_LIMITS.perVacancyDay / divisor)), 86_400)) return 'vacancy_day'
   return null
 }
 
@@ -889,4 +919,85 @@ export async function candidatesOfVacancy(ctx: Ctx, vacancyId: string): Promise<
     const rows = await candidatesQuery(tx, { id: users.id }, eq(users.vacancyId, vacancyId))
     return rows.length
   })
+}
+
+// ── Резюме из публичного контура (§6.3, §12.7, план PR-17) ────────────────────────────────
+
+/**
+ * Формат и размер (§6.3: «PDF, DOC, DOCX або зображення, до 10 МБ»). Флэт 10 МБ на все типы —
+ * не как в `media.ts#MEDIA_LIMITS_MB` (там лимит разный по виду), потому что документ прямо
+ * называет одно число для резюме независимо от формата.
+ */
+const RESUME_MIME: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+}
+export const RESUME_MAX_BYTES = 10 * 1024 * 1024
+
+export type ResumeUploadResult
+  = | { ok: true, assetId: string }
+    | { ok: false, code: 'not_found' | 'gone' | 'state_locked' | 'mime_not_allowed' | 'too_big' | 'storage_limit' }
+
+/**
+ * `POST /j/:token/apply/:aid/resume` (§10). **До подтверждения контакта — нельзя** (PR-16
+ * progress, запись «Резюме из публичного контура отложено в PR-17»): анонимная запись в
+ * хранилище тенанта ограничивается только после того, как OTP подтвердил владение контактом
+ * (вакансии без OTP — сразу, `pending` уже достаточно доверенное состояние). Файл до конверсии
+ * в кандидата не принадлежит никому (`owner_user_id = null`, §12.7); при `expired`/отклонении
+ * уборку делает та же задача `vacancy.application_expire`/`softDeleteMedia`, что и раньше.
+ */
+export async function uploadApplicationResume(
+  token: string, applicationId: string, file: { filename: string, mime: string, data: Buffer },
+): Promise<ResumeUploadResult> {
+  const st = await resolveVacancyToken(token)
+  if (!st.ok) { await alignDelay(); return { ok: false, code: st.code } }
+  const link = st.link
+
+  const ext = RESUME_MIME[file.mime]
+  if (!ext) return { ok: false, code: 'mime_not_allowed' }
+  if (file.data.length > RESUME_MAX_BYTES) return { ok: false, code: 'too_big' }
+
+  const app = await withTenant(link.tenant_id, link.owner_id, tx => tx.select().from(vacancyApplications)
+    .where(and(eq(vacancyApplications.id, applicationId), eq(vacancyApplications.vacancyId, link.id))).then(r => r[0] ?? null))
+  if (!app) return { ok: false, code: 'not_found' }
+  const confirmed = Boolean(app.otpConfirmedAt) || app.state === 'accepted' || app.state === 'merged'
+  if (!confirmed || !['pending', 'pending_review', 'accepted'].includes(app.state)) return { ok: false, code: 'state_locked' }
+
+  const limitBytes = (await effectiveLimits(link.tenant_id)).axes.storage_bytes
+  if (limitBytes != null) {
+    const used = await tenantStorageBytes({ tenantId: link.tenant_id, actorId: link.owner_id ?? '' })
+    if (used + file.data.length > limitBytes) return { ok: false, code: 'storage_limit' }
+  }
+
+  const now = new Date()
+  const key = `t/${link.tenant_id}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${randomUUID()}.${ext}`
+  await ensureBucket()
+  await s3().send(new PutObjectCommand({ Bucket: S3_BUCKET(), Key: key, Body: file.data, ContentType: file.mime }))
+
+  const assetId = await withTenant(link.tenant_id, link.owner_id, async (tx) => {
+    const [media] = await tx.insert(mediaAssets).values({
+      tenantId: link.tenant_id,
+      key,
+      originalName: file.filename,
+      kind: file.mime.startsWith('image/') ? 'image' : 'file',
+      mime: file.mime,
+      bytes: file.data.length,
+      status: 'ready',
+      ownerUserId: null, // §12.7: до конверсії в кандидата файл нічий
+      origin: 'candidate_cv',
+      sourceEntity: 'vacancy_application',
+      sourceId: applicationId,
+    }).returning({ id: mediaAssets.id })
+    await tx.update(vacancyApplications).set({ resumeAssetId: media!.id, updatedAt: new Date() }).where(eq(vacancyApplications.id, applicationId))
+    await recordAudit(tx, {
+      tenantId: link.tenant_id, actorId: null, action: 'media.upload', entity: 'media_assets', entityId: media!.id,
+      after: { origin: 'candidate_cv', bytes: file.data.length, mime: file.mime, sourceEntity: 'vacancy_application', sourceId: applicationId },
+    })
+    return media!.id
+  })
+  await recordUsage(link.tenant_id, 'storage_bytes', file.data.length, { refKind: 'upload', refId: assetId, meta: { mime: file.mime } }).catch(() => null)
+  return { ok: true, assetId }
 }

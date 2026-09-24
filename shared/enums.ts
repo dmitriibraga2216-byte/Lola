@@ -600,6 +600,70 @@ export const VACANCY_APPLY_EXPIRE_HOURS = 24
 export const PUBLIC_CONSENT_TEXT_VERSION = 'consent-2026-09'
 
 /**
+ * Площадка публикации вакансии (`job_board_accounts.provider`, `vacancy_publications`,
+ * `29` §3.7). Три площадки эталона; `telegram` здесь — канал объявлений о вакансии, отдельный
+ * от `tenant_secrets.telegram` (бот напоминаний): собственный ключ `key` разводит секреты
+ * одного тенанта в общей таблице (docs/v2/45 PR-17).
+ */
+export const JOB_BOARD_PROVIDERS = ['work_ua', 'robota_ua', 'telegram'] as const
+export type JobBoardProvider = typeof JOB_BOARD_PROVIDERS[number]
+
+/** Кто распоряжается аккаунтом площадки (`job_board_accounts.owner_type`, `29` §3.7 [решение]). */
+export const JOB_BOARD_OWNER_TYPES = ['company', 'personal', 'recruiter'] as const
+export type JobBoardOwnerType = typeof JOB_BOARD_OWNER_TYPES[number]
+
+/** Состояние аккаунта площадки (`job_board_accounts.status`, `29` §3.7, статусы из `docs/09` §9.3). */
+export const JOB_BOARD_ACCOUNT_STATUSES = ['not_connected', 'connecting', 'active', 'failing', 'revoked', 'disabled'] as const
+export type JobBoardAccountStatus = typeof JOB_BOARD_ACCOUNT_STATUSES[number]
+
+/**
+ * Состояние публикации (`vacancy_publications.state`, `29` §3.8, §4, §7.13–§7.17).
+ *
+ * > [исправлено, PR-17: `44` §8 предписывает обходной путь «рекрутер публикує вручну,
+ * > без площадки» — состоянию нужно имя] Ранее перечень заканчивался на `conflict`.
+ * > Добавлено `manual`: строка публикации, у которой нет и не будет вызова адаптера —
+ * > рекрутер сам разместил об'яву на площадці і вставив посилання. Це не синонім `active`:
+ * > `active` тримає `external_id`, здатний піти в `update()`/`remove()` адаптера, а `manual`
+ * > — ні, і фонові задачі `vacancy.publish_external`/`vacancy.publication_health` рядки
+ * > `manual` не чіпають зовсім (нема секрету і нема з чим звертатись до провайдера).
+ */
+export const VACANCY_PUBLICATION_STATES = ['queued', 'publishing', 'active', 'failed', 'removed', 'expired', 'conflict', 'manual'] as const
+export type VacancyPublicationState = typeof VACANCY_PUBLICATION_STATES[number]
+
+/** Ретраи временной ошибки публикации (`29` §7.16): 1, 5, 25 минут, затем `failed`. */
+export const VACANCY_PUBLISH_RETRY_DELAYS_SEC = [60, 300, 1500] as const
+
+/** Через сколько дней истёкшая публикация напоминает о себе (`29` §11 `vacancy.publication_expiring`). */
+export const VACANCY_PUBLICATION_EXPIRING_DAYS = 3
+
+/**
+ * Блок формы вакансии, который умеет генерировать ИИ (`vacancy_ai_generations.target`,
+ * `vacancies.ai_blocks`, `29` §3.6, §3.10, §7.10–§7.11). `criteria` — тоже цель генерации
+ * (черновик критериев), хотя пишет не в `ai_blocks`, а в отдельный ответ §7.11.
+ */
+export const VACANCY_AI_GENERATION_TARGETS = ['description', 'requirements', 'duties', 'extra', 'criteria'] as const
+export type VacancyAiGenerationTarget = typeof VACANCY_AI_GENERATION_TARGETS[number]
+
+/** Итог вызова ИИ-генерации (`vacancy_ai_generations.status`, `29` §3.10): `limited` не списывает операцию (§7.10). */
+export const VACANCY_AI_GENERATION_STATUSES = ['ok', 'failed', 'limited'] as const
+export type VacancyAiGenerationStatus = typeof VACANCY_AI_GENERATION_STATUSES[number]
+
+/** Лимит символов одного сгенерированного блока (`29` §7.10) — тот же, что у ручного ввода блока (§6.1). */
+export const VACANCY_AI_TEXT_MAX_CHARS = 2500
+
+/** Черновик критериев от ИИ (`29` §7.11): от и до строк в ответе. */
+export const VACANCY_AI_CRITERIA_MIN = 3
+export const VACANCY_AI_CRITERIA_MAX = 8
+
+/**
+ * Всплеск блокировок публичной формы (`29` §7.8): порог за час, на который ужесточаются
+ * частотные лимиты §7.4, и срок ужесточения.
+ */
+export const VACANCY_SPAM_BURST_THRESHOLD_PER_HOUR = 20
+export const VACANCY_SPAM_BURST_HARDEN_HOURS = 6
+export const VACANCY_SPAM_BURST_HARDEN_DIVISOR = 2
+
+/**
  * Вид работы в очереди проверки (`review_queue_items.task_type`, docs/v2/37 §3.1,
  * решение docs/v2/44 В-2). Он же «Тип завдання» — колонка, фильтр и таб экрана «Черга
  * перевірки» (`37` §5.1).
@@ -1036,4 +1100,10 @@ export const ENUMS: Record<string, readonly string[]> = {
   person_document_status: PERSON_DOCUMENT_STATUSES,
   announcement_audience: ANNOUNCEMENT_AUDIENCES,
   absence_norm_scope: ABSENCE_NORM_SCOPES,
+  job_board_provider: JOB_BOARD_PROVIDERS,
+  job_board_owner_type: JOB_BOARD_OWNER_TYPES,
+  job_board_account_status: JOB_BOARD_ACCOUNT_STATUSES,
+  vacancy_publication_state: VACANCY_PUBLICATION_STATES,
+  vacancy_ai_generation_target: VACANCY_AI_GENERATION_TARGETS,
+  vacancy_ai_generation_status: VACANCY_AI_GENERATION_STATUSES,
 }

@@ -281,6 +281,12 @@ create index idx_job_board_accounts_tenant on job_board_accounts (tenant_id, pro
 
 ### 3.8 `vacancy_publications` — журнал публикаций
 
+> [исправлено, PR-17: `44` §8 предписывает обходной путь «рекрутер публикує вручну, без
+> площадки» — состоянию нужно имя] Ранее `state_chk` заканчивался на `conflict`. Добавлено
+> восьмое значение `manual`: строка публикации без вызова адаптера — рекрутер сам разместил
+> об'яву на площадці і вставив готове посилання. Индекс `uq_vacancy_publications_active`
+> тоже включает `manual` — вторая ручная запись того же аккаунта тоже `409 publication.duplicate`.
+
 ```sql
 create table vacancy_publications (
   id uuid primary key default gen_random_uuid(),
@@ -294,9 +300,9 @@ create table vacancy_publications (
   requested_by uuid not null references users(id),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   constraint vacancy_publications_state_chk check (state in
-    ('queued','publishing','active','failed','removed','expired','conflict')));
+    ('queued','publishing','active','failed','removed','expired','conflict','manual')));
 create unique index uq_vacancy_publications_active on vacancy_publications
-  (tenant_id, vacancy_id, account_id) where state in ('queued','publishing','active','conflict');
+  (tenant_id, vacancy_id, account_id) where state in ('queued','publishing','active','conflict','manual');
 create index idx_vacancy_publications_tenant on vacancy_publications (tenant_id, vacancy_id, state);
 ```
 
@@ -649,6 +655,24 @@ draft ──archive──→ archived
 состоянии вакансии и модерации своего отклика он не уведомляется — «ваш відгук на перевірці» это прямая
 подсказка спамеру.
 
+> [исправлено, PR-17] Три поправки к таблице выше, по прецеденту PR-14 (`docs/v2/28` §8: «точка
+> в коде уведомления означала бы второе соглашение об именах рядом с полусотней существующих
+> кодов»):
+> 1. **Коды — `snake_case`, не через точку**: `vacancy_application_review`, `vacancy_spam_burst`,
+>    `vacancy_published_external`, `vacancy_publication_failed`, `vacancy_account_revoked`,
+>    `vacancy_closed_with_candidates` (плюс уже сданные PR-16 `vacancy_applied_welcome`,
+>    `vacancy_application_received`). Решение `44` В-16 предлагало обратное для пакета в целом —
+>    отменено тем же прецедентом второй раз, теперь и для этого документа.
+> 2. **`vacancy.ai_quota` не заводится** — решение `44` В-16: «`vacancy.ai_quota` и
+>    `ai_ops_exhausted` — один `limit_exceeded` с `axis=ai_generate_ops`». Уведомление админу
+>    уже шлёт `billing.limit_scan` (PR-09) для любой исчерпанной оси, включая эту, — второй код
+>    о том же факте только дал бы второе письмо.
+> 3. **`vacancy.publication_expiring` и `vacancy.subscriber_reopened` не реализованы** — их
+>    фоновые задачи (`vacancy.publication_expiry`, подписка на странице 410) вне объёма PR-17,
+>    см. `docs/v2/46-progress.md`, запись PR-17, «Что осталось».
+> `vacancy.apply_otp` — не отдельный код: контакт подтверждается тем же `otp_code`
+> (`server/services/otpChannel.ts`), что и вход в систему (PR-16, `otp.ts#issueContactCode()`).
+
 ---
 
 ## 9. Отчёты и выгрузки
@@ -686,17 +710,24 @@ draft ──archive──→ archived
 | POST | `/vacancies/:id/rotate-token` | — | `{public_url}` | `409 vacancy.not_published` |
 | GET / POST | `/vacancies/:id/criteria` | — / `{name, weight, scale_min, scale_max, is_critical}` | критерии | `422` |
 | PATCH / DELETE | `/vacancies/:id/criteria/:cid` | поля | критерий / `204` | `404` |
-| POST | `/vacancies/:id/criteria/generate` | — | черновик критериев | `409 limit.ai_ops_exceeded` |
-| POST | `/vacancies/:id/ai-text` | `{target, tone?}` | `{html, generation_id}` | `409 limit.ai_ops_exceeded`, `503 ai.unavailable` |
-| POST | `/vacancies/:id/ai-text/:gid/acknowledge` | — | `204` | `404` |
+| POST | `/vacancies/:id/criteria/generate` | — | черновик критериев | `409 limit_exceeded` с `details.axis=ai_generate_ops` (решение `44` В-16) |
+| POST | `/vacancies/:id/ai-text` | `{target, tone?}` | `{html, generation_id}` | `409 limit_exceeded` с `details.axis=ai_generate_ops` (решение `44` В-16 — не именованный код), `404` |
+| POST | `/vacancies/:id/ai-text/:gid/acknowledge` | — | вакансия | `404` |
 | POST | `/candidates/:id/criterion-scores` | `[{criterion_id, value_num, comment?}]` | свёрнутая `candidate_scores` | `404`, `422 criterion.out_of_scale` |
 | GET / POST | `/vacancy-templates` | — / `{name, payload, criteria, languages}` | шаблоны | `409 template.name_exists` |
 | POST | `/vacancy-templates/from-vacancy/:id` | `{name}` | шаблон | `409 template.name_exists` |
 | POST | `/vacancies/from-template/:tid` | `{location_id, recruiter_id}` | вакансия-черновик | `404` |
 | GET | `/job-board-accounts` | `?provider=&owner_type=` | список, сгруппированный по владельцу | — |
-| GET | `/job-board-accounts/:provider/auth-url` | `{owner_type, owner_user_id?}` | `{url}` | `403 jobboard.owner_forbidden` |
-| GET | `/job-board-accounts/:provider/callback` | `code`, `state` | HTML-закрывашка | `400 oauth.state_invalid` |
-| POST | `/job-board-accounts/:id/disconnect` | — | `204` | `403`, `404` |
+| POST | `/job-board-accounts` | `{provider, owner_type, owner_user_id?, label?}` | аккаунт (см. ниже) | `403 jobboard.owner_forbidden`, `422` |
+| POST | `/job-board-accounts/:id/disconnect` | — | `{ok:true}` | `403`, `404` |
+
+> [исправлено, PR-17: заглушка не делает сетевого вызова — пара `GET .../auth-url` +
+> `GET .../callback` описывала бы редирект в никуда] Ранее было две ручки выше плюс
+> `POST /job-board-accounts` не существовал. Подключение — один синхронный `POST
+> /job-board-accounts`: право решает `owner_type` (§7.14), секрет-заглушка создаётся сразу.
+> Когда придёт настоящий вендор (не в этом пакете), `getAuthUrl`/`handleCallback` из §7.18
+> встанут под тот же интерфейс адаптера без переписывания вызывающего кода — контракт
+> подключения (кто может подключить, что сохраняется) не меняется, меняется реализация.
 | GET / POST | `/vacancies/:id/publications` | — / `{account_ids[], confirm:true}` | публикации | `409 publication.duplicate`, `409 jobboard.account_revoked`, `422 publication.confirm_required` |
 | DELETE | `/vacancies/:id/publications/:pid` | — | `204` | `404`, `409 publication.not_active` |
 | POST | `/vacancies/:id/publications/:pid/link-external` | `{external_id}` | публикация | `409 publication.not_conflict` |
@@ -808,7 +839,7 @@ receivedAt}` — без ФИО и контактов откликнувшего�
 9. **Дано** блок «Вимоги», сгенерированный ИИ и не тронутый человеком, **коли** нажата «Опублікувати», **тоді**
    `409 vacancy.ai_text_unreviewed` с перечнем блоков.
 10. **Дано** лимит `ai_generate_ops` исчерпан, **коли** нажата «Створити з AI», **тоді** `409
-    limit.ai_ops_exceeded`, текст не сгенерирован, счётчик не изменился.
+    limit_exceeded` с `details.axis=ai_generate_ops` (решение `44` В-16), текст не сгенерирован, счётчик не изменился.
 11. **Дано** критерии с весами 3, 1, 1 и баллами 5, 2, 0 по шкале 0–5, **коли** рекрутер сохраняет оценку,
     **тоді** создаётся одна `candidate_scores` с `kind='recruiter'` и `value_num = 6.80`, предыдущая строка того
     же вида получает `is_current = false`.

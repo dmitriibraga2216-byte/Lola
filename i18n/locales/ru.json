@@ -20,7 +20,8 @@
     "confirmDelete": "Удалить? Действие нельзя отменить",
     "search": "Поиск",
     "yes": "Да",
-    "no": "Нет"
+    "no": "Нет",
+    "actions": "Действия"
   },
   "login": {
     "phoneLabel": "Номер телефона",
@@ -5265,7 +5266,8 @@
     },
     "tab": {
       "vacancies": "Вакансии",
-      "templates": "Шаблоны"
+      "templates": "Шаблоны",
+      "integrations": "Интеграции"
     },
     "tpl": {
       "name": "Название шаблона",
@@ -5277,6 +5279,7 @@
     },
     "sec": {
       "main": "О вакансии",
+      "blocks": "Тексты вакансии",
       "template": "Параметры назначения",
       "criteria": "Оценка кандидата по критериям"
     },
@@ -5299,6 +5302,49 @@
       "min": "Минимум шкалы",
       "max": "Максимум шкалы",
       "empty": "Критериев пока нет"
+    },
+    "ai": {
+      "generate": "Создать с AI",
+      "generating": "Генерируется…",
+      "unreviewed": "Проверьте сгенерированный текст перед публикацией",
+      "acknowledge": "Текст проверен",
+      "criteriaGenerate": "Сгенерировать критерии (AI)",
+      "criteriaDraftHint": "Черновик — просмотрите и добавьте нужные критерии",
+      "addDraft": "Добавить",
+      "limitExceeded": "Лимит ИИ-операций исчерпан. Осталось: 0"
+    },
+    "pub": {
+      "title": "Публикации",
+      "empty": "Ещё не публиковали ни на одной площадке",
+      "account": "Аккаунт",
+      "publish": "Опубликовать",
+      "manualTitle": "Добавить ссылку вручную",
+      "manualUrl": "Ссылка на объявление",
+      "removeAction": "Снять",
+      "linkExternal": "Привязать",
+      "noAccounts": "Нет подключённых интеграций",
+      "goIntegrations": "Перейти на вкладку «Интеграции»"
+    },
+    "integrations": {
+      "connect": "Подключить",
+      "disconnect": "Отключить",
+      "provider": "Площадка",
+      "ownerType": "Кому принадлежит",
+      "label": "Название (необязательно)",
+      "empty": "Нет подключённых аккаунтов"
+    },
+    "applications": {
+      "title": "Отклики",
+      "empty": "Откликов пока нет",
+      "accept": "Принять",
+      "reject": "Отклонить",
+      "spam": "Отметить спамом",
+      "name": "Имя",
+      "contact": "Контакт",
+      "source": "Источник",
+      "received": "Получено",
+      "resume": "Резюме",
+      "reasons": "Признаки"
     }
   },
   "vacancy": {
@@ -5357,6 +5403,43 @@
       "requirements": "Требования",
       "duties": "Обязанности",
       "extra": "Дополнительно"
+    },
+    "applicationState": {
+      "pending": "Новые",
+      "pending_review": "На модерации",
+      "accepted": "Принятые",
+      "merged": "Уже кандидат",
+      "rejected": "Отклонённые",
+      "spam": "Спам",
+      "expired": "Просроченные"
+    },
+    "jobBoardProvider": {
+      "work_ua": "Work.ua",
+      "robota_ua": "Robota.ua",
+      "telegram": "Telegram"
+    },
+    "jobBoardOwnerType": {
+      "company": "Компания",
+      "personal": "Персональный",
+      "recruiter": "Рекрутер"
+    },
+    "jobBoardStatus": {
+      "not_connected": "Не подключено",
+      "connecting": "Подключение…",
+      "active": "Подключено",
+      "failing": "Молчит",
+      "revoked": "Отозвано",
+      "disabled": "Выключено"
+    },
+    "publicationState": {
+      "queued": "В очереди",
+      "publishing": "Публикуется",
+      "active": "Активна",
+      "failed": "Ошибка",
+      "removed": "Снята",
+      "expired": "Завершилась",
+      "conflict": "Конфликт",
+      "manual": "Вручную"
     }
   },
   "apply": {

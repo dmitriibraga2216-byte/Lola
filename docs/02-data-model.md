@@ -665,7 +665,10 @@ create table course_categories (
   tenant_id uuid not null,
   parent_id uuid references course_categories(id),
   name text not null,
-  sort int not null default 0
+  sort int not null default 0,
+  -- владелец категории — адресат жалобы на материал её курсов, когда все авторы неактивны
+  -- (`v2/36` §7.5 в; PR-24, миграция 0077_v2_content_routing)
+  owner_id uuid references users(id) on delete set null
 );
 
 create table course_versions (
@@ -959,6 +962,9 @@ create table attempt_results (
   score numeric(5,2), max_score numeric(7,2), passed boolean,
   created_by uuid references users(id),
   comment text,
+  -- карточка жалобы, из которой запущено «Перерахувати» (`v2/36` §7.8, П-12.4, PR-24): логика
+  -- пересчёта одна, точек входа две — запись одна и та же, различает их эта ссылка
+  issue_id uuid references content_issues(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -2260,6 +2266,12 @@ shop_order_status: reserved | ready | issued | cancelled
 Точный список таблиц и колонок каждой подсистемы — в `docs/v2/40-data-model-delta.md` §2 и §3;
 этот документ переносить построчно не нужно, он остаётся источником истины и обновляется по
 мере реализации PR пакета (`docs/v2/45-plan.md`).
+
+**Обратная связь по контенту** (`docs/v2/36`) реализована двумя миграциями: `0069_v2_content_issues`
+(PR-23: `content_issues`, `content_reports`, `content_issue_events`, `content_reporter_stats`) и
+`0077_v2_content_routing` (PR-24: `content_issue_routing_rules` — фильтр по типу элемента, типу
+проблемы и категории курса → человек или роль, запасное правило одно на тенант частичным
+уникальным индексом; плюс колонки `course_categories.owner_id` и `attempt_results.issue_id` выше).
 
 **Отдельно:** `users.hired_at` уже существует и имеет тип `date`; пакет **не переопределяет**
 её тип и не добавляет её заново (`docs/v2/28-recruiting-candidates.md` §3.2).

@@ -15,6 +15,7 @@ import {
   MANUAL_KINDS, computeTotals, gradeAnswer, stripAnswers,
   type GradeResult, type QuizParams, type SnapshotQuestion,
 } from '../../shared/domain/grading'
+import { rescoreVerdict } from '../../shared/domain/contentIssues'
 import type { ScoringMethod } from '../../shared/enums'
 import { completeLesson, rollbackLessonCompletion, type RollbackResult } from './learning'
 import { logTaskAccess } from './journals'
@@ -382,8 +383,11 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
   return { status, ...totals }
 }
 
-/** Запись результата (docs/22 §13.7): первый подсчёт, итог проверки, каждое «Перерахувати». Снимок не трогается. */
-async function writeResult(tx: TenantTx, ctx: Ctx, attemptId: string, reason: 'submit' | 'review' | 'recalculate', r: { status: string, score: number, maxScore: number, passed: boolean | null }, comment: string | null, createdBy: string | null = null) {
+/**
+ * Запись результата (docs/22 §13.7): первый подсчёт, итог проверки, каждое «Перерахувати». Снимок
+ * не трогается. `issueId` — карточка жалобы, из которой запущен пересчёт (docs/v2/36 §7.8, П-12.4).
+ */
+async function writeResult(tx: TenantTx, ctx: Ctx, attemptId: string, reason: 'submit' | 'review' | 'recalculate', r: { status: string, score: number, maxScore: number, passed: boolean | null }, comment: string | null, createdBy: string | null = null, issueId: string | null = null) {
   await tx.insert(attemptResults).values({
     tenantId: ctx.tenantId,
     attemptId,
@@ -394,6 +398,7 @@ async function writeResult(tx: TenantTx, ctx: Ctx, attemptId: string, reason: 's
     passed: r.passed,
     createdBy,
     comment,
+    issueId,
   })
 }
 
@@ -572,94 +577,210 @@ export async function addAnswerFile(ctx: Ctx, attemptId: string, questionId: str
   })
 }
 
-// ── «Перерахувати» (docs/22 §13.7, docs/04 §4.6) ──────────────────────
+// ── «Перерахувати» (docs/22 §13.7, docs/04 §4.6; docs/v2/36 §7.8, П-12.4) ─────────────
+//
+// Логика пересчёта одна, точек входа две (П-12.4): кнопка в отчёте по тесту
+// (`recalculateAttempt`/`recalculateQuiz`) и кнопка «Перерахувати результати» в карточке жалобы
+// (`server/services/contentIssueTriage.ts`). Обе считают через `planRecalc()` и записывают через
+// `recalculateAttempt()`; различаются только параметры:
+//   - какие вопросы берут текущий ключ (отчёт по тесту — все; жалоба — вопрос жалобы);
+//   - исключается ли вопрос из знаменателя (резолюция `question_void`);
+//   - политика применения: отчёт по тесту применяет любой итог и откатывает снятый зачёт (D-013),
+//     жалоба — только улучшение (§7.8: «отобрать зачтённое нельзя»).
 
-export type RecalcResult
-  = | { ok: true, before: { status: string, score: number | null, passed: boolean | null }, after: { status: string, score: number, passed: boolean | null }, changed: boolean, rollback?: RollbackResult | null }
-    | { ok: false, code: 'not_found' | 'in_progress' }
+/** Статусы попыток, которые пересчитываются из обеих точек входа: завершённые и не аннулированные. */
+export const RECALCULABLE_ATTEMPT_STATUSES = ['submitted', 'review', 'passed', 'failed', 'expired'] as const
+
+export interface RecalcOptions {
+  /**
+   * Вопросы, которые берут текущий ключ. Не задано — все (отчёт по тесту: «пересчёт по текущему
+   * ключу»). Задано — только эти; у остальных остаётся уже выставленная оценка, чтобы пересчёт
+   * по жалобе на один вопрос не переписал чужой (и чтобы аудит с `issue_id` не приписал жалобе
+   * изменение, которого она не вызывала).
+   */
+  rekeyQuestionIds?: readonly string[]
+  /** Вопросы, исключённые из знаменателя (`question_void`): Σ баллов без них / Σ весов без них. */
+  voidQuestionIds?: readonly string[]
+  /** `any` — отчёт по тесту (D-013); `improve_only` — жалоба: худший итог не применяется. */
+  policy?: 'any' | 'improve_only'
+  /** Карточка жалобы: ссылка в `attempt_results.issue_id`; по ней же повторный пересчёт идемпотентен. */
+  issueId?: string | null
+}
+
+export interface RecalcPlan {
+  before: { status: string, score: number | null, passed: boolean | null }
+  after: { status: string, score: number, maxScore: number, passed: boolean | null }
+  verdict: 'improved' | 'unchanged' | 'worse'
+  /** Ответы на авто-вопросы, которые получили новую оценку, — их строки перепишет применение. */
+  answerUpdates: { id: string, isCorrect: boolean | null, score: number, auto: boolean }[]
+}
 
 /**
- * Пересчёт результата по текущему ключу. Что пересчитывается: автопроверяемые ответы — по
- * текущим answer / scoring_method / negative_marking / балл (с переопределением в составе теста)
- * и критичности вопроса. Что не трогается: снимок попытки (формулировки, варианты, порядок),
- * ответы ученика, оценки наставника по ручным вопросам, params назначения. Пишется новая
- * запись attempt_results (reason=recalculate), attempts.score/passed/status обновляются,
- * событие уходит в аудит с before/after.
+ * Подсчёт без записи — общий для предпросмотра, пересчёта по тесту и пересчёта по жалобе.
+ * Что пересчитывается: автопроверяемые ответы — по текущим answer / scoring_method /
+ * negative_marking / балл (с переопределением в составе теста) и критичности вопроса. Что не
+ * трогается: снимок попытки (формулировки, варианты, порядок), ответы ученика, оценки
+ * наставника по ручным вопросам, params назначения.
  */
-export async function recalculateAttempt(ctx: Ctx, attemptId: string, comment?: string): Promise<RecalcResult> {
+export async function planRecalc(tx: TenantTx, attempt: typeof attempts.$inferSelect, opts: RecalcOptions = {}): Promise<RecalcPlan> {
+  const snapshot = attempt.snapshot as SnapshotQuestion[]
+  const params = attempt.params as QuizParams
+  const rekeyAll = !opts.rekeyQuestionIds
+  const rekey = new Set(opts.rekeyQuestionIds ?? [])
+  const voided = new Set(opts.voidQuestionIds ?? [])
+  const takesKey = (id: string) => rekeyAll || rekey.has(id)
+
+  const keyIds = snapshot.filter(q => takesKey(q.id)).map(q => q.id)
+  const current = keyIds.length
+    ? await tx.select({ q: questions, override: quizQuestions })
+        .from(questions)
+        .leftJoin(quizQuestions, and(eq(quizQuestions.questionId, questions.id), eq(quizQuestions.quizId, attempt.quizId)))
+        .where(inArray(questions.id, keyIds))
+    : []
+  const keyById = new Map(current.map(r => [r.q.id, r]))
+
+  // Ключ для пересчёта: снимок + текущие эталон/метод/балл/критичность; исключённые — вне расчёта
+  const keyed: SnapshotQuestion[] = snapshot.filter(q => !voided.has(q.id)).map((q) => {
+    const cur = takesKey(q.id) ? keyById.get(q.id) : undefined
+    if (!cur) return q
+    return {
+      ...q,
+      answer: cur.q.answer,
+      points: cur.override?.pointsOverride != null ? Number(cur.override.pointsOverride) : Number(cur.q.points),
+      isCritical: cur.override?.isCriticalOverride ?? cur.q.isCritical,
+      scoringMethod: cur.q.scoringMethod as ScoringMethod,
+      negativeMarking: cur.q.negativeMarking,
+      requireExact: (cur.q.answer as { requireExact?: boolean } | null)?.requireExact,
+    }
+  })
+
+  const rows = await tx.select().from(attemptAnswers).where(eq(attemptAnswers.attemptId, attempt.id))
+  const byQ = new Map(rows.map(r => [r.questionId, r]))
+  const graded = new Map<string, GradeResult>()
+  const answerUpdates: RecalcPlan['answerUpdates'] = []
+  for (const q of keyed) {
+    const row = byQ.get(q.id)
+    if (MANUAL_KINDS.has(q.kind)) {
+      // Ручные оценки не пересчитываются — только балл ограничивается новым весом
+      if (row && row.isCorrect !== null) graded.set(q.id, { isCorrect: row.isCorrect, score: Math.min(Number(row.score ?? 0), q.points), auto: false })
+      else if (!row) graded.set(q.id, { isCorrect: false, score: 0, auto: true })
+      continue
+    }
+    if (!takesKey(q.id)) {
+      // Вопрос не пересчитывается: остаётся оценка, выставленная раньше (в т. ч. прошлым «Перерахувати»)
+      graded.set(q.id, row ? { isCorrect: row.isCorrect ?? false, score: Number(row.score ?? 0), auto: row.autoGraded } : { isCorrect: false, score: 0, auto: true })
+      continue
+    }
+    const late = attempt.deadlineAt && row?.answeredAt && row.answeredAt > attempt.deadlineAt
+    const g = gradeAnswer(q, late ? null : (row?.answer ?? null))
+    if (row) answerUpdates.push({ id: row.id, isCorrect: g.isCorrect, score: g.score, auto: g.auto })
+    graded.set(q.id, g)
+  }
+
+  const totals = computeTotals(keyed, graded, params.passScore)
+  const status = totals.passed === null ? 'review' : totals.passed ? 'passed' : 'failed'
+  const before = { status: attempt.status, score: attempt.score != null ? Number(attempt.score) : null, passed: attempt.passed }
+  const after = { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }
+  return { before, after, verdict: rescoreVerdict(before, after), answerUpdates }
+}
+
+export type RecalcResult
+  = | {
+    ok: true
+    before: { status: string, score: number | null, passed: boolean | null }
+    after: { status: string, score: number, passed: boolean | null }
+    changed: boolean
+    /** Записан ли результат. У `improve_only` худший и неизменный итог не записываются. */
+    applied: boolean
+    verdict: 'improved' | 'unchanged' | 'worse'
+    /** Попытка уже пересчитана по этой карточке — повторно не трогается (идемпотентность). */
+    already?: boolean
+    userId: string
+    rollback?: RollbackResult | null
+  }
+  | { ok: false, code: 'not_found' | 'in_progress' }
+
+/**
+ * Пересчёт одной попытки (см. блок выше): новая запись attempt_results (reason=recalculate),
+ * attempts.score/passed/status обновляются, событие уходит в аудит с before/after.
+ * Третий аргумент — причина (комментарий записи результата и аудита), как и прежде.
+ */
+export async function recalculateAttempt(ctx: Ctx, attemptId: string, comment?: string, opts: RecalcOptions = {}): Promise<RecalcResult> {
+  const policy = opts.policy ?? 'any'
   const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [attempt] = await tx.select().from(attempts).where(eq(attempts.id, attemptId))
     if (!attempt) return { ok: false as const, code: 'not_found' as const }
     if (attempt.status === 'in_progress' || attempt.status === 'annulled') return { ok: false as const, code: 'in_progress' as const }
 
-    const snapshot = attempt.snapshot as SnapshotQuestion[]
-    const params = attempt.params as QuizParams
-    const current = await tx.select({ q: questions, override: quizQuestions })
-      .from(questions)
-      .leftJoin(quizQuestions, and(eq(quizQuestions.questionId, questions.id), eq(quizQuestions.quizId, attempt.quizId)))
-      .where(inArray(questions.id, snapshot.map(s => s.id)))
-    const keyById = new Map(current.map(r => [r.q.id, r]))
-
-    // Ключ для пересчёта: снимок + текущие эталон/метод/балл/критичность
-    const keyed: SnapshotQuestion[] = snapshot.map((q) => {
-      const cur = keyById.get(q.id)
-      if (!cur) return q
-      return {
-        ...q,
-        answer: cur.q.answer,
-        points: cur.override?.pointsOverride != null ? Number(cur.override.pointsOverride) : Number(cur.q.points),
-        isCritical: cur.override?.isCriticalOverride ?? cur.q.isCritical,
-        scoringMethod: cur.q.scoringMethod as ScoringMethod,
-        negativeMarking: cur.q.negativeMarking,
-        requireExact: (cur.q.answer as { requireExact?: boolean } | null)?.requireExact,
+    if (opts.issueId) {
+      const [done] = await tx.select({ id: attemptResults.id }).from(attemptResults)
+        .where(and(eq(attemptResults.attemptId, attemptId), eq(attemptResults.issueId, opts.issueId)))
+      if (done) {
+        const same = { status: attempt.status, score: attempt.score != null ? Number(attempt.score) : 0, passed: attempt.passed }
+        return { ok: true as const, before: same, after: same, changed: false, applied: false, verdict: 'unchanged' as const, already: true, userId: attempt.userId, enrollmentId: null, lessonId: null, quizId: attempt.quizId }
       }
-    })
-
-    const rows = await tx.select().from(attemptAnswers).where(eq(attemptAnswers.attemptId, attemptId))
-    const byQ = new Map(rows.map(r => [r.questionId, r]))
-    const graded = new Map<string, GradeResult>()
-    for (const q of keyed) {
-      const row = byQ.get(q.id)
-      if (MANUAL_KINDS.has(q.kind)) {
-        // Ручные оценки не пересчитываются — только балл ограничивается новым весом
-        if (row && row.isCorrect !== null) graded.set(q.id, { isCorrect: row.isCorrect, score: Math.min(Number(row.score ?? 0), q.points), auto: false })
-        else if (!row) graded.set(q.id, { isCorrect: false, score: 0, auto: true })
-        continue
-      }
-      const late = attempt.deadlineAt && row?.answeredAt && row.answeredAt > attempt.deadlineAt
-      const g = gradeAnswer(q, late ? null : (row?.answer ?? null))
-      if (row) {
-        await tx.update(attemptAnswers).set({ isCorrect: g.isCorrect, score: String(g.score), autoGraded: g.auto, updatedAt: new Date() }).where(eq(attemptAnswers.id, row.id))
-      }
-      graded.set(q.id, g)
     }
 
-    const totals = computeTotals(keyed, graded, params.passScore)
-    const status = totals.passed === null ? 'review' : totals.passed ? 'passed' : 'failed'
-    const before = { status: attempt.status, score: attempt.score != null ? Number(attempt.score) : null, passed: attempt.passed }
+    const plan = await planRecalc(tx, attempt, opts)
+    const { before } = plan
+    const after = { status: plan.after.status, score: plan.after.score, passed: plan.after.passed }
+    const changed = before.status !== after.status || before.score !== after.score
+    if (policy === 'improve_only' && plan.verdict !== 'improved') {
+      return { ok: true as const, before, after, changed: false, applied: false, verdict: plan.verdict, userId: attempt.userId, enrollmentId: null, lessonId: null, quizId: attempt.quizId }
+    }
+
     const now = new Date()
+    for (const u of plan.answerUpdates) {
+      await tx.update(attemptAnswers).set({ isCorrect: u.isCorrect, score: String(u.score), autoGraded: u.auto, updatedAt: now }).where(eq(attemptAnswers.id, u.id))
+    }
     await tx.update(attempts).set({
-      status,
-      score: String(totals.score),
-      maxScore: String(totals.maxScore),
-      passed: totals.passed,
-      ...(status !== 'review' ? { gradedAt: now } : {}),
+      status: after.status,
+      score: String(after.score),
+      maxScore: String(plan.after.maxScore),
+      passed: after.passed,
+      ...(after.status !== 'review' ? { gradedAt: now } : {}),
       updatedAt: now,
     }).where(eq(attempts.id, attemptId))
-    await writeResult(tx, ctx, attemptId, 'recalculate', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, comment ?? null, ctx.actorId)
-    const after = { status, score: totals.score, passed: totals.passed }
-    // D-013: зачёт снят (passed → failed/review) — откат урока, записи и сертификата (docs/28 Spec 12 «Перерахувати»)
-    const rollback = before.status === 'passed' && status !== 'passed' && attempt.enrollmentId && attempt.lessonId
+    await writeResult(tx, ctx, attemptId, 'recalculate', { status: after.status, score: after.score, maxScore: plan.after.maxScore, passed: after.passed }, comment ?? null, ctx.actorId, opts.issueId ?? null)
+    // D-013: зачёт снят (passed → failed/review) — откат урока, записи и сертификата (docs/28 Spec 12
+    // «Перерахувати»). По жалобе сюда не доходит: `improve_only` худший итог не применяет.
+    const rollback = before.status === 'passed' && after.status !== 'passed' && attempt.enrollmentId && attempt.lessonId
       ? await rollbackLessonCompletion(tx, ctx, attempt.enrollmentId, attempt.lessonId)
       : null
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.recalculate', entity: 'attempt', entityId: attemptId, before, after: { ...after, comment: comment ?? null, ...(rollback?.lessonReopened ? { rollback } : {}) } })
-    if (status === 'passed' && before.status !== 'passed') await onAttemptPassed(tx, ctx, attempt)
-    return { ok: true as const, before, after, changed: before.status !== status || before.score !== totals.score, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, userId: attempt.userId, rollback }
+    await recordAudit(tx, {
+      tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.recalculate', entity: 'attempt', entityId: attemptId, before,
+      after: { ...after, comment: comment ?? null, ...(opts.issueId ? { issueId: opts.issueId } : {}), ...(rollback?.lessonReopened ? { rollback } : {}) },
+    })
+    const newlyPassed = after.status === 'passed' && before.status !== 'passed'
+    if (newlyPassed) {
+      await onAttemptPassed(tx, ctx, attempt)
+      // Самостоятельный тест: «завдання завершено» — та же единая точка, что и при сдаче (D-020)
+      await logAttemptCompletion(tx, ctx.tenantId, attempt, 'passed', { score: after.score, maxScore: plan.after.maxScore }, ctx.actorId)
+    }
+    return { ok: true as const, before, after, changed, applied: true, verdict: plan.verdict, userId: attempt.userId, rollback, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, quizId: attempt.quizId }
   })
-  if (result.ok && result.after.status === 'passed' && result.before.status !== 'passed' && result.enrollmentId && result.lessonId) {
-    await completeLesson({ tenantId: ctx.tenantId, actorId: result.userId }, result.enrollmentId, result.lessonId).catch(() => {})
+  if (!result.ok) return result
+  // Зачёт появился — прогресс курса, сертификат и граф программы/траектории, как при сдаче попытки
+  if (result.applied && result.after.status === 'passed' && result.before.status !== 'passed') {
+    if (result.enrollmentId && result.lessonId) {
+      await completeLesson({ tenantId: ctx.tenantId, actorId: result.userId }, result.enrollmentId, result.lessonId).catch(() => {})
+    }
+    const { quizId, userId } = result
+    const score = result.after.score
+    import('./programs').then(p => p.onItemResult(ctx.tenantId, userId, 'quiz', quizId, { passed: true, score })).catch(err => console.error('program quiz hook', err))
+    import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, userId, 'quiz', quizId, { passed: true, score })).catch(err => console.error('trajectory quiz hook', err))
   }
-  return result
+  return {
+    ok: true,
+    before: result.before,
+    after: result.after,
+    changed: result.changed,
+    applied: result.applied,
+    verdict: result.verdict,
+    ...('already' in result ? { already: result.already } : {}),
+    userId: result.userId,
+    ...('rollback' in result ? { rollback: result.rollback } : {}),
+  }
 }
 
 /** «Перерахувати» для всех завершённых попыток теста — после правки ключа одного вопроса. */
@@ -668,7 +789,7 @@ export async function recalculateQuiz(ctx: Ctx, quizId: string, comment?: string
     const [quiz] = await tx.select({ id: quizzes.id }).from(quizzes).where(and(eq(quizzes.id, quizId), isNull(quizzes.deletedAt)))
     if (!quiz) return null
     return (await tx.select({ id: attempts.id }).from(attempts)
-      .where(and(eq(attempts.quizId, quizId), sql`${attempts.status} in ('submitted', 'review', 'passed', 'failed', 'expired')`))).map(r => r.id)
+      .where(and(eq(attempts.quizId, quizId), inArray(attempts.status, [...RECALCULABLE_ATTEMPT_STATUSES])))).map(r => r.id)
   })
   if (!ids) return null
   let changed = 0

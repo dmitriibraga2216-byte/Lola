@@ -84,3 +84,31 @@ export function IS_EMPLOYEE(alias = 'u'): SQL {
 export function IS_CANDIDATE(alias = 'u'): SQL {
   return sql`${sql.raw(alias ? `${alias}.` : '')}kind = 'candidate'`
 }
+
+/**
+ * Фрагмент сырого SQL «только действующие сотрудники»: `and (u.kind = 'employee' and
+ * u.status = 'active' and not u.is_blocked)`.
+ *
+ * Своего условия «уволен» здесь нет — это ровно та отметка, которую ставит офбординг PR-07
+ * (`completeOffboarding()`: `status = 'archived'`, docs/v2/33 §7.7) и блокировка входа
+ * (`is_blocked`), и ровно то условие, по которому считается ось лимита `users_active`
+ * (`usageCounters.ts`): уволенный не занимает места в тарифе — и не получает работу.
+ * Маршрутизация жалоб (docs/v2/36 §7.5 б–д, критерий 8) спрашивает «кому отдать карточку»
+ * именно так, чтобы уволенный автор не блокировал очередь.
+ */
+export function ACTIVE_EMPLOYEES_ONLY(alias = 'u'): SQL {
+  const p = sql.raw(alias ? `${alias}.` : '')
+  return sql`and (${p}kind = 'employee' and ${p}status = 'active' and not ${p}is_blocked)`
+}
+
+/**
+ * Фрагмент сырого SQL «сотрудники, кроме уволенных»: `and (u.kind = 'employee' and
+ * u.status <> 'archived')`. Уволенный — ровно та отметка, что ставит офбординг PR-07
+ * (`status = 'archived'`); приглашённый, ещё не входивший, уволенным не считается.
+ * Нужен адресатам ответа на их же обращение: «заявитель уволен до закрытия — уведомление не
+ * отправляется» (docs/v2/36 §12), а приглашённому — отправляется.
+ */
+export function NOT_ARCHIVED_EMPLOYEES_ONLY(alias = 'u'): SQL {
+  const p = sql.raw(alias ? `${alias}.` : '')
+  return sql`and (${p}kind = 'employee' and ${p}status <> 'archived')`
+}

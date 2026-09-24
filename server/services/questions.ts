@@ -146,6 +146,12 @@ export async function updateQuestion(ctx: Ctx, id: string, input: z.infer<typeof
       before: { version: before.version },
       after: { version: after!.version },
     })
+    // Вопрос живёт без черновика: новая версия сразу идёт в новые попытки, то есть она и есть
+    // публикация — исправленные жалобы на вопрос закрываются (docs/v2/36 §7.9, PR-24)
+    if (after!.version > before.version) {
+      const { onContentPublished } = await import('./contentIssueTriage')
+      await onContentPublished(tx, 'question', id)
+    }
     return after!
   })
 }

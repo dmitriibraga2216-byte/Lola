@@ -546,6 +546,10 @@ export async function putTaskParameterValues(ctx: Ctx, id: string, input: z.infe
 export async function markContentChanged(tx: Tx, contentType: ContentType, contentId: string) {
   await tx.update(assignments).set({ contentChangedAt: sql`now()` })
     .where(and(eq(assignments.subjectType, contentType), eq(assignments.subjectId, contentId), inArray(assignments.status, ['active', 'paused'])))
+  // docs/v2/36 §7.9, §11 `content_issue.autoclose_scan`: опубликованная правка закрывает
+  // исправленные жалобы на этот материал — в той же транзакции, что и сама публикация
+  const { onContentPublished } = await import('./contentIssueTriage')
+  await onContentPublished(tx, contentType, contentId)
 }
 
 const changedWhere = sql`${assignments.contentChangedAt} is not null and (${assignments.contentChangeNotifiedAt} is null or ${assignments.contentChangeNotifiedAt} < ${assignments.contentChangedAt})`

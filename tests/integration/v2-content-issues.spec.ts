@@ -84,13 +84,17 @@ beforeEach(cleanup)
 
 const ctxOf = (actorId: string) => ({ tenantId, actorId })
 
-/** Попытка с таймером: снапшот содержит вопрос со своей версией (правило 4). */
+/**
+ * Попытка с таймером: снапшот содержит вопрос со своей версией (правило 4). Снапшот — массив
+ * вопросов, как его пишет `attempts.ts` `buildSnapshot` (PR-24: раньше здесь была форма
+ * `{ questions: […] }`, и тест не видел, что на настоящей попытке версия бралась не из снимка).
+ */
 async function makeAttempt(deadlineInSec = 1800) {
   const [a] = await admin`
     insert into attempts (tenant_id, quiz_id, user_id, attempt_no, snapshot, params, status, deadline_at, device)
     values (
       ${tenantId}, ${quizId}, ${employeeId}, 1,
-      ${admin.json({ questions: [{ id: questionId, version: questionVersion, kind: 'single' }] })},
+      ${admin.json([{ id: questionId, version: questionVersion, kind: 'single' }])},
       ${admin.json({ timeLimitSec: deadlineInSec })},
       'in_progress', ${new Date(Date.now() + deadlineInSec * 1000)}, 'v2-23-test')
     returning id, deadline_at`
@@ -173,7 +177,8 @@ describe('критерий 2: второй человек на тот же де�
     expect(rows[0]!.n).toBe(1)
 
     const events = await admin`select kind from content_issue_events where issue_id = ${first.result.issueId} order by created_at`
-    expect(events.map(e => e.kind)).toEqual(['created', 'merged'])
+    // PR-24: при подаче карточка сразу получает ответственного (`36` §7.5) — событие `assigned`
+    expect(events.map(e => e.kind)).toEqual(['created', 'assigned', 'merged'])
   })
 
   it('повторная жалоба того же человека — 409, счётчик не растёт', async () => {

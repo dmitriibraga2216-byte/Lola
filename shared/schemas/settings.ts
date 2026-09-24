@@ -355,6 +355,8 @@ export const translationsImportSchema = z.object({
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(120),
   parentId: z.string().uuid().nullable().optional(),
+  /** Владелец категории — адресат жалобы, когда все авторы материала неактивны (docs/v2/36 §7.5 в). */
+  ownerId: z.string().uuid().nullable().optional(),
 })
 export const categoryReorderSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) })
 

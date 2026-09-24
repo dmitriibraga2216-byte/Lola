@@ -59,6 +59,9 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/catalog/requests': "hasScope('assignment.create')",
   '/admin/catalog/access': "hasScope('assignment.create')",
   '/admin/comments': "hasScope('course.view')",
+  // PR-24 (docs/v2/36 §5.3, §9): очередь «Звіт про помилки» и отчёт «Якість контенту».
+  '/admin/content-issues': "hasScope('content_issue.view')",
+  '/admin/reports/content-quality': "hasScope('content_issue.view')",
   '/admin/rules': "hasScope('settings.tenant')",
   '/admin/profiles': "hasScope('assignment.create')",
   '/admin/knowledge': "hasScope('knowledge.manage')",

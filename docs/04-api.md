@@ -374,7 +374,7 @@
 | GET | `/billing/notices` | открытые предупреждения баннера (`v2/35` §5.5, §7.9); скрытые крестиком не возвращаются, пока не истекли 24 часа; скоуп `billing.view` |
 | POST | `/billing/notices/:id/dismiss` | скрыть предупреждение на 24 часа; у уровня `exceeded` крестика нет — 409 `limit_exceeded` (`v2/35` §7.9 п. 2) |
 | GET/PATCH | `/settings/modules` | переключатели модулей; выключенный модуль → 403 `module.disabled` на его маршрутах (`24` §3.2) |
-| CRUD | `/course-categories`, `POST /course-categories/reorder` | «Категорії каталогу навчання» с порядком (`24` §3.7.1); категория с курсами — 409 `in_use` |
+| CRUD | `/course-categories`, `POST /course-categories/reorder` | «Категорії каталогу навчання» с порядком (`24` §3.7.1); категория с курсами — 409 `in_use`. `ownerId` — владелец категории, адресат жалоб на материалы её курсов, когда авторы неактивны (`docs/v2/36` §7.5 в, PR-24); чужой или несуществующий — 404 |
 | GET/PATCH | `/settings/catalog` | тумблер «Використовувати обмеження доступу до завдань в каталозі навчання» — `{restrictAccess}`, за замовчуванням вимкнено (`10` §14.1, Spec 10); групи доступу — той самий `/access-groups?appliesTo=catalog` |
 | GET | `/certificates/summary` | сводка сертификатов по курсам для экрана Certificates |
 | POST | `/auth/impersonation/stop` | выход из режима «от имени» с плашки → `impersonation.ended` |
@@ -603,13 +603,24 @@ AI-генерация текста и критериев, площадки и ж
 | --- | --- | --- |
 | POST | `/content-issues/reports` | подача жалобы (`content_issue.report`): `{targetType, targetId, blockId?, issueType, comment?, screenshotMediaId?, source, enrollmentId?, lessonId?, attemptId?, context}`. Ответ — `{issueId, reportId, merged, deadlineShiftSec, reportsToday, limitPerDay}`; `merged=true` — жалоба приклеилась к открытой карточке. Ошибки: `400 validation_failed`, `404` (чужой тенант, чужая попытка, скриншот не с `origin='issue_screenshot'`), `409 content_issue.already_reported`, `423 content_issue.reporter_muted`, `429 content_issue.rate_limited` (в `details` — `reason`, `used`, `limit`) |
 | GET | `/me/content-reports` | «Мої повідомлення про помилки»: свои жалобы со статусом и ответом автора |
+| GET | `/content-issues` | очередь «Звіт про помилки» (`content_issue.view`, PR-24): `tab=new\|in_progress\|fixed\|rejected\|all`, фильтры `issueType`, `targetType`, `courseId`, `authorId`, `assigneeId`, `locationId`, `from`, `to`, `affectsScoring`; `limit` (10/25/50/100) и ключевой курсор `cursor` (§4.1, ключ `reports_count, trusted, last_reported_at, id` по убыванию), в ответе `{items, total, limit, nextCursor}`. Видимость — из роли: администратор всё, методист свой контент, керівник точки — скарги со своих точек |
+| GET | `/content-issues/:id` | карточка: заявители с контекстом, журнал (внутренние заметки — только тем, кто разбирает), «Вплив на результати», `actions` — кнопки этого человека. Чужая или невидимая — `404` |
+| PATCH | `/content-issues/:id` | разбор (`content_issue.triage`): `{status?, resolution?, resolutionComment?, dueAt?, affectsScoring?, internalNote?}`. `400 content_issue.resolution_required`, `400 validation_failed` (резолюция не к переходу, отказ без комментария, срок вне 1–180 дней), `403` (закрыть и переоткрыть — только администратор), `409 content_issue.invalid_transition` с актуальной карточкой в `details.card` |
+| POST | `/content-issues/:id/assign` | переназначить (`content_issue.assign`): `{userId}` — действующий сотрудник с правом разбора, иначе `400` |
+| POST | `/content-issues/:id/comment` | комментарий в журнал (`content_issue.view`): `{comment, isInternal}` |
+| GET | `/content-issues/:id/rescore-preview` | предпросмотр пересчёта (`content_issue.rescore`): `{mode, attemptsTotal, attemptsChanged, toPassed, toFailedSkipped, worseSkipped, avgDelta}`; `409 content_issue.not_a_quiz_issue` |
+| POST | `/content-issues/:id/rescore` | «Перерахувати результати» из карточки — второй вход в «Перерахувати» теста (П-12.4): `{mode?: recalc\|void\|skip, reason}`. Ответ — `{mode, attemptsTotal, rescoredAttempts, toPassed, unchanged, worse[]}`: ухудшения не применяются и перечислены отдельно. `400 content_issue.resolution_required`, `409 content_issue.already_rescored` |
+| GET/POST | `/settings/content-issue-routing-rules` | правила адресации (`content_issue.triage` — чтение, `content_issue.assign` — создание); непустой набор без запасного правила — `400 content_issue.fallback_rule_required` |
+| PATCH/DELETE | `/settings/content-issue-routing-rules/:id` | правка и удаление правила (`content_issue.assign`); запасное правило выключить или удалить раньше остальных нельзя |
+| POST | `/content-reporters/:userId/mute` \| `/unmute` | приостановить и вернуть приём жалоб (`content_issue.mute`): `{until, reason}`; снятие обнуляет серию `spam` |
+| GET | `/reports/content-quality` | «Якість контенту» (`content_issue.view`): `groupBy=element\|course`, фильтры §9, `drillKey` — заявители строки единым каркасом, `format=xlsx` (`report.export`) |
 
 Контекст жалобы собирает **сервер** (`36` §7.1): клиент присылает только то, чего сервер знать
 не может (позиция плеера, прокрутка, вьюпорт, время на устройстве), а версию материала, версию
 вопроса из снапшота попытки, заголовок карточки и `request_context` дописывает сам. Жалоба
 во время попытки её не прерывает и таймер не съедает: `deadline_at` сдвигается на время формы,
 до 60 секунд на жалобу и не больше 180 за попытку (§7.7). Очередь «Звіт про помилки», карточка
-жалобы, маршрутизация и пересчёт результатов — PR-24.
+жалобы, маршрутизация и пересчёт результатов — PR-24 (строки выше с `/content-issues` без `reports`).
 
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом

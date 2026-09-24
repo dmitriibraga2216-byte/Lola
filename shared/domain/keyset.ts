@@ -49,6 +49,12 @@ export const KEYSETS = {
    * у протокола статусов строки приходят из трёх таблиц сразу.
    */
   logs: ['at', 'text'],
+  /**
+   * Очередь «Звіт про помилки»: `reports_count desc, trusted desc, last_reported_at desc, id desc`
+   * (docs/v2/36 §5.3, §7.11; PR-24). `trusted` — 1, если среди заявителей есть «надійний»:
+   * при равном числе жалоб его карточка выше.
+   */
+  contentIssues: ['int', 'int', 'at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

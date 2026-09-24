@@ -164,8 +164,12 @@ export const attemptResults = pgTable('attempt_results', {
   passed: boolean('passed'),
   createdBy: uuid('created_by').references(() => users.id),
   comment: text('comment'),
+  // Пересчёт по жалобе (docs/v2/36 §7.8, П-12.4): карточка, из которой запущено «Перерахувати».
+  // FK на content_issues — в миграции 0077 (здесь без .references(): схема жалоб импортирует attempts)
+  issueId: uuid('issue_id'),
 }, t => [
   index().on(t.tenantId, t.attemptId),
+  index('idx_attempt_results_issue').on(t.tenantId, t.issueId).where(sql`issue_id is not null`),
 ])
 
 /**

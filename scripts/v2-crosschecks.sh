@@ -64,7 +64,7 @@ check1_stage_codes() {
   # модуль появился в базовом ТЗ задолго до пакета docs/v2 и переименовывать его не входит
   # в план (docs/v2/45-plan.md ничего об этом не говорит).
   local allow=(
-    "server/db/schema/content.ts:103" # строка сдвинулась на 1 в v2 PR-11/12 (импорт enrollments в схеме media_assets)
+    "server/db/schema/content.ts:104" # строка сдвинулась на 1 в v2 PR-11/12 (импорт enrollments в схеме media_assets), ещё на 1 в PR-24 (course_categories.owner_id)
     "server/api/v1/access-groups/index.get.ts:7"
     # Номера сдвинулись дважды: fix-keyset-cursor (+2, импорт keyset) и PR-30 (+1 импорт
     # orgManager, −2 на сжатии локального managerOf()). Сами строки не менялись: 29 → 32, 89 → 90.

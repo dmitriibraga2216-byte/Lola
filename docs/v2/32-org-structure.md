@@ -182,7 +182,7 @@ create table org_structure_snapshots (
   constraint org_structure_snapshots_kind_chk check (kind in ('manual','auto_daily','pre_import','pre_bulk_move'))
 );
 create index idx_org_structure_snapshots_tenant on org_structure_snapshots (tenant_id, created_at desc);
--- Вместо новой таблицы — расширение существующей (решение `44` В-7, миграция 0074).
+-- Вместо новой таблицы — расширение существующей (решение `44` В-7, миграция 0075).
 alter table org_conflicts add column severity text not null default 'warning';
 alter table org_conflicts add column node_id uuid references org_nodes(id) on delete cascade;
 alter table org_conflicts add constraint org_conflicts_severity_check

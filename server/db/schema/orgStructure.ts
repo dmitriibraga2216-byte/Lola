@@ -7,7 +7,7 @@ import { users, userPlacements } from './people'
 import { locations, orgUnits, positions } from './org'
 
 /**
- * Дерево подчинения (docs/v2/32-org-structure.md §3, миграция 0074_v2_org_structure).
+ * Дерево подчинения (docs/v2/32-org-structure.md §3, миграция 0075_v2_org_structure).
  *
  * Три разные вещи, которые нельзя смешивать (`32` §3.1): `org_units` — «до якого шматка
  * компанії належить», `positions` — «як називається робота», `org_nodes` — «хто кому

@@ -232,7 +232,7 @@ Multipart-загрузки в коде нет — `@aws-sdk/lib-storage` не п
 
 **Сделано:**
 
-- **Миграция `0074_v2_org_structure.sql`.** `org_nodes` (`ltree`, глубина ≤ 12,
+- **Миграция `0075_v2_org_structure.sql`.** `org_nodes` (`ltree`, глубина ≤ 12,
   до 10 корней), `org_node_assignments` (ровно одно активное основное подчинение на человека —
   частичный уникальный индекс), `org_manager_map` (проекция), `org_structure_snapshots`.
   RLS `enable` + `force` и политика с `using`/`with check` на всех четырёх, индекс с

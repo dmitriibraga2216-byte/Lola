@@ -62,7 +62,7 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // здесь не формальность, а единственное, что отделяет отклики разных пространств.
   'vacancy_applications',
   'public_apply_attempts',
-  // 32. Оргструктура: дерево подчинения (PR-30, миграция 0074_v2_org_structure).
+  // 32. Оргструктура: дерево подчинения (PR-30, миграция 0075_v2_org_structure).
   // Пятой таблицы пакета — `org_structure_conflicts` — здесь нет и не будет: решение
   // `docs/v2/44` В-7 свело её к `alter table org_conflicts` (таблица существует с 0033
   // и уже наполняется импортом людей).

@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { ORG_CONFLICT_KINDS, TAG_SCOPES } from '../enums'
 import { phoneSchema } from './auth'
+import { KEYSETS } from '../domain/keyset'
+import { keysetCursorSchema } from './keyset'
 
 /** Метка (docs/16 §14.2): ≤ 40 знаков, без угловых скобок. */
 export const tagNameSchema = z.string().trim().min(1, 'Вкажіть мітку').max(40, 'Не більше 40 знаків').regex(/^[^<>]+$/, 'Без кутових дужок')
@@ -65,7 +67,7 @@ export const personListQuerySchema = z.object({
   activeFrom: z.string().date().optional(),
   activeTo: z.string().date().optional(),
   includeHidden: z.coerce.boolean().optional(),
-  cursor: z.string().optional(),
+  cursor: keysetCursorSchema(KEYSETS.people).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 })
 

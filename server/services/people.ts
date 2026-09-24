@@ -6,6 +6,8 @@ import {
 import { OWNER_ROLE_CODE } from '../../shared/domain/roles'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
+import { keysetAfter, keysetAt } from '../utils/keyset'
+import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { enqueueNotification } from './notifications'
 import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
@@ -26,7 +28,12 @@ interface Ctx { tenantId: string, actorId: string }
 
 export type PersonListFilter = z.infer<typeof personListQuerySchema>
 
-/** Список людей с фильтрами (docs/05-screens.md §5.9), курсорная пагинация по created_at+id. */
+/**
+ * Список людей с фильтрами (docs/05-screens.md §5.9), курсорная пагинация по `(created_at, id)`.
+ * Момент в курсоре — текстом из Postgres с микросекундами (`shared/domain/keyset.ts`): импорт
+ * пишет пачку в одной транзакции, у всей пачки один `created_at`, и курсор в миллисекундах
+ * выбрасывал её остаток со второй страницы и из выгрузки.
+ */
 export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     // Условия фильтров без вкладки и курсора — общие для страницы и для счётчиков чипов
@@ -64,10 +71,8 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
     const conditions = [...baseConditions]
     if (filter.tab === 'active') conditions.push(inArray(users.status, ['invited', 'active']))
     if (filter.tab === 'blocked') conditions.push(inArray(users.status, ['suspended', 'archived']))
-    if (filter.cursor) {
-      const [ts, id] = filter.cursor.split('_')
-      conditions.push(sql`(${users.createdAt}, ${users.id}) < (${new Date(Number(ts))}, ${id}::uuid)`)
-    }
+    const after = keysetAfter(KEYSETS.people, filter.cursor, [users.createdAt, users.id], 'desc')
+    if (after) conditions.push(after)
 
     const [counts] = await tx.select({
       active: sql<number>`count(*) filter (where ${users.status} in ('invited', 'active'))::int`,
@@ -85,6 +90,7 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
       hiredAt: users.hiredAt,
       lastSeenAt: users.lastSeenAt,
       createdAt: users.createdAt,
+      cursorAt: keysetAt(users.createdAt),
       cityName: cities.name,
       externalId: users.externalId,
       isBlocked: users.isBlocked,
@@ -126,13 +132,13 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
       : []
 
     return {
-      items: page.map(r => ({
+      items: page.map(({ cursorAt: _cursorAt, ...r }) => ({
         ...r,
         placements: placements.filter(p => p.userId === r.id)
           .map(({ userId: _, ...p }) => p),
         roles: [...new Set(roleRows.filter(x => x.userId === r.id).map(x => x.name))],
       })),
-      cursor: hasMore && last ? `${last.createdAt.getTime()}_${last.id}` : null,
+      cursor: hasMore && last ? encodeKeyset(KEYSETS.people, [last.cursorAt, last.id]) : null,
       counts: counts ?? { active: 0, blocked: 0, all: 0 },
     }
   })

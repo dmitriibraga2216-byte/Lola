@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeCursor, encodeCursor } from '../../server/services/candidateFunnel'
+import { KEYSETS, decodeKeyset, encodeKeyset } from '../../shared/domain/keyset'
 import { candidateBoardSchema, candidateHireSchema, candidateRejectSchema, candidateReopenSchema } from '../../shared/schemas/candidates'
 import { recruitingPatchSchema, tenantSettingsSchema } from '../../shared/schemas/settings'
 
@@ -10,20 +10,20 @@ import { recruitingPatchSchema, tenantSettingsSchema } from '../../shared/schema
  */
 
 describe('курсор колонки канбана (§5.2, критерий §13 к. 12)', () => {
-  it('кодируется парой «дата создания + id» и читается обратно без потерь', () => {
-    const row = { createdAt: new Date('2026-09-23T10:11:12.345Z'), id: '3f6c0b3e-0c4a-4b0e-9c1a-2a3b4c5d6e7f' }
-    const cursor = encodeCursor(row)
-    expect(cursor).toBe('2026-09-23T10:11:12.345Z|3f6c0b3e-0c4a-4b0e-9c1a-2a3b4c5d6e7f')
-    const back = decodeCursor(cursor)
-    expect(back!.id).toBe(row.id)
-    expect(back!.createdAt.getTime()).toBe(row.createdAt.getTime())
+  it('кодируется парой «дата создания + id» и читается обратно без потерь — с микросекундами', () => {
+    const row = { cursorAt: '2026-09-23T10:11:12.345678Z', id: '3f6c0b3e-0c4a-4b0e-9c1a-2a3b4c5d6e7f' }
+    const cursor = encodeKeyset(KEYSETS.candidateBoard, [row.cursorAt, row.id])
+    expect(decodeKeyset(KEYSETS.candidateBoard, cursor)).toEqual([row.cursorAt, row.id])
   })
 
-  it('пустой и битый курсор не ломают страницу — просто первая страница', () => {
-    expect(decodeCursor(undefined)).toBeNull()
-    expect(decodeCursor('')).toBeNull()
-    expect(decodeCursor('без-разделителя')).toBeNull()
-    expect(decodeCursor('не-дата|3f6c0b3e-0c4a-4b0e-9c1a-2a3b4c5d6e7f')).toBeNull()
+  // [исправлено 24.09.2026, keyset-курсор] Ранее: «пустой и битый курсор не ломают страницу —
+  // просто первая страница». Первая страница вместо следующей даёт дубли на «Показати ще»;
+  // битый курсор теперь режет схема входа (422 `validation_failed`), пустой — по-прежнему начало.
+  it('пустой курсор — первая страница, битый и прежний `<ISO>|<id>` отсекаются схемой входа', () => {
+    expect(candidateBoardSchema.safeParse({ cursor: '' }).success).toBe(true)
+    expect(candidateBoardSchema.safeParse({ cursor: 'без-разделителя' }).success).toBe(false)
+    expect(candidateBoardSchema.safeParse({ cursor: 'не-дата|3f6c0b3e-0c4a-4b0e-9c1a-2a3b4c5d6e7f' }).success).toBe(false)
+    expect(candidateBoardSchema.safeParse({ cursor: '2026-09-23T10:11:12.345Z|3f6c0b3e-0c4a-4b0e-9c1a-2a3b4c5d6e7f' }).success).toBe(false)
   })
 
   it('страница колонки ограничена полусотней: доска не грузит колонку целиком', () => {

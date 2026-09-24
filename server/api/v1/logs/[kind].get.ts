@@ -1,11 +1,11 @@
 import { logFilterSchema } from '../../../../shared/schemas/reports'
 import { can, requireScope } from '../../../services/access'
-import { LOG_KINDS, RETENTION_DAYS, logRows, readLog } from '../../../services/logs'
+import { LOG_KINDS, RETENTION_DAYS, logRows, readLogPage } from '../../../services/logs'
 import type { LogKind } from '../../../services/logs'
 import { logSecurity } from '../../../services/securityLog'
 import { toXlsx } from '../../../services/reports'
 import { apiData, apiError } from '../../../utils/apiResponse'
-/** Журналы (docs/22 §5, §13.4): фильтры по периоду, человеку, типу; доступ по audit.view; `format=xlsx` — выгрузка с каркасом первыми колонками. */
+/** Журналы (docs/22 §5, §13.4): фильтры по периоду, человеку, типу; доступ по audit.view; `format=xlsx` — выгрузка с каркасом первыми колонками; `cursor` в ответе — следующая страница. */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'audit.view')
   const kind = getRouterParam(event, 'kind') as LogKind
@@ -22,6 +22,6 @@ export default defineEventHandler(async (event) => {
     setHeader(event, 'Content-Disposition', `attachment; filename="lola-log-${kind}.xlsx"`)
     return toXlsx(kind, rows)
   }
-  const rows = await readLog(ctx, kind, q.data)
-  return apiData({ kind, retentionDays: RETENTION_DAYS[kind], rows })
+  const page = await readLogPage(ctx, kind, q.data)
+  return apiData({ kind, retentionDays: RETENTION_DAYS[kind], rows: page.rows, cursor: page.cursor })
 })

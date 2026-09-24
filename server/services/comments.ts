@@ -1,9 +1,11 @@
-import { and, desc, eq, gt, isNull, lt, or } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import {
   comments, courses, locations, notices, programs, quizzes, resources, roles, userPlacements, userRoles, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
+import { keysetAfter, keysetAt } from '../utils/keyset'
+import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import type { CommentSourceType } from '../../shared/schemas/catalog'
@@ -114,7 +116,13 @@ export async function createComment(ctx: Ctx, input: { sourceType: CommentSource
   })
 }
 
-/** Стрічка для адміну/автора (мокап Comments): фільтри — джерело, стан прочитання. */
+/**
+ * Стрічка для адміну/автора (мокап Comments): фільтри — джерело, стан прочитання.
+ *
+ * Сторінка — `(created_at, id)` за спаданням з курсором сервера (`shared/domain/keyset.ts`).
+ * Раніше курсор будував клієнт з `createdAt` останнього рядка: JSON віддає момент у мілісекундах,
+ * а другого ключа не було — коментарі тієї ж мілісекунди випадали з наступної сторінки.
+ */
 export async function listComments(ctx: Ctx, filter: { sourceType?: CommentSourceType, isRead?: 'read' | 'unread', cursor?: string, limit: number }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select({
@@ -126,6 +134,7 @@ export async function listComments(ctx: Ctx, filter: { sourceType?: CommentSourc
       routedTo: comments.routedTo,
       replyToId: comments.replyToId,
       createdAt: comments.createdAt,
+      cursorAt: keysetAt(comments.createdAt),
       authorId: comments.authorId,
       authorName: users.fullName,
     })
@@ -136,17 +145,22 @@ export async function listComments(ctx: Ctx, filter: { sourceType?: CommentSourc
         ...(filter.sourceType ? [eq(comments.sourceType, filter.sourceType)] : []),
         ...(filter.isRead === 'read' ? [eq(comments.isRead, true)] : []),
         ...(filter.isRead === 'unread' ? [eq(comments.isRead, false)] : []),
-        ...(filter.cursor ? [lt(comments.createdAt, new Date(filter.cursor))] : []),
+        keysetAfter(KEYSETS.comments, filter.cursor, [comments.createdAt, comments.id], 'desc'),
       ))
-      .orderBy(desc(comments.createdAt))
-      .limit(filter.limit)
+      .orderBy(desc(comments.createdAt), desc(comments.id))
+      .limit(filter.limit + 1)
 
+    const page = rows.slice(0, filter.limit)
     const titles = new Map<string, string | null>()
-    for (const r of rows) {
+    for (const r of page) {
       const key = `${r.sourceType}:${r.sourceId}`
       if (!titles.has(key)) titles.set(key, await sourceTitle(tx, r.sourceType as CommentSourceType, r.sourceId))
     }
-    return rows.map(r => ({ ...r, sourceTitle: titles.get(`${r.sourceType}:${r.sourceId}`) ?? null }))
+    const last = rows.length > filter.limit ? page[page.length - 1] : undefined
+    return {
+      items: page.map(({ cursorAt: _cursorAt, ...r }) => ({ ...r, sourceTitle: titles.get(`${r.sourceType}:${r.sourceId}`) ?? null })),
+      cursor: last ? encodeKeyset(KEYSETS.comments, [last.cursorAt, last.id]) : null,
+    }
   })
 }
 

@@ -178,12 +178,12 @@ describe('лента коментарів з маршрутизацією (docs/
     expect(n.length).toBeGreaterThan(0)
 
     const list = await listComments(ctx(author), { limit: 50 })
-    expect(list.some(r => r.id === comment.id)).toBe(true)
+    expect(list.items.some(r => r.id === comment.id)).toBe(true)
 
     const read = await markCommentRead(ctx(author), comment.id)
     expect(read).toBe(true)
     const unreadOnly = await listComments(ctx(author), { isRead: 'unread', limit: 50 })
-    expect(unreadOnly.some(r => r.id === comment.id)).toBe(false)
+    expect(unreadOnly.items.some(r => r.id === comment.id)).toBe(false)
 
     const reply = await replyToComment(ctx(author), comment.id, 'Дякую, перевірю рецептуру')
     expect(reply.ok).toBe(true)

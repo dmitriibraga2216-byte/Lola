@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { KEYSETS } from '../domain/keyset'
+import { keysetCursorSchema } from './keyset'
 
 /** Контракты оплаты и смены тарифа (docs/v2/35-billing-limits.md §3.5, §6, §10, PR-10). */
 
@@ -32,7 +34,7 @@ export const tenantPaymentsQuerySchema = z.object({
   to: z.string().date().optional(),
   kind: z.enum(['subscription', 'addon', 'adjustment']).optional(),
   status: z.enum(['pending', 'paid', 'failed', 'refunded', 'written_off']).optional(),
-  cursor: z.string().datetime().optional(),
+  cursor: keysetCursorSchema(KEYSETS.payments).optional(),
   limit: z.number().int().min(1).max(100).default(30),
 })
 export type TenantPaymentsQuery = z.infer<typeof tenantPaymentsQuerySchema>

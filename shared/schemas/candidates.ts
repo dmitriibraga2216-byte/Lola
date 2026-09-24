@@ -3,6 +3,8 @@ import {
   CANDIDATE_COMMENT_VISIBILITIES, CANDIDATE_REJECT_REASONS, CANDIDATE_SCORE_KINDS,
   CANDIDATE_SOURCES, CANDIDATE_STATES,
 } from '../enums'
+import { KEYSETS } from '../domain/keyset'
+import { keysetCursorSchema } from './keyset'
 
 /**
  * Контракты рекрутинга: кандидат, его карточка, статусы, оценки (docs/v2/28 §6, §10).
@@ -213,7 +215,7 @@ export const candidateBoardSchema = z
     recruiterId: z.string().uuid().optional(),
     source: z.enum(CANDIDATE_SOURCES).optional(),
     q: z.string().trim().max(200).optional(),
-    cursor: z.string().max(80).optional(), // «<createdAt ISO>|<id>» последней показанной карточки
+    cursor: keysetCursorSchema(KEYSETS.candidateBoard).optional(), // позиция последней показанной карточки, выдаёт сервер
     limit: z.coerce.number().int().min(1).max(50).default(50),
   })
   .strict()

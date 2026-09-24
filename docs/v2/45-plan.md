@@ -895,7 +895,7 @@ PR-09»; решения при отступлениях — `docs/28-implementat
 
 #### PR-39 · `v2-settings-39` · Настройки тенанта и платформы (П-21, П-24, В-20)
 
-> [исправлено, реализация PR-39] Номер миграции — свой (`0086_v2_settings`, назначен при rebase
+> [исправлено, реализация PR-39] Номер миграции — свой (`0084_v2_settings`, назначен при rebase
 > по правилу §5). Таблиц — **шесть** и три `alter`: `platform_announcements` (платформенная),
 > `platform_announcement_reads`, `position_groups`, `user_totp`, `user_totp_recovery_codes` и
 > `absence_norms`; `positions.group_id`, `automation_rules.position_id`/`position_group_id`,

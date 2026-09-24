@@ -37,6 +37,14 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // Единственная таблица PR-18: делегирования, правила маршрутизации, ёмкость проверяющих и
   // события SLA (`docs/v2/37` §3.2–3.4) приезжают следующим PR — они ссылаются на эту строку.
   'review_queue_items',
+  // 37. Делегирование, распределение, SLA (PR-19, миграция 0080_v2_review_delegation): шесть
+  // таблиц `37` §3.2–3.4 поверх очереди и два ключа-развязки из неё (В-13).
+  'review_delegations',
+  'review_routing_rules',
+  'reviewer_capacity',
+  'reviewer_absences',
+  'review_sla_events',
+  'reviewer_stats_daily',
   // 36. Обратная связь по контенту: подача и дедупликация (PR-23, миграция 0069_v2_content_issues).
   // `content_issue_events` здесь, а не в PR-24: критерий приёмки 2 (`36` §13) требует событие
   // `merged` в момент подачи, а `content_issue_routing_rules` придут с разбором.

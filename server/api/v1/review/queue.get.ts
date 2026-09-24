@@ -1,6 +1,6 @@
 import { reviewQueueQuerySchema } from '../../../../shared/schemas/review'
 import { requireScope } from '../../../services/access'
-import { listReviewQueue } from '../../../services/reviewQueue'
+import { listReviewQueue, reviewQueueCounts } from '../../../services/reviewQueue'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
 /**
@@ -10,6 +10,9 @@ import { apiData, apiError } from '../../../utils/apiResponse'
  * `limit 200`. Теперь это самостоятельный список: четыре таба, фильтры экрана `37` §5.1, `total`
  * и ключевой курсор. Три базовых пути остаются узкими фильтрами поверх своих источников —
  * у них есть то, чего у очереди нет (метки вопросов, «Поза програмами», «Поза курсами»).
+ *
+ * С PR-19 табы «Делеговані мені» и «Делеговані мною» наполнены (`review_delegations`), а ответ
+ * несёт `counts` — счётчики всех табов для шапки экрана.
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'review.queue')
@@ -29,5 +32,8 @@ export default defineEventHandler(async (event) => {
     limit: q.limit ? Number(q.limit) : undefined,
   })
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Невірний фільтр черги')
-  return apiData(await listReviewQueue({ tenantId: a.tenantId, actorId: a.userId }, p.data))
+  const ctx = { tenantId: a.tenantId, actorId: a.userId }
+  // Счётчики табов (`37` §5.1: «Мої» — ждущие и взятые, просроченные коралловые) — одним ответом
+  // со списком, чтобы экран не делал четыре запроса на каждое переключение таба.
+  return apiData({ ...(await listReviewQueue(ctx, p.data)), counts: await reviewQueueCounts(ctx) })
 })

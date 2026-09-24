@@ -1,13 +1,14 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  enrollments, lessonProgress, locations, userPlacements, userRoles, roles, users, workshopComments, workshopSubmissions, workshops,
+  enrollments, lessonProgress, locations, reviewQueueItems, userPlacements, userRoles, roles, users, workshopComments, workshopSubmissions, workshops,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { sanitizeBody } from './sanitize'
 import { enqueueNotification } from './notifications'
-import { claimReview, closeReview, enqueueReview, releaseReview, reviewConflict } from './reviewQueue'
+import { claimReview, closeReview, enqueueReview, heldByOtherSql, releaseReview, reviewConflict, staleClaims } from './reviewQueue'
+import { CLAIM_TTL_MS } from './reviewRules'
 import { closeOpenSegments } from './learningTime'
 import type { ContentBlock } from '../../shared/schemas/content'
 import { managerIdOf, managerIdsOf } from './orgManager'
@@ -16,7 +17,8 @@ interface Ctx { tenantId: string, actorId: string }
 
 export interface Criterion { id: string, text: string, weight: number, isCritical: boolean }
 
-const CLAIM_TTL_MS = 30 * 60_000 // docs/13 §4.2: 30 минут бездействия — карточка возвращается
+/** Решение по практикуму словами — для `review_delegation_resolved` делегировавшему (docs/v2/37 §8). */
+const WORKSHOP_DECISION_UK: Record<'accepted' | 'rejected' | 'rework', string> = { accepted: 'зараховано', rejected: 'не зараховано', rework: 'на доопрацювання' }
 
 // ── Управление (методист) ──────────────────────────────────────────────
 
@@ -211,8 +213,12 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
       slaHours: w.slaHours,
     })
 
+    // Правило распределения уже назначило проверяющего (он получил `review_assigned`) — звать
+    // всех наставников точки «перевірити» нечестно: взять назначенную другому работу нельзя.
+    const [queued] = await tx.select({ assigned: reviewQueueItems.assignedReviewerId }).from(reviewQueueItems)
+      .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, s!.id)))
     const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
-    for (const rid of await reviewersFor(tx, ctx.tenantId, w, ctx.actorId)) {
+    for (const rid of queued?.assigned ? [] : await reviewersFor(tx, ctx.tenantId, w, ctx.actorId)) {
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: rid, code: 'workshop_submitted', payload: { name: me?.fullName, title: w.title, submissionId: s!.id }, dedupKey: `ws_submitted:${s!.id}:${rid}` })
     }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.submit', entity: 'workshop_submission', entityId: s!.id })
@@ -273,6 +279,9 @@ export async function reviewQueue(ctx: Ctx, filter: { mine?: boolean, overdue?: 
         filter.mine
           ? eq(workshopSubmissions.reviewerId, ctx.actorId)
           : sql`(${workshopSubmissions.reviewerId} is null or ${workshopSubmissions.reviewerId} = ${ctx.actorId}::uuid or ${workshopSubmissions.claimedAt} < ${stale}::timestamptz)`,
+        // Назначенная или делегированная другому работа ушла из «Мої» (docs/v2/37 §13 к. 1) —
+        // узкий фильтр не должен возвращать её обратно: состояние берётся из очереди (В-2).
+        sql`not ${heldByOtherSql(ctx.actorId, 'workshop', sql`${workshopSubmissions.id}`)}`,
         ...(filter.overdue ? [sql`${workshopSubmissions.slaDueAt} < now()`] : []),
       ))
       .orderBy(asc(workshopSubmissions.slaDueAt))
@@ -281,28 +290,35 @@ export async function reviewQueue(ctx: Ctx, filter: { mine?: boolean, overdue?: 
   })
 }
 
-export type ClaimResult = { ok: true } | { ok: false, code: 'not_found' | 'already_claimed' | 'self_review' }
+export type ClaimResult = { ok: true } | { ok: false, code: 'not_found' | 'already_claimed' | 'self_review' | 'assigned_to_other' }
 
-/** Захват карточки (docs/13 §7.2): открытие ставит reviewer_id; через 30 минут бездействия освобождается. */
+/**
+ * Захват карточки (docs/13 §7.2): открытие берёт работу в руки; через 30 минут бездействия
+ * она освобождается. Кто может брать и занята ли карточка, решает очередь (`reviewGuard`,
+ * PR-19): назначенную или делегированную другому работу открыть нельзя (docs/v2/37 §7.1).
+ */
 export async function claim(ctx: Ctx, submissionId: string): Promise<ClaimResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [s] = await tx.select().from(workshopSubmissions).where(eq(workshopSubmissions.id, submissionId))
     if (!s || !['submitted', 'in_review'].includes(s.status)) return { ok: false as const, code: 'not_found' as const }
     if (s.userId === ctx.actorId) return { ok: false as const, code: 'self_review' as const }
-    const stale = s.claimedAt && s.claimedAt.getTime() < Date.now() - CLAIM_TTL_MS
-    if (s.reviewerId && s.reviewerId !== ctx.actorId && !stale) return { ok: false as const, code: 'already_claimed' as const }
+    const guard = await claimReview(tx, { taskType: 'workshop', sourceId: submissionId, reviewerId: ctx.actorId })
+    if (!guard.ok) return { ok: false as const, code: guard.code }
+    // `workshop_submissions.reviewer_id` и `claimed_at` — зеркало для совместимости (В-2):
+    // источник истины о захвате — review_queue_items.claimed_by / claimed_at.
     await tx.update(workshopSubmissions).set({ status: 'in_review', reviewerId: ctx.actorId, claimedAt: new Date(), updatedAt: new Date() }).where(eq(workshopSubmissions.id, submissionId))
-    // `workshop_submissions.reviewer_id` и `claimed_at` с этого PR — зеркало для
-    // совместимости (В-2): источник истины о состоянии очереди — review_queue_items.
-    await claimReview(tx, { taskType: 'workshop', sourceId: submissionId, reviewerId: ctx.actorId })
     return { ok: true as const }
   })
 }
 
+/** «Пропустити»: снимается только свой захват; назначение и делегирование остаются (docs/v2/37 §4). */
 export async function release(ctx: Ctx, submissionId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [q] = await tx.select({ claimedBy: reviewQueueItems.claimedBy }).from(reviewQueueItems)
+      .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, submissionId)))
+    if (q && q.claimedBy !== ctx.actorId) return false
     await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null, updatedAt: new Date() })
-      .where(and(eq(workshopSubmissions.id, submissionId), eq(workshopSubmissions.reviewerId, ctx.actorId)))
+      .where(and(eq(workshopSubmissions.id, submissionId), eq(workshopSubmissions.status, 'in_review')))
     await releaseReview(tx, { taskType: 'workshop', sourceIds: [submissionId] })
     return true
   })
@@ -335,7 +351,10 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
   const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [s] = await tx.select().from(workshopSubmissions).where(eq(workshopSubmissions.id, submissionId))
     if (!s || s.status !== 'in_review') return { ok: false as const, code: 'not_found' as const }
-    if (s.reviewerId !== ctx.actorId) return { ok: false as const, code: 'not_claimed' as const }
+    // Решает тот, у кого карточка в руках, — по очереди, а не по зеркалу (В-2).
+    const [q] = await tx.select({ claimedBy: reviewQueueItems.claimedBy }).from(reviewQueueItems)
+      .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, submissionId)))
+    if ((q ? q.claimedBy : s.reviewerId) !== ctx.actorId) return { ok: false as const, code: 'not_claimed' as const }
     const [w] = await tx.select().from(workshops).where(eq(workshops.id, s.workshopId))
     if (!w) return { ok: false as const, code: 'not_found' as const }
 
@@ -379,7 +398,7 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     // Решение принято — элемент очереди закрывается, но остаётся строкой (проверка 21:
     // ни truncate, ни delete). Доработка тоже закрывает: работа вернулась к ученику, и
     // повторная сдача откроет ту же строку заново через enqueueReview().
-    await closeReview(tx, { taskType: 'workshop', sourceIds: [submissionId], reviewerId: ctx.actorId, at: now })
+    await closeReview(tx, { taskType: 'workshop', sourceIds: [submissionId], reviewerId: ctx.actorId, decision: WORKSHOP_DECISION_UK[input.decision], at: now })
 
     const code = input.decision === 'accepted' ? 'workshop_accepted' : input.decision === 'rework' ? 'workshop_rework' : 'workshop_rejected'
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s.userId, code, payload: { title: w.title, comment, submissionId }, dedupKey: `ws_${code}:${submissionId}:${s.reworkCount}` })
@@ -434,10 +453,13 @@ export async function addComment(ctx: Ctx, submissionId: string, body: string, i
 /** Фоновые (docs/13 §11): SLA-просрочки руководителю, освобождение протухших захватов, expire доработок. */
 export async function workshopSlaScan(tenantId: string): Promise<{ released: number, breached: number, expired: number }> {
   return withTenant(tenantId, null, async (tx) => {
-    const stale = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
-    const released = await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null })
-      .where(and(eq(workshopSubmissions.status, 'in_review'), sql`${workshopSubmissions.claimedAt} < ${stale}::timestamptz`)).returning({ id: workshopSubmissions.id })
-    await releaseReview(tx, { taskType: 'workshop', sourceIds: released.map(r => r.id) })
+    // Протухшие захваты — по очереди (источник истины, В-2), зеркало следует за ней.
+    const staleIds = await staleClaims(tx, 'workshop')
+    const released = staleIds.length
+      ? await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null })
+        .where(and(eq(workshopSubmissions.status, 'in_review'), inArray(workshopSubmissions.id, staleIds))).returning({ id: workshopSubmissions.id })
+      : []
+    await releaseReview(tx, { taskType: 'workshop', sourceIds: staleIds })
 
     let breached = 0
     const overdue = await tx.select({ s: workshopSubmissions, w: workshops }).from(workshopSubmissions).innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))

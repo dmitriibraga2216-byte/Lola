@@ -35,10 +35,14 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/trajectories', label: t('admin.nav.trajectories'), show: hasScope('program.manage'), group: t('admin.group.assignments') },
     { to: '/admin/profiles', label: t('admin.nav.profiles'), show: hasScope('assignment.create'), group: t('admin.group.assignments') },
     { to: '/admin/rules', label: t('admin.nav.rules'), show: hasScope('settings.tenant'), group: t('admin.group.assignments') },
-    // Перевірка — черга та відповіді (docs/12 §14).
+    // Перевірка — черга та відповіді (docs/12 §14); єдина черга з делегуванням, навантаження
+    // і правила розподілу — docs/v2/37 §5.1, §5.3 (PR-19).
+    { to: '/admin/review-queue', label: t('admin.nav.reviewQueue'), show: hasScope('review.queue'), group: t('admin.group.review') },
     { to: '/admin/review-workshops', label: t('admin.nav.reviewWorkshops'), show: hasScope('review.queue'), group: t('admin.group.review') },
     { to: '/admin/review', label: t('admin.nav.review'), show: hasScope('review.queue'), group: t('admin.group.review') },
     { to: '/admin/attempt-requests', label: t('admin.nav.attemptRequests'), show: hasScope('review.grade'), group: t('admin.group.review') },
+    { to: '/admin/review-workload', label: t('admin.nav.reviewWorkload'), show: hasScope('review.workload.view'), group: t('admin.group.review') },
+    { to: '/admin/review-routing', label: t('admin.nav.reviewRouting'), show: hasScope('review.routing.manage'), group: t('admin.group.review') },
     { to: '/admin/comments', label: t('admin.nav.comments'), show: hasScope('course.view'), group: t('admin.group.review') },
     // «Звіт про помилки» (docs/v2/36 §5.3): черга скарг на матеріали — поруч із коментарями
     { to: '/admin/content-issues', label: t('admin.nav.contentIssues'), show: hasScope('content_issue.view'), group: t('admin.group.review') },

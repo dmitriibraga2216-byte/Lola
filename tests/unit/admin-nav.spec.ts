@@ -53,6 +53,10 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/assignments': "hasScope('assignment.create')",
   '/admin/tasks/parameters': "hasScope('assignment.create')",
   '/admin/trajectories': "hasScope('program.manage')",
+  // PR-19 (docs/v2/37 §5.1, §5.3): единая очередь с делегированием, нагрузка, правила распределения
+  '/admin/review-queue': "hasScope('review.queue')",
+  '/admin/review-workload': "hasScope('review.workload.view')",
+  '/admin/review-routing': "hasScope('review.routing.manage')",
   '/admin/review-workshops': "hasScope('review.queue')",
   '/admin/review': "hasScope('review.queue')",
   '/admin/attempt-requests': "hasScope('review.grade')",

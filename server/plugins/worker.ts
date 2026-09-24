@@ -182,6 +182,32 @@ export default defineNitroPlugin(async () => {
       const n = await reassignScan(tenantId)
       if (n) console.log(`[content_issue.reassign_scan] ${tenantId}: переназначено ${n}`)
     }))
+    // Очередь проверки (docs/v2/37 §11, PR-19). Каждая задача — круг по тенантам: падение
+    // одного не трогает остальных, приостановленные пропускаются.
+    await work('review.sla_scan', () => runPerTenant('review.sla_scan', async (tenantId) => {
+      const { reviewSlaScan } = await import('../services/reviewSla')
+      const s = await reviewSlaScan(tenantId)
+      if (s.warned || s.breached || s.escalated) console.log(`[review.sla_scan] ${tenantId}:`, s)
+    }))
+    await work('review.delegation_expire', () => runPerTenant('review.delegation_expire', async (tenantId) => {
+      const { expireDelegations } = await import('../services/reviewDelegation')
+      const n = await expireDelegations(tenantId)
+      if (n) console.log(`[review.delegation_expire] ${tenantId}: повернуто ${n}`)
+    }))
+    await work('review.absence_apply', () => runPerTenant('review.absence_apply', async (tenantId) => {
+      const { applyAbsences } = await import('../services/reviewWorkload')
+      const n = await applyAbsences(tenantId)
+      if (n) console.log(`[review.absence_apply] ${tenantId}: перекинуто ${n}`)
+    }))
+    await work('review.rebalance', () => runPerTenant('review.rebalance', async (tenantId) => {
+      const { rebalanceTenant } = await import('../services/reviewRouting')
+      const n = await rebalanceTenant(tenantId)
+      if (n) console.log(`[review.rebalance] ${tenantId}: призначено ${n}`)
+    }))
+    await work('review.stats_rollup', () => runPerTenant('review.stats_rollup', async (tenantId) => {
+      const { reviewStatsRollup } = await import('../services/reviewSla')
+      await reviewStatsRollup(tenantId)
+    }))
     await work('webhook.deliver', () => runPerTenant('webhook.deliver', async (tenantId) => {
       const s = await deliverPending(tenantId)
       if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)

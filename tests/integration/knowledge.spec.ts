@@ -362,6 +362,8 @@ describe('практикум: сдача → захват → доработка
     if (!sub.ok) throw new Error(sub.code)
     await claim(mentor(), sub.submissionId)
     await admin`update workshop_submissions set claimed_at = now() - interval '31 minutes', sla_due_at = now() - interval '3 hours', submitted_at = now() - interval '4 hours' where id = ${sub.submissionId}`
+    // Захват живёт в очереди (источник истины с PR-19, docs/v2/44 В-2): протухшим его делает она.
+    await admin`update review_queue_items set claimed_at = now() - interval '31 minutes' where task_type = 'workshop' and source_id = ${sub.submissionId}`
     const [loc] = await admin`select l.id from locations l join user_placements up on up.location_id = l.id where up.user_id = ${learnerId} and up.ended_at is null limit 1`
     await admin`update locations set manager_id = ${adminId} where id = ${loc!.id}`
 

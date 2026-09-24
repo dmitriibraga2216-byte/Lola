@@ -563,12 +563,37 @@ export type ReviewTaskType = typeof REVIEW_TASK_TYPES[number]
 
 /**
  * Состояние элемента очереди (`review_queue_items.status`, docs/14 §3.3, docs/v2/37 §4).
- * `done` — терминальное: решение принято. Повторная сдача после доработки открывает **ту же**
- * строку заново (`enqueueReview()` через `on conflict do update`), потому что источник
- * переиспользует ту же `workshop_submissions.id`.
+ * `delegated` — есть активное делегирование, работа у делегата; `escalated` — срок нарушен на
+ * 150 %, работу видит и руководитель области (PR-19). `done` — терминальное: решение принято.
+ * Повторная сдача после доработки открывает **ту же** строку заново (`enqueueReview()` через
+ * `on conflict do update`), потому что источник переиспользует ту же `workshop_submissions.id`.
  */
-export const REVIEW_QUEUE_STATUSES = ['waiting', 'in_review', 'done'] as const
+export const REVIEW_QUEUE_STATUSES = ['waiting', 'in_review', 'delegated', 'escalated', 'done'] as const
 export type ReviewQueueStatus = typeof REVIEW_QUEUE_STATUSES[number]
+
+/** Причина делегирования (`review_delegations.reason_code`, docs/v2/37 §3.2, §6.1); при `other` пояснение 10–500. */
+export const REVIEW_DELEGATION_REASONS = ['absence', 'workload', 'expertise', 'conflict_of_interest', 'location_change', 'other'] as const
+export type ReviewDelegationReason = typeof REVIEW_DELEGATION_REASONS[number]
+
+/**
+ * Состояние звена делегирования (`review_delegations.state`, docs/v2/37 §4): `resolved` — делегат
+ * принял решение, `revoked_by_author` / `revoked_by_manager` — отозвано, `revoked_sla` — делегат
+ * не уложился в срок и работа вернулась (§7.5), `cancelled` — работа аннулирована.
+ */
+export const REVIEW_DELEGATION_STATES = ['active', 'resolved', 'revoked_by_author', 'revoked_by_manager', 'revoked_sla', 'cancelled'] as const
+export type ReviewDelegationState = typeof REVIEW_DELEGATION_STATES[number]
+
+/** Стратегия правила распределения (`review_routing_rules.strategy`, docs/v2/37 §3.3, §7.16). */
+export const REVIEW_ROUTING_STRATEGIES = ['location_mentor', 'course_author', 'specific_list', 'round_robin', 'least_loaded', 'manual'] as const
+export type ReviewRoutingStrategy = typeof REVIEW_ROUTING_STRATEGIES[number]
+
+/** Вид отсутствия проверяющего (`reviewer_absences.kind`, docs/v2/37 §3.4, §7.18); `dismissal` — бессрочно. */
+export const REVIEWER_ABSENCE_KINDS = ['vacation', 'sick', 'training', 'dismissal', 'other'] as const
+export type ReviewerAbsenceKind = typeof REVIEWER_ABSENCE_KINDS[number]
+
+/** Событие журнала SLA (`review_sla_events.event`, docs/v2/37 §3.4, §7.17, §7.19). */
+export const REVIEW_SLA_EVENTS = ['assigned', 'warned', 'breached', 'escalated', 'reassigned', 'resolved', 'delegation_expired'] as const
+export type ReviewSlaEvent = typeof REVIEW_SLA_EVENTS[number]
 
 /**
  * Достоверность измерения времени (`review_queue_items.time_confidence`, docs/v2/37 §7.15).
@@ -757,6 +782,11 @@ export const ENUMS: Record<string, readonly string[]> = {
   learning_time_subject_type: LEARNING_TIME_SUBJECT_TYPES,
   learning_time_closed_reason: LEARNING_TIME_CLOSED_REASONS,
   answer_input_mode: ANSWER_INPUT_MODES,
+  review_delegation_reason: REVIEW_DELEGATION_REASONS,
+  review_delegation_state: REVIEW_DELEGATION_STATES,
+  review_routing_strategy: REVIEW_ROUTING_STRATEGIES,
+  reviewer_absence_kind: REVIEWER_ABSENCE_KINDS,
+  review_sla_event: REVIEW_SLA_EVENTS,
   content_issue_target_type: CONTENT_ISSUE_TARGET_TYPES,
   content_issue_type: CONTENT_ISSUE_TYPES,
   content_issue_status: CONTENT_ISSUE_STATUSES,

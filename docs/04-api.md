@@ -154,13 +154,25 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/review/queue` | **единая очередь** поверх `review_queue_items` (`v2/37` §10, решение `v2/44` В-15): `?tab=mine\|delegated_in\|delegated_out\|done&taskType&locationId&trackId&reviewerId&subjectKind&from&to&overdue&cursor&limit`; ответ `{items, total, cursor}` |
+| GET | `/review/queue` | **единая очередь** поверх `review_queue_items` (`v2/37` §10, решение `v2/44` В-15): `?tab=mine\|delegated_in\|delegated_out\|done&taskType&locationId&trackId&reviewerId&subjectKind&from&to&overdue&cursor&limit`; ответ `{items, total, cursor, counts}` — `counts` со счётчиками табов (PR-19) |
 | GET | `/review/answers` | **узкий фильтр** поверх того же источника: очередь **ответов** (`12` §14.4) со своими фильтрами — `checked`, метки вопросов, «Поза програмами», «Поза курсами», точка, курс |
 | POST | `/review/answers/:id/grade` | `{score, comment}`; наставнику видна `grader_hint` |
 | GET | `/review/workshops` | **узкий фильтр**: очередь сдач практикумов, `?mine&overdue`; сортировка по времени в очереди |
 | POST | `/review/workshops/:id/claim` | взять в работу (блокировка 30 минут) (старый путь: `/review/submissions/:id/claim`, до конца R1) |
 | POST | `/review/workshops/:id/grade` | `{decision: passed\|rework\|failed, criteria[], comment}` (старый путь: `/review/submissions/:id/grade`, до конца R1) |
-| GET/POST | `/review/submissions/:id`, `/:id/claim`, `/:id/release`, `/:id/grade`, `/:id/comments` | карточка проверки и действия над **работой**; решение принимается над работой, а не над строкой очереди — очередь обновляется тем же сервисом в той же транзакции |
+| GET/POST | `/review/submissions/:id`, `/:id/claim`, `/:id/release`, `/:id/grade`, `/:id/comments` | карточка проверки и действия над **работой**; решение принимается над работой, а не над строкой очереди — очередь обновляется тем же сервисом в той же транзакции. С PR-19 назначенную или делегированную другому работу взять нельзя: `409 review.assigned_to_other` |
+| GET | `/review/items/:id` | карточка элемента очереди (`v2/37` §5.2): работа, критерии, история попыток, цепочка передач, `can` — какие действия доступны смотрящему. **Без `phone`, `email`, `resume_asset_id`** ни для кого (сквозная проверка 20); не видящему работу ни в одном табе — `404` |
+| GET | `/review/items/:id/delegate-targets` | кому можно передать работу (`v2/37` §6.1) — список уже отфильтрован по праву оценки на точке, отсутствию и «приймаю делегування»; с нагрузкой `open / max` |
+| POST | `/review/items/:id/delegate` | `{toUserId, reasonCode, reasonText?, dueAt, notify}` → `{delegationId, item}`; `422 review.delegate_target_forbidden \| review.delegate_target_declines \| review.delegate_cycle \| review.delegate_depth_exceeded`, `409 review.already_in_review`. Срок проверки не меняется (`v2/37` §7.5) |
+| POST | `/review/items/bulk-delegate` | «Делегувати обрані»: `{itemIds[≤25], toUserId, reasonCode, dueAt}` → `{ok[], failed[{id, code, message}]}`; `422 review.bulk_limit` |
+| POST | `/review/items/:id/reassign` | «Переназначити» (`review.delegate.any`): `{toUserId, reason}` — без цепочки, активные звенья закрываются `revoked_by_manager` |
+| POST | `/review/delegations/:id/revoke` | `{reason?}`; автору — пока делегат не открыл карточку, иначе `409 review.delegation_in_progress`; руководителю — всегда, с причиной (`v2/37` §7.6) |
+| GET | `/review/workload` | нагрузка проверяющих области (`v2/37` §5.3): `?locationId` |
+| PATCH | `/review/capacity/:userId` | «Змінити ліміт» и «приймаю делегування» (`v2/37` §5.3, §7.2 (д)) |
+| POST | `/review/absences` | отсутствие проверяющего (`v2/37` §6.2) → `{absence, movedCount}`; `422 reviewer_absence.range_invalid`, `422 absence.self_substitute` |
+| DELETE | `/review/absences/:id` | отмена отсутствия; переехавшие работы назад не едут |
+| GET/POST | `/review/routing-rules` | правила распределения (`v2/37` §3.3); `422 routing.scope_empty` — руководитель точки не заводит правило на всю сеть |
+| PATCH/DELETE | `/review/routing-rules/:id` | правка и удаление правила; назначенные им работы остаются у своих проверяющих (FK `set null`) |
 
 > [исправлено, решение `docs/v2/44-decisions.md` В-15: путь никогда не существовал, а долг
 > закрывается удалением строки, а не реализацией — подтверждение чек-листа приходит в единую

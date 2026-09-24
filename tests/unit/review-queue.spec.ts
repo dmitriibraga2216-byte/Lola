@@ -51,8 +51,10 @@ describe('перечисления очереди объявлены в одно
     expect(ENUMS.review_time_confidence).toEqual(REVIEW_TIME_CONFIDENCE)
   })
 
-  it('статусов ровно три, и done — единственный терминальный', () => {
-    expect([...REVIEW_QUEUE_STATUSES]).toEqual(['waiting', 'in_review', 'done'])
+  it('статусов пять (`37` §4, PR-19: делегирование и эскалация), и done — единственный терминальный', () => {
+    // PR-18 заводил три — делегирования и эскалации ещё не существовало. `delegated` и
+    // `escalated` — не выдуманные значения, а состояния из `37` §4, внесённые в docs/02.
+    expect([...REVIEW_QUEUE_STATUSES]).toEqual(['waiting', 'in_review', 'delegated', 'escalated', 'done'])
   })
 })
 

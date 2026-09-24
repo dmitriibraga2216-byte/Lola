@@ -15,7 +15,10 @@
  * керівник точки ✓ своей точки»); `offboarding.complete` остаётся только у `admin`. Третье —
  * `time.metrics.view` у `mentor` и `manager` (PR-21: `GET /learning/time/totals`, `docs/v2/37`
  * §2 — чужое время «по своей области»); автору поимённого времени не положено вовсе — ему
- * обезличенный отчёт PR-22. Роль `owner`
+ * обезличенный отчёт PR-22.
+ * Четвёртое — скоупы проверки (PR-19, `docs/v2/37` §2): `review.delegate` и
+ * `review.absence.manage` у `mentor` и `manager`, плюс `review.delegate.any`,
+ * `review.routing.manage`, `review.workload.view` у `manager`. Роль `owner`
  * заведена (см. ниже) — `docs/v2/35` §2 ссылалась на неё как на существующую, хотя в `01` §1.2
  * её не было. Распределение по будущим ролям `recruiter` и `hr` — в PR, которые добавят
  * соответствующие эндпоинты. Скоупы `platform.*` из `docs/v2/35-billing-limits.md` §2
@@ -135,6 +138,8 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'bonus.grant',
       // PR-21: «Час на контент» и «Час на випробування» людей своей точки (`docs/v2/37` §2)
       'time.metrics.view',
+      // PR-19 (`docs/v2/37` §2): делегировать свою проверку и отмечать своё отсутствие.
+      'review.delegate', 'review.absence.manage',
     ],
   },
   manager: {
@@ -163,6 +168,10 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       'shop.issue', 'bonus.grant',
       // PR-21: чужое время обучения своей области (`docs/v2/37` §2)
       'time.metrics.view',
+      // PR-19 (`docs/v2/37` §2): своя проверка — как у наставника; сверх того в своей области
+      // отзывает и переназначает чужое, правит правила распределения, видит нагрузку и
+      // перебрасывает очередь отсутствующего.
+      'review.delegate', 'review.delegate.any', 'review.routing.manage', 'review.workload.view', 'review.absence.manage',
     ],
   },
   author: {

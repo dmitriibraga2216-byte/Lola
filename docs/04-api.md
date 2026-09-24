@@ -756,3 +756,17 @@ AI-генерация текста и критериев, площадки и ж
 только сегменты `learning_time_sessions`; витрину, прогресс урока, попытку, сдачу и колонки
 времени очереди проверки пересчитывает фоновая `time.rollup` (раз в 10 минут). Колонки времени
 попытки — учёт, а не правило: срок попытки по-прежнему только `deadline_at`.
+
+### Нормы времени на контент (`docs/v2/37-review-delegation.md` §6.3, §7.13–7.14, §9.3, §10, PR-22)
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/content/time-norms/:subjectType/:subjectId` | «Розрахунковий час» элемента (`lesson`, `quiz`, `workshop`, `track_node`) и его источник: `{source, plannedSeconds, authorSeconds, autoSeconds, observedSeconds, observedP25, observedP75, observedSample, deviationFlag, canApplyObserved, persisted, …}`; медиана и процентили — с 10 достоверных прохождений. Скоуп — `time.metrics.view` или `course.edit`; чужой тенант, удалённый и несуществующий элемент — `404` |
+| PUT | `/content/time-norms/:subjectType/:subjectId` | форма «Норма часу елемента» (`course.edit`): `{source: 'author', authorSeconds}` \| `{source: 'auto'}` \| `{source: 'observed'}`. `422 norm.value_range` — вне 1 минуты … 60 часов, `422 norm.sample_too_small` — «За фактом» при выборке меньше 20. Флаг пересчитывается сразу по посчитанной медиане; правка — в `audit_log` |
+| POST | `/content/time-norms/:subjectType/:subjectId/apply-observed` | «Застосувати» (`course.edit`): медиана факта (вверх до целой минуты) становится нормой и замораживается; `422 norm.sample_too_small` |
+| GET | `/reports/time-plan-fact` | «План і факт часу», обезличенный (`time.metrics.view` — по людям своей области, `course.edit` — весь тенант): фильтры `subjectType`, `subjectId`, `trackId`, `deviation`, `minSample`, `from`, `to` (по дате завершения), `locationId`, `includeArchived`; ответ `{rows, summary, computedAt}` — строка элемент, людей нет; `format=xlsx` — `report.export` |
+
+Норма — оценка плана, а не правило прохождения: ни балл, ни зачёт, ни рейтинг её не читают.
+В очередь проверки она попадает снимком на момент сдачи (`review_queue_items.estimated_seconds`),
+правка нормы прежние работы не переписывает. Медиану факта, флаг отклонения и уведомление автору
+`content_time_deviation` считает еженедельная `time.norms_recalc` (воскресенье 02:30 по Киеву).

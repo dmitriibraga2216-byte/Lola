@@ -1687,6 +1687,40 @@ alter table attempt_answers add column input_mode text not null default 'text'
 и `seconds_spent` по-прежнему вход правила зачёта урока (`min_seconds`, `11` §7.3). Новые колонки
 расходятся с ними на выброшенный простой.
 
+### Нормы времени на контент
+
+> [исправлено, PR-22 пакета `docs/v2`: таблицы не было — «Розрахунковий час» очереди проверки
+> оставался пустым] Ранее: подраздела не существовало.
+
+«Розрахунковий час» элемента (`docs/v2/37` §3.5, §7.13–7.14): одна норма на урок, тест,
+практикум или шаг траектории — по той же мягкой паре, что и сегменты измерения. Строка хранит
+только агрегаты по элементу, ни одного человека: **отклонение — сигнал качества материала, а
+не оценка людей**, и ни балл, ни зачёт, ни рейтинг, ни начисление баллов эту таблицу не читают
+(тринадцатая сквозная проверка `scripts/v2-crosschecks.sh`). В очередь проверки норма попадает
+снимком на момент сдачи — `review_queue_items.estimated_seconds`.
+
+```sql
+-- Миграция 0085_v2_time_norms. Пишет только server/services/timeNorms.ts.
+create table content_time_norms (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  subject_type text not null, subject_id uuid not null,  -- learning_time_subject_type; ссылка мягкая
+  source text not null default 'auto',               -- content_time_norm_source
+  author_seconds int,                                -- число автора; при observed — медиана, замороженная «Застосувати»
+  auto_seconds int,                                  -- расчёт по объёму; у практикума и шага траектории — null
+  observed_seconds int, observed_p25 int, observed_p75 int,  -- факт; null при выборке меньше 10
+  observed_sample int not null default 0,            -- достоверные завершённые прохождения
+  deviation_flag text not null default 'no_data',    -- content_time_deviation_flag
+  recalculated_at timestamptz,                       -- последний time.norms_recalc
+  updated_by uuid references users(id) on delete set null,
+  check (author_seconds is null or author_seconds between 60 and 216000),
+  check (source = 'auto' or author_seconds is not null),
+  unique (tenant_id, subject_type, subject_id)       -- одна норма на элемент
+);
+create index idx_content_time_norms_tenant on content_time_norms (tenant_id, subject_type, deviation_flag);
+```
+
 ## Программы и траектории
 
 ```sql
@@ -2521,6 +2555,12 @@ learning_time_subject_type: lesson | quiz | workshop | track_node
 -- Причина закрытия сегмента (`learning_time_sessions.closed_reason`, `v2/37` §4). stale
 -- предварительна: вернувшийся сеанс переписывает её на idle_timeout (`v2/46` Р-21.5)
 learning_time_closed_reason: completed | idle_timeout | segment_cap | daily_cap | navigated_away | session_end | stale
+-- Источник «Розрахункового часу» (`content_time_norms.source`, `v2/37` §3.5, §7.13, PR-22):
+-- observed — медиана факта, принятая автором кнопкой «Застосувати»; сама система норму не меняет
+content_time_norm_source: author | auto | observed
+-- Флаг отклонения факта от нормы (`content_time_norms.deviation_flag`, `v2/37` §7.14): сигнал
+-- качества материала, а не оценка человека — ни в одну формулу балла, зачёта и рейтинга не входит
+content_time_deviation_flag: none | too_fast | too_slow | no_data
 
 -- Способ ввода ответа (`attempt_answers.input_mode`, `v2/30` §3.7, решение `v2/44` В-12):
 -- голос — не тип вопроса, а способ ответа; ставит сервер при сохранении ответа

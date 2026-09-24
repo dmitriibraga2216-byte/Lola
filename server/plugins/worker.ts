@@ -193,6 +193,13 @@ export default defineNitroPlugin(async () => {
       const s = await rollupTenant(tenantId, { windowMinutes: jobs[0]?.data?.windowMinutes })
       if (s.totals || s.lessonProgress || s.attempts || s.submissions || s.queueItems) console.log(`[time.rollup] ${tenantId}:`, s)
     }))
+    // Нормы времени (docs/v2/37 §11, PR-22): тот же круг по `activeTenantIds` — выборка
+    // «тенанты с нормами» вне withTenant под app_user вернула бы пусто (RLS)
+    await work('time.norms_recalc', () => runPerTenant('time.norms_recalc', async (tenantId) => {
+      const { recalcNorms } = await import('../services/timeNorms')
+      const s = await recalcNorms(tenantId)
+      if (s.written || s.notified) console.log(`[time.norms_recalc] ${tenantId}:`, s)
+    }))
     await work('workshop.sla_scan', () => runPerTenant('workshop.sla_scan', async (tenantId) => {
       const s = await workshopSlaScan(tenantId)
       if (s.released || s.breached || s.expired) console.log(`[workshop.sla_scan] ${tenantId}:`, s)

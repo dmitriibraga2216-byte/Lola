@@ -66,6 +66,10 @@ const ORIGINAL_SHOW: Record<string, string> = {
   // PR-24 (docs/v2/36 §5.3, §9): очередь «Звіт про помилки» и отчёт «Якість контенту».
   '/admin/content-issues': "hasScope('content_issue.view')",
   '/admin/reports/content-quality': "hasScope('content_issue.view')",
+  // PR-22 (docs/v2/37 §9.3, §5.3, §2): «План і факт часу» — обезличенный отчёт и нормы времени;
+  // видят те, кому §2 показывает отклонение план/факт: наставник и руководитель — по
+  // `time.metrics.view`, автор и администратор — по `course.edit`.
+  '/admin/reports/time-plan-fact': "hasScope('time.metrics.view') || hasScope('course.edit')",
   '/admin/rules': "hasScope('settings.tenant')",
   '/admin/profiles': "hasScope('assignment.create')",
   '/admin/knowledge': "hasScope('knowledge.manage')",

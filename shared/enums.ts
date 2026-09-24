@@ -690,6 +690,24 @@ export const LEARNING_TIME_CLOSED_REASONS = ['completed', 'idle_timeout', 'segme
 export type LearningTimeClosedReason = typeof LEARNING_TIME_CLOSED_REASONS[number]
 
 /**
+ * Откуда «Розрахунковий час» элемента (`content_time_norms.source`, docs/v2/37 §3.5, §7.13;
+ * PR-22): `author` — число автора (форма §6.3 или «Орієнтовний час» материала); `auto` —
+ * расчёт по объёму; `observed` — медиана факта, которую автор принял кнопкой «Застосувати».
+ * Молча система норму не меняет: `observed` появляется только нажатием.
+ */
+export const CONTENT_TIME_NORM_SOURCES = ['author', 'auto', 'observed'] as const
+export type ContentTimeNormSource = typeof CONTENT_TIME_NORM_SOURCES[number]
+
+/**
+ * Флаг отклонения факта от нормы (`content_time_norms.deviation_flag`, `37` §7.14): медиана
+ * факта больше нормы вдвое — `too_slow`, меньше 0,4 нормы — `too_fast`, выборка меньше 10 или
+ * норма не задана — `no_data`. **Сигнал качества материала, а не оценка человека**: флаг не
+ * входит ни в одну формулу балла, зачёта, рейтинга и начисления баллов (`37` §7.14 б).
+ */
+export const CONTENT_TIME_DEVIATION_FLAGS = ['none', 'too_fast', 'too_slow', 'no_data'] as const
+export type ContentTimeDeviationFlag = typeof CONTENT_TIME_DEVIATION_FLAGS[number]
+
+/**
  * Способ ввода ответа (`attempt_answers.input_mode`, docs/v2/30 §3.7, решение docs/v2/44 В-12):
  * голос — не новый тип вопроса, а способ ответа. Четыре значения DDL `30` §3.7 (`video` —
  * видеоответ собеседования при `record_video`, `30` §3.3).
@@ -978,6 +996,8 @@ export const ENUMS: Record<string, readonly string[]> = {
   learning_time_kind: LEARNING_TIME_KINDS,
   learning_time_subject_type: LEARNING_TIME_SUBJECT_TYPES,
   learning_time_closed_reason: LEARNING_TIME_CLOSED_REASONS,
+  content_time_norm_source: CONTENT_TIME_NORM_SOURCES,
+  content_time_deviation_flag: CONTENT_TIME_DEVIATION_FLAGS,
   answer_input_mode: ANSWER_INPUT_MODES,
   review_delegation_reason: REVIEW_DELEGATION_REASONS,
   review_delegation_state: REVIEW_DELEGATION_STATES,

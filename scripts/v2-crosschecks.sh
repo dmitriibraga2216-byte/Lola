@@ -72,7 +72,7 @@ check1_stage_codes() {
     "server/services/comments.ts:90"
     "server/services/modules.ts:34"
     "server/services/modules.ts:60" # 54→60: маршруты модуля «Бонуси і магазин» выше в MODULE_ROUTES (gamification)
-    "server/services/resources.ts:485" # 479→485 в PR-25: тело модуля библиотеки скрыто из списков ресурсов (`listed()`)
+    "server/services/resources.ts:488" # 479→485 в PR-25: тело модуля библиотеки скрыто из списков ресурсов (`listed()`); 485→488 в PR-22: синхронизация «Орієнтовного часу» материала в норму времени
     "shared/schemas/resources.ts:89"
     "shared/schemas/settings.ts:17" # 14→17: импорт умолчаний правил нарахування (gamification)
     "shared/schemas/catalog.ts:35" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
@@ -499,6 +499,29 @@ check12_contours_pr39() {
   report "12. Bearer разграничен только скоупами, лента платформы — один модуль (docs/v2/44 В-20, П-21)" "$(printf '%s\n%s\n' "$tokens" "$news" | sed '/^$/d')"
 }
 
+# ── Проверка 13. Норма времени и флаг отклонения не входят в балл ───────────────────────────
+# docs/v2/37 §7.14 б, критерий приёмки 11 (PR-22): «отклонение факта от плана — сигнал качества
+# контента, а не основание наказывать человека; время не участвует ни в одной формуле балла,
+# зачёта, рейтинга или начисления баллов — ни прямо, ни коэффициентом». Поведение проверяет
+# тест (`tests/integration/v2-time-norms.spec.ts`, «бал жодної людини не змінився»); здесь —
+# статический сторож того же правила: таблицу норм, флаг отклонения и модуль норм знают только
+# сам модуль (`server/services/timeNorms.ts`, схема, миграция, его ручки и планировщик) и
+# ровно два входа снаружи, каждый — одним именем: писатели очереди проверки берут снимок нормы
+# (`plannedSecondsFor`, `37` §7.14: «попадает в очередь снимком на момент сдачи»), сохранение
+# материала отдаёт в норму его «Орієнтовний час» (`syncMaterialEstimate`, `37` §3.5). Любое
+# другое упоминание в server/ и shared/ — это правило балла, зачёта или рейтинга, которое
+# начало смотреть на время. Комментарии нарушением не считаются.
+check13_time_norms_not_in_score() {
+  local hits
+  hits="$(grep -rnE "content_time_norms|contentTimeNorms|\bdeviation_flag\b|\bdeviationFlag\b|/timeNorms'" \
+    server shared --include='*.ts' --include='*.sql' 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|--|#)' \
+    | grep -vE '^(server/services/timeNorms\.ts|server/db/schema/timeNorms\.ts|server/db/schema/index\.ts|server/db/migrations/0085_v2_time_norms\.sql|server/api/v1/content/time-norms/[^:]+|server/api/v1/reports/time-plan-fact\.get\.ts|server/plugins/worker\.ts|shared/domain/timeNorms\.ts|shared/schemas/timeNorms\.ts):' \
+    | grep -vE "^server/services/(attempts|workshops)\.ts:[0-9]+:import \{ plannedSecondsFor \} from '\./timeNorms'$" \
+    | grep -vE "^server/services/resources\.ts:[0-9]+:import \{ syncMaterialEstimate \} from '\./timeNorms'$" || true)"
+  report "13. норма времени и флаг отклонения не входят в балл (docs/v2/37 §7.14 б, критерий 11)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -511,5 +534,6 @@ check9_resolve_manager
 check10_candidate_quiet_hours
 check11_time_single_writer
 check12_contours_pr39
+check13_time_norms_not_in_score
 
 exit $overall

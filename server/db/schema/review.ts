@@ -69,7 +69,10 @@ export const reviewQueueItems = pgTable('review_queue_items', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
   /** «Кількість спроб» — какая по счёту сдача. Имя `attempt_no` — как в `workshop_submissions`. */
   attemptNo: integer('attempt_no').notNull().default(1),
-  /** «Розрахунковий час» — снимок нормы (`37` §3.5). Нормы приезжают с PR-20, пока null. */
+  /**
+   * «Розрахунковий час» — снимок нормы на момент сдачи (`37` §3.5, §7.14): кладёт писатель
+   * работы из `plannedSecondsFor()` (PR-22), правка нормы историю не переписывает. Нормы нет — null.
+   */
   estimatedSeconds: integer('estimated_seconds'),
   /** «Час на контент» и «Час на випробування» — заполняются биениями (PR-21), не разницей «открыл/закрыл». */
   contentSeconds: integer('content_seconds').notNull().default(0),

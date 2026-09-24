@@ -130,6 +130,9 @@ export async function enqueueReview(tx: TenantTx, input: EnqueueInput): Promise<
       locationId: place.locationId,
       positionId: place.positionId,
       priority: input.priority ?? 0,
+      // «Розрахунковий час» — снимок на момент **этой** сдачи (docs/v2/37 §7.14, PR-22): норма,
+      // исправленная автором между доработками, доходит до пересдачи, а прежние работы не трогает
+      estimatedSeconds: input.estimatedSeconds ?? null,
       // Пересдача — новая работа: назначение, захват, решение, делегирование и отметки порогов
       // снимаются, распределение ниже решает заново (Р-19.5).
       assignedReviewerId: null,

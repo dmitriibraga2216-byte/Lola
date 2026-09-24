@@ -582,6 +582,13 @@
       "when": 1790234160000,
       "tag": "0084_v2_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790234220000,
+      "tag": "0085_v2_time_norms",
+      "breakpoints": true
     }
   ]
 }

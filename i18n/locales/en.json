@@ -152,6 +152,7 @@
       "rewards": "Reward rules",
       "contentIssues": "Content issues",
       "contentQuality": "Content quality",
+      "timePlanFact": "Planned vs actual time",
       "reviewQueue": "My reviews",
       "reviewWorkload": "Reviewer workload",
       "reviewRouting": "Routing rules",
@@ -3529,7 +3530,8 @@
       "storage_upload_deferred": "Recording saved on the device",
       "storage_pending_upload_done": "File uploaded",
       "storage_pending_upload_expired": "File could not be uploaded",
-      "storage_bulk_delete_done": "Files deleted from storage"
+      "storage_bulk_delete_done": "Files deleted from storage",
+      "content_time_deviation": "Time deviates from the estimate"
     }
   },
   "ntpl": {
@@ -6540,5 +6542,81 @@
     "empty": "No announcements from Lola yet",
     "markRead": "Mark as read",
     "read": "Read"
+  },
+  "timeNorms": {
+    "title": "Planned vs actual time",
+    "hint": "How long people spend on material compared with the estimated time — no names",
+    "banner": "This is a measure of material quality, not of people's speed. A deviation means the estimate is off or the material is hard",
+    "signal": "A material quality signal, not an assessment of a person",
+    "filter": {
+      "type": "Element type",
+      "anyType": "All types",
+      "track": "Track",
+      "anyTrack": "All tracks",
+      "deviation": "Deviation",
+      "anyDeviation": "Any",
+      "minSample": "Minimum sample",
+      "from": "From",
+      "to": "To",
+      "apply": "Show",
+      "export": "Export XLSX"
+    },
+    "type": {
+      "lesson": "Lesson",
+      "quiz": "Test",
+      "workshop": "Workshop",
+      "track_node": "Trajectory step"
+    },
+    "source": {
+      "author": "Author",
+      "auto": "Auto",
+      "observed": "Actual"
+    },
+    "deviation": {
+      "none": "Within plan",
+      "too_fast": "Faster than planned",
+      "too_slow": "Slower than planned",
+      "no_data": "No data"
+    },
+    "col": {
+      "element": "Element",
+      "type": "Type",
+      "track": "Track",
+      "planned": "Estimated time",
+      "source": "Estimate source",
+      "median": "Actual median",
+      "p25": "p25",
+      "p75": "p75",
+      "sample": "Sample",
+      "deviation": "Deviation",
+      "unreliable": "Share of unreliable measurements",
+      "actions": "Estimate"
+    },
+    "minutes": "{n} min",
+    "factor": "×{n}",
+    "empty": "No completed passes with measured time for these filters",
+    "summary": {
+      "elements": "Elements",
+      "tooSlow": "Slower than planned",
+      "tooFast": "Faster than planned",
+      "noData": "No data"
+    },
+    "computedAt": "Calculated just now: {at}",
+    "editor": {
+      "title": "Element time estimate",
+      "open": "Change estimate",
+      "close": "Hide",
+      "source": "Source",
+      "planned": "Estimated time, min",
+      "save": "Save",
+      "saved": "Estimate saved",
+      "rangeError": "From 1 minute to 60 hours",
+      "autoValue": "Auto-estimate by volume: {n} min",
+      "autoNone": "There is no auto-estimate for this element — enter the time manually",
+      "observedHint": "In practice people spend {median} min (sample {n}). Apply?",
+      "observedLocked": "Actual time can be applied from 20 passes",
+      "apply": "Apply",
+      "applied": "Estimate taken from actual time"
+    }
   }
 }

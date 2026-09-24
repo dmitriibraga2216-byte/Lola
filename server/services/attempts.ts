@@ -23,6 +23,7 @@ import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
 import { closeReview, enqueueReview, heldByOtherSql, reviewGuard } from './reviewQueue'
 import { closeOpenSegments } from './learningTime'
+import { plannedSecondsFor } from './timeNorms'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -371,6 +372,8 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
         ? await tx.select({ courseId: enrollments.subjectId }).from(enrollments)
           .where(and(eq(enrollments.id, attempt.enrollmentId), eq(enrollments.subjectType, 'course')))
         : []
+      // «Розрахунковий час» теста — снимком на момент сдачи (docs/v2/37 §7.14, PR-22)
+      const estimatedSeconds = await plannedSecondsFor(tx, { subjectType: 'quiz', subjectId: attempt.quizId })
       for (const a of pending) {
         await enqueueReview(tx, {
           tenantId: ctx.tenantId,
@@ -381,6 +384,7 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
           trackId: enr?.courseId ?? null,
           submittedAt: attempt.submittedAt ?? now,
           attemptNo: attempt.attemptNo,
+          estimatedSeconds,
         })
       }
     }

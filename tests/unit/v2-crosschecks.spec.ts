@@ -187,6 +187,42 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.stdout).toContain('[ok]   11.')
   })
 
+  /**
+   * Проверка 12 (PR-39, `docs/v2/44` В-20, `docs/v2/39` П-21): права Bearer читает одно место —
+   * `access.ts`; таблицу объявлений платформы — один модуль. Три фикстуры: ручка со своим
+   * «списком путей» для токена и лента новостей, подмешавшая объявления, — нарушения; сам
+   * модуль объявлений и комментарий — нет.
+   */
+  it('12. ручка сама решает по токену — начало чёрного списка путей', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/api/v1/people'), { recursive: true })
+    writeFileSync(join(dir, 'server/api/v1/people/notes.get.ts'), 'export default (event) => { if (event.context.tokenScopes) throw new Error("no") }\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('12. Bearer разграничен только скоупами')
+  })
+
+  it('12. лента новостей тенанта подмешивает объявления платформы', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/news.ts'), 'export const q = sql`select title from news union all select title from platform_announcements`\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('12. Bearer разграничен только скоупами, лента платформы — один модуль')
+  })
+
+  it('12. модуль объявлений, схема и комментарий нарушением не считаются', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    mkdirSync(join(dir, 'server/db/schema'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/platformAnnouncements.ts'), 'export const q = tx.select().from(platformAnnouncements)\n')
+    writeFileSync(join(dir, 'server/db/schema/platform.ts'), "export const platformAnnouncements = pgTable('platform_announcements', {})\n")
+    writeFileSync(join(dir, 'server/services/access.ts'), 'const t = event.context.tokenScopes\n')
+    writeFileSync(join(dir, 'server/services/other.ts'), '// лента новостей не читает platform_announcements и tokenScopes\nexport const x = 1\n')
+    const res = run(dir)
+    expect(res.stdout).toContain('[ok]   12.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

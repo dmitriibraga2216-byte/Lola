@@ -14,6 +14,7 @@ export default defineEventHandler(async (event) => {
   const r = await updateTenantSpace({ tenantId: a.tenantId, actorId: a.userId }, p.data)
   if (!r.ok) {
     if (r.code === 'slug_taken') return apiError(event, 409, 'slug_taken', 'Адреса зайнята або містить недопустимі символи')
+    if (r.code === 'logo_invalid') return apiError(event, 422, 'logo_invalid', 'Логотип — це зображення, завантажене в налаштуваннях простору. Завантажте файл ще раз')
     return apiError(event, 409, 'slug_locked', 'Адресу простору не можна змінити після першого входу співробітника — старі посилання перестануть працювати')
   }
   return apiData(r.space)

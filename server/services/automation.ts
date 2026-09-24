@@ -136,7 +136,7 @@ export async function ruleConditions(tx: TenantTx, rule: { id: string, condition
   return { ...(rule.conditions as Conditions), ...await dimensionsToConditions(tx, dims) }
 }
 
-async function saveDimensions(tx: TenantTx, tenantId: string, ruleId: string, dims: RuleDimensionInput[]) {
+export async function saveDimensions(tx: TenantTx, tenantId: string, ruleId: string, dims: RuleDimensionInput[]) {
   await tx.delete(automationRuleDimensions).where(eq(automationRuleDimensions.ruleId, ruleId))
   const rows = RULE_DIMENSION_KEYS.map((dimension) => {
     const d = dims.find(x => x.dimension === dimension)
@@ -211,10 +211,23 @@ export async function getRule(ctx: Ctx, id: string) {
   })
 }
 
+/**
+ * Правило «посада → курси за замовчуванням» (docs/v2/39 П-24.3, PR-39) правится только из
+ * справочника должностей (`positionDefaults.ts`): там его аудитория пересобирается при смене
+ * состава группы. Общий редактор правил его показывает, но не меняет и не удаляет — иначе
+ * аудитория правила и привязка к должности разошлись бы.
+ */
+export class RuleBoundToPositionError extends Error {
+  statusCode = 409
+  data = { code: 'rule_bound_to_position', message: 'Це правило курсів за замовчуванням посади — змінюйте його в довіднику посад' }
+  constructor() { super('rule_bound_to_position') }
+}
+
 export async function deleteRule(ctx: Ctx, id: string): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'in_use', usedBy: string[] }> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select({ id: automationRules.id, name: automationRules.name }).from(automationRules).where(eq(automationRules.id, id))
+    const [r] = await tx.select({ id: automationRules.id, name: automationRules.name, positionId: automationRules.positionId, positionGroupId: automationRules.positionGroupId }).from(automationRules).where(eq(automationRules.id, id))
     if (!r) return { ok: false as const, code: 'not_found' as const, usedBy: [] }
+    if (r.positionId || r.positionGroupId) throw new RuleBoundToPositionError()
     const used = (await ruleUsagesTx(tx, [id])).get(id) ?? []
     if (used.length) return { ok: false as const, code: 'in_use' as const, usedBy: used.map(u => u.title) }
     await tx.delete(automationRules).where(eq(automationRules.id, id))
@@ -238,6 +251,7 @@ export async function updateRule(ctx: Ctx, id: string, input: Partial<z.infer<ty
     const { dimensions, ...rest } = input
     const [before] = await tx.select().from(automationRules).where(eq(automationRules.id, id))
     if (!before) return null
+    if (before.positionId || before.positionGroupId) throw new RuleBoundToPositionError()
     const [r] = await tx.update(automationRules).set({ ...rest, updatedAt: new Date() }).where(eq(automationRules.id, id)).returning()
     if (dimensions) await saveDimensions(tx, ctx.tenantId, id, dimensions)
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'rule.update', entity: 'automation_rule', entityId: id, before: { name: before.name, isActive: before.isActive }, after: { ...rest, dimensions } })

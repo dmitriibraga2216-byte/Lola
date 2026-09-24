@@ -42,6 +42,8 @@ export interface SessionRow {
   impersonator_admin_id: string | null
   /** «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052) */
   preview_role_id: string | null
+  /** Промежуточная сессия двухфакторного входа (docs/24 §3.4, PR-39): второй фактор ещё не пройден */
+  two_factor_pending: boolean
 }
 
 export async function sessionByTokenHash(tokenHash: string): Promise<SessionRow | null> {

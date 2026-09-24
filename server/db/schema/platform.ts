@@ -295,6 +295,46 @@ export const platformAudit = pgTable('platform_audit', {
   index().on(t.createdAt.desc()),
 ])
 
+/**
+ * Объявления платформы (docs/v2/39 П-21, П-24.2; docs/24 §4.7): вторая «новость», **не**
+ * корпоративная лента тенанта. Пишет оператор платформы, читают все тенанты — только чтение.
+ *
+ * Платформенная таблица: без `tenant_id` и вне RLS — по образцу `plans`, `plan_prices`,
+ * `plan_addons` (docs/v2/40 §6.2): строка одна на всю платформу, а не копия на тенант.
+ * Адресация — колонками самой строки (`audience` + `plan_codes` | `tenant_ids`); отбор «что
+ * адресовано этому тенанту» — одна функция `server/services/platformAnnouncements.ts`.
+ * Писать может только роль `platform_admin`: у `app_user` в миграции отозваны
+ * `insert`/`update`/`delete` — сессия тенанта не может создать объявление даже ошибкой кода.
+ */
+export const platformAnnouncements = pgTable('platform_announcements', {
+  ...baseColumns,
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  audience: text('audience').notNull().default('all'), // announcement_audience (docs/02): all | plans | tenants
+  planCodes: text('plan_codes').array().notNull().default(sql`'{}'::text[]`),
+  tenantIds: uuid('tenant_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  publishedAt: timestamp('published_at', { withTimezone: true }), // null — черновик оператора
+  archivedAt: timestamp('archived_at', { withTimezone: true }), // снято с ленты; история остаётся
+  createdBy: uuid('created_by').references(() => platformAdmins.id, { onDelete: 'set null' }),
+}, t => [
+  index('idx_platform_announcements_feed').on(t.publishedAt.desc()).where(sql`archived_at is null`),
+])
+
+/**
+ * Отметка «прочитано» объявления платформы человеком (docs/v2/39 П-21). Тенантная таблица под
+ * RLS: человек принадлежит тенанту, и отметки одного пространства не должны быть видны другому,
+ * а сама таблица объявлений отметок не хранит — иначе в платформенной строке копились бы
+ * идентификаторы людей всех тенантов вперемешку.
+ */
+export const platformAnnouncementReads = pgTable('platform_announcement_reads', {
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  announcementId: uuid('announcement_id').notNull().references(() => platformAnnouncements.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  readAt: timestamp('read_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.tenantId, t.userId, t.announcementId] }),
+])
+
 /** Секреты тенанта (docs/09 §9.4): AES-GCM, ключ из окружения, наружу — только account_label и статус. */
 export const tenantSecrets = pgTable('tenant_secrets', {
   ...baseColumns,

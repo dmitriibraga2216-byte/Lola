@@ -426,6 +426,7 @@ async function next() {
         />
       </template>
       <div v-else-if="!error" class="skeleton" />
+      <ContentFooter />
     </main>
 
     <footer class="bottom">

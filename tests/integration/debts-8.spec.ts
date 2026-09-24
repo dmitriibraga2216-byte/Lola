@@ -290,6 +290,7 @@ describe('D-055 — api_per_minute і webhooks читаються з tenant_limi
     await admin`insert into tenant_limits (tenant_id, api_per_minute) values (${tenantId}, 2) on conflict (tenant_id) do update set api_per_minute = 2`
     invalidateLimits(tenantId)
     const t = await createToken(ctx(), { name: 'debts8 limit', scopes: ['people.view'] })
+    if (!t.ok) throw new Error(`токен не выдан: ${t.code}`)
     tokenIds.push(t.id)
     expect((await validateBearer(t.token)).ok).toBe(true)
     expect((await validateBearer(t.token)).ok).toBe(true)

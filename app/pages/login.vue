@@ -4,9 +4,66 @@ definePageMeta({ layout: false })
 const rawFetch = $fetch as unknown as <T>(url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => Promise<T>
 const { t } = useI18n()
 const { fetchMe } = useAuth()
+const { api } = useApi()
 
-type Step = 'phone' | 'code' | 'tenant' | 'password'
+type Step = 'phone' | 'code' | 'tenant' | 'password' | 'twoFactor'
 const step = ref<Step>('phone')
+/**
+ * Второй фактор (docs/24 §3.4, PR-39): после кода, пароля, Google или кнопки бота сервер может
+ * открыть промежуточную сессию — `verify` (нужен код приложения) или `enroll` (политика требует
+ * подключить приложение, а оно ещё не подключено). Экран входа доводит её до полной сессии.
+ */
+const twoFactor = ref<'verify' | 'enroll' | null>(null)
+const tfCode = ref('')
+const tfRecovery = ref('')
+const useRecovery = ref(false)
+const afterSignIn = ref('/')
+
+function openTwoFactor(stepName: 'verify' | 'enroll' | null | undefined, target = '/'): boolean {
+  if (!stepName) return false
+  twoFactor.value = stepName
+  afterSignIn.value = target
+  tfCode.value = ''
+  tfRecovery.value = ''
+  useRecovery.value = false
+  step.value = 'twoFactor'
+  return true
+}
+
+async function verifySecondFactor() {
+  error.value = ''
+  busy.value = true
+  try {
+    await api('/auth/two-factor/verify', { method: 'POST', body: useRecovery.value ? { recoveryCode: tfRecovery.value.trim() } : { code: tfCode.value.trim() } })
+    await fetchMe()
+    await navigateTo(afterSignIn.value)
+  }
+  catch (err) {
+    const e = apiErrorOf(err)
+    const left = (e.details as { attemptsLeft?: number } | undefined)?.attemptsLeft
+    error.value = left !== undefined ? t('twoFactor.invalidLeft', { n: left }) : e.message
+    tfCode.value = ''
+    // Промежуточная сессия закрыта (перебор или истекла) — начинать вход заново
+    if (e.code === 'rate_limited' || e.code === 'two_factor.not_pending' || e.code === 'auth_required') { twoFactor.value = null; step.value = 'phone' }
+  }
+  finally { busy.value = false }
+}
+
+async function afterEnroll() {
+  await fetchMe()
+  await navigateTo(afterSignIn.value)
+}
+
+/** «Увійти інакше»: закрыть промежуточную сессию и вернуться к первому шагу. */
+async function cancelTwoFactor() {
+  try { await api('/auth/logout', { method: 'POST' }) }
+  catch { /* сессии уже нет — и так на первый шаг */ }
+  twoFactor.value = null
+  step.value = 'phone'
+  error.value = ''
+}
+
+watch(tfCode, (v) => { if (v.length === 6 && !busy.value && step.value === 'twoFactor' && !useRecovery.value) verifySecondFactor() })
 const devCode = ref('')
 const phone = ref('')
 const code = ref('')
@@ -19,6 +76,13 @@ const route = useRoute()
 const googleAvailable = ref(false)
 const tenantSlug = computed(() => String(route.query.tenant || useRuntimeConfig().public.defaultTenant || 'kappi'))
 onMounted(async () => {
+  // Вход, начатый Google или кнопкой бота, возвращается сюда за вторым фактором: промежуточная
+  // сессия уже есть — узнать её шаг (без сессии ручка отвечает 401, и это обычный вход)
+  try {
+    const st = await rawFetch<{ data: { step: 'verify' | 'enroll' | null } }>('/api/v1/auth/two-factor')
+    openTwoFactor(st.data.step)
+  }
+  catch { /* промежуточной сессии нет */ }
   const err = route.query.error as string | undefined
   if (err) error.value = err === 'google_no_user' ? t('login.errors.google_no_user') : t('login.errors.oauth')
   try { await rawFetch<unknown>(`/api/v1/auth/google/url?tenant=${encodeURIComponent(tenantSlug.value)}`); googleAvailable.value = true } catch { googleAvailable.value = false }
@@ -94,6 +158,7 @@ async function verifyCode() {
       requiresTenantSelect: boolean
       selectToken?: string
       tenants?: { tenantId: string, name: string, slug: string }[]
+      twoFactor?: 'verify' | 'enroll' | null
     } }>('/api/v1/auth/otp/verify', {
       method: 'POST',
       body: { phone: normalizedPhone(), code: code.value },
@@ -104,6 +169,7 @@ async function verifyCode() {
       step.value = 'tenant'
       return
     }
+    if (openTwoFactor(res.data.twoFactor)) return
     await fetchMe()
     await navigateTo('/')
   }
@@ -128,13 +194,14 @@ async function loginPassword() {
   error.value = ''
   busy.value = true
   try {
-    const res = await rawFetch<{ data: { requiresTenantSelect: boolean, mustChangePassword?: boolean, selectToken?: string, tenants?: { tenantId: string, name: string, slug: string }[] } }>('/api/v1/auth/password/login', { method: 'POST', body: { email: email.value.trim(), password: password.value } })
+    const res = await rawFetch<{ data: { requiresTenantSelect: boolean, mustChangePassword?: boolean, selectToken?: string, tenants?: { tenantId: string, name: string, slug: string }[], twoFactor?: 'verify' | 'enroll' | null } }>('/api/v1/auth/password/login', { method: 'POST', body: { email: email.value.trim(), password: password.value } })
     if (res.data.requiresTenantSelect) {
       selectToken.value = res.data.selectToken!
       tenantOptions.value = res.data.tenants!
       step.value = 'tenant'
       return
     }
+    if (openTwoFactor(res.data.twoFactor, res.data.mustChangePassword ? '/learn/profile?password=1' : '/')) return
     await fetchMe()
     await navigateTo(res.data.mustChangePassword ? '/learn/profile?password=1' : '/')
   }
@@ -146,10 +213,11 @@ async function selectTenant(tenantId: string) {
   error.value = ''
   busy.value = true
   try {
-    await rawFetch('/api/v1/auth/tenant/select', {
+    const res = await rawFetch<{ data: { twoFactor?: 'verify' | 'enroll' | null } }>('/api/v1/auth/tenant/select', {
       method: 'POST',
       body: { selectToken: selectToken.value, tenantId },
     })
+    if (openTwoFactor(res.data.twoFactor)) return
     await fetchMe()
     await navigateTo('/')
   }
@@ -240,6 +308,30 @@ async function selectTenant(tenantId: string) {
           <p>{{ channel === 'telegram' ? t('login.noCodeTelegram') : channel === 'email' ? t('login.noCodeEmail') : t('login.noCodeSms') }}</p>
           <button class="ghost" @click="step = 'phone'; codeHelp = false">{{ t('login.changePhone') }}</button>
         </div>
+      </template>
+
+      <template v-else-if="step === 'twoFactor'">
+        <h2 class="title">{{ t('twoFactor.loginTitle') }}</h2>
+        <template v-if="twoFactor === 'enroll'">
+          <p class="hint">{{ t('twoFactor.loginEnrollHint') }}</p>
+          <TwoFactorEnroll mode="enroll" @done="afterEnroll" />
+        </template>
+        <template v-else>
+          <template v-if="!useRecovery">
+            <p class="hint">{{ t('twoFactor.loginVerifyHint') }}</p>
+            <input v-model="tfCode" class="code-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" :aria-label="t('twoFactor.loginVerifyHint')" data-testid="two-factor-code" @input="tfCode = tfCode.replace(/\D/g, '').slice(0, 6)" @keyup.enter="verifySecondFactor">
+            <button class="primary" :disabled="busy || tfCode.length !== 6" @click="verifySecondFactor">{{ t('login.signIn') }}</button>
+            <button class="linkish" type="button" @click="useRecovery = true; error = ''">{{ t('twoFactor.useRecovery') }}</button>
+          </template>
+          <template v-else>
+            <p class="hint">{{ t('twoFactor.recoveryLoginHint') }}</p>
+            <input v-model="tfRecovery" class="code-input" autocomplete="off" maxlength="20" :aria-label="t('twoFactor.recoveryLoginHint')" @keyup.enter="verifySecondFactor">
+            <button class="primary" :disabled="busy || tfRecovery.trim().length < 10" @click="verifySecondFactor">{{ t('login.signIn') }}</button>
+            <button class="linkish" type="button" @click="useRecovery = false; error = ''">{{ t('twoFactor.useApp') }}</button>
+          </template>
+          <p class="hint muted">{{ t('twoFactor.lostPhone') }}</p>
+        </template>
+        <button class="ghost" type="button" @click="cancelTwoFactor">{{ t('twoFactor.otherAccount') }}</button>
       </template>
 
       <template v-else>

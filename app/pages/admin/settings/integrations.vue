@@ -60,7 +60,7 @@ const webhooks = ref<{ endpoints: Endpoint[], events: string[] }>({ endpoints: [
 const whForm = reactive({ url: '', events: [] as string[], description: '' })
 const whSecret = ref('')
 const deliveries = ref<{ id: string, list: Delivery[] } | null>(null)
-const tokens = ref<{ tokens: Token[], scopes: string[] }>({ tokens: [], scopes: [] })
+const tokens = ref<{ tokens: Token[], scopes: string[], sessionOnly?: string[] }>({ tokens: [], scopes: [] })
 const tokForm = reactive({ name: '', scopes: [] as string[], expiresInDays: 365 })
 const tokShown = ref('')
 const error = ref('')
@@ -237,6 +237,8 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeri
         <input v-model="tokForm.name" :placeholder="t('integrations.tokenName')">
         <label class="check">{{ t('integrations.expiresDays') }} <input v-model.number="tokForm.expiresInDays" type="number" min="1" max="3650" class="num"></label>
       </div>
+      <!-- docs/v2/44 В-20: права людини (нотатки, рішення по кандидатах, паролі й другий фактор, володіння) токену не видаються -->
+      <p v-if="tokens.sessionOnly?.length" class="sub">{{ t('integrations.sessionOnly', { scopes: tokens.sessionOnly.join(', ') }) }}</p>
       <div class="row wrap scopes">
         <label v-for="sc in tokens.scopes" :key="sc" class="check"><input v-model="tokForm.scopes" type="checkbox" :value="sc"> {{ sc }}</label>
       </div>

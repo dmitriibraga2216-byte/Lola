@@ -5,6 +5,7 @@ import {
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 import { competencies } from './development'
+import { positionGroups, positions } from './org'
 
 /**
  * Назначения (docs/15-assignments.md): центральная управляющая сущность —
@@ -117,6 +118,15 @@ export const automationRules = pgTable('automation_rules', {
   runLimit: jsonb('run_limit').notNull().default(sql`'{"oncePerUser":true}'::jsonb`),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
   stats: jsonb('stats').notNull().default(sql`'{}'::jsonb`),
+  /**
+   * «Посада → курси за замовчуванням» (docs/v2/39 П-24.3, PR-39): правило, привязанное к
+   * должности или к группе должностей, — **отдельной таблицы нет**. Привязка — хозяин правила
+   * (его правят из справочника должностей, удаление должности уносит правило); аудиторию
+   * по-прежнему задаёт измерение `position` (`automation_rule_dimensions`), движок правил не
+   * меняется. Не больше одной привязки на строку и не больше одного правила на должность/группу.
+   */
+  positionId: uuid('position_id').references(() => positions.id, { onDelete: 'cascade' }),
+  positionGroupId: uuid('position_group_id').references(() => positionGroups.id, { onDelete: 'cascade' }),
 }, t => [
   index().on(t.tenantId),
 ])

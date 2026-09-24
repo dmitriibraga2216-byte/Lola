@@ -53,7 +53,24 @@ const busy = ref(false)
 const showCreate = ref(false)
 const newTenant = reactive({ slug: '', name: '', adminName: '', adminPhone: '', plan: 'trial' })
 const impFor = ref<Tenant | null>(null)
-const impUsers = ref<{ id: string, fullName: string, phone: string | null, status: string }[]>([])
+const impUsers = ref<{ id: string, fullName: string, phone: string | null, status: string, twoFactor?: boolean }[]>([])
+/**
+ * Сброс второго фактора (docs/24 §3.4, PR-39) — последний способ вернуть вход администратору,
+ * потерявшему телефон и резервные коды, когда другого администратора нет. С причиной: клиент
+ * увидит её в своём журнале безопасности.
+ */
+const tfFor = ref<Tenant | null>(null)
+const tfForm = reactive({ userId: '', reason: '' })
+/**
+ * Объявления платформы (docs/v2/39 П-21, П-24.2; docs/24 §4.7): вторая «новость» — от Lola всем
+ * пространствам, по тарифу или конкретным. Это не новости компании: тенант их только читает.
+ */
+interface Announcement { id: string, title: string, body: string, audience: 'all' | 'plans' | 'tenants', planCodes: string[], tenantIds: string[], publishedAt: string | null, archivedAt: string | null, createdAt: string, readers: number }
+const announcements = ref<Announcement[]>([])
+const annForm = reactive({ title: '', body: '', audience: 'all' as Announcement['audience'], planCodes: [] as string[], tenantIds: [] as string[], publish: true })
+const annReady = computed(() => annForm.title.trim().length >= 3 && annForm.body.trim().length > 0
+  && (annForm.audience !== 'plans' || annForm.planCodes.length > 0) && (annForm.audience !== 'tenants' || annForm.tenantIds.length > 0))
+const annState = (a: Announcement) => a.archivedAt ? 'archived' : a.publishedAt ? 'published' : 'draft'
 const impForm = reactive({ userId: '', reason: '' })
 /** Диалог действия над тенантом: suspend — с причиной, purge — с подтверждением slug, resume/cancelPurge — просто подтвердить. */
 const action = ref<{ kind: 'suspend' | 'resume' | 'purge' | 'cancelPurge', tenant: Tenant } | null>(null)
@@ -181,9 +198,55 @@ async function ops<T>(path: string, opts: Record<string, unknown> = {}): Promise
 async function load() {
   try {
     me.value = await ops<Me>('/me')
-    ;[tenants.value, plans.value, metrics.value] = await Promise.all([ops<Tenant[]>('/tenants'), ops<Plan[]>('/plans'), ops<Record<string, unknown>>('/metrics')])
+    ;[tenants.value, plans.value, metrics.value, announcements.value] = await Promise.all([ops<Tenant[]>('/tenants'), ops<Plan[]>('/plans'), ops<Record<string, unknown>>('/metrics'), ops<Announcement[]>('/announcements')])
   }
   catch { me.value = null }
+}
+
+async function createAnnouncement() {
+  if (!annReady.value || busy.value) return
+  error.value = ''
+  busy.value = true
+  try {
+    await ops('/announcements', { method: 'POST', body: {
+      title: annForm.title.trim(), body: annForm.body.trim(), audience: annForm.audience, publish: annForm.publish,
+      planCodes: annForm.audience === 'plans' ? annForm.planCodes : [], tenantIds: annForm.audience === 'tenants' ? annForm.tenantIds : [],
+    } })
+    notice.value = t('ops.ann.created')
+    Object.assign(annForm, { title: '', body: '', audience: 'all', planCodes: [], tenantIds: [], publish: true })
+    announcements.value = await ops<Announcement[]>('/announcements')
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+async function announcementAction(a: Announcement, kind: 'publish' | 'archive') {
+  if (kind === 'archive' && !confirm(t('ops.ann.archiveConfirm', { title: a.title }))) return
+  error.value = ''
+  try {
+    await ops(`/announcements/${a.id}/${kind}`, { method: 'POST' })
+    announcements.value = await ops<Announcement[]>('/announcements')
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+
+async function openTwoFactorReset(tn: Tenant) {
+  error.value = ''
+  tfFor.value = tn
+  impUsers.value = await ops(`/tenants/${tn.id}/users`)
+  tfForm.userId = ''
+  tfForm.reason = ''
+}
+async function resetTwoFactor() {
+  if (!tfFor.value || !tfForm.userId || tfForm.reason.trim().length < 10 || busy.value) return
+  error.value = ''
+  busy.value = true
+  try {
+    await ops(`/tenants/${tfFor.value.id}/users/${tfForm.userId}/two-factor-reset`, { method: 'POST', body: { reason: tfForm.reason.trim() } })
+    notice.value = t('ops.tf.done', { name: impUsers.value.find(u => u.id === tfForm.userId)?.fullName ?? '' })
+    tfFor.value = null
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
 }
 onMounted(load)
 
@@ -346,11 +409,43 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
                 <button type="button" class="chip" @click="openBilling(tn)">{{ t('ops.billing.title') }}</button>
                 <button type="button" class="chip" @click="openDomain(tn)">{{ t('ops.domain.title') }}</button>
                 <button v-if="tn.status === 'active'" type="button" class="chip warn" @click="openImpersonate(tn)">{{ t('ops.impersonate') }}</button>
+                <button v-if="tn.status === 'active'" type="button" class="chip" @click="openTwoFactorReset(tn)">{{ t('ops.tf.open') }}</button>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
+
+      <section class="card" data-testid="ops-announcements">
+        <h2>{{ t('ops.ann.title') }}</h2>
+        <p class="sub">{{ t('ops.ann.hint') }}</p>
+        <div class="grid">
+          <label class="field"><span>{{ t('ops.ann.f.title') }}</span><input v-model="annForm.title" maxlength="200"></label>
+          <label class="field"><span>{{ t('ops.ann.f.audience') }}</span>
+            <select v-model="annForm.audience"><option v-for="a in ['all', 'plans', 'tenants']" :key="a" :value="a">{{ t(`ops.ann.audience.${a}`) }}</option></select>
+          </label>
+        </div>
+        <label class="field"><span>{{ t('ops.ann.f.body') }}</span><textarea v-model="annForm.body" class="area" rows="4" maxlength="5000" /></label>
+        <fieldset v-if="annForm.audience === 'plans'" class="picks">
+          <legend class="sub">{{ t('ops.ann.f.plans') }}</legend>
+          <label v-for="p in plans" :key="p.code" class="pick"><input v-model="annForm.planCodes" type="checkbox" :value="p.code">{{ p.name }}</label>
+        </fieldset>
+        <fieldset v-if="annForm.audience === 'tenants'" class="picks">
+          <legend class="sub">{{ t('ops.ann.f.tenants') }}</legend>
+          <label v-for="tn in tenants" :key="tn.id" class="pick"><input v-model="annForm.tenantIds" type="checkbox" :value="tn.id">{{ tn.name }}</label>
+        </fieldset>
+        <label class="pick"><input v-model="annForm.publish" type="checkbox">{{ t('ops.ann.f.publish') }}</label>
+        <div class="actions"><button type="button" class="primary" :disabled="!annReady || busy" @click="createAnnouncement">{{ t('ops.ann.create') }}</button></div>
+        <ul v-if="announcements.length" class="payments">
+          <li v-for="a in announcements" :key="a.id" class="payment">
+            <span :class="['badge', annState(a) === 'published' ? 'paid' : annState(a) === 'draft' ? 'pending' : 'failed']">{{ t(`ops.ann.state.${annState(a)}`) }}</span>
+            <strong>{{ a.title }}</strong>
+            <span class="sub">{{ t(`ops.ann.audience.${a.audience}`) }} · {{ fmt(a.publishedAt ?? a.createdAt) }} · {{ t('ops.ann.readers', { n: a.readers }) }}</span>
+            <button v-if="annState(a) === 'draft'" type="button" class="chip" @click="announcementAction(a, 'publish')">{{ t('ops.ann.publish') }}</button>
+            <button v-if="annState(a) === 'published'" type="button" class="chip warn" @click="announcementAction(a, 'archive')">{{ t('ops.ann.archive') }}</button>
+          </li>
+        </ul>
+      </section>
     </main>
 
     <div v-if="action" class="modal-backdrop" @click.self="action = null" @keydown.esc="action = null">
@@ -463,6 +558,18 @@ const kpiKeys = ['tenants_active', 'trials_ending', 'users_active', 'dau', 'wau'
       </div>
     </div>
 
+    <div v-if="tfFor" class="modal-backdrop" @click.self="tfFor = null" @keydown.esc="tfFor = null">
+      <div class="modal" role="dialog" aria-modal="true" :aria-label="t('ops.tf.title')">
+        <h2>{{ t('ops.tf.title') }}: {{ tfFor.name }}</h2>
+        <p class="sub">{{ t('ops.tf.text') }}</p>
+        <label class="field"><span>{{ t('ops.pickUser') }}</span><select v-model="tfForm.userId"><option value="" disabled>{{ t('ops.pickUser') }}</option><option v-for="u in impUsers.filter(x => x.twoFactor)" :key="u.id" :value="u.id">{{ u.fullName }} · {{ u.phone }}</option></select></label>
+        <p v-if="!impUsers.some(x => x.twoFactor)" class="sub">{{ t('ops.tf.nobody') }}</p>
+        <label class="field"><span>{{ t('ops.reasonHint') }}</span><input v-model="tfForm.reason" maxlength="500" placeholder="10–500"></label>
+        <p v-if="error" class="error">{{ error }}</p>
+        <div class="actions"><button type="button" class="chip" @click="tfFor = null">{{ t('common.cancel') }}</button><button type="button" class="danger" :disabled="!tfForm.userId || tfForm.reason.trim().length < 10 || busy" @click="resetTwoFactor">{{ t('ops.tf.reset') }}</button></div>
+      </div>
+    </div>
+
     <div v-if="impFor" class="modal-backdrop" @click.self="impFor = null" @keydown.esc="impFor = null">
       <div class="modal" role="dialog" aria-modal="true" :aria-label="t('ops.impersonate')">
         <h2>{{ t('ops.impersonate') }}: {{ impFor.name }}</h2>
@@ -547,6 +654,10 @@ select.badge { width: auto; min-height: 0; border: none; padding-right: 22px; ap
 .badge.readonly, .badge.blocked { background: var(--color-coral); color: var(--color-coral-deep); }
 .actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.area { font: inherit; border: 2px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg-soft); color: var(--color-ink); width: 100%; resize: vertical; }
+.picks { border: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.pick { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-body-s); font-weight: 700; }
+.pick input { width: auto; min-height: 0; }
 @media (max-width: 720px) {
   .table thead { display: none; }
   .table, .table tbody, .row { display: block; }

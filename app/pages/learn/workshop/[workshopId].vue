@@ -275,6 +275,7 @@ function fileState(f: SubFile): string | null {
           <li v-for="h in w.history" :key="h.attemptNo">#{{ h.attemptNo }} · {{ t(`workshop.status.${h.status}`) }} · {{ fmt(h.submittedAt) }}</li>
         </ul>
       </details>
+      <ContentFooter />
     </main>
 
     <footer v-if="w && editable" class="bottom">

@@ -13,5 +13,7 @@ export default defineEventHandler(async (event) => {
   setSessionCookies(event, session.sessionToken)
   // Реакция на уведомление (docs/23 §8): клик по «Пройти»
   if (n) { const { markReacted } = await import('../../services/notifications'); await markReacted(issued.tenantId, n).catch(() => {}) }
+  // Второй фактор (docs/24 §3.4): кнопка бота — первый фактор, дальше экран кода
+  if (session.twoFactor) return sendRedirect(event, '/login?step=two-factor')
   return sendRedirect(event, target)
 })

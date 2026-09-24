@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import type { H3Event } from 'h3'
 import { roles as rolesTable, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
-import type { Scope } from '../../shared/domain/roles'
+import { isSessionOnlyScope, type Scope } from '../../shared/domain/roles'
 import type { AuthContext } from './session'
 import { effectiveRoles, resolveActiveRole } from './activeRole'
 
@@ -93,8 +93,11 @@ export async function getAccess(event: H3Event): Promise<Access | null> {
   const tokenScopes = event.context.tokenScopes as string[] | undefined
   let access: Access | null
   if (tokenScopes) {
-    // API-токен: скоупы токена, область — весь тенант (docs/09 §9.6)
-    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes, scopeType: 'tenant', scopeId: null }], activeRole: null, roles: [] }
+    // API-токен: скоупы токена, область — весь тенант (docs/09 §9.6). Скоупы `sessionOnly`
+    // (docs/v2/44 В-20) вычёркиваются — второй рубеж для токенов, выданных до появления флага:
+    // `requireScope` на такой скоуп отвечает 403 `forbidden` независимо от содержимого токена.
+    // Список не путей, а прав: разграничение Bearer живёт здесь и в реестре скоупов, больше нигде.
+    access = { userId: auth.userId, tenantId: auth.tenantId, grants: [{ scopes: tokenScopes.filter(s => !isSessionOnlyScope(s)), scopeType: 'tenant', scopeId: null }], activeRole: null, roles: [] }
   }
   else {
     access = await loadAccess(auth)

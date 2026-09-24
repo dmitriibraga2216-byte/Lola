@@ -12,6 +12,17 @@ export const PLATFORM_COOKIE = 'lola_ops'
  * Сессия обязана совпадать с тенантом из Host (docs/25 §16.1): чужая сессия на этом хосте — как её нет.
  * Приостановленный тенант — 403 `tenant_suspended` для сессий и API-токенов (docs/25 §8).
  */
+/**
+ * Что открыто промежуточной сессии двухфакторного входа (docs/24 §3.4, PR-39): экран второго
+ * фактора и выход. Всё прочее — `401 two_factor_required`, и так для любой ручки: закрытие
+ * здесь, а не в эндпоинтах, иначе каждая новая ручка должна была бы помнить про 2FA.
+ */
+const TWO_FACTOR_OPEN = ['/api/v1/auth/two-factor', '/api/v1/auth/logout']
+export function openForPendingTwoFactor(path: string): boolean {
+  const clean = path.split('?')[0]!
+  return TWO_FACTOR_OPEN.some(p => clean === p || clean.startsWith(`${p}/`))
+}
+
 async function assertTenantOpen(tenantId: string): Promise<void> {
   const t = await tenantById(tenantId)
   if (t && t.status !== 'active') throw new TenantClosedError()
@@ -64,6 +75,12 @@ export default defineEventHandler(async (event) => {
   const hostTenant = event.context.hostTenant as ResolvedTenant | undefined
   if (hostTenant && hostTenant.id !== auth.tenantId) return // сессия другого пространства на этом хосте не действует
   if (!event.path.startsWith('/api/v1/auth/logout')) await assertTenantOpen(auth.tenantId) // выйти из закрытого пространства можно
+
+  // Второй фактор не пройден: сессия есть, но права — только на экран кода и выход
+  if (auth.twoFactorPending && !openForPendingTwoFactor(event.path)) {
+    if (!event.path.startsWith('/api/')) return
+    throw createError({ statusCode: 401, data: { code: 'two_factor_required', message: 'Підтвердіть вхід кодом із застосунку-автентифікатора' } })
+  }
 
   event.context.auth = auth
   // Продление скользящее, не чаще раза в час — не блокируем ответ

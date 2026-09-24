@@ -122,6 +122,9 @@ export const SECURITY_EVENTS = [
   'password.changed', 'password.reset_by_admin',
   'roles.changed', 'contacts.changed', 'impersonation.started', 'impersonation.ended',
   'export.personal_data', 'settings.security_changed', 'api_token.created', 'api_token.revoked',
+  // Двухфакторный вход (docs/24 §3.4, П-24.1, PR-39): подключил, отключил сам, сбросил
+  // администратор или оператор платформы, неверный код, вход резервным кодом
+  'two_factor.enabled', 'two_factor.disabled', 'two_factor.reset', 'two_factor.failed', 'two_factor.recovery_used',
 ] as const
 export type SecurityEvent = typeof SECURITY_EVENTS[number]
 
@@ -904,6 +907,22 @@ export const SYSTEM_PERSON_DOCUMENT_TYPES: {
   { code: 'other', name: 'Інше', isRequired: false, validityMonths: null, isFactOnly: false, selfUpload: false },
 ]
 
+/**
+ * Кому адресовано объявление платформы (`platform_announcements.audience`, docs/v2/39 П-21
+ * [решение]: «всем / по тарифу / конкретным тенантам»). Список тарифов и тенантов — в
+ * `plan_codes` и `tenant_ids` той же строки, CHECK держит их согласованными с видом адресации.
+ */
+export const ANNOUNCEMENT_AUDIENCES = ['all', 'plans', 'tenants'] as const
+export type AnnouncementAudience = typeof ANNOUNCEMENT_AUDIENCES[number]
+
+/**
+ * Уровень нормы отсутствий (`absence_norms.scope_type`, docs/v2/38 §3.6, §7.13): компания,
+ * точка, человек. Разрешение — снизу вверх, по каждому виду отдельно: человек → точка →
+ * компания → системный дефолт (відпустка 24, лікарняний 5).
+ */
+export const ABSENCE_NORM_SCOPES = ['tenant', 'location', 'user'] as const
+export type AbsenceNormScope = typeof ABSENCE_NORM_SCOPES[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -995,4 +1014,6 @@ export const ENUMS: Record<string, readonly string[]> = {
   person_note_visibility: PERSON_NOTE_VISIBILITIES,
   person_note_category: PERSON_NOTE_CATEGORIES,
   person_document_status: PERSON_DOCUMENT_STATUSES,
+  announcement_audience: ANNOUNCEMENT_AUDIENCES,
+  absence_norm_scope: ABSENCE_NORM_SCOPES,
 }

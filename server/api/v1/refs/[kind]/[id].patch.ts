@@ -9,6 +9,8 @@ const body = z.object({
   code: z.string().max(50).nullable().optional(),
   isActive: z.boolean().optional(),
   levelId: z.string().uuid().nullable().optional(),
+  groupId: z.string().uuid().nullable().optional(), // группа должности (docs/v2/39 П-24.5); null — вне группы
+  sortOrder: z.number().int().min(0).max(10_000).optional(),
   parentId: z.string().uuid().nullable().optional(),
   cityId: z.string().uuid().nullable().optional(),
   orgUnitId: z.string().uuid().optional(),

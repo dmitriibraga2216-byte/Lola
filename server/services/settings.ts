@@ -1,5 +1,5 @@
-import { eq, sql } from 'drizzle-orm'
-import { tenants } from '../db/schema'
+import { and, eq, isNull, sql } from 'drizzle-orm'
+import { mediaAssets, tenants } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import {
   ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type RecruitingPatch, type RewardRulesPatch, type TenantPatch, type TenantSettings,
@@ -59,9 +59,25 @@ async function writeGroup<K extends keyof TenantSettings>(tx: TenantTx, ctx: Ctx
 
 // ── Политики (docs/24 §3.4, §3.4.1): сохраняются пачкой, любые группы частично ──
 
+/**
+ * 422 `two_factor_enroll_first` (docs/24 §3.4, PR-39): политику «двухфакторность для админов»
+ * включает только тот, у кого второй фактор уже подключён. Так политика никогда не запирает
+ * включившего её: у него на руках приложение и десять резервных кодов, а остальные администраторы
+ * подключат фактор на экране входа при следующем входе.
+ */
+export class TwoFactorEnrollFirstError extends Error {
+  statusCode = 422
+  data = { code: 'two_factor_enroll_first', message: 'Спершу підключіть двофакторний вхід собі — у блоці «Двофакторна автентифікація», потім увімкніть вимогу для адміністраторів' }
+  constructor() { super('two_factor_enroll_first') }
+}
+
 export async function updatePolicies(ctx: Ctx, patch: PoliciesPatch) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const before = await readSettings(tx, ctx.tenantId)
+    if (patch.passwords?.adminTwoFactor === true && before.policies.passwords.adminTwoFactor !== true) {
+      const { hasActiveFactor } = await import('./twoFactor')
+      if (!await hasActiveFactor(tx, ctx.actorId)) throw new TwoFactorEnrollFirstError()
+    }
     const merged: Record<string, unknown> = { ...before.policies }
     for (const [g, v] of Object.entries(patch)) if (v) merged[g] = { ...(before.policies as Record<string, object>)[g], ...v }
     const r = await writeGroup(tx, ctx, 'policies', merged as Partial<TenantSettings['policies']>, { critical: true })
@@ -200,7 +216,8 @@ export interface TenantSpace {
   timezone: string
   plan: string
   accent: AccentToken
-  logoKey: string | null
+  /** Логотип пространства (docs/24 §3.1): шапка, сертификаты, колонтитул материалов */
+  logoMediaId: string | null
   space: TenantSettings['space']
   defaults: TenantSettings['defaults']
   quietHours: TenantSettings['quietHours']
@@ -220,6 +237,12 @@ async function slugLocked(tx: TenantTx): Promise<boolean> {
   return rows.length > 0
 }
 
+/** Логотип из `tenants.branding` (docs/02 `branding`): id файла `media_assets`, иначе null. */
+export function logoOf(branding: unknown): string | null {
+  const id = (branding as { logo_media_id?: unknown } | null)?.logo_media_id
+  return typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? id : null
+}
+
 export function accentOf(branding: unknown): AccentToken {
   const a = (branding as { accent?: unknown } | null)?.accent
   return typeof a === 'string' && (ACCENT_TOKENS as readonly string[]).includes(a) ? a as AccentToken : 'sun'
@@ -230,22 +253,21 @@ export async function tenantSpace(ctx: Ctx): Promise<TenantSpace> {
     const [t] = await tx.select().from(tenants).where(eq(tenants.id, ctx.tenantId))
     if (!t) throw new Error('tenant not found')
     const s = tenantSettingsSchema.parse(t.settings ?? {})
-    const branding = (t.branding ?? {}) as { accent?: string, logo_key?: string }
     return {
       id: t.id, name: t.name, slug: t.slug, slugLocked: await slugLocked(tx), locale: t.locale, timezone: t.timezone, plan: t.plan,
-      accent: accentOf(branding), logoKey: branding.logo_key ?? null,
+      accent: accentOf(t.branding), logoMediaId: logoOf(t.branding),
       space: s.space, defaults: s.defaults, quietHours: s.quietHours, modules: s.modules,
     }
   })
 }
 
-export type TenantUpdateError = 'slug_taken' | 'slug_locked'
+export type TenantUpdateError = 'slug_taken' | 'slug_locked' | 'logo_invalid'
 
 export async function updateTenantSpace(ctx: Ctx, patch: TenantPatch): Promise<{ ok: true, space: TenantSpace } | { ok: false, code: TenantUpdateError }> {
   const r = await withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<TenantUpdateError | null> => {
     const [t] = await tx.select().from(tenants).where(eq(tenants.id, ctx.tenantId))
     if (!t) throw new Error('tenant not found')
-    const before: Record<string, unknown> = { name: t.name, slug: t.slug, locale: t.locale, timezone: t.timezone, accent: accentOf(t.branding) }
+    const before: Record<string, unknown> = { name: t.name, slug: t.slug, locale: t.locale, timezone: t.timezone, accent: accentOf(t.branding), logoMediaId: logoOf(t.branding) }
     const after: Record<string, unknown> = { ...before }
 
     if (patch.slug !== undefined && patch.slug !== t.slug) {
@@ -259,12 +281,22 @@ export async function updateTenantSpace(ctx: Ctx, patch: TenantPatch): Promise<{
     if (patch.locale !== undefined) after.locale = patch.locale
     if (patch.timezone !== undefined) after.timezone = patch.timezone
     if (patch.accent !== undefined) after.accent = patch.accent // только токен палитры (docs/29 Б.14), проверено zod
+    if (patch.logoMediaId !== undefined) {
+      // Логотип — только своё готовое изображение, загруженное как фирменный файл (origin
+      // brand_asset, docs/v2/40 §4): чужой тенант под RLS не виден и даёт ту же ошибку, что и мусор
+      if (patch.logoMediaId !== null) {
+        const [m] = await tx.select({ id: mediaAssets.id }).from(mediaAssets)
+          .where(and(eq(mediaAssets.id, patch.logoMediaId), eq(mediaAssets.origin, 'brand_asset'), eq(mediaAssets.kind, 'image'), isNull(mediaAssets.deletedAt)))
+        if (!m) return 'logo_invalid'
+      }
+      after.logoMediaId = patch.logoMediaId
+    }
 
     const changes = diff(before, after)
     if (Object.keys(changes).length) {
       await tx.execute(sql`
         update tenants set name = ${after.name as string}, slug = ${after.slug as string}, locale = ${after.locale as string}, timezone = ${after.timezone as string},
-          branding = coalesce(branding, '{}'::jsonb) || jsonb_build_object('accent', ${after.accent as string}::text), updated_at = now()
+          branding = coalesce(branding, '{}'::jsonb) || jsonb_build_object('accent', ${after.accent as string}::text, 'logo_media_id', ${(after.logoMediaId as string | null) ?? null}::text), updated_at = now()
         where id = ${ctx.tenantId}::uuid
       `)
       await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'settings.tenant', entity: 'tenant', entityId: ctx.tenantId, before: Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, v.before])), after: Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, v.after])) })

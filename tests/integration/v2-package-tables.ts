@@ -108,6 +108,18 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'storage_retention_policies',
   'storage_deletion_requests',
   'storage_pending_uploads',
+  // 24. Настройки тенанта и платформы (PR-39, миграция 0084_v2_settings). Первых четырёх нет
+  // среди 71 тенантной таблицы `docs/v2/40` §2: их вводят патчи к базовому ТЗ, а не модульные
+  // документы — П-21 (отметка прочтения объявления платформы), П-24.5 (`position_groups`),
+  // П-24.1 (второй фактор входа). Сверка PR-40 «71 на длину» обязана прибавить эти четыре
+  // строки (записано в `46-progress.md`). `absence_norms` — из 71 (`38` §3.6): блок норм
+  // отпуска в настройках компании заводит её раньше карточки человека PR-33.
+  'platform_announcement_reads',
+  'position_groups',
+  'user_totp',
+  'user_totp_recovery_codes',
+  // 38. Нормы отсутствий: уровни компании и точки (PR-39); факты и корректировка человека — PR-33
+  'absence_norms',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */
@@ -116,4 +128,7 @@ export const V2_PACKAGE_PLATFORM_TABLES: string[] = [
   // справочники платформы, общие для всех тенантов (docs/v2/35 §3.6, docs/25 §3.1)
   'plan_prices',
   'plan_addons',
+  // Объявления платформы (PR-39, П-21, П-24.2): строка одна на платформу, адресация — её же
+  // колонками; у `app_user` отозваны insert/update/delete — писать может только оператор
+  'platform_announcements',
 ]

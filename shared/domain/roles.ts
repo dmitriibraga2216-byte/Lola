@@ -104,6 +104,47 @@ export const SCOPES = [
 export type Scope = typeof SCOPES[number]
 
 /**
+ * Флаги скоупа (`docs/v2/44` В-20). Разграничение Bearer-токена интеграции — **по скоупам, а
+ * не по путям**: путь — адрес и меняется рефакторингом, скоуп — право и его переживает.
+ *
+ * `sessionOnly` — право, которое действует только в сессии человека и **никогда** по токену:
+ *  1. `createToken` не выдаёт такой скоуп — `422 scope_not_tokenable` (`server/services/apiTokens.ts`);
+ *  2. `getAccess` вычёркивает его из прав токена, выданного до появления флага, — дальше
+ *     `requireScope` отвечает обычным `403 forbidden` (`server/services/access.ts`).
+ *
+ * Состав. Пять — из В-20 дословно, с одной правкой имени: заметки о человеке читает скоуп
+ * `person.note.read` (реестр ниже и `docs/v2/38` §2), а не `person.note.view` из текста решения.
+ * «Всё `impersonation.*`» в реестре тенанта пусто: вход «от имени» — механизм оператора
+ * платформы (`platform_admin`, cookie `lola_ops`), а не скоуп тенанта, и токену он недоступен
+ * архитектурно — `/api/v1/platform/*` разбирается раньше ветки Bearer (`01.session.ts`).
+ * Два добавлены PR-39 по тому же критерию — «действие, которое делает человек, а не интеграция»:
+ * `people.password` (задать пароль и **снять второй фактор** другому человеку: токен, который
+ * снимает 2FA, обнуляет смысл 2FA) и `tenant.transfer` (передача владения — договорное действие
+ * конкретного человека).
+ */
+export interface ScopeFlags { sessionOnly?: true }
+
+export const SCOPE_FLAGS = {
+  'person.note.read': { sessionOnly: true },
+  'person.note.write': { sessionOnly: true },
+  'interview.listen': { sessionOnly: true },
+  'candidate.decide': { sessionOnly: true },
+  'candidate.hire': { sessionOnly: true },
+  'people.password': { sessionOnly: true },
+  'tenant.transfer': { sessionOnly: true },
+} as const satisfies Partial<Record<Scope, ScopeFlags>>
+
+/** Скоупы с флагом `sessionOnly` — для формы выдачи токена и для проверок. */
+export const SESSION_ONLY_SCOPES: readonly Scope[] = (Object.entries(SCOPE_FLAGS) as [Scope, ScopeFlags][])
+  .filter(([, f]) => f.sessionOnly === true)
+  .map(([s]) => s)
+
+/** Действует ли право только в сессии человека (`docs/v2/44` В-20). Неизвестный скоуп — нет. */
+export function isSessionOnlyScope(scope: string): boolean {
+  return (SCOPE_FLAGS as Partial<Record<string, ScopeFlags>>)[scope]?.sessionOnly === true
+}
+
+/**
  * Скоупы, которые есть только у владельца и которых нет у администратора (docs/01 §1.2,
  * `docs/v2/35-billing-limits.md` §2: «Суммы видит только он, `admin` — потребление и даты
  * [решение]: администратор обучения и подписант договора — разные люди»).

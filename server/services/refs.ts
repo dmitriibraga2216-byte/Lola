@@ -9,16 +9,19 @@ interface Ctx { tenantId: string, actorId: string }
  * Справочники (docs/16 §3.3): переименование сохраняет связи; удалить используемый нельзя —
  * только деактивировать; слияние двух значений — отдельная операция с журналом.
  */
-export const REF_KINDS = ['cities', 'positions', 'position-levels', 'org-units', 'locations', 'tags'] as const
+export const REF_KINDS = ['cities', 'positions', 'position-levels', 'position-groups', 'org-units', 'locations', 'tags'] as const
 export type RefKind = typeof REF_KINDS[number]
 
-const TABLE: Record<RefKind, string> = { 'cities': 'cities', 'positions': 'positions', 'position-levels': 'position_levels', 'org-units': 'org_units', 'locations': 'locations', 'tags': 'tags' }
+const TABLE: Record<RefKind, string> = { 'cities': 'cities', 'positions': 'positions', 'position-levels': 'position_levels', 'position-groups': 'position_groups', 'org-units': 'org_units', 'locations': 'locations', 'tags': 'tags' }
 
 /** Где значение используется — для запрета удаления и для слияния. */
 const USAGE: Record<RefKind, { table: string, column: string }[]> = {
   'cities': [{ table: 'users', column: 'city_id' }, { table: 'locations', column: 'city_id' }, { table: 'user_placements', column: 'city_id' }],
   'positions': [{ table: 'user_placements', column: 'position_id' }, { table: 'position_profiles', column: 'position_id' }],
   'position-levels': [{ table: 'positions', column: 'level_id' }, { table: 'user_placements', column: 'position_level_id' }],
+  // Группа должностей (docs/v2/39 П-24.5): удалить можно только пустую — иначе вместе с ней
+  // тихо пропало бы правило «курси за замовчуванням» группы
+  'position-groups': [{ table: 'positions', column: 'group_id' }],
   'org-units': [{ table: 'locations', column: 'org_unit_id' }, { table: 'org_units', column: 'parent_id' }, { table: 'user_placements', column: 'org_unit_id' }, { table: 'user_roles', column: 'scope_id' }],
   'locations': [{ table: 'user_placements', column: 'location_id' }, { table: 'user_roles', column: 'scope_id' }, { table: 'meetups', column: 'location_id' }],
   'tags': [],
@@ -26,13 +29,14 @@ const USAGE: Record<RefKind, { table: string, column: string }[]> = {
 
 const EDITABLE: Record<RefKind, string[]> = {
   'cities': ['name', 'is_active'],
-  'positions': ['name', 'code', 'level_id', 'is_active'],
+  'positions': ['name', 'code', 'level_id', 'group_id', 'is_active'],
   'position-levels': ['name', 'sort'],
+  'position-groups': ['name', 'sort_order'],
   'org-units': ['name', 'parent_id'],
   'locations': ['name', 'address', 'city_id', 'org_unit_id', 'timezone', 'manager_id', 'is_active'],
   'tags': ['name', 'color', 'description'], // область действия не меняется — иначе метка «переедет» с людей на курсы
 }
-const CAMEL: Record<string, string> = { isActive: 'is_active', levelId: 'level_id', parentId: 'parent_id', cityId: 'city_id', orgUnitId: 'org_unit_id', managerId: 'manager_id' }
+const CAMEL: Record<string, string> = { isActive: 'is_active', levelId: 'level_id', parentId: 'parent_id', cityId: 'city_id', orgUnitId: 'org_unit_id', managerId: 'manager_id', groupId: 'group_id', sortOrder: 'sort_order' }
 
 export async function usageCount(ctx: Ctx, kind: RefKind, id: string): Promise<number> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -53,6 +57,12 @@ export async function updateRef(ctx: Ctx, kind: RefKind, id: string, patch: Reco
     if (!sets.length) return null
     const [before] = await tx.execute(sql`select * from ${sql.identifier(TABLE[kind])} where id = ${id}::uuid`) as unknown as Record<string, unknown>[]
     if (!before) return null
+    // Группа должности — только своя (RLS): чужая или несуществующая даёт отказ, а не висячую ссылку
+    const nextGroup = kind === 'positions' ? sets.find(([k]) => k === 'group_id') : undefined
+    if (nextGroup && nextGroup[1]) {
+      const [g] = await tx.execute(sql`select 1 from position_groups where id = ${nextGroup[1] as string}::uuid`) as unknown as unknown[]
+      if (!g) return null
+    }
     // Перенос подразделения: пересчёт ltree-пути у него и потомков (docs/16 §5.3 перетаскивание)
     if (kind === 'org-units' && 'parent_id' in Object.fromEntries(sets)) {
       const parentId = Object.fromEntries(sets).parent_id as string | null
@@ -71,6 +81,17 @@ export async function updateRef(ctx: Ctx, kind: RefKind, id: string, patch: Reco
     if (kind === 'org-units' && sets.some(([k]) => k === 'parent_id')) assignments.push(sql`parent_id = ${(Object.fromEntries(sets).parent_id as string | null) ?? null}::uuid`)
     const [row] = await tx.execute(sql`update ${sql.identifier(TABLE[kind])} set ${sql.join(assignments, sql`, `)}, updated_at = now() where id = ${id}::uuid returning *`) as unknown as Record<string, unknown>[]
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: `refs.${kind}.update`, entity: kind, entityId: id, before: Object.fromEntries(sets.map(([k]) => [k, before[k]])), after: Object.fromEntries(sets) })
+    // Курсы по умолчанию (П-24.3): правило группы смотрит на её состав, имя правила — на имя
+    // должности или группы. Пересборка — в той же транзакции, что и правка справочника.
+    if (kind === 'positions' || kind === 'position-groups') {
+      const { syncGroupRule, renameBoundRule } = await import('./positionDefaults')
+      if (kind === 'positions' && nextGroup && nextGroup[1] !== before.group_id) {
+        await syncGroupRule(tx, ctx.tenantId, (before.group_id as string | null) ?? null)
+        await syncGroupRule(tx, ctx.tenantId, (nextGroup[1] as string | null) ?? null)
+      }
+      if (kind === 'position-groups') await syncGroupRule(tx, ctx.tenantId, id)
+      else if (sets.some(([k]) => k === 'name')) await renameBoundRule(tx, id, String(row?.name ?? ''))
+    }
     return row ?? null
   })
 }
@@ -123,6 +144,16 @@ export async function mergeRefs(ctx: Ctx, kind: RefKind, fromId: string, intoId:
       }
     }
     await tx.execute(sql`delete from ${sql.identifier(TABLE[kind])} where id = ${fromId}::uuid`)
+    // Слияние меняет состав групп должностей (П-24.3): правило группы-получателя пересобирается;
+    // правило удалённой группы или должности уходит каскадом вместе с ней
+    if (kind === 'position-groups' || kind === 'positions') {
+      const { syncGroupRule } = await import('./positionDefaults')
+      if (kind === 'position-groups') await syncGroupRule(tx, ctx.tenantId, intoId)
+      else {
+        const [g] = await tx.execute(sql`select group_id from positions where id = ${intoId}::uuid`) as unknown as { group_id: string | null }[]
+        await syncGroupRule(tx, ctx.tenantId, g?.group_id ?? null)
+      }
+    }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: `refs.${kind}.merge`, entity: kind, entityId: intoId, before: { fromId, fromName: a.name }, after: { intoName: b.name, moved } })
     return { ok: true as const, moved }
   })

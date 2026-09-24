@@ -188,6 +188,10 @@ export const sessions = pgTable('sessions', {
   previewRoleId: uuid('preview_role_id').references(() => roles.id, { onDelete: 'set null' }),
   requestContext: jsonb('request_context'), // технический контекст события (CLAUDE.md п. 14): {ip, geo, user_agent, browser, os, device}
   loginMethod: text('login_method'), // чем подтверждена личность при входе (docs/33 D-021): otp_sms | otp_telegram | otp_email | password | password_otp | google | invite | impersonation
+  // Промежуточная сессия двухфакторного входа (docs/24 §3.4, PR-39): первый фактор пройден,
+  // второго ещё нет. Такая сессия открывает только `/auth/two-factor/*` и выход (01.session.ts),
+  // живёт 10 минут и после кода получает новый токен — промежуточный в полную не превращается.
+  twoFactorPending: boolean('two_factor_pending').notNull().default(false),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, t => [

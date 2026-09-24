@@ -38,3 +38,26 @@ export async function setBlock(key: string, windowSec: number): Promise<void> {
       count = 1, reset_at = now() + make_interval(secs => ${windowSec})
   `)
 }
+
+/**
+ * Как `hitRateLimit`, но отдаёт номер попытки в окне — экрану нужен остаток попыток
+ * («Залишилось спроб: 2»), а не только «можно / нельзя». Окно то же, фиксированное.
+ */
+export async function hitRateLimitCount(key: string, windowSec: number): Promise<number> {
+  const rows = await db.execute(sql`
+    insert into rate_limits (key, count, reset_at)
+    values (${key}, 1, now() + make_interval(secs => ${windowSec}))
+    on conflict (key) do update set
+      count = case when rate_limits.reset_at < now() then 1 else rate_limits.count + 1 end,
+      reset_at = case when rate_limits.reset_at < now()
+                      then now() + make_interval(secs => ${windowSec})
+                      else rate_limits.reset_at end
+    returning count
+  `)
+  return Number((rows as unknown as { count: number }[])[0]!.count)
+}
+
+/** Сбросить счётчик — после удачной попытки неудачи до неё не копятся против человека. */
+export async function clearRateLimit(key: string): Promise<void> {
+  await db.execute(sql`delete from rate_limits where key = ${key}`)
+}

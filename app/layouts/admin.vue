@@ -154,6 +154,9 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/usage', label: t('admin.nav.usage'), show: hasScope('billing.usage.view'), group: t('admin.group.billing') },
     // Сховище (docs/v2/34 §5): місце — тарифікований ресурс, тому поруч із тарифом; кошик і політики — вкладки всередині
     { to: '/admin/settings/storage', label: t('admin.nav.storage'), show: hasScope('storage.view'), group: t('admin.group.billing') },
+    // Объявления платформы (docs/v2/39 П-21, PR-39): пишет оператор Lola, тенант только читает.
+    // Отдельно от «Інформація → Новини» намеренно: две «новости» не смешиваются ни лентой, ни меню.
+    { to: '/admin/platform-announcements', label: t('admin.nav.platformAnnouncements'), show: hasScope('learn.view'), group: t('admin.group.fromLola') },
   ] },
 ].map(s => ({ ...s, items: s.items.filter((i) => {
   const m = moduleOfPage(i.to)

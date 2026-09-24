@@ -13,12 +13,26 @@ export function useApi() {
   const csrf = useCookie('lola_csrf')
   const requestFetch = useRequestFetch()
 
+  /**
+   * CSRF-токен на момент запроса. В браузере — прямо из `document.cookie`: сервер переставляет
+   * cookie при входе и при подтверждении второго фактора (docs/24 §3.4), а ref `useCookie`,
+   * созданный до этого, помнит старое значение — мутация с экрана входа ушла бы без токена.
+   */
+  function csrfToken(): string | null {
+    if (import.meta.client) {
+      const m = document.cookie.match(/(?:^|;\s*)lola_csrf=([^;]*)/)
+      if (m) return decodeURIComponent(m[1]!)
+    }
+    return csrf.value ?? null
+  }
+
   // Явный тип опций вместо Parameters<typeof $fetch>[1]: типизированные роуты Nitro при 300+ эндпоинтах
   // упираются в глубину инстанцирования (TS2589) в компонентах
   async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     const method = String(opts.method || 'GET').toUpperCase()
     const headers: Record<string, string> = { ...(opts.headers as Record<string, string> || {}) }
-    if (method !== 'GET' && csrf.value) headers['x-csrf-token'] = csrf.value
+    const token = method !== 'GET' ? csrfToken() : null
+    if (token) headers['x-csrf-token'] = token
 
     const res = await (requestFetch as unknown as (url: string, o: unknown) => Promise<{ data: T }>)(`/api/v1${path}`, { ...opts, headers })
     return res.data
@@ -28,7 +42,8 @@ export function useApi() {
   async function apiRaw<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     const method = String(opts.method || 'GET').toUpperCase()
     const headers: Record<string, string> = { ...(opts.headers ?? {}) }
-    if (method !== 'GET' && csrf.value) headers['x-csrf-token'] = csrf.value
+    const token = method !== 'GET' ? csrfToken() : null
+    if (token) headers['x-csrf-token'] = token
     return (requestFetch as unknown as (url: string, o: unknown) => Promise<T>)(`/api/v1${path}`, { ...opts, headers })
   }
 

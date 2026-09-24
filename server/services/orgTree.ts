@@ -4,7 +4,7 @@ import { withTenant } from '../utils/withTenant'
 
 interface Ctx { tenantId: string, actorId: string }
 
-/** Публичная оргструктура (docs/03 §3.22): подразделения → точки → люди с должностями, руководители точек. */
+/** Справочное дерево админки: подразделения → точки → люди, руководители точек. Публичная оргструктура хаба — витрина `/org-structure` (docs/v2/39 П-21). */
 export async function orgTree(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const units = await tx.select({ id: orgUnits.id, name: orgUnits.name, parentId: orgUnits.parentId, path: orgUnits.path }).from(orgUnits).orderBy(asc(orgUnits.path))

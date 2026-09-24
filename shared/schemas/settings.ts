@@ -182,6 +182,13 @@ export const tenantSettingsSchema = z.object({
     localesEnabled: z.array(z.enum(['uk', 'en', 'ru'])).min(1).default(['uk']),
     weekStart: z.enum(['monday', 'sunday']).default('monday'),
     supportContact: z.object({ name: z.string().max(120).optional(), phone: z.string().max(30).optional(), email: z.string().email().max(120).optional(), telegram: z.string().max(60).optional() }).default({}),
+    /**
+     * «Колонтитул» (docs/v2/39 П-24.1, снято со второго эталона дословно: «Відображати назву та
+     * логотип компанії в контенті під час проходження»): внизу урока, теста, практикума и статьи
+     * базы знаний — название пространства и логотип (`tenants.branding.logo_media_id`).
+     * Выключен по умолчанию: тенант, у которого логотипа ещё нет, не должен получить пустую полосу.
+     */
+    contentFooter: z.boolean().default(false),
   }).default({}),
   modules: modulesSchema.default({}),
   /** Значения по умолчанию для обучения (docs/24 §3.3), их наследуют назначения */
@@ -281,6 +288,8 @@ export const tenantPatchSchema = z.object({
   locale: z.enum(['uk', 'en', 'ru']).optional(),
   timezone: z.string().min(3).max(60).optional(),
   accent: accentSchema.optional(),
+  /** Логотип пространства (docs/24 §3.1 `logo_media_id`): файл `media_assets` с `origin='brand_asset'`; null — убрать */
+  logoMediaId: z.string().uuid().nullable().optional(),
   space: tenantSettingsSchema.shape.space.removeDefault().partial().optional(),
   defaults: tenantSettingsSchema.shape.defaults.removeDefault().partial().optional(),
   quietHours: quietHoursSchema.optional(),

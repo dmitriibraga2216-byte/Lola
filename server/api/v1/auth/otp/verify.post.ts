@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const user = users[0]!
-  const { token } = await createSession({
+  const { token, twoFactor } = await createSession({
     tenantId: user.tenant_id,
     userId: user.user_id,
     userAgent: getHeader(event, 'user-agent'),
@@ -60,6 +60,9 @@ export default defineEventHandler(async (event) => {
     loginMethod: `otp_${result.channel}`,
   })
   setSessionCookies(event, token)
+
+  // Второй фактор (docs/24 §3.4): сессия промежуточная, `login.success` — после кода приложения
+  if (twoFactor) return apiData({ requiresTenantSelect: false, twoFactor })
 
   await logSecurity({
     tenantId: user.tenant_id,
@@ -70,5 +73,5 @@ export default defineEventHandler(async (event) => {
     userAgent: getHeader(event, 'user-agent'),
   })
 
-  return apiData({ requiresTenantSelect: false })
+  return apiData({ requiresTenantSelect: false, twoFactor: null })
 })

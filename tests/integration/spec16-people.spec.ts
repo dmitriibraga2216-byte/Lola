@@ -247,8 +247,13 @@ describe('импорт: конфликт «людина у двох підроз
 
 describe('журнал безопасности Г-16.2 (docs/16 §15)', () => {
   it('коды событий — ровно список docs/02; уровни по градации; писатели людей пишут user.*, roles.changed, contacts.changed, session.revoked', async () => {
-    expect([...SECURITY_EVENTS]).toEqual(['login.success', 'login.failed', 'login.blocked', 'otp.sent', 'otp.failed', 'session.revoked', 'user.created', 'user.blocked', 'user.unblocked', 'user.archived', 'password.changed', 'password.reset_by_admin', 'roles.changed', 'contacts.changed', 'impersonation.started', 'impersonation.ended', 'export.personal_data', 'settings.security_changed', 'api_token.created', 'api_token.revoked'])
+    expect([...SECURITY_EVENTS]).toEqual(['login.success', 'login.failed', 'login.blocked', 'otp.sent', 'otp.failed', 'session.revoked', 'user.created', 'user.blocked', 'user.unblocked', 'user.archived', 'password.changed', 'password.reset_by_admin', 'roles.changed', 'contacts.changed', 'impersonation.started', 'impersonation.ended', 'export.personal_data', 'settings.security_changed', 'api_token.created', 'api_token.revoked',
+      // PR-39 (docs/24 §3.4.2): второй фактор входа — зарегистрированы в docs/02 вместе с кодом
+      'two_factor.enabled', 'two_factor.disabled', 'two_factor.reset', 'two_factor.failed', 'two_factor.recovery_used'])
     expect(severityOf('impersonation.started')).toBe('critical')
+    expect(severityOf('two_factor.reset')).toBe('critical')
+    expect(severityOf('two_factor.failed')).toBe('warning')
+    expect(severityOf('two_factor.enabled')).toBe('info')
     expect(severityOf('export.personal_data')).toBe('critical')
     expect(severityOf('login.blocked')).toBe('warning')
     expect(severityOf('otp.failed')).toBe('warning')

@@ -31,15 +31,19 @@ const cursor = ref<number | null>(null)
 const jq = ref('')
 const event = ref<Event | ''>('')
 const journalLoaded = ref(false)
+/** Идёт догрузка следующей страницы — вторая, пока первая не пришла, не просится (подгрузка при прокрутке) */
+const journalLoading = ref(false)
 async function loadJournal(more = false) {
+  if (more && journalLoading.value) return
   error.value = ''
+  journalLoading.value = true
   try {
     const r = await apiRaw<{ data: Row[], meta: { cursor: number | null } }>('/bonuses/ledger', { query: { limit: 50, ...(jq.value.trim() ? { q: jq.value.trim() } : {}), ...(event.value ? { event: event.value } : {}), ...(more && cursor.value ? { cursor: cursor.value } : {}) } })
     rows.value = more ? [...rows.value, ...r.data] : r.data
     cursor.value = r.meta.cursor
   }
   catch (err) { error.value = apiErrorOf(err).message }
-  finally { journalLoaded.value = true }
+  finally { journalLoaded.value = true; journalLoading.value = false }
 }
 
 // ── Реєстр ──
@@ -161,7 +165,7 @@ const who = (p: { position: string | null, location: string | null }) => [p.posi
           </tbody>
         </table>
       </div>
-      <button v-if="cursor" type="button" class="btn ghost more" @click="loadJournal(true)">{{ t('common.loadMore') }}</button>
+      <LoadMore v-if="cursor" :loading="journalLoading" @more="loadJournal(true)" />
     </template>
 
     <template v-else>
@@ -243,7 +247,6 @@ const who = (p: { position: string | null, location: string | null }) => [p.posi
 .plus { color: var(--color-teal-ink); }
 .minus { color: var(--color-coral-ink); }
 .nowrap { white-space: nowrap; }
-.more { margin-top: var(--space-3); }
 .pager { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
 .overlay { position: fixed; inset: 0; background: rgba(12, 15, 20, 0.5); display: grid; place-items: center; padding: var(--space-3); z-index: 50; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-5); display: grid; gap: var(--space-2); width: min(480px, 100%); box-sizing: border-box; max-height: 90dvh; overflow-y: auto; }

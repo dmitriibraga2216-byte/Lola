@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
       .where(eq(invitations.id, invite.invitation_id))
   })
 
-  const { token } = await createSession({
+  const { token, twoFactor } = await createSession({
     tenantId: invite.tenant_id,
     userId: invite.user_id,
     userAgent: getHeader(event, 'user-agent'),
@@ -32,6 +32,9 @@ export default defineEventHandler(async (event) => {
     loginMethod: 'invite',
   })
   setSessionCookies(event, token)
+
+  // Второй фактор (docs/24 §3.4): приглашённому администратору его подключают на экране входа
+  if (twoFactor) return apiData({ ok: true, twoFactor })
 
   await logSecurity({
     tenantId: invite.tenant_id,
@@ -41,5 +44,5 @@ export default defineEventHandler(async (event) => {
     ip: clientIp(event),
   })
 
-  return apiData({ ok: true })
+  return apiData({ ok: true, twoFactor: null })
 })

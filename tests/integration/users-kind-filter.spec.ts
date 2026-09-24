@@ -84,7 +84,7 @@ const ALLOWLIST: Record<string, string> = {
   // флаг tenants.candidates_enabled и access_until), а не запрос на чтение: иначе кандидат
   // с выданным доступом молча получал бы «неверный логин» вместо понятного отказа.
   // completeSignin() — общая для обоих колбеков Google (собственного и пути интеграций)
-  'server/services/session.ts:112':
+  'server/services/session.ts:151':
     'вход через Google: поиск человека по e-mail учётной записи, а не список людей — право входа решает контур доступа',
   'server/services/googleApps.ts:81':
     'сопоставление участников встречи Google Calendar с людьми тенанта по e-mail — поиск по ключу, не список',

@@ -72,6 +72,7 @@ const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
       <NuxtLink :to="`/admin/knowledge/${article.id}`" class="chip">{{ t('common.edit') }}</NuxtLink>
       <button class="chip" @click="confirmActual">{{ t('kb.confirmActual') }}</button>
     </div>
+    <ContentFooter />
   </div>
   <p v-else-if="error" class="error">{{ error }}</p>
 </template>

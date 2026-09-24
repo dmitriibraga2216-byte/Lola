@@ -5,7 +5,8 @@ const { t } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 
-const kinds = ['cities', 'positions', 'position-levels', 'org-units', 'locations'] as const
+// «Групи посад» (docs/v2/39 П-24.5): необязательная группировка должностей — «кухня», «зал»
+const kinds = ['cities', 'positions', 'position-groups', 'position-levels', 'org-units', 'locations'] as const
 type Kind = typeof kinds[number]
 
 const kind = ref<Kind>('cities')
@@ -29,8 +30,55 @@ async function load() {
   }
 }
 
-watch(kind, () => { adding.value = false; load() })
+watch(kind, () => { adding.value = false; coursesFor.value = null; load() })
 onMounted(load)
+
+/**
+ * «Посада → курси за замовчуванням» (docs/v2/39 П-24.3; колонка «Треки» справочника должностей
+ * второго эталона): курсы, которые назначаются при найме и переводе на должность — или на любую
+ * должность группы. Носитель — правило автоматизации, привязанное к должности или группе.
+ */
+interface DefaultCourse { courseId: string, title: string, dueDays: number }
+const groups = ref<{ id: string, name: string }[]>([])
+const courses = ref<{ id: string, title: string }[]>([])
+const coursesFor = ref<{ kind: 'position' | 'group', id: string, name: string } | null>(null)
+const courseItems = ref<DefaultCourse[]>([])
+const groupCourses = ref<DefaultCourse[]>([])
+const pickCourse = ref('')
+async function loadGroups() {
+  groups.value = await api<{ id: string, name: string }[]>('/refs/position-groups').catch(() => [])
+}
+watch(kind, (k) => { if (k === 'positions') loadGroups() }, { immediate: true })
+const setGroup = (row: Record<string, unknown>, groupId: string) => run(() => api(`/refs/positions/${row.id}`, { method: 'PATCH', body: { groupId: groupId || null } }))
+async function openCourses(row: Record<string, unknown>) {
+  error.value = ''
+  const target = { kind: kind.value === 'positions' ? 'position' as const : 'group' as const, id: String(row.id), name: String(row.name) }
+  try {
+    const path = target.kind === 'position' ? `/positions/${target.id}/default-courses` : `/position-groups/${target.id}/default-courses`
+    const [d, list] = await Promise.all([
+      api<{ items: DefaultCourse[], group: { items: DefaultCourse[] } | null }>(path),
+      courses.value.length ? Promise.resolve(courses.value) : api<{ id: string, title: string, status: string }[]>('/courses').then(r => r.filter(c => c.status === 'published')),
+    ])
+    courses.value = list
+    courseItems.value = d.items.map(i => ({ ...i }))
+    groupCourses.value = d.group?.items ?? []
+    coursesFor.value = target
+    pickCourse.value = ''
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+function addCourse() {
+  const c = courses.value.find(x => x.id === pickCourse.value)
+  if (!c || courseItems.value.some(i => i.courseId === c.id)) return
+  courseItems.value.push({ courseId: c.id, title: c.title, dueDays: 14 })
+  pickCourse.value = ''
+}
+async function saveCourses() {
+  if (!coursesFor.value) return
+  const path = coursesFor.value.kind === 'position' ? `/positions/${coursesFor.value.id}/default-courses` : `/position-groups/${coursesFor.value.id}/default-courses`
+  await run(() => api(path, { method: 'PUT', body: { items: courseItems.value.map(i => ({ courseId: i.courseId, dueDays: Number(i.dueDays) })) } }))
+  if (!error.value) coursesFor.value = null
+}
 
 async function add() {
   if (!newName.value.trim()) return
@@ -66,6 +114,7 @@ const toggleActive = (row: Record<string, unknown>) => run(() => api(`/refs/${ki
 const remove = (row: Record<string, unknown>) => { if (confirm(t('refs.deleteConfirm', { name: String(row.name) }))) run(() => api(`/refs/${kind.value}/${row.id}`, { method: 'DELETE' })) }
 const merge = () => run(() => api(`/refs/${kind.value}/merge`, { method: 'POST', body: { fromId: mergeFrom.value!.id, intoId: mergeInto.value } }))
 const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(kind.value))
+const hasCourses = computed(() => kind.value === 'positions' || kind.value === 'position-groups')
 </script>
 
 <template>
@@ -110,9 +159,17 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
             <span class="name">{{ row.name }}</span>
             <span v-if="row.isActive === false" class="sub">· {{ t('refs.inactive') }}</span>
             <span v-if="row.levelName" class="sub">· {{ row.levelName }}</span>
+            <span v-if="row.groupName" class="sub">· {{ row.groupName }}</span>
             <span v-if="row.address" class="sub">· {{ row.address }}</span>
+            <span v-if="row.positionsCount !== undefined" class="sub">· {{ t('refs.positionsCount', { n: Number(row.positionsCount) }) }}</span>
+            <span v-if="hasCourses && Number(row.defaultCourses) > 0" class="sub">· {{ t('refs.defaultCoursesCount', { n: Number(row.defaultCourses) }) }}</span>
             <span v-if="row.peopleCount !== undefined" class="count-num">{{ row.peopleCount }}</span>
             <span v-if="hasScope('settings.tenant')" class="row-actions">
+              <select v-if="kind === 'positions'" :value="String(row.groupId ?? '')" :aria-label="t('refs.group')" @change="setGroup(row, ($event.target as HTMLSelectElement).value)">
+                <option value="">{{ t('refs.noGroup') }}</option>
+                <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+              </select>
+              <button v-if="hasCourses" class="ghost small" @click="openCourses(row)">{{ t('refs.defaultCourses') }}</button>
               <button class="ghost small" @click="editId = String(row.id); editName = String(row.name)">{{ t('refs.edit') }}</button>
               <button v-if="hasActive" class="ghost small" @click="toggleActive(row)">{{ row.isActive === false ? t('common.activate') : t('common.deactivate') }}</button>
               <button v-if="kind !== 'org-units'" class="ghost small" @click="mergeFrom = row; mergeInto = ''">{{ t('refs.merge') }}</button>
@@ -130,6 +187,31 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
       </form>
       <button v-else-if="hasScope('settings.tenant')" class="ghost add-btn" @click="adding = true">{{ t('common.add') }}</button>
     </section>
+
+    <section v-if="coursesFor" class="card courses" data-testid="default-courses">
+      <h2>{{ t('refs.defaultCoursesTitle', { name: coursesFor.name }) }}</h2>
+      <p class="sub">{{ coursesFor.kind === 'position' ? t('refs.defaultCoursesHint') : t('refs.defaultCoursesGroupHint') }}</p>
+      <ul class="list">
+        <li v-for="(c, i) in courseItems" :key="c.courseId">
+          <span class="name">{{ c.title }}</span>
+          <label class="sub">{{ t('refs.dueDays') }} <input v-model.number="c.dueDays" type="number" min="1" max="365" class="days" :aria-label="`${c.title}: ${t('refs.dueDays')}`"></label>
+          <span class="row-actions"><button class="ghost small danger" :aria-label="t('common.delete')" @click="courseItems.splice(i, 1)">×</button></span>
+        </li>
+        <li v-if="!courseItems.length" class="sub">{{ t('refs.noDefaultCourses') }}</li>
+      </ul>
+      <p v-if="groupCourses.length" class="sub">{{ t('refs.groupCourses') }}: {{ groupCourses.map(c => c.title).join(', ') }}</p>
+      <div class="add-row">
+        <select v-model="pickCourse" :aria-label="t('refs.addCourse')">
+          <option value="" disabled>{{ t('refs.addCourse') }}</option>
+          <option v-for="c in courses.filter(x => !courseItems.some(i => i.courseId === x.id))" :key="c.id" :value="c.id">{{ c.title }}</option>
+        </select>
+        <button class="ghost small" :disabled="!pickCourse || courseItems.length >= 10" @click="addCourse">{{ t('common.add') }}</button>
+      </div>
+      <div class="add-row">
+        <button class="primary" @click="saveCourses">{{ t('common.save') }}</button>
+        <button class="ghost" @click="coursesFor = null">{{ t('common.cancel') }}</button>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -140,6 +222,8 @@ const hasActive = computed(() => ['cities', 'positions', 'locations'].includes(k
 .name { font-weight: 700; }
 .count-num { color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
 .add-btn { margin-top: var(--space-2); }
+.courses { margin-top: var(--space-4); display: grid; gap: var(--space-2); }
+.days { width: 5rem; }
 a.tab { text-decoration: none; }
 h1 {
   margin: 0 0 var(--space-4);

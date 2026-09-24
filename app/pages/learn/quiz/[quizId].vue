@@ -393,6 +393,7 @@ function retry() {
         <button v-if="canRetry && result.passed !== true" class="ghost" @click="retry">{{ t('quiz.retry') }}</button>
         <NuxtLink :to="backTo" class="primary link">{{ t('quiz.backToLearning') }}</NuxtLink>
       </template>
+      <ContentFooter />
     </main>
 
     <footer v-if="phase === 'question' && state" class="bottom">

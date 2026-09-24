@@ -1,7 +1,7 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { TAG_SCOPES } from '../../../../shared/enums'
 import {
-  cities, locations, orgUnits, positionLevels, positions, tags,
+  cities, locations, orgUnits, positionGroups, positionLevels, positions, tags,
 } from '../../../db/schema'
 import { requireScope } from '../../../services/access'
 import { withTenant } from '../../../utils/withTenant'
@@ -31,11 +31,24 @@ export default defineEventHandler(async (event) => {
           code: positions.code,
           levelId: positions.levelId,
           levelName: positionLevels.name,
+          // Группа должностей (docs/v2/39 П-24.5) и число курсов по умолчанию (П-24.3) — колонка «Треки» эталона
+          groupId: positions.groupId,
+          groupName: positionGroups.name,
+          defaultCourses: sql<number>`coalesce((select jsonb_array_length(r.actions) from automation_rules r where r.position_id = ${positions.id} and r.is_active), 0)`,
           isActive: positions.isActive,
           peopleCount: sql<number>`(select count(*)::int from user_placements up where up.is_primary and up.ended_at is null and up.position_id = ${positions.id})`,
         }).from(positions)
           .leftJoin(positionLevels, eq(positionLevels.id, positions.levelId))
+          .leftJoin(positionGroups, eq(positionGroups.id, positions.groupId))
           .orderBy(asc(positions.name))
+      case 'position-groups':
+        return tx.select({
+          id: positionGroups.id,
+          name: positionGroups.name,
+          sortOrder: positionGroups.sortOrder,
+          positionsCount: sql<number>`(select count(*)::int from positions p where p.group_id = ${positionGroups.id})`,
+          defaultCourses: sql<number>`coalesce((select jsonb_array_length(r.actions) from automation_rules r where r.position_group_id = ${positionGroups.id} and r.is_active), 0)`,
+        }).from(positionGroups).orderBy(asc(positionGroups.sortOrder), asc(positionGroups.name))
       case 'locations':
         return tx.select().from(locations).orderBy(asc(locations.name))
       case 'org-units':

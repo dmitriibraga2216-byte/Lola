@@ -259,7 +259,11 @@ export async function impersonate(tenantId: string, userId: string, reason: stri
 
 export async function tenantUsers(tenantId: string) {
   const db = platformDb()
-  return db.select({ id: schema.users.id, fullName: schema.users.fullName, phone: schema.users.phone, status: schema.users.status })
+  return db.select({
+    id: schema.users.id, fullName: schema.users.fullName, phone: schema.users.phone, status: schema.users.status,
+    // Подключён ли второй фактор (docs/24 §3.4, PR-39) — для кнопки «Скинути 2FA» в панели оператора; без секретов
+    twoFactor: sql<boolean>`exists (select 1 from user_totp t where t.user_id = ${schema.users.id} and t.confirmed_at is not null)`,
+  })
     .from(schema.users).where(employeeOnly(eq(schema.users.tenantId, tenantId))).orderBy(desc(schema.users.createdAt)).limit(200)
 }
 

@@ -217,6 +217,13 @@ create index idx_person_documents_tenant_expiry on person_documents (tenant_id, 
 
 ### 3.6 Нормы и факты отсутствий
 
+> [дополнено, PR-39] `absence_norms` заведена раньше карточки — миграцией настроек компании
+> (`docs/v2/45` PR-39, блок «Кількість днів відпустки», §5.4). Отличия от DDL ниже: общие поля
+> `updated_at` (правка перезаписывает строку года, §4) и `set_by` nullable с `on delete set null`
+> (как у прочих «кто правил»: стирание человека по GDPR не должно упираться в справочную норму);
+> уникальность — `unique nulls not distinct`, иначе строк компании (`scope_id is null`) на год
+> могло бы быть несколько. `absence_records` — по-прежнему PR-33.
+
 ```sql
 create table absence_norms (
   id uuid primary key default gen_random_uuid(),

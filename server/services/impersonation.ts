@@ -39,6 +39,11 @@ export const FORBIDDEN_ROUTES: { method?: string, pattern: RegExp, what: string 
   { pattern: /^\/api\/v1\/settings\/integrations(\/|$)/, what: 'secrets' },
   { pattern: /^\/api\/v1\/settings\/api-tokens(\/|$)/, what: 'secrets' },
   { pattern: /^\/api\/v1\/settings\/webhooks(\/|$)/, what: 'secrets' },
+  // Второй фактор человека (docs/24 §3.4, PR-39): оператор «от имени» не подключает, не меняет,
+  // не снимает чужой фактор и не сбрасывает его другим — только своим входом в панель оператора
+  // (`POST /platform/tenants/:id/users/:userId/two-factor-reset`, с причиной и журналом)
+  { pattern: /^\/api\/v1\/auth\/two-factor(\/|$)/, what: 'secrets' },
+  { pattern: /^\/api\/v1\/people\/[^/]+\/two-factor$/, what: 'secrets' },
 ]
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS'])

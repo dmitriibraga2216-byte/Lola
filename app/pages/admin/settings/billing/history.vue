@@ -21,9 +21,13 @@ const error = ref('')
 const loading = ref(true)
 const filters = reactive({ from: '', to: '', kind: '', status: '' })
 
+/** Догрузка следующей страницы — одна за раз (подгрузка при прокрутке, docs/v2/39 П-24.1) */
+const paging = ref(false)
 async function load(reset = true) {
+  if (!reset && paging.value) return
   error.value = ''
   if (reset) { loading.value = true; items.value = [] }
+  else paging.value = true
   try {
     const q: Record<string, string> = {}
     if (filters.from) q.from = filters.from
@@ -36,7 +40,7 @@ async function load(reset = true) {
     nextCursor.value = page.nextCursor
   }
   catch (err) { error.value = apiErrorOf(err).message }
-  finally { loading.value = false }
+  finally { loading.value = false; paging.value = false }
 }
 onMounted(() => load())
 
@@ -98,7 +102,7 @@ const period = (p: Payment) => (p.periodFrom && p.periodTo ? `${fmtDate(p.period
       </table>
     </div>
 
-    <button v-if="nextCursor" type="button" class="btn ghost" @click="load(false)">{{ t('common.loadMore') }}</button>
+    <LoadMore v-if="nextCursor" :loading="loading || paging" @more="load(false)" />
   </div>
 </template>
 

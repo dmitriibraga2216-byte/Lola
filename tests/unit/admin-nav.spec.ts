@@ -145,6 +145,9 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/rewards': "hasScope('settings.tenant')",
   // PR-36 (docs/v2/34 §5): «Сховище» — admin і owner (`storage.view`); кошик і політики — вкладки сторінки.
   '/admin/settings/storage': "hasScope('storage.view')",
+  // PR-39 (docs/v2/39 П-21): объявления платформы — своя подгруппа «Від Lola» в «Налаштуваннях»,
+  // а не рядом с «Новинами» компании: две ленты не смешиваются и в меню. Читает любой вошедший.
+  '/admin/platform-announcements': "hasScope('learn.view')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

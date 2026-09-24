@@ -216,6 +216,7 @@ describe('вебхуки наружу (docs/09 §9.5)', () => {
 describe('API-токены (docs/09 §9.6)', () => {
   it('создание → показ один раз → Bearer проходит со скоупами → отзыв → отказ', async () => {
     const t = await createToken(ctx(), { name: 'test integr', scopes: ['people.view', 'people.import'], expiresInDays: 30 })
+    if (!t.ok) throw new Error(`токен не выдан: ${t.code}`)
     expect(t.token).toMatch(/^lola_/)
     const [row] = await admin`select token_hash, prefix from api_tokens where id = ${t.id}`
     expect(row!.token_hash).not.toBe(t.token)
@@ -235,6 +236,7 @@ describe('API-токены (docs/09 §9.6)', () => {
 
   it('лимит 60/мин на токен', async () => {
     const t = await createToken(ctx(), { name: 'test limit', scopes: ['people.view'] })
+    if (!t.ok) throw new Error(`токен не выдан: ${t.code}`)
     let last: Awaited<ReturnType<typeof validateBearer>> = { ok: false, code: 'invalid' }
     for (let i = 0; i < 61; i++) last = await validateBearer(t.token)
     expect(last.ok).toBe(false)

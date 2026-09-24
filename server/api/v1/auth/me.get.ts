@@ -4,7 +4,7 @@ import { db } from '../../../db/client'
 import { withTenant } from '../../../utils/withTenant'
 import type { AuthContext } from '../../../services/session'
 import { getAccess } from '../../../services/access'
-import { accentOf } from '../../../services/settings'
+import { accentOf, logoOf } from '../../../services/settings'
 import { tenantModules } from '../../../services/modules'
 import { impersonationInfo } from '../../../services/impersonation'
 import { previewInfo } from '../../../services/previewAs'
@@ -72,7 +72,13 @@ export default defineEventHandler(async (event) => {
 
   return apiData({
     user: { ...profile, roles: access.roles },
-    tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, candidatesEnabled: tenant.candidatesEnabled, localesEnabled: space.localesEnabled, passwordMinLength } : null,
+    tenant: tenant
+      ? {
+          id: tenant.id, slug: tenant.slug, name: tenant.name, locale: tenant.locale, timezone: tenant.timezone, accent: accentOf(tenant.branding), modules, candidatesEnabled: tenant.candidatesEnabled, localesEnabled: space.localesEnabled, passwordMinLength,
+          // «Колонтитул» материалов (docs/v2/39 П-24.1): название и логотип внизу урока, теста, практикума
+          contentFooter: space.contentFooter, logoMediaId: logoOf(tenant.branding),
+        }
+      : null,
     scopes,
     activeRole: access.activeRole,
     roles: access.roles,

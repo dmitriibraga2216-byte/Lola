@@ -21,7 +21,7 @@ create table tenants (
   status text not null default 'active',     -- active | suspended | archived
   plan text not null default 'trial',        -- trial | point | network | custom
   trial_ends_at timestamptz,
-  branding jsonb not null default '{}',      -- logo_key, accent, space_name
+  branding jsonb not null default '{}',      -- logo_media_id, accent, space_name ([исправлено, PR-39: `logo_key` не писался ни одним экраном, логотип — id файла `media_assets` с origin brand_asset, `24` §3.1] Ранее: «logo_key»)
   settings jsonb not null default '{}',      -- флаги модулей, пороги, политика паролей
   candidates_enabled boolean not null default false, -- рекрутинг выключен, пока тенант его не включил
                                              -- (`v2/28` §3, `v2/44` В-14): до включения кандидатов в тенанте нет
@@ -529,6 +529,7 @@ create table sessions (
   impersonation_reason text,                  -- причина 10–500 знаков, видна клиенту в журнале
   active_role_id uuid references roles(id),   -- активная роль сессии (`01` §1.9.2): права по ней, переключение без выхода
   preview_role_id uuid references roles(id),  -- «Переглянути систему як роль» (`24` §3.5, докс/33 D-052): права рахуються по ній, а не по власних ролях
+  two_factor_pending boolean not null default false, -- промежуточная сессия двухфакторного входа (`24` §3.4.2, PR-39): открыты только /auth/two-factor/* и выход, 10 минут
   expires_at timestamptz not null,
   revoked_at timestamptz
 );
@@ -2299,12 +2300,16 @@ org_manager_source: org_tree | location | functional | role_scope | none
 -- Вид снимка дерева (`v2/32` §3.3); откат по снимку — PR-31
 org_snapshot_kind: manual | auto_daily | pre_import | pre_bulk_move
 
--- Коды событий журнала безопасности (`16` §15 Г-16.2); Spec 16
+-- Коды событий журнала безопасности (`16` §15 Г-16.2); Spec 16.
+-- Пять `two_factor.*` добавил PR-39 (`v2/39` П-24.1, `24` §3.4 «Двухфакторность для админов»):
+-- подключение, отключение самим человеком, сброс администратором или оператором платформы
+-- (critical), неверный код второго фактора и вход резервным кодом (warning)
 security_event: login.success | login.failed | login.blocked | otp.sent | otp.failed | session.revoked
               | user.created | user.blocked | user.unblocked | user.archived
               | password.changed | password.reset_by_admin
               | roles.changed | contacts.changed | impersonation.started | impersonation.ended
               | export.personal_data | settings.security_changed | api_token.created | api_token.revoked
+              | two_factor.enabled | two_factor.disabled | two_factor.reset | two_factor.failed | two_factor.recovery_used
 
 -- Тип анкеты оценки (`20` §14.2: «Оцінка за критеріями» | «Оцінка за компетенціями»); Spec 20
 assessment_kind: by_criteria | by_competencies
@@ -2602,6 +2607,14 @@ person_note_category: general | onboarding | performance | training_plan | incid
 -- Состояние документа человека (`person_documents.status`, `v2/38` §4): valid → expiring → expired
 -- двигает срок (`documents.expiry_scan`), revoked — вручную с причиной или заменой, необратимо
 person_document_status: valid | expiring | expired | revoked
+
+-- Кому адресовано объявление платформы (`platform_announcements.audience`, `v2/39` П-21 [решение]:
+-- «всем / по тарифу / конкретным тенантам»); списки — в plan_codes и tenant_ids той же строки
+announcement_audience: all | plans | tenants
+
+-- Уровень нормы отсутствий (`absence_norms.scope_type`, `v2/38` §3.6, §7.13): разрешение снизу
+-- вверх по каждому виду отдельно — человек → точка → компания → системный дефолт (24 и 5)
+absence_norm_scope: tenant | location | user
 ```
 
 ## Что проверяет тест схемы
@@ -2653,3 +2666,61 @@ person_document_status: valid | expiring | expired | revoked
 
 **Отдельно:** `users.hired_at` уже существует и имеет тип `date`; пакет **не переопределяет**
 её тип и не добавляет её заново (`docs/v2/28-recruiting-candidates.md` §3.2).
+
+**Настройки тенанта и платформы** (`docs/v2/45` PR-39, миграция `0084_v2_settings`; патчи `docs/v2/39`
+П-21, П-24.1, П-24.3, П-24.5):
+
+```sql
+-- Объявления платформы (`24` §4.7): строка на платформу, без tenant_id, вне RLS — как plans.
+-- У app_user отозваны insert/update/delete: писать может только роль platform_admin.
+create table platform_announcements (
+  id uuid primary key, created_at, updated_at,
+  title text not null,                        -- 3–200
+  body text not null,                         -- 1–5000
+  audience text not null default 'all',       -- announcement_audience: all | plans | tenants
+  plan_codes text[] not null default '{}',    -- при audience = plans, иначе пусто (CHECK)
+  tenant_ids uuid[] not null default '{}',    -- при audience = tenants, иначе пусто (CHECK)
+  published_at timestamptz,                   -- null — черновик оператора
+  archived_at timestamptz,                    -- снято с ленты
+  created_by uuid references platform_admins(id) on delete set null
+);
+-- Отметка «прочитано» — тенантная, под RLS: люди принадлежат тенантам
+create table platform_announcement_reads (
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  announcement_id uuid not null references platform_announcements(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  read_at timestamptz not null default now(),
+  primary key (tenant_id, user_id, announcement_id)
+);
+-- Группы должностей (П-24.5): «кухня», «зал», «адміністрація»
+create table position_groups (id, created_at, updated_at, tenant_id, name text not null, sort_order int not null default 0,
+  unique (tenant_id, name));
+alter table positions add column group_id uuid references position_groups(id) on delete set null;
+-- «Посада → курси за замовчуванням» (П-24.3): правило автоматизации, привязанное к должности
+-- или группе; не больше одной привязки на правило и одного правила на должность/группу
+alter table automation_rules add column position_id uuid references positions(id) on delete cascade,
+  add column position_group_id uuid references position_groups(id) on delete cascade;
+-- Второй фактор (`24` §3.4.2): секрет — шифротекст AES-256-GCM, как токены интеграций;
+-- новый секрет ждёт подтверждения рядом с действующим
+create table user_totp (id, created_at, updated_at, tenant_id, user_id uuid not null references users(id) on delete cascade,
+  secret_encrypted bytea, secret_nonce bytea, confirmed_at timestamptz,
+  pending_secret_encrypted bytea, pending_nonce bytea, pending_created_at timestamptz,
+  last_used_step bigint,                      -- защита от повтора принятого кода
+  unique (tenant_id, user_id));
+-- Резервные коды — только argon2id-хеши, показываются один раз
+create table user_totp_recovery_codes (id, created_at, updated_at, tenant_id, user_id, code_hash text not null, used_at timestamptz);
+-- Нормы отпуска (`v2/38` §3.6): уровни компании и точки заводит PR-39, человека и факты — PR-33
+create table absence_norms (id, created_at, updated_at, tenant_id,
+  scope_type text not null,                   -- absence_norm_scope: tenant | location | user
+  scope_id uuid,                              -- null у компании; точка или человек — мягкая ссылка
+  year int not null, vacation_days numeric(4,1), sick_days numeric(4,1), -- null — наследовать
+  reason text,                                -- обязательна для user (CHECK)
+  set_by uuid references users(id) on delete set null,
+  unique nulls not distinct (tenant_id, scope_type, scope_id, year));
+```
+
+Тенантные таблицы — с RLS `enable`+`force`, политикой `using`/`with check`, индексом по `tenant_id`
+и FK на `tenants` (контрактные тесты 1–3 пакета). Четыре из них (`platform_announcement_reads`,
+`position_groups`, `user_totp`, `user_totp_recovery_codes`) вводят патчи, а не модульные документы,
+и в счёт «71 тенантная» `docs/v2/40` §2 не входят; `platform_announcements` — третья платформенная
+таблица пакета рядом с `plan_prices` и `plan_addons`.

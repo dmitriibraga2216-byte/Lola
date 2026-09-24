@@ -79,7 +79,24 @@ const busy = ref('')
 const moveTo = ref('')
 /** Модальне вікно найму (§5.5): точка, посада, дата виходу — обовʼязкові. */
 const hireOpen = ref(false)
-const hireForm = reactive({ locationId: '', positionId: '', startDate: new Date().toISOString().slice(0, 10), mentorId: '', welcomeLetter: true })
+const hireForm = reactive({ locationId: '', positionId: '', startDate: new Date().toISOString().slice(0, 10), mentorId: '', welcomeLetter: true, onboardingCourseIds: [] as string[] })
+/**
+ * Курси онбордингу (§5.5): предзаполняются из «посада → курси за замовчуванням» (docs/v2/39
+ * П-24.3) — своих курсов должности и её группы. Рекрутер может снять галочку: назначаются
+ * отмеченные, одним обычным назначением на курс.
+ */
+const onboarding = ref<{ courseId: string, title: string }[]>([])
+watch(() => hireForm.positionId, async (positionId) => {
+  onboarding.value = []
+  hireForm.onboardingCourseIds = []
+  if (!positionId) return
+  try {
+    const d = await api<{ effective: { courseId: string, title: string }[] }>(`/positions/${positionId}/default-courses`)
+    onboarding.value = d.effective
+    hireForm.onboardingCourseIds = d.effective.map(c => c.courseId)
+  }
+  catch { /* без курсов по умолчанию найм всё равно возможен */ }
+})
 const locations = ref<{ id: string, name: string }[]>([])
 const positions = ref<{ id: string, name: string }[]>([])
 const rejectOpen = ref(false)
@@ -184,6 +201,7 @@ async function hire() {
         startDate: hireForm.startDate,
         ...(hireForm.mentorId ? { mentorId: hireForm.mentorId } : {}),
         welcomeLetter: hireForm.welcomeLetter,
+        onboardingCourseIds: hireForm.onboardingCourseIds,
       },
     })
     hireOpen.value = false
@@ -280,6 +298,14 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
         <label>{{ t('candidate.startDate') }}
           <input v-model="hireForm.startDate" type="date" required>
         </label>
+        <fieldset v-if="onboarding.length" class="onboarding">
+          <legend>{{ t('candidate.onboardingCourses') }}</legend>
+          <label v-for="c in onboarding" :key="c.courseId" class="row">
+            <input v-model="hireForm.onboardingCourseIds" type="checkbox" :value="c.courseId">
+            <span>{{ c.title }}</span>
+          </label>
+        </fieldset>
+        <p v-else-if="hireForm.positionId" class="help">{{ t('candidate.noDefaultCourses') }}</p>
         <label class="row">
           <input v-model="hireForm.welcomeLetter" type="checkbox">
           <span>{{ t('candidate.welcomeLetter') }}</span>
@@ -412,6 +438,8 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
 <style scoped>
 .form { display: grid; gap: var(--space-3); max-width: 32rem; margin-bottom: var(--space-3); }
 .row { display: flex; gap: var(--space-2); align-items: center; }
+.onboarding { border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-1); margin: 0; }
+.onboarding legend { font-weight: 700; padding: 0 var(--space-1); }
 .title { margin: 0; }
 .head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-3); }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }

@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     return apiError(event, 404, 'not_found', 'Простір не знайдено')
   }
 
-  const { token } = await createSession({
+  const { token, twoFactor } = await createSession({
     tenantId: user.tenant_id,
     userId: user.user_id,
     userAgent: getHeader(event, 'user-agent'),
@@ -33,6 +33,9 @@ export default defineEventHandler(async (event) => {
     loginMethod: byEmail ? 'password' : 'otp',
   })
   setSessionCookies(event, token)
+
+  // Второй фактор (docs/24 §3.4): пространство выбрано, но вход завершит код приложения
+  if (twoFactor) return apiData({ ok: true, twoFactor })
 
   await logSecurity({
     tenantId: user.tenant_id,
@@ -43,5 +46,5 @@ export default defineEventHandler(async (event) => {
     userAgent: getHeader(event, 'user-agent'),
   })
 
-  return apiData({ ok: true })
+  return apiData({ ok: true, twoFactor: null })
 })

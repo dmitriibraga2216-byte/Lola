@@ -155,7 +155,8 @@
       "reviewQueue": "My reviews",
       "reviewWorkload": "Reviewer workload",
       "reviewRouting": "Routing rules",
-      "storage": "Storage"
+      "storage": "Storage",
+      "platformAnnouncements": "Lola announcements"
     },
     "section": {
       "learning": "Learning",
@@ -181,7 +182,8 @@
       "billing": "Plan and billing",
       "peopleList": "People",
       "peopleStructure": "Structure",
-      "motivation": "Motivation"
+      "motivation": "Motivation",
+      "fromLola": "From Lola"
     },
     "menu": {
       "learner": "My cabinet",
@@ -490,7 +492,20 @@
     "color": "Color",
     "count": "{n} records",
     "people": "{n} people",
-    "documentTypes": "Document types"
+    "documentTypes": "Document types",
+    "position-groups": "Position groups",
+    "positionsCount": "positions: {n}",
+    "defaultCoursesCount": "default courses: {n}",
+    "group": "Position group",
+    "noGroup": "No group",
+    "defaultCourses": "Courses",
+    "defaultCoursesTitle": "Default courses: {name}",
+    "defaultCoursesHint": "Assigned to a person on hiring or transfer to this position. Courses of the position's group are added to them",
+    "defaultCoursesGroupHint": "Assigned on hiring or transfer to any position of the group",
+    "dueDays": "days to complete",
+    "noDefaultCourses": "No default courses",
+    "groupCourses": "Also from the position group",
+    "addCourse": "Add course"
   },
   "journals": {
     "audit": "Audit log",
@@ -608,7 +623,12 @@
       "export_personal_data": "Personal data export",
       "settings_security_changed": "Security settings changed",
       "api_token_created": "API token created",
-      "api_token_revoked": "API token revoked"
+      "api_token_revoked": "API token revoked",
+      "two_factor_enabled": "Two-factor sign-in turned on",
+      "two_factor_disabled": "Two-factor sign-in turned off",
+      "two_factor_reset": "Two-factor sign-in reset",
+      "two_factor_failed": "Wrong two-factor code",
+      "two_factor_recovery_used": "Signed in with a recovery code"
     },
     "retentionForever": "Kept indefinitely",
     "anyType": "Any",
@@ -2012,6 +2032,42 @@
       "title": "Change plan",
       "hint": "The plan will change from «{from}» to «{to}» immediately, without an overage check (§7.10).",
       "ok": "Change plan"
+    },
+    "ann": {
+      "title": "Platform announcements",
+      "hint": "The second kind of “news”: from Lola to spaces, read-only. Not company news — those are written by the space admin",
+      "f": {
+        "title": "Title",
+        "audience": "Audience",
+        "body": "Text",
+        "plans": "Plans",
+        "tenants": "Spaces",
+        "publish": "Publish right away"
+      },
+      "audience": {
+        "all": "All spaces",
+        "plans": "By plan",
+        "tenants": "Selected spaces"
+      },
+      "create": "Create announcement",
+      "created": "Announcement created",
+      "archiveConfirm": "Remove “{title}” from the spaces' feed?",
+      "state": {
+        "draft": "Draft",
+        "published": "Published",
+        "archived": "Removed"
+      },
+      "readers": "read: {n}",
+      "publish": "Publish",
+      "archive": "Remove"
+    },
+    "tf": {
+      "open": "Reset 2FA",
+      "title": "Reset two-factor sign-in",
+      "text": "For an admin who lost both the phone and the recovery codes when there is no other admin. The client will see the reason in the security log; the person's sessions will be closed",
+      "nobody": "Nobody in this space has set up two-factor sign-in",
+      "reset": "Reset",
+      "done": "Two-factor sign-in for “{name}” was reset"
     }
   },
   "integrations": {
@@ -2108,7 +2164,8 @@
       "queue_delay_ms": "Artificial delay between messages so the mail provider doesn't flag the mailing as spam",
       "max_attachment_mb": "Sender-side cutoff, checked before attempting to connect"
     },
-    "smtpTlsHint": "\"Ignore TLS errors\" is a dangerous flag for self-signed relay certificates — only a platform operator can set it, and every change is logged"
+    "smtpTlsHint": "\"Ignore TLS errors\" is a dangerous flag for self-signed relay certificates — only a platform operator can set it, and every change is logged",
+    "sessionOnly": "These rights work only in a person's session and are never given to a token: {scopes}"
   },
   "dev": {
     "title": "My development",
@@ -2899,10 +2956,7 @@
   },
   "org": {
     "title": "Org structure",
-    "short": "Org",
-    "totals": "{l} locations · {p} people",
-    "people": "people",
-    "manager": "Manager"
+    "short": "Org"
   },
   "rb": {
     "title": "Custom reports",
@@ -4325,7 +4379,10 @@
       "tasks": "Tasks",
       "users": "Users",
       "dataProtection": "Data protection",
-      "session": "Sessions and codes"
+      "session": "Sessions and codes",
+      "twoFactor": "Two-factor authentication",
+      "absence": "Leave days",
+      "tables": "Table behaviour"
     },
     "modes": {
       "position_map": "Position mapping",
@@ -4351,7 +4408,21 @@
       },
       "locale": "Default language",
       "timezone": "Time zone",
-      "plan": "Plan"
+      "plan": "Plan",
+      "logo": "Logo",
+      "logoUpload": "Upload logo",
+      "logoReplace": "Replace",
+      "logoRemove": "Remove",
+      "logoInvalid": "The logo must be an image up to 2 MB (PNG, JPG, SVG)",
+      "contentFooter": "Footer: show the company name and logo in learning materials",
+      "contentFooterHint": "At the bottom of a lesson, test, workshop and knowledge base article while learning",
+      "localesEnabled": "Interface languages",
+      "localesEnabledHint": "Languages employees can choose in their profile. At least one stays enabled",
+      "locales": {
+        "uk": "Українська",
+        "en": "English",
+        "ru": "Русский"
+      }
     },
     "modules": {
       "hint": "A disabled module disappears from the menu and API; data is kept and its reports stay available to the admin",
@@ -4406,7 +4477,8 @@
       "minLength": "Minimum password length",
       "forbidWeak": "Forbid weak passwords",
       "changeAfterFirstLogin": "Change password after first login",
-      "adminTwoFactor": "Two-factor sign-in for admins"
+      "adminTwoFactor": "Two-factor sign-in for admins",
+      "twoFactorMoved": "Two-factor sign-in for admins is in the “Two-factor authentication” group"
     },
     "phones": {
       "allowedCountryCodes": "Allowed phone country codes",
@@ -5073,7 +5145,9 @@
     "startDate": "Start date",
     "welcomeLetter": "Send a welcome letter",
     "reasonCode": "Reason",
-    "notifyRejected": "Notify the candidate"
+    "notifyRejected": "Notify the candidate",
+    "onboardingCourses": "Onboarding courses",
+    "noDefaultCourses": "The position has no default courses — set them in the positions dictionary"
   },
   "candidates": {
     "title": "Candidates",
@@ -6386,5 +6460,85 @@
       "evidenceAckRequired": "Confirm you understand that grade evidence will be deleted",
       "confirmVolume": "I have checked the dry run volume"
     }
+  },
+  "tables": {
+    "hint": "A setting of this browser, not of the space: another computer or phone keeps its own",
+    "autoLoad": "Automatically load more data when a table is scrolled down",
+    "thisBrowser": "This browser only. The “Load more” button stays for keyboard users",
+    "autoLoadOn": "The next rows load by themselves as you scroll"
+  },
+  "twoFactor": {
+    "invalidLeft": "Wrong code. Attempts left: {n}",
+    "currentCode": "Current code from the app",
+    "replaceHint": "The old device keeps working until the new one confirms a code",
+    "getKey": "Get a new key",
+    "preparing": "Preparing the key…",
+    "stepApp": "Install an authenticator app: Google Authenticator, Microsoft Authenticator or any other TOTP app",
+    "stepScan": "Scan the QR code with the app or type the key in manually",
+    "qrAlt": "QR code for the authenticator app",
+    "manualKey": "Key for manual entry:",
+    "stepCode": "Six digits from the app",
+    "confirm": "Confirm",
+    "enabledNow": "Two-factor sign-in is on",
+    "recoveryTitle": "Recovery codes",
+    "recoveryHint": "Save them now — they are not shown anywhere again. Each code signs you in once when the phone is not at hand",
+    "copy": "Copy codes",
+    "copied": "Copied",
+    "savedCodes": "I have saved the recovery codes",
+    "done": "Done",
+    "requireAdmins": "Require two-factor sign-in from admins",
+    "requireAdminsHint": "Applies to everyone whose role can change space settings. Those who have not set up the app yet will do it at their next sign-in",
+    "enrollFirst": "Set up two-factor sign-in for yourself first — below, in “My sign-in”. This way the requirement cannot lock you out",
+    "myLogin": "My sign-in",
+    "notEnrolled": "Two-factor sign-in is off. Once it is on, every sign-in will ask for a code from the app",
+    "enroll": "Set up the app",
+    "on": "On",
+    "off": "Off",
+    "since": "since {date}",
+    "codesLeft": "recovery codes: {n}",
+    "proof": "Code from the app or a recovery code",
+    "newCodes": "New recovery codes",
+    "disable": "Turn off",
+    "replace": "Replace device",
+    "requiredNoDisable": "The space requires two-factor sign-in from admins — you cannot turn it off, but you can replace the device",
+    "admins": "Admins",
+    "adminsHint": "Who of those covered by the requirement has already set up the app",
+    "person": "Person",
+    "state": "State",
+    "reset": "Reset",
+    "resetConfirm": "Reset two-factor sign-in for “{name}”? All their sessions will be closed and the app will have to be set up again",
+    "resetDone": "Two-factor sign-in for “{name}” was reset",
+    "disabled": "Two-factor sign-in is off",
+    "lostEverything": "Lost both the phone and the recovery codes? Another admin resets the sign-in here; if you are the only admin, contact Lola support",
+    "loginTitle": "Confirm sign-in",
+    "loginEnrollHint": "This space requires two-factor sign-in for admins. Set up an authenticator app — it takes a minute",
+    "loginVerifyHint": "Enter the six digits from the authenticator app",
+    "useRecovery": "No phone? Sign in with a recovery code",
+    "recoveryLoginHint": "One of the recovery codes you saved when setting up",
+    "useApp": "Sign in with a code from the app",
+    "lostPhone": "Lost both the phone and the codes — contact your space admin",
+    "otherAccount": "Sign in differently"
+  },
+  "absence": {
+    "hint": "Default number of leave days per year for employees. HR can adjust it individually in the employee card. This is a reference value, not HR accounting",
+    "saved": "The norm is saved",
+    "year": "Year",
+    "vacationDays": "Leave days per year",
+    "sickDays": "Sick leave",
+    "systemDefault": "Not set — the system norm applies: {v} leave days and {s} sick days",
+    "saveCompany": "Save company norm",
+    "overrides": "Overrides by location ({n})",
+    "overridesHint": "An empty field means the location inherits the company norm. You can override sick leave only",
+    "location": "Location",
+    "inherits": "same as company",
+    "inherit": "Inherit"
+  },
+  "platformNews": {
+    "title": "Lola platform announcements",
+    "hint": "News from the Lola team to every space: updates, maintenance, changes of terms. Read-only — your company news is in “Information → News”",
+    "unread": "Unread announcements: {n}",
+    "empty": "No announcements from Lola yet",
+    "markRead": "Mark as read",
+    "read": "Read"
   }
 }

@@ -1,9 +1,10 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { currentRequestContext } from '../utils/requestContext'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { sessions, users } from '../db/schema'
-import { withTenant } from '../utils/withTenant'
+import { TWO_FACTOR_PENDING_MINUTES, type TwoFactorStep } from '../../shared/domain/twoFactor'
+import { withTenant, type TenantTx } from '../utils/withTenant'
 import { sessionByTokenHash } from './authLookup'
 import { defaultRoleOf, effectiveRoles } from './activeRole'
 import type { CallbackResult } from './oauth'
@@ -45,6 +46,21 @@ export async function loginFormHidden(tenantId: string, userId: string): Promise
   return settings.policies.auth.hideLoginForm === true
 }
 
+/** Результат входа: `twoFactor` не null — сессия промежуточная, нужен второй фактор (docs/24 §3.4). */
+export interface CreatedSession {
+  token: string
+  sessionId: string
+  expiresAt: Date
+  twoFactor: TwoFactorStep | null
+}
+
+/** Первый вход активирует приглашённого (жизненный цикл, docs/01-roles.md §1.6) — только полноценный вход. */
+async function markSignedIn(tx: TenantTx, userId: string): Promise<void> {
+  await tx.update(users)
+    .set({ status: 'active', lastSeenAt: new Date() })
+    .where(eq(users.id, userId))
+}
+
 export async function createSession(input: {
   tenantId: string
   userId: string
@@ -52,14 +68,20 @@ export async function createSession(input: {
   ip?: string | null
   impersonatedBy?: string | null
   loginMethod?: LoginMethod | null
-}): Promise<{ token: string, sessionId: string, expiresAt: Date }> {
+}): Promise<CreatedSession> {
   // docs/25 §8, §14 п. 10: в приостановленный или удаляемый тенант не входит никто — ни по коду, ни по паролю, ни «от имени»
   const tenant = await tenantById(input.tenantId)
   if (tenant && tenant.status !== 'active') throw new TenantClosedError()
   // docs/33 D-021: при скрытой форме входа код и пароль не пускают — только Google, приглашение и «от имени»
   if (input.loginMethod && (OTP_LOGIN_METHODS.includes(input.loginMethod) || input.loginMethod === 'password') && await loginFormHidden(input.tenantId, input.userId)) throw new LoginFormHiddenError()
+  // Второй фактор (docs/24 §3.4, PR-39): решается здесь, в единственной точке создания сессии,
+  // а не в каждом из шести входов — ни один способ входа не может его обойти. «От имени»
+  // второй фактор человека не спрашивает: оператор платформы вошёл своим входом, а сессия
+  // человека ему не принадлежит (docs/24 §4.5).
+  const { secondFactorStep } = await import('./twoFactor')
+  const twoFactor = input.loginMethod === 'impersonation' ? null : await secondFactorStep(input.tenantId, input.userId)
   const token = randomBytes(32).toString('base64url')
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
+  const expiresAt = new Date(Date.now() + (twoFactor ? TWO_FACTOR_PENDING_MINUTES * 60_000 : SESSION_TTL_MS))
 
   const sessionId = await withTenant(input.tenantId, input.userId, async (tx) => {
     // При входе активная роль — роль по умолчанию (docs/01 §1.9.2, docs/28 «Паритет 4»)
@@ -74,18 +96,35 @@ export async function createSession(input: {
       impersonatedBy: input.impersonatedBy ?? null,
       loginMethod: input.loginMethod ?? null,
       activeRoleId,
+      twoFactorPending: twoFactor !== null,
       expiresAt,
     }).returning({ id: sessions.id })
 
-    // Первый вход активирует приглашённого (жизненный цикл, docs/01-roles.md §1.6)
-    await tx.update(users)
-      .set({ status: 'active', lastSeenAt: new Date() })
-      .where(eq(users.id, input.userId))
-
+    if (!twoFactor) await markSignedIn(tx, input.userId)
     return row!.id
   })
 
-  return { token, sessionId, expiresAt }
+  return { token, sessionId, expiresAt, twoFactor }
+}
+
+/**
+ * Второй фактор пройден: промежуточная сессия становится полной **с новым токеном** —
+ * токен промежуточной сессии, даже если его перехватили, полной сессией не станет никогда.
+ * Срок — обычный, приглашённый активируется. null — сессии нет, она отозвана, истекла
+ * или уже не промежуточная.
+ */
+export async function completeTwoFactor(auth: AuthContext): Promise<{ token: string, expiresAt: Date } | null> {
+  const token = randomBytes(32).toString('base64url')
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
+  return withTenant(auth.tenantId, auth.userId, async (tx) => {
+    const rows = await tx.update(sessions)
+      .set({ tokenHash: hashToken(token), twoFactorPending: false, expiresAt, updatedAt: new Date() })
+      .where(and(eq(sessions.id, auth.sessionId), eq(sessions.twoFactorPending, true), isNull(sessions.revokedAt), sql`${sessions.expiresAt} > now()`))
+      .returning({ id: sessions.id })
+    if (!rows.length) return null
+    await markSignedIn(tx, auth.userId)
+    return { token, expiresAt }
+  })
 }
 
 /** Куда вести человека после колбека провайдера. Редирект делает эндпоинт — сессию ставит сервис. */
@@ -118,8 +157,11 @@ export async function completeSignin(event: H3Event, r: CallbackResult): Promise
   const { clientIp, setSessionCookies } = await import('../utils/authCookies')
   const userAgent = getHeader(event, 'user-agent')
   const ip = clientIp(event)
-  const { token } = await createSession({ tenantId: r.tenantId, userId, userAgent, ip, loginMethod: 'google' })
+  const { token, twoFactor } = await createSession({ tenantId: r.tenantId, userId, userAgent, ip, loginMethod: 'google' })
   setSessionCookies(event, token)
+  // Второй фактор (docs/24 §3.4): вход ещё не завершён — `login.success` пишет подтверждение кода,
+  // а человек возвращается на экран входа, к шагу кода
+  if (twoFactor) return { ok: true, userId, redirectTo: '/login?step=two-factor' }
   await logSecurity({ tenantId: r.tenantId, userId, event: 'login.success', meta: { method: 'google' }, ip, userAgent })
   return { ok: true, userId, redirectTo: '/' }
 }
@@ -135,6 +177,12 @@ export interface AuthContext {
   activeRoleId: string | null
   /** «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052): права рахуються по цій ролі — `loadAccess`; мутації заборонені (03.guards). */
   previewRoleId: string | null
+  /**
+   * Промежуточная сессия двухфакторного входа (docs/24 §3.4, PR-39): первый фактор пройден,
+   * второго ещё нет. Открыты только `/auth/two-factor/*` и выход — остальное middleware
+   * `01.session` отвечает `401 two_factor_required`.
+   */
+  twoFactorPending?: boolean
 }
 
 export async function validateSession(token: string): Promise<AuthContext | null> {
@@ -150,12 +198,14 @@ export async function validateSession(token: string): Promise<AuthContext | null
     impersonatorAdminId: row.impersonator_admin_id ?? null,
     activeRoleId: row.active_role_id,
     previewRoleId: row.preview_role_id ?? null,
+    twoFactorPending: row.two_factor_pending === true,
   }
 }
 
 /** Скользящее продление и last_seen_at — не чаще раза в час. */
 export async function touchSession(auth: AuthContext): Promise<void> {
   if (auth.impersonatorAdminId) return // сессия «от имени» живёт ровно 60 минут и не продлевается (docs/24 §4.5, §11)
+  if (auth.twoFactorPending) return // промежуточная сессия живёт 10 минут и не продлевается (docs/24 §3.4)
   await withTenant(auth.tenantId, auth.userId, async (tx) => {
     const [row] = await tx.select({ updatedAt: sessions.updatedAt })
       .from(sessions).where(eq(sessions.id, auth.sessionId))

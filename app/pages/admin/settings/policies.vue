@@ -2,22 +2,33 @@
 /**
  * Налаштування простору (мокап Settings, docs/24 §3): слева группы — Простір, Модулі, десять групп политик
  * эталона и наши сессии/коды; изменения копятся и сохраняются пачкой («Відхилити зміни / Зберегти»).
+ *
+ * PR-39 (docs/v2/39 П-24.1 — шесть блоков настроек компании со второго эталона): в «Простір»
+ * добавлены логотип с колонтитулом материалов и мови інтерфейсу; отдельными группами —
+ * «Двофакторна автентифікація», «Кількість днів відпустки» и «Поведінка таблиць». Шестой блок —
+ * API-токен — живёт в «Інтеграції» (`/admin/settings/integrations`), где и был.
  */
 import { ACCENT_TOKENS, MODULES } from '#shared/schemas/settings'
 import type { TenantPolicies } from '#shared/schemas/settings'
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
 const { t } = useI18n()
 const { api } = useApi()
-const { fetchMe } = useAuth()
+const { fetchMe, hasScope } = useAuth()
+const { upload } = useMediaUpload()
+const { autoLoad, readPreference, setAutoLoad } = useTableBehavior()
 
-interface Space { name: string, slug: string, slugLocked: boolean, locale: string, timezone: string, plan: string, accent: string, modules: Record<string, boolean>, lockedModules: Record<string, string>, defaults: Record<string, unknown>, quietHours: { enabled: boolean, from: number, to: number } }
+interface Space { name: string, slug: string, slugLocked: boolean, locale: string, timezone: string, plan: string, accent: string, logoMediaId: string | null, space: { localesEnabled: string[], contentFooter: boolean }, modules: Record<string, boolean>, lockedModules: Record<string, string>, defaults: Record<string, unknown>, quietHours: { enabled: boolean, from: number, to: number } }
 
-const GROUPS = ['space', 'modules', 'auth', 'roles', 'subordinates', 'orgStructure', 'passwords', 'phones', 'notifications', 'tasks', 'users', 'dataProtection', 'session'] as const
-type Group = typeof GROUPS[number]
+const ALL_GROUPS = ['space', 'modules', 'twoFactor', 'absence', 'tables', 'auth', 'roles', 'subordinates', 'orgStructure', 'passwords', 'phones', 'notifications', 'tasks', 'users', 'dataProtection', 'session'] as const
+type Group = typeof ALL_GROUPS[number]
+// Нормы отпуска правит носитель `person.absence.manage` (docs/v2/38 §2) — у остальных группы нет
+const GROUPS = computed(() => ALL_GROUPS.filter(g => g !== 'absence' || hasScope('person.absence.manage')))
 const active = ref<Group>('auth')
+const INTERFACE_LOCALES = ['uk', 'en', 'ru'] as const
 
 const space = ref<Space | null>(null)
-const spaceForm = reactive({ name: '', slug: '', accent: 'sun', locale: 'uk', timezone: 'Europe/Kyiv' })
+const spaceForm = reactive({ name: '', slug: '', accent: 'sun', locale: 'uk', timezone: 'Europe/Kyiv', logoMediaId: null as string | null, contentFooter: false, localesEnabled: ['uk'] as string[] })
+const logoBusy = ref(false)
 const modules = reactive<Record<string, boolean>>({})
 const policies = ref<TenantPolicies | null>(null)
 const draft = ref<TenantPolicies | null>(null)
@@ -27,15 +38,23 @@ const saved = ref(false)
 const listInput = reactive({ virtualDomain: '', countryCode: '' })
 
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)) as T }
+/** Изменились ли поля пространства — колонки tenants, бренд и группа `space` настроек */
+const spaceDirty = computed(() => space.value !== null && (spaceForm.name !== space.value.name || spaceForm.slug !== space.value.slug || spaceForm.accent !== space.value.accent || spaceForm.locale !== space.value.locale || spaceForm.timezone !== space.value.timezone
+  || spaceForm.logoMediaId !== space.value.logoMediaId || spaceForm.contentFooter !== space.value.space.contentFooter
+  || [...spaceForm.localesEnabled].sort().join() !== [...space.value.space.localesEnabled].sort().join()))
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(policies.value)
   || Object.keys(modules).some(k => modules[k] !== space.value?.modules[k])
-  || (space.value !== null && (spaceForm.name !== space.value.name || spaceForm.slug !== space.value.slug || spaceForm.accent !== space.value.accent || spaceForm.locale !== space.value.locale || spaceForm.timezone !== space.value.timezone)))
+  || spaceDirty.value)
+
+function fillSpace(s: Space) {
+  Object.assign(spaceForm, { name: s.name, slug: s.slug, accent: s.accent, locale: s.locale, timezone: s.timezone, logoMediaId: s.logoMediaId, contentFooter: s.space.contentFooter, localesEnabled: [...s.space.localesEnabled] })
+}
 
 async function load() {
   try {
     const [s, p, r] = await Promise.all([api<Space>('/settings/tenant'), api<TenantPolicies>('/settings/policies'), api<{ code: string, name: string }[]>('/settings/roles')])
     space.value = s
-    Object.assign(spaceForm, { name: s.name, slug: s.slug, accent: s.accent, locale: s.locale, timezone: s.timezone })
+    fillSpace(s)
     for (const m of MODULES) modules[m] = s.modules[m] ?? true
     policies.value = p
     draft.value = clone(p)
@@ -43,12 +62,12 @@ async function load() {
   }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-onMounted(load)
+onMounted(() => { load(); readPreference() })
 
 function discard() {
   if (policies.value) draft.value = clone(policies.value)
   if (space.value) {
-    Object.assign(spaceForm, { name: space.value.name, slug: space.value.slug, accent: space.value.accent, locale: space.value.locale, timezone: space.value.timezone })
+    fillSpace(space.value)
     for (const m of MODULES) modules[m] = space.value.modules[m] ?? true
   }
   error.value = ''
@@ -57,9 +76,11 @@ function discard() {
 async function save() {
   error.value = ''; saved.value = false
   try {
-    if (space.value && (spaceForm.name !== space.value.name || spaceForm.slug !== space.value.slug || spaceForm.accent !== space.value.accent || spaceForm.locale !== space.value.locale || spaceForm.timezone !== space.value.timezone)) {
+    if (space.value && spaceDirty.value) {
       const body: Record<string, unknown> = { name: spaceForm.name, accent: spaceForm.accent, locale: spaceForm.locale, timezone: spaceForm.timezone }
       if (spaceForm.slug !== space.value.slug) body.slug = spaceForm.slug
+      if (spaceForm.logoMediaId !== space.value.logoMediaId) body.logoMediaId = spaceForm.logoMediaId
+      body.space = { contentFooter: spaceForm.contentFooter, localesEnabled: spaceForm.localesEnabled }
       await api('/settings/tenant', { method: 'PATCH', body })
     }
     const modPatch = Object.fromEntries(Object.entries(modules).filter(([k, v]) => v !== space.value?.modules[k]))
@@ -81,6 +102,24 @@ function addTo(list: string[], value: string, re: RegExp) {
   if (v && re.test(v) && !list.includes(v)) list.push(v)
 }
 const removeAt = (list: string[], i: number) => list.splice(i, 1)
+
+/** Логотип пространства (docs/24 §3.1): фирменный файл `brand_asset`, до 2 МБ; сохраняется общей кнопкой. */
+async function pickLogo(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  error.value = ''
+  if (!file.type.startsWith('image/') || file.size > 2 * 1024 * 1024) { error.value = t('settings.space.logoInvalid'); return }
+  logoBusy.value = true
+  try { spaceForm.logoMediaId = await upload(file, file.name, 'brand_asset') }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { logoBusy.value = false }
+}
+
+/** Мови інтерфейсу (П-24.1): хоча б одна залишається увімкненою. */
+function toggleLocale(l: string, on: boolean) {
+  const next = on ? [...new Set([...spaceForm.localesEnabled, l])] : spaceForm.localesEnabled.filter(x => x !== l)
+  if (next.length) spaceForm.localesEnabled = next
+}
 
 // Другий канал OTP — e-mail (docs/28 «Вхід: код на e-mail»): otpChannels — масив, на екрані — перемикач
 const otpEmailEnabled = computed({
@@ -129,6 +168,38 @@ const otpEmailEnabled = computed({
           <select id="sp-locale" v-model="spaceForm.locale" class="field"><option value="uk">Українська</option><option value="en">English</option><option value="ru">Русский</option></select>
           <label class="label top" for="sp-tz">{{ t('settings.space.timezone') }}</label><input id="sp-tz" v-model="spaceForm.timezone" class="field" maxlength="60">
           <p class="help">{{ t('settings.space.plan') }}: <b>{{ space.plan }}</b></p>
+
+          <p class="label top">{{ t('settings.space.logo') }}</p>
+          <div class="logo-row">
+            <img v-if="spaceForm.logoMediaId" :src="`/api/v1/media/${spaceForm.logoMediaId}?redirect=1&variant=320`" :alt="t('settings.space.logo')" class="logo">
+            <label class="btn ghost small" :class="{ off: logoBusy }">
+              <input type="file" accept="image/*" class="visually-hidden" :disabled="logoBusy" @change="pickLogo">{{ spaceForm.logoMediaId ? t('settings.space.logoReplace') : t('settings.space.logoUpload') }}
+            </label>
+            <button v-if="spaceForm.logoMediaId" class="btn ghost small" type="button" @click="spaceForm.logoMediaId = null">{{ t('settings.space.logoRemove') }}</button>
+          </div>
+          <label class="toggle row top"><input v-model="spaceForm.contentFooter" type="checkbox" data-testid="content-footer-toggle"><span>{{ t('settings.space.contentFooter') }}<span class="hint">{{ t('settings.space.contentFooterHint') }}</span></span></label>
+
+          <p class="label top">{{ t('settings.space.localesEnabled') }}</p>
+          <p class="help">{{ t('settings.space.localesEnabledHint') }}</p>
+          <label v-for="l in INTERFACE_LOCALES" :key="l" class="check">
+            <input type="checkbox" :checked="spaceForm.localesEnabled.includes(l)" :disabled="spaceForm.localesEnabled.length === 1 && spaceForm.localesEnabled.includes(l)" @change="toggleLocale(l, ($event.target as HTMLInputElement).checked)"><span>{{ t(`settings.space.locales.${l}`) }}</span>
+          </label>
+        </template>
+
+        <!-- Двофакторна автентифікація (docs/24 §3.4, П-24.1) -->
+        <template v-else-if="active === 'twoFactor'">
+          <TwoFactorPanel v-model="draft.passwords.adminTwoFactor" />
+        </template>
+
+        <!-- Кількість днів відпустки (docs/v2/38 §5.4, П-24.1) -->
+        <template v-else-if="active === 'absence'">
+          <AbsenceNormsPanel />
+        </template>
+
+        <!-- Поведінка таблиць (П-24.1): налаштування цього браузера, не простору -->
+        <template v-else-if="active === 'tables'">
+          <p class="help">{{ t('tables.hint') }}</p>
+          <label class="toggle row"><input type="checkbox" :checked="autoLoad" data-testid="tables-auto-load" @change="setAutoLoad(($event.target as HTMLInputElement).checked)"><span>{{ t('tables.autoLoad') }}<span class="hint">{{ t('tables.thisBrowser') }}</span></span></label>
         </template>
 
         <!-- Модулі -->
@@ -194,7 +265,7 @@ const otpEmailEnabled = computed({
           <input id="p-minlen" v-model.number="draft.passwords.minLength" class="field num" type="number" min="8" max="32">
           <label class="toggle row top"><input v-model="draft.passwords.forbidWeak" type="checkbox"><span>{{ t('settings.passwords.forbidWeak') }}</span></label>
           <label class="toggle row"><input v-model="draft.passwords.changeAfterFirstLogin" type="checkbox"><span>{{ t('settings.passwords.changeAfterFirstLogin') }}</span></label>
-          <label class="toggle row"><input v-model="draft.passwords.adminTwoFactor" type="checkbox"><span>{{ t('settings.passwords.adminTwoFactor') }}</span></label>
+          <p class="help">{{ t('settings.passwords.twoFactorMoved') }}</p>
         </template>
 
         <!-- Телефони -->
@@ -286,6 +357,11 @@ const otpEmailEnabled = computed({
 .accent.coral input { background: var(--color-coral); }
 .accent.ink input { background: var(--color-ink); }
 .accent.on { border-color: var(--color-ink); }
+.logo-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.logo { height: 40px; width: auto; max-width: 160px; object-fit: contain; background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-1); }
+.logo-row .off { opacity: 0.5; }
+.logo-row label:focus-within { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 800px) {
   .layout { grid-template-columns: 1fr; }
   .groups { display: flex; overflow-x: auto; }

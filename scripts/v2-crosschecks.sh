@@ -471,6 +471,34 @@ check11_time_single_writer() {
   report "11. время обучения пишет только свёртка биений (docs/v2/42 §5 проверка 22)" "$hits"
 }
 
+# ── Проверка 12. Контуры PR-39 не смешиваются: Bearer — только скоупами, лента платформы — одна ─
+# docs/v2/44 В-20 и docs/v2/39 П-21, условия выхода docs/v2/45 PR-39: «чёрного списка путей нет»,
+# «две новости не смешаны». Поведение проверяют тесты (`tests/integration/v2-settings-39*.spec.ts`);
+# здесь — статический сторож того, что правило не расползётся по коду:
+#  (а) права Bearer-токена читает **одно** место — `server/services/access.ts` (там же вычёркиваются
+#      скоупы `sessionOnly`). Ручка, которая сама смотрит на `event.context.tokenScopes`, — это и есть
+#      начало списка путей, от которого В-20 отказалось: «путь меняется рефакторингом, и список тихо
+#      перестаёт действовать». Allowlist — поимённо, по файлам:
+#        - server/middleware/01.session.ts — единственный писатель контекста токена;
+#        - server/utils/sessionAuth.ts — ручки второго фактора отвергают токен целиком: у токена
+#          нет человека за экраном и его телефона (это отсутствие сессии, а не список путей);
+#  (б) таблицу `platform_announcements` читает и пишет **один** модуль —
+#      `server/services/platformAnnouncements.ts` (плюс схема и миграции). Лента новостей тенанта
+#      к ней не обращается: две «новости» разведены не соглашением, а кодом.
+check12_contours_pr39() {
+  local tokens news
+  tokens="$(grep -rnE "tokenScopes" server app --include='*.ts' --include='*.vue' 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//)' \
+    | grep -v '^server/services/access.ts:' \
+    | grep -v '^server/middleware/01.session.ts:' \
+    | grep -v '^server/utils/sessionAuth.ts:' || true)"
+  news="$(grep -rnE "platform_announcements|platformAnnouncements[.)]" server app --include='*.ts' --include='*.vue' 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//)' \
+    | grep -v '^server/services/platformAnnouncements.ts:' \
+    | grep -v '^server/db/schema/' || true)"
+  report "12. Bearer разграничен только скоупами, лента платформы — один модуль (docs/v2/44 В-20, П-21)" "$(printf '%s\n%s\n' "$tokens" "$news" | sed '/^$/d')"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -482,5 +510,6 @@ check8_public_contour
 check9_resolve_manager
 check10_candidate_quiet_hours
 check11_time_single_writer
+check12_contours_pr39
 
 exit $overall

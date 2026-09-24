@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { TAG_SCOPES } from '../../../../shared/enums'
-import { cities, locations, orgUnits, positionLevels, positions, tags } from '../../../db/schema'
+import { cities, locations, orgUnits, positionGroups, positionLevels, positions, tags } from '../../../db/schema'
 import { requireScope } from '../../../services/access'
 import { recordAudit } from '../../../services/audit'
 import { withTenant } from '../../../utils/withTenant'
@@ -14,6 +14,7 @@ const bodySchema = z.object({
   address: z.string().max(300).optional(),
   parentId: z.string().uuid().optional(),
   scope: z.enum(TAG_SCOPES).optional(), // метки: область обязательна (docs/16 §14.2)
+  sortOrder: z.number().int().min(0).max(10_000).optional(), // группы должностей: порядок в списке
 })
 
 export default defineEventHandler(async (event) => {
@@ -34,6 +35,10 @@ export default defineEventHandler(async (event) => {
           break
         case 'position-levels':
           [created] = await tx.insert(positionLevels).values({ tenantId: access.tenantId, name: input.name }).returning()
+          break
+        // Группа должностей (docs/v2/39 П-24.5): «кухня», «зал», «адміністрація» — новая в конец списка
+        case 'position-groups':
+          [created] = await tx.insert(positionGroups).values({ tenantId: access.tenantId, name: input.name.trim(), sortOrder: input.sortOrder ?? 0 }).returning()
           break
         case 'tags':
           if (!input.scope) throw createError({ statusCode: 400, data: { code: 'validation_failed', message: 'Вкажіть область дії мітки' } })

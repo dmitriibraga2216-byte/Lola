@@ -7,6 +7,7 @@ import { recordAudit } from './audit'
 import { logSecurity } from './securityLog'
 import { hitRateLimit } from './rateLimit'
 import { DEFAULT_API_PER_MINUTE, effectiveLimits } from './tenantLimits'
+import { isSessionOnlyScope } from '../../shared/domain/roles'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -24,7 +25,24 @@ export async function listTokens(ctx: Ctx) {
   })
 }
 
-export async function createToken(ctx: Ctx, input: { name: string, scopes: string[], expiresInDays?: number | null }) {
+export type CreateTokenResult
+  = | { ok: true, id: string, token: string }
+    | { ok: false, code: 'scope_not_tokenable' | 'scope_not_held', scopes: string[] }
+
+/**
+ * Выдача токена (docs/09 §9.6). Два отказа до записи:
+ *  - `scope_not_tokenable` — скоуп помечен `sessionOnly` (docs/v2/44 В-20): право человека,
+ *    а не интеграции, токену не выдаётся никогда;
+ *  - `scope_not_held` — у того, кто выдаёт, этого права нет (docs/24 Г-24.1 «нельзя выдать
+ *    себе скоуп, которого у тебя нет»). Без проверки администратор выписывал себе токен с
+ *    правами владельца (`billing.manage`, `tenant.transfer`) и обходил границу ролей.
+ * `held` — проверка «есть ли у выдающего право» (`can()` по его доступу), её даёт эндпоинт.
+ */
+export async function createToken(ctx: Ctx, input: { name: string, scopes: string[], expiresInDays?: number | null }, held: (scope: string) => boolean = () => true): Promise<CreateTokenResult> {
+  const notTokenable = input.scopes.filter(s => isSessionOnlyScope(s))
+  if (notTokenable.length) return { ok: false, code: 'scope_not_tokenable', scopes: notTokenable }
+  const notHeld = input.scopes.filter(s => !held(s))
+  if (notHeld.length) return { ok: false, code: 'scope_not_held', scopes: notHeld }
   const raw = `lola_${randomBytes(32).toString('base64url')}`
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [t] = await tx.insert(apiTokens).values({
@@ -33,7 +51,7 @@ export async function createToken(ctx: Ctx, input: { name: string, scopes: strin
     }).returning({ id: apiTokens.id })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'api_token.create', entity: 'api_token', entityId: t!.id, after: { name: input.name, scopes: input.scopes } })
     await logSecurity({ tenantId: ctx.tenantId, userId: ctx.actorId, event: 'api_token.created', meta: { tokenId: t!.id, name: input.name, scopes: input.scopes } })
-    return { id: t!.id, token: raw }
+    return { ok: true as const, id: t!.id, token: raw }
   })
 }
 

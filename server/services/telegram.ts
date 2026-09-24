@@ -143,16 +143,17 @@ export async function createLoginToken(chatId: bigint): Promise<{ token: string,
   return { token, tenantId: row.tenant_id }
 }
 
-export async function consumeLoginToken(token: string, meta: { userAgent?: string | null, ip?: string | null }): Promise<{ sessionToken: string } | null> {
+export async function consumeLoginToken(token: string, meta: { userAgent?: string | null, ip?: string | null }): Promise<{ sessionToken: string, twoFactor: 'verify' | 'enroll' | null } | null> {
   const rows = await db.execute(sql`select * from telegram_token_lookup(${hash(token)})`)
   const row = (rows as unknown as TokenRow[])[0]
   if (!row || row.kind !== 'login' || row.consumed_at || new Date(row.expires_at) < new Date()) return null
   await withTenant(row.tenant_id, row.user_id, async (tx) => {
     await tx.update(telegramTokens).set({ consumedAt: new Date() }).where(eq(telegramTokens.id, row.token_id))
   })
-  const { token: sessionToken } = await createSession({ tenantId: row.tenant_id, userId: row.user_id, userAgent: meta.userAgent, ip: meta.ip, loginMethod: 'otp_telegram' })
-  await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'login.success', meta: { method: 'telegram' }, ip: meta.ip })
-  return { sessionToken }
+  const { token: sessionToken, twoFactor } = await createSession({ tenantId: row.tenant_id, userId: row.user_id, userAgent: meta.userAgent, ip: meta.ip, loginMethod: 'otp_telegram' })
+  // Второй фактор (docs/24 §3.4): вход завершит код — `login.success` пишется тогда
+  if (!twoFactor) await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'login.success', meta: { method: 'telegram' }, ip: meta.ip })
+  return { sessionToken, twoFactor }
 }
 
 const HELP = 'Команди: /menu — мої завдання, /stop — вимкнути необовʼязкові нагадування, /help — довідка. Навчання проходиться у вебі: натискайте «Пройти» під повідомленням.'

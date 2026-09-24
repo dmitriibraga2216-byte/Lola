@@ -53,6 +53,7 @@ const activeFilter = computed(() => Object.fromEntries(Object.entries(filter).fi
 const filterCount = computed(() => Object.keys(activeFilter.value).length)
 
 async function load(reset = true) {
+  if (!reset && loading.value) return // догрузка при прокрутке — одна страница за раз
   loading.value = true
   error.value = ''
   try {
@@ -262,7 +263,7 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
       </table>
     </div>
 
-    <button v-if="cursor" class="btn more" :disabled="loading" @click="load(false)">{{ t('common.loadMore') }}</button>
+    <LoadMore v-if="cursor" :loading="loading" @more="load(false)" />
 
     <div v-if="archiveOne" class="overlay" @click.self="archiveOne = null">
       <form class="modal" role="dialog" aria-modal="true" @submit.prevent="archiveConfirm">
@@ -326,7 +327,6 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .empty { padding: var(--space-7); text-align: center; color: var(--color-ink-faint); }
 .error { color: var(--color-coral-ink); }
 .notice { color: var(--color-teal-ink); }
-.more { margin-top: var(--space-3); }
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 40%); display: grid; place-items: center; padding: var(--space-3); z-index: 20; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); width: min(440px, 100%); box-sizing: border-box; }
 .modal-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }

@@ -13,8 +13,11 @@ import type { TenantTx } from '../utils/withTenant'
  * warning — неудачный вход, блокировка по попыткам; остальное — info. Вызывающий может передать severity явно.
  */
 export function severityOf(event: SecurityEvent): SecuritySeverity {
-  if (event.startsWith('impersonation.') || event === 'export.personal_data' || event === 'settings.security_changed') return 'critical'
+  // Сброс второго фактора другим человеком (администратором или оператором платформы) — critical:
+  // это ровно то, что сделал бы захвативший чужую учётную запись (docs/24 §3.4, PR-39)
+  if (event.startsWith('impersonation.') || event === 'export.personal_data' || event === 'settings.security_changed' || event === 'two_factor.reset') return 'critical'
   if (event === 'login.failed' || event === 'login.blocked' || event === 'otp.failed') return 'warning'
+  if (event === 'two_factor.failed' || event === 'two_factor.recovery_used' || event === 'two_factor.disabled') return 'warning'
   return 'info'
 }
 

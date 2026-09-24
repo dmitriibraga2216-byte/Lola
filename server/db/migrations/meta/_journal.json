@@ -575,6 +575,13 @@
       "when": 1790234100000,
       "tag": "0083_v2_storage_quota",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790234160000,
+      "tag": "0084_v2_settings",
+      "breakpoints": true
     }
   ]
 }

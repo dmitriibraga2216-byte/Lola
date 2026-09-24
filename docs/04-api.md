@@ -5,6 +5,16 @@
 - База: `/api/v1`. Формат — JSON, UTF-8. Даты — ISO 8601 с таймзоной.
 - Аутентификация — сессионная cookie (`lola_sid`, httpOnly, Secure, SameSite=Lax).
   Для интеграций — `Authorization: Bearer <api_token>` (токены тенанта, скоупы те же).
+  Разграничение Bearer — **по скоупам, не по путям** (`docs/v2/44` В-20, PR-39): скоуп с флагом
+  `sessionOnly` (`shared/domain/roles.ts` `SCOPE_FLAGS`: `person.note.read`, `person.note.write`,
+  `interview.listen`, `candidate.decide`, `candidate.hire`, `people.password`, `tenant.transfer`)
+  токену не выдаётся (`422 scope_not_tokenable`), а у старого токена вычёркивается из прав —
+  ручка отвечает обычным `403 forbidden`. Токену не выдаётся и право, которого нет у выдающего
+  (`422 scope_not_held`). `/api/v1/platform/*` по Bearer недоступен вовсе: контур оператора
+  разбирается раньше ветки Bearer и требует cookie `lola_ops`.
+  Второй фактор (`24` §3.4): при подключённом TOTP или политике «двухфакторность для админов»
+  вход даёт **промежуточную** сессию — ей открыты только `/auth/two-factor/*` и выход, прочее
+  отвечает `401 two_factor_required`.
 - Каждый запрос выполняется внутри `withTenant()`: тенант берётся из сессии, **не** из тела запроса.
 - Валидация входа — zod-схемы из `shared/schemas`; те же схемы использует клиент.
 - Мутации требуют заголовок `X-CSRF-Token` (double submit cookie), кроме Bearer-запросов.
@@ -70,14 +80,20 @@
 | Метод | Путь | Описание |
 | --- | --- | --- |
 | POST | `/auth/otp/request` | `{phone, channel?: 'sms'\|'email'}` → отправка кода; ответ `{channel, maskedEmail?, devCode?}` (`channel='email'` — код ушёл письмом, `maskedEmail` вида `d***@gmail.com`); всегда 200, кроме `422 no_channel` (нет ни Telegram, ни SMS, ни почты — «Зверніться до менеджера точки») |
-| POST | `/auth/otp/verify` | `{phone, code}` → сессия или список тенантов для выбора |
-| POST | `/auth/tenant/select` | `{tenantId}` → сессия в выбранном тенанте |
+| POST | `/auth/otp/verify` | `{phone, code}` → сессия или список тенантов для выбора; `twoFactor: 'verify'\|'enroll'\|null` — сессия промежуточная, нужен второй фактор (`24` §3.4) |
+| POST | `/auth/tenant/select` | `{tenantId}` → сессия в выбранном тенанте; `twoFactor` — как у `/auth/otp/verify` |
 | POST | `/auth/password/login` | `{email, password}` (если включено политикой `passwords.loginEnabled`, иначе 403 `password_login_disabled`); ответ `{requiresTenantSelect, mustChangePassword}` либо `selectToken` + `tenants`; N неудач → 429 |
 | POST | `/me/password` | `{currentPassword?, password}` — свой пароль; текущий обязателен, если он был (403 `wrong_current`), кроме восстановления (docs/33 D-021): без текущего — после входа по коду (e-mail всегда, телефон при `passwords.allowPhoneRecovery`), при `passwords.disableRecovery` — 403 `recovery_disabled`; `/auth/me` отдаёт `user.canRecoverPassword`; остальные сессии закрываются |
 | POST | `/auth/invite/accept` | `{token}` → активация и сессия |
 | POST | `/auth/logout` | текущая сессия |
 | POST | `/auth/logout-all` | все сессии пользователя |
-| GET | `/auth/me` | профиль, `activeRole`, `roles` (все действующие — для переключателя), `scopes` активной роли, настройки тенанта |
+| GET | `/auth/me` | профиль, `activeRole`, `roles` (все действующие — для переключателя), `scopes` активной роли, настройки тенанта (с PR-39 — `tenant.contentFooter`, `tenant.logoMediaId` для колонтитула материалов) |
+| GET | `/auth/two-factor` | второй фактор (`24` §3.4, PR-39): в промежуточной сессии — шаг экрана входа `step: verify\|enroll`; в полной — `enrolled`, `required` (политика требует), `confirmedAt`, `recoveryCodesLeft`, `setupPending`. Секретов в ответе нет |
+| POST | `/auth/two-factor/verify` | `{code}` из приложения **или** `{recoveryCode}` → промежуточная сессия становится полной **с новым токеном** (cookie переставляется). `401 two_factor_invalid` (`details.attemptsLeft`), после `session.otpAttempts` неудач — `429 rate_limited`, блокировка на `session.blockMinutes` и отзыв промежуточных сессий; повтор принятого кода не проходит; `409 two_factor.not_pending` |
+| POST | `/auth/two-factor/setup` | новый ключ приложения: `{secret, otpauthUrl, expiresAt}` (15 минут на первый код). Работает и в промежуточной сессии `enroll`; замена подключённого фактора — только с `{code}` (`422 two_factor.code_required`), старый действует до подтверждения нового; в промежуточной `verify` — `409 two_factor.verify_first` |
+| POST | `/auth/two-factor/confirm` | `{code}` — фактор подключён; ответ `{recoveryCodes (10, показываются один раз), signedIn}` — в промежуточной `enroll` заодно завершается вход. `409 two_factor.no_pending` \| `two_factor.setup_expired` |
+| POST | `/auth/two-factor/recovery-codes` | `{code}\|{recoveryCode}` → десять новых резервных кодов, старые гаснут (полная сессия) |
+| DELETE | `/auth/two-factor` | `{code}\|{recoveryCode}` — отключить свой фактор; если политика требует его от этого человека — `409 two_factor.required_by_policy` |
 
 Лимиты: `/auth/otp/request` — 3 на номер / 15 мин и 30 на IP / час; `/auth/otp/verify` — 5 на код.
 
@@ -262,6 +278,10 @@
 | POST | `/people/:id/roles` | роль в области: `{roleCode, scopeType, scopeId?, validUntil?, reason?}`; повтор той же роли в той же области — редактирование срока и причины |
 | DELETE | `/people/:id/roles/:code` | снять роль; `?reason=` — в аудит; последний администратор — 409 `last_admin` |
 | POST | `/people/:id/password` | `{password, mustChange?}` — смена пароля администратором, скоуп `people.password`; 400 `too_short` \| `weak` по политикам «Паролі» |
+| DELETE | `/people/:id/two-factor` | сброс второго фактора человеку, потерявшему телефон и резервные коды (`24` §3.4, PR-39): скоуп `people.password` (`sessionOnly` — по токену никогда); закрываются все сессии человека, `two_factor.reset` (critical); себе — `409 two_factor.self` (свой снимается своим кодом), чужой тенант — 404 |
+| GET/PUT | `/positions/:id/default-courses` | «Посада → курси за замовчуванням» (`v2/39` П-24.3, PR-39): `GET` (people.view \| assignment.create \| candidate.hire) → `{ruleId, items, group, effective}` — `effective` предзаполняет окно найма (`v2/28` §5.5); `PUT {items: [{courseId, dueDays}]}` (settings.tenant, до 10) — носитель **правило автоматизации**, привязанное к должности (`automation_rules.position_id`, измерение `position`, триггер `user.placement_changed`), отдельной таблицы нет; пустой список выключает правило; `422 course_not_found`, 404 |
+| CRUD | `/position-groups` | группы должностей (`v2/39` П-24.5, PR-39) поверх `/refs/position-groups`; `PATCH /positions/:id {groupId}` — должность в группу (чужая группа — отказ); непустую группу не удалить — 409 `in_use`; `GET/PUT /position-groups/:id/default-courses` — курсы группы: правило с измерением `position` = текущий состав группы, пересобирается при каждой смене состава |
+| GET/PUT | `/absence-norms` | нормы отпуска и больничного (`v2/38` §3.6, §10; блок настроек компании `v2/39` П-24.1, PR-39): `GET ?year=` → норма компании и переопределения точек области права; `PUT {scopeType: tenant\|location\|user, scopeId, year, vacationDays?, sickDays?, reason?}` — опущенное поле не трогается, `null` — наследовать, оба `null` снимают переопределение; скоуп `person.absence.manage`: компания — только на весь тенант, точка и человек — в области точки (`403 forbidden`); `422 reason_required` для человека; чужая точка или человек — 404 |
 | POST | `/people/import` | CSV → `importJobId`, файл проверяется целиком |
 | GET | `/people/import/:id` | протокол: создать N, обновить M, ошибок K с номерами строк |
 | POST | `/people/import/:id/apply` | применить (всё или ничего) |
@@ -295,6 +315,8 @@
 | POST | `/knowledge/:id/bookmark` | закладка-переключатель, тело `{contentType: resource\|article\|news\|notice}`; `GET /knowledge/bookmarks` — «Мої закладки» |
 | PUT/DELETE | `/content-ratings/:contentId` | оцінка читача 1–5 (докс/33 D-042): `PUT {contentType, value}` — upsert; `DELETE ?contentType=` — забрати свою; агрегат `{count, average, myValue}` вбудований у `GET /knowledge/:id` і `GET /knowledge/resource/:id` |
 | CRUD | `/news`, `/notices`, `/simple-notices` | лента и объявления; `GET/POST /news/categories`; `GET /notices/pending` — что показать при входе, `GET /notices/mine`; `POST /simple-notices/:id/view` |
+| GET | `/platform-announcements` | **объявления платформы** — вторая «новость», не новости компании (`v2/39` П-21, PR-39): от оператора Lola, только чтение, по адресации (всем / по тарифу / пространствам); `{items: [{id, title, body, publishedAt, read}], unread}` — адресации наружу нет (`learn.view`) |
+| POST | `/platform-announcements/:id/read` | «Прочитано»; не адресованное пространству, черновик или снятое — 404 (CLAUDE.md п. 15) |
 | POST | `/notices/:id/acknowledge` | «Ознайомлений» — подтверждение (`21` §14.5); объявление назначается через `POST /tasks {subjectType: notice}` |
 | GET | `/notices/:id/coverage` | кто подтвердил, кто нет, по точкам; `POST /notices/:id/remind` — «Нагадати тим, хто не підтвердив» |
 | GET | `/birthdays`, `/contacts`, `/events` | дни рождения (`?tab=upcoming\|past&from=&to=`), контакты (`?q=&orgUnitId=&positionId=&cityId=`), события; `POST /events`, `PATCH /events/:id`, `POST /events/:id/register`; `PATCH /me/birthday-consent` |
@@ -375,8 +397,9 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET/PATCH | `/settings/tenant` | простір: `name`, `slug` (409 `slug_taken` / `slug_locked` — после первого входа сотрудника не меняется, `29` Б.12), `locale`, `timezone`, `accent` только из палитры (`29` Б.14), `space`, `defaults`, `quietHours`; `GET` отдаёт ещё `slugLocked`, `plan`, `modules` |
-| GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1) |
+| GET/PATCH | `/settings/tenant` | простір: `name`, `slug` (409 `slug_taken` / `slug_locked` — после первого входа сотрудника не меняется, `29` Б.12), `locale`, `timezone`, `accent` только из палитры (`29` Б.14), `space`, `defaults`, `quietHours`; `GET` отдаёт ещё `slugLocked`, `plan`, `modules`. С PR-39: `logoMediaId` — логотип (`media_assets` своего тенанта, `origin='brand_asset'`, изображение; иначе `422 logo_invalid`), `space.contentFooter` — колонтитул материалов, `space.localesEnabled` — мови інтерфейсу (`v2/39` П-24.1) |
+| GET/PATCH | `/settings/policies` | десять групп политик эталона (`24` §3.4.1); включить `passwords.adminTwoFactor` может только тот, у кого второй фактор уже подключён — иначе `422 two_factor_enroll_first` (`24` §3.4) |
+| GET | `/settings/two-factor` | блок «Двофакторна автентифікація» (`24` §3.4, PR-39): `{required, admins: [{userId, fullName, enrolled, confirmedAt}]}` — на кого распространяется требование и кто подключил фактор (settings.tenant) |
 | CRUD | `/settings/roles` | роли и скоупы (`24` Г-24.1): `GET` (people.view, со счётчиками людей и прав), `POST`, `PATCH /:id`, `DELETE /:id` (settings.tenant); 409 `code_taken` · `admin_role` · `owner_role` · `role_in_use` · `last_settings_role`, 403 `scope_not_owned` |
 | GET | `/settings/roles/scope-groups` | группы прав для редактора ролей (`01` §1.3): `[{key, scopes[]}]` (people.view) |
 | GET | `/settings/owner` | владелец простора (`01` §1.9.4): `{owner: {userId, fullName, email, phone, since} \| null, canClaim}` (people.view) |
@@ -388,7 +411,7 @@
 | CRUD | `/settings/notification-templates` | шаблоны: `subject`, `body_text`, `body_mjml` (старый путь: `/settings/notifications`, до конца R1; список и правка целиком — `PUT`, не `POST`/`PATCH`, как и было) |
 | GET/PUT | `/settings/notification-schedule` | время отправки по классам событий (`23` §13.2.1) |
 | GET/PUT | `/settings/email-layout` | шапка и подвал письма |
-| CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены |
+| CRUD | `/settings/integrations` | SMTP, Telegram (свой и внешний), источники людей, вебхуки, API-токены (`GET /settings/api-tokens` отдаёт `scopes` — только выдаваемые токену: без `sessionOnly` и без чужих прав — и `sessionOnly` для подсказки; `POST` — `422 scope_not_tokenable` \| `scope_not_held`, `docs/v2/44` В-20) |
 | POST | `/settings/integrations/:provider/test` | тестовое сообщение без постановки в очередь (пока только `smtp`, `23` §13.4) |
 | CRUD | `/settings/translations` | переопределение строк интерфейса: `GET ?locale&q&changedOnly&page`, `PUT {locale,key,value}`, `DELETE ?locale&key?` (без key — весь набор), `GET /export?locale`, `POST /import {locale, items}`; клиенту — `GET /translations/:locale` (любая сессия) поверх словаря |
 | GET | `/settings/usage` | потребление: активные, диск, SMS, дата последнего сбора, тариф и лимиты (`24` §4.4.1); с `v2/45` PR-09 — ещё `consumption[]` по одиннадцати осям и `notices[]` для баннера |
@@ -425,6 +448,11 @@
 | GET/PUT | `/platform/tenants/:id/limits` | тариф и переопределения `tenant_limits` (`users`, `storageGb`, `smsPerMonth`, `apiPerMinute`, `webhooks`, `activeJobs`); null — вернуться к тарифу. Spec 25 |
 | GET/PUT | `/platform/tenants/:id/smtp-tls` | `{ignoreTlsErrors}` — небезпечний прапорець SMTP (`09` §9.7.1 п. 3, докс/33 D-050): тенант його не бачить, лише оператор платформи; кожна зміна в `platform_audit`. Spec 23/25 |
 | GET | `/platform/audit` | `?tenantId=&limit=` — журнал `platform_audit` (`25` §7 п. 5). Spec 25 |
+| GET/POST | `/platform/announcements` | объявления платформы (`v2/39` П-21, П-24.2, PR-39): список с числом прочтений; создание `{title 3–200, body ≤5000, audience: all\|plans\|tenants, planCodes, tenantIds, publish}` — адресация согласована с видом (400), тариф только из `plans` (`422 announcement.unknown_plan`). Пишет только оператор: у роли приложения на таблицу — только `select` |
+| PATCH | `/platform/announcements/:id` | правка текста и адресации (адресация — вместе с видом); снятое не правится — `409 announcement.archived` |
+| POST | `/platform/announcements/:id/publish` | черновик — в ленту тенантов (повторная публикация ничего не меняет) |
+| POST | `/platform/announcements/:id/archive` | снять с ленты: тенанты больше не видят, история и счёт прочтений остаются |
+| POST | `/platform/tenants/:id/users/:userId/two-factor-reset` | `{reason 10–500}` — сброс второго фактора человеку тенанта (`24` §3.4, PR-39): последний способ вернуть вход администратору без телефона и кодов, когда другого нет; `two_factor.reset` (critical, с причиной) — в журнал безопасности тенанта, действие — в `platform_audit`; чужой или несуществующий человек — 404 |
 
 ## 4.18 Вебхуки наружу
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Новини (мокап News): фильтры Категорія · Автор, колонки Тема · Автор · Актуально · Переглядів · Реакцій · Опубліковано. */
+const { formatDateTime, formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -10,7 +11,7 @@ const error = ref('')
 const category = ref('')
 const author = ref('')
 const report = ref<{ title: string, data: Report } | null>(null)
-const d = (s: string | null) => s ? new Date(s).toLocaleDateString('uk-UA') : '—'
+const d = (s: string | null) => s ? formatShortDate(new Date(s)) : '—'
 async function load() { try { items.value = await api<N[]>('/news', { query: { all: '1' } }) } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)
 const categories = computed(() => [...new Set(items.value.map(n => n.categoryName).filter(Boolean))] as string[])
@@ -61,7 +62,7 @@ async function toggle(n: N, field: 'isPinned' | 'status') {
         <h3>{{ t('news.notAcked') }} ({{ report.data.notAcked.length }})</h3>
         <ul><li v-for="r in report.data.notAcked" :key="r.id">{{ r.fullName }} <span class="muted">{{ r.location ?? '' }}{{ r.viewedAt ? ` · ${t('news.viewedOnly')}` : '' }}</span></li><li v-if="!report.data.notAcked.length" class="faint">—</li></ul>
         <h3>{{ t('news.acked') }} ({{ report.data.readers.length }})</h3>
-        <ul><li v-for="r in report.data.readers" :key="r.id">✓ {{ r.fullName }} <span class="muted">{{ new Date(r.ackedAt).toLocaleString('uk') }}</span></li></ul>
+        <ul><li v-for="r in report.data.readers" :key="r.id">✓ {{ r.fullName }} <span class="muted">{{ formatDateTime(new Date(r.ackedAt)) }}</span></li></ul>
         <button class="btn ghost" @click="report = null">{{ t('common.close') }}</button>
       </div>
     </div>

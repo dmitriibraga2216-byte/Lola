@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'program.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -163,7 +164,7 @@ function onUp() { if (!drag.value || !p.value) return; const n = p.value.nodes.f
             <NuxtLink to="/admin/rules" class="link">{{ t('prog.createRule') }}</NuxtLink>
           </template>
           <button class="primary" @click="saveSettings">{{ t('common.save') }}</button>
-          <p class="sub">{{ t('prog.updated') }}: {{ new Date(p.updatedAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }}</p>
+          <p class="sub">{{ t('prog.updated') }}: {{ formatDateTime(new Date(p.updatedAt), { dateStyle: 'short', timeStyle: 'short' }) }}</p>
           <NuxtLink :to="`/admin/programs/${p.id}/report`" class="link">{{ t('prog.report') }} →</NuxtLink>
         </aside>
       </div>

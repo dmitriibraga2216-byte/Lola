@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
@@ -34,7 +35,7 @@ function status(c: Cert): { text: string, tone: string } {
   return { text: t('cert.valid'), tone: 'teal' }
 }
 
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
+const fmt = (d: string | null) => d ? formatDate(new Date(d), { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
 
 async function share(c: Cert) {
   const url = `${location.origin}/c/${c.publicToken}`

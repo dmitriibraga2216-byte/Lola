@@ -7,6 +7,7 @@
  * показує; посилання й токен вона не вигадує.
  */
 import type { VacancyState } from '#shared/enums'
+const { formatDate } = useFormat()
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'vacancy.view' })
 
@@ -74,7 +75,7 @@ async function fromTemplate(id: string) {
   finally { busy.value = false }
 }
 
-const dateOf = (v: string) => new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const dateOf = (v: string) => formatDate(new Date(v), { day: '2-digit', month: '2-digit', year: 'numeric' })
 /** Бейдж стану у кольорах бренду (Г-29.3): чернетка — чорнило, опубліковано — бірюза, пауза — сонце. */
 const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ? 'sun' : s === 'draft' ? 'ink' : 'muted')
 </script>

@@ -5,6 +5,7 @@
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'billing.usage.view' })
 const { t } = useI18n()
+const { formatNumber, formatDateTime, formatShortDate } = useFormat()
 const { api } = useApi()
 
 interface Snap { collectedAt: string, activeUsers: number, blockedUsers: number, archivedUsers: number, storageBytes: number, smsMonth: number, coursesCount: number, assignmentsCount: number, attemptsMonth: number }
@@ -27,11 +28,11 @@ const error = ref('')
 onMounted(async () => { try { view.value = await api<View>('/settings/usage') } catch (err) { error.value = apiErrorOf(err).message } })
 
 const GIB = 1024 ** 3
-const gb = (b: number) => (b / GIB).toLocaleString('uk-UA', { maximumFractionDigits: 1 })
+const gb = (b: number) => formatNumber(b / GIB, { maximumFractionDigits: 1 })
 const pct = (v: number, lim: number | null) => (lim ? Math.min(100, Math.round(v / lim * 100)) : 0)
 const tone = (v: number, lim: number | null) => (lim && v >= lim ? 'coral' : lim && v / lim >= 0.8 ? 'sun' : 'teal')
-const fmt = (s: string) => new Date(s).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-const day = (s: string) => new Date(s).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const fmt = (s: string) => formatDateTime(new Date(s), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const day = (s: string) => formatShortDate(new Date(s))
 /** Значение в единице оси: хранилище — в ГБ для читабельности, остальные — счётчиками. */
 const amount = (a: AxisUsage, n: number | null) => (n === null ? t('billing.unlimited') : a.axis === 'storage_bytes' ? `${gb(n)} ${t('settings.usage.gb')}` : String(n))
 const axisTone = (a: AxisUsage) => (a.level === 'exceeded' ? 'coral' : a.level === 'warn' ? 'sun' : 'teal')

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Прості оголошення (мокап SimpleNotices): без призначення і підтвердження — просто плашка. Таблица Назва · Опубліковано · Діє до · Реакцій · Стан. */
 import type { ContentBlock } from '../../../shared/schemas/content'
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'knowledge.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -10,7 +11,7 @@ const error = ref('')
 const adding = ref(false)
 const busy = ref(false)
 const form = reactive({ title: '', body: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], endsAt: '', publish: true })
-const d = (s: string | null) => s ? new Date(s).toLocaleDateString('uk-UA') : '—'
+const d = (s: string | null) => s ? formatShortDate(new Date(s)) : '—'
 const excerpt = (body: unknown[]) => (body as { html?: string }[]).map(b => (b.html ?? '').replace(/<[^>]+>/g, ' ')).join(' ').replace(/\s+/g, ' ').trim().slice(0, 90)
 async function load() { try { items.value = await api<S[]>('/simple-notices', { query: { all: '1' } }) } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)

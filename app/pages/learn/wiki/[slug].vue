@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '~~/shared/schemas/content'
+const { formatDateTime } = useFormat()
 
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
@@ -67,7 +68,7 @@ async function remove() { if (!confirm(t('wiki.deleteConfirm'))) return; await a
     <template v-else-if="page">
       <p class="crumbs"><NuxtLink v-for="c in page.crumbs" :key="c.id" :to="`/learn/wiki/${c.slug}`">{{ c.title }} ›</NuxtLink></p>
       <h1>{{ page.title }}</h1>
-      <p class="sub">v{{ page.version }} · {{ new Date(page.updatedAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }}<template v-if="page.updatedByName"> · {{ page.updatedByName }}</template><template v-if="page.status !== 'published'"> · {{ t('wiki.draft') }}</template></p>
+      <p class="sub">v{{ page.version }} · {{ formatDateTime(new Date(page.updatedAt), { dateStyle: 'short', timeStyle: 'short' }) }}<template v-if="page.updatedByName"> · {{ page.updatedByName }}</template><template v-if="page.status !== 'published'"> · {{ t('wiki.draft') }}</template></p>
       <div v-if="page.canEdit" class="actions">
         <button class="chip" data-testid="wiki-edit" @click="startEdit">{{ t('common.edit') }}</button>
         <button class="chip" @click="showHistory">{{ t('wiki.history') }}</button>
@@ -81,7 +82,7 @@ async function remove() { if (!confirm(t('wiki.deleteConfirm'))) return; await a
       </section>
       <section v-if="history" class="card">
         <h2>{{ t('wiki.history') }}</h2>
-        <ul class="log"><li v-for="r in history" :key="r.id"><b>v{{ r.version }}</b> · {{ new Date(r.createdAt).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) }} · {{ r.authorName ?? '—' }}<template v-if="r.comment"> — {{ r.comment }}</template> <button v-if="r.version !== page.version" class="chip" @click="restore(r.version)">{{ t('wiki.restore') }}</button> <button v-if="r.version !== page.version" class="chip" @click="showDiff(r.version)">{{ t('wiki.diff') }}</button></li></ul>
+        <ul class="log"><li v-for="r in history" :key="r.id"><b>v{{ r.version }}</b> · {{ formatDateTime(new Date(r.createdAt), { dateStyle: 'short', timeStyle: 'short' }) }} · {{ r.authorName ?? '—' }}<template v-if="r.comment"> — {{ r.comment }}</template> <button v-if="r.version !== page.version" class="chip" @click="restore(r.version)">{{ t('wiki.restore') }}</button> <button v-if="r.version !== page.version" class="chip" @click="showDiff(r.version)">{{ t('wiki.diff') }}</button></li></ul>
         <div v-if="diff" class="diff">
           <p class="sub">v{{ diff.from }} → v{{ diff.to }}</p>
           <p v-for="(l, i) in diff.lines" :key="i" :class="['dl', l.op]">{{ l.op === 'add' ? '+' : l.op === 'del' ? '−' : ' ' }} {{ l.text }}</p>

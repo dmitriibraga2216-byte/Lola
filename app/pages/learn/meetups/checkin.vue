@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -20,7 +21,7 @@ async function send(token: string) {
   try {
     const r = await tryCheckin(token.trim())
     status.value = 'done'
-    message.value = t('mt.checkedIn', { time: new Date(r.checkedInAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }), title: r.title })
+    message.value = t('mt.checkedIn', { time: formatTime(new Date(r.checkedInAt), { hour: '2-digit', minute: '2-digit' }), title: r.title })
     stop()
   } catch (err) {
     const e = apiErrorOf(err)

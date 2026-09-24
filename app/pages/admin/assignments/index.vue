@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CONTENT_TYPES } from '#shared/enums'
+const { formatShortDate } = useFormat()
 
 /**
  * Главный экран администратора по мокапу Main: вкладки-чипы task_type, баннер
@@ -128,7 +129,7 @@ function shortName(name: string | null) {
             </td>
             <td>{{ t(`contentType.${r.subjectType}`) }}</td>
             <td class="muted">{{ shortName(r.authorName) }}</td>
-            <td class="muted">{{ new Date(r.createdAt).toLocaleDateString('uk') }}</td>
+            <td class="muted">{{ formatShortDate(new Date(r.createdAt)) }}</td>
             <td class="num">{{ r.stats.assigned ?? 0 }}<span class="sub"><span class="teal">{{ r.stats.completed ?? 0 }}</span> · <span class="coral">{{ r.stats.overdue ?? 0 }}</span></span></td>
             <td><span :class="['badge upper', stateOf(r)]">{{ t(`assign.state.${stateOf(r)}`) }}</span></td>
           </tr>

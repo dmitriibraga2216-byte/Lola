@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
 
 const { t } = useI18n()
@@ -76,7 +77,7 @@ async function apply(p: Profile) {
         <div class="card-head">
           <b>{{ p.name }}</b>
           <span :class="['badge', p.isActive ? 'on' : '']">{{ p.isActive ? t('profiles.active') : t('profiles.inactive') }}</span>
-          <span class="sub">{{ t('profiles.lastApplied', { at: p.lastAppliedAt ? new Date(p.lastAppliedAt).toLocaleDateString('uk') : '—' }) }}</span>
+          <span class="sub">{{ t('profiles.lastApplied', { at: p.lastAppliedAt ? formatShortDate(new Date(p.lastAppliedAt)) : '—' }) }}</span>
         </div>
         <div class="sub">{{ t('profiles.positions') }}: {{ p.scope.positionIds.map(posName).join(', ') || '—' }}</div>
         <ol class="courses">

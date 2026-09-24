@@ -8,6 +8,7 @@
  */
 import { OFFBOARDING_REASONS, OFFBOARDING_STATES } from '#shared/enums'
 import type { OffboardingReason, OffboardingState } from '#shared/enums'
+const { formatDate } = useFormat()
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'offboarding.start' })
 
@@ -118,7 +119,7 @@ async function cancelCase() {
   finally { busy.value = '' }
 }
 
-const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 const isActive = (s: OffboardingState) => s !== 'done' && s !== 'cancelled'
 </script>
 

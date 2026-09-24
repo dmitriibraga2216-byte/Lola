@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.integrations' })
 
 const { t, te } = useI18n()
@@ -117,7 +118,7 @@ async function createToken() {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 async function revoke(tk: Token) { if (confirm(t('integrations.revokeConfirm'))) { await api(`/settings/api-tokens/${tk.id}`, { method: 'DELETE' }); await load() } }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 </script>
 
 <template>

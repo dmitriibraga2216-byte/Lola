@@ -3,6 +3,7 @@
  * Траєкторії навчання по мокапу Trajectories: НАЗВА · СКЛАД · РЕЖИМ ПРИЗНАЧЕННЯ · ЛЮДЕЙ · ДАТА ЗМІНИ · ОПУБЛІКОВАНО,
  * кнопка «Створити траєкторію» (docs/17 §14.1).
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'program.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -20,7 +21,7 @@ async function create() {
   try { const t = await api<{ id: string }>('/trajectories', { method: 'POST', body: { title: title.value, tags: [] } }); await navigateTo(`/admin/trajectories/${t.id}`) }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk-UA') : '—'
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 const modeLabel = (r: Row) => r.assignMode === 'automation' && r.ruleName ? t('traj.ruleChip', { name: r.ruleName }) : t(`traj.assignMode.${r.assignMode}`)
 </script>
 

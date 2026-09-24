@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'development.team' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -23,7 +24,7 @@ async function open(row: Row, cell: Cell) {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 const cellOf = (row: Row, compId: string) => row.cells.find(c => c.competencyId === compId)
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk')
+const fmt = (d: string) => formatShortDate(new Date(d))
 const asLabel = (v: number, label: string) => m.value?.displayAs === 'label' ? label : String(v)
 </script>
 <template>

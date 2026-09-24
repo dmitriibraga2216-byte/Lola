@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Профиль сотрудника по мокапу screens/Profile.html: инициалы, должность · точка, плитки, сертификаты, ссылки. */
+const { formatDate, formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
@@ -25,7 +26,7 @@ const counts = ref<{ done: number, new: number, overdue: number } | null>(null)
 const rating = ref<number | null>(null)
 const week = ref<{ days: { date: string, events: number }[], total: number } | null>(null)
 const weekMax = computed(() => Math.max(1, ...(week.value?.days.map(d => d.events) ?? [1])))
-const dayLabel = (iso: string) => new Date(iso).toLocaleDateString('uk', { weekday: 'short' }).replace('.', '')
+const dayLabel = (iso: string) => formatDate(new Date(iso), { weekday: 'short' }).replace('.', '')
 const tgLink = ref<{ url: string | null, token: string } | null>(null)
 const error = ref('')
 
@@ -86,7 +87,7 @@ async function changePassword() {
   catch (err) { pwdError.value = apiErrorOf(err).message }
   finally { pwd.busy = false }
 }
-const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('uk') : ''
+const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
 </script>
 
 <template>

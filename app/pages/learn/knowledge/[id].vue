@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
+const { formatShortDate } = useFormat()
 
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
@@ -30,7 +31,7 @@ async function confirmActual() {
   try { const r = await api<{ reviewAt: string }>(`/knowledge/${id}/confirm-actual`, { method: 'POST' }); if (article.value) { article.value.reviewAt = r.reviewAt; article.value.needsReview = false; article.value.reviewConfirmedAt = new Date().toISOString() } notice.value = t('common.saved') }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '—'
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 </script>
 
 <template>

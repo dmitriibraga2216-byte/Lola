@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assessment.run' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -61,7 +62,7 @@ const notSubmitted = computed(() => data.value?.tasks.filter(tk => ['pending', '
           <tbody>
             <tr v-for="r in report" :key="String(r.task_id)">
               <td>{{ r.full_name }}</td><td>{{ t(`assess.kind.${r.rater_kind}`) }}</td><td>{{ r.filled ? t('common.yes') : t('common.no') }}</td>
-              <td>{{ r.completed_at ? new Date(String(r.completed_at)).toLocaleDateString('uk') : '—' }}</td><td>{{ r.avg_score ?? '—' }}</td>
+              <td>{{ r.completed_at ? formatShortDate(new Date(String(r.completed_at))) : '—' }}</td><td>{{ r.avg_score ?? '—' }}</td>
               <td class="sub">{{ byGroupText(r.by_group) }}</td>
               <td class="gaps"><span v-for="g in gapsOf(r.gaps)" :key="g.criterion" :class="['gap', { red: g.gap < 0 }]" :title="g.criterion">{{ g.gap > 0 ? '+' : '' }}{{ g.gap }}</span><span v-if="!gapsOf(r.gaps).length">—</span></td>
             </tr>

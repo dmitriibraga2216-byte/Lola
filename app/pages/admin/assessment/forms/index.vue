@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Анкети оцінки — список за мокапом Assessments: назва · тип · критеріїв · шкала · дата зміни · опубліковано. */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assessment.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -7,7 +8,7 @@ interface Row { id: string, title: string, kind: string, is_active: boolean, is_
 const items = ref<Row[]>([])
 const error = ref('')
 onMounted(async () => { try { items.value = await api<Row[]>('/assessment/forms') } catch (err) { error.value = apiErrorOf(err).message } })
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk')
+const fmt = (d: string) => formatShortDate(new Date(d))
 </script>
 <template>
   <div>

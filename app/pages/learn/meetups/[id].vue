@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime, formatTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -28,12 +29,12 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 async function sessionAct(fn: () => Promise<unknown>, ok?: string) { error.value = ''; notice.value = ''; try { await fn(); if (ok) notice.value = ok; await load() } catch (err) { error.value = apiErrorOf(err).message } }
 const registerSession = (s: Session) => sessionAct(() => api(`/meetup-sessions/${s.id}/register`, { method: 'POST', body: fromCourse.value }), t('mt.registeredOk'))
 const unregisterSession = (s: Session) => sessionAct(() => api(`/meetup-sessions/${s.id}/register`, { method: 'DELETE' }), t('mt.unregisteredOk'))
-const fmtSession = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' })
+const fmtSession = (d: string) => formatDateTime(new Date(d), { dateStyle: 'medium', timeStyle: 'short' })
 const countdown = computed(() => { if (!m.value) return ''; const left = new Date(m.value.startsAt).getTime() - now.value; if (left <= 0) return ''; const h = Math.floor(left / 3_600_000), mi = Math.floor((left % 3_600_000) / 60_000), s = Math.floor((left % 60_000) / 1000); return h > 48 ? t('mt.inDays', { n: Math.floor(h / 24) }) : `${h}:${String(mi).padStart(2, '0')}:${String(s).padStart(2, '0')}` })
 async function act(fn: () => Promise<unknown>, ok?: string) { error.value = ''; notice.value = ''; try { const r = await fn() as { conflict?: string }; if (r?.conflict) notice.value = t('mt.conflict', { title: r.conflict }); else if (ok) notice.value = ok; await load() } catch (err) { error.value = apiErrorOf(err).message } }
 const register = () => act(() => api(`/meetups/${route.params.id}/register`, { method: 'POST' }), t('mt.registeredOk'))
 const unregister = () => act(() => api(`/meetups/${route.params.id}/register`, { method: 'DELETE' }), t('mt.unregisteredOk'))
-const fmt = (d: string) => new Date(d).toLocaleString('uk-UA', { dateStyle: 'medium', timeStyle: 'short' })
+const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'medium', timeStyle: 'short' })
 const canManage = computed(() => m.value?.isTrainer || hasScope('meetup.attendance') || hasScope('meetup.manage'))
 // docs/33 D-029: щойно з'явилась хоч одна сесія, картка більше не приймає прямий запис/QR/ics —
 // усе це веде відповідна сесія нижче (легасі-блок картки лишається тільки для kind=event і старих
@@ -48,7 +49,7 @@ const hasSessions = computed(() => sessions.value.length > 0)
     <template v-if="m">
       <h1>{{ m.kind === 'webinar' ? '🎥 ' : '' }}{{ m.title }}</h1>
       <template v-if="!hasSessions">
-        <p class="sub">{{ fmt(m.startsAt) }} — {{ new Date(m.endsAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) }} · {{ m.trainers.map(x => x.fullName).join(', ') }}</p>
+        <p class="sub">{{ fmt(m.startsAt) }} — {{ formatTime(new Date(m.endsAt), { hour: '2-digit', minute: '2-digit' }) }} · {{ m.trainers.map(x => x.fullName).join(', ') }}</p>
         <p v-if="m.location || m.address" class="sub">📍 {{ m.location?.name }}{{ m.room ? `, ${m.room}` : '' }}{{ m.address ? ` · ${m.address}` : '' }}{{ m.location?.address ? ` · ${m.location.address}` : '' }}</p>
         <p v-if="countdown && m.status === 'planned'" class="count">{{ t('mt.startsIn') }} {{ countdown }}</p>
         <span v-if="m.status === 'cancelled'" class="badge coral">{{ t('mt.cancelled') }}</span>

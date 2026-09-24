@@ -5,6 +5,7 @@
  * крестиком нельзя, интерфейс перекрыт до подтверждения (кроме входа и профиля).
  * «Ознайомився» — один тап, отметка хранится с датой (мокап Notice).
  */
+const { formatShortDate } = useFormat()
 const { t } = useI18n()
 const { api } = useApi()
 const { me } = useAuth()
@@ -51,7 +52,7 @@ function dismiss(a: A) { if (a.blockUntilAck) return; dismissed.value = new Set(
           <button v-if="!modal.blockUntilAck" class="x" :aria-label="t('news.close')" @click="dismiss(modal)">×</button>
         </div>
         <h2>{{ modal.title }}</h2>
-        <p v-if="modal.dueAt" class="sub">{{ t('news.ackUntil', { at: new Date(modal.dueAt).toLocaleDateString('uk-UA') }) }}</p>
+        <p v-if="modal.dueAt" class="sub">{{ t('news.ackUntil', { at: formatShortDate(new Date(modal.dueAt)) }) }}</p>
         <p v-if="modal.blockUntilAck" class="sub">{{ t('news.blockHint') }}</p>
         <div class="body"><LessonBlocks :blocks="modal.body as never" :blocks-state="{}" readonly /></div>
         <ul v-if="modal.attachments?.length" class="files">

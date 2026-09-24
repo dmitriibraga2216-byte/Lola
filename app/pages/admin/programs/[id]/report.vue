@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -25,7 +26,7 @@ onMounted(async () => { try { rep.value = await api(`/programs/${route.params.id
       </section>
       <table class="table">
         <thead><tr><th>{{ t('people.col.name') }}</th><th>{{ t('prog.currentStep') }}</th><th>%</th><th>{{ t('dev.due') }}</th><th>{{ t('assign.col.status') }}</th></tr></thead>
-        <tbody><tr v-for="p in rep.people" :key="p.enrollmentId"><td>{{ p.fullName }}</td><td>{{ p.currentStep ? `${p.currentStep}. ${p.currentTitle}` : '—' }}</td><td>{{ p.progressPct }}</td><td class="sub">{{ p.dueAt ? new Date(p.dueAt).toLocaleDateString('uk-UA') : '' }}</td><td><span :class="['badge', p.status]">{{ t(`prog.status.${p.status}`) }}</span></td></tr></tbody>
+        <tbody><tr v-for="p in rep.people" :key="p.enrollmentId"><td>{{ p.fullName }}</td><td>{{ p.currentStep ? `${p.currentStep}. ${p.currentTitle}` : '—' }}</td><td>{{ p.progressPct }}</td><td class="sub">{{ p.dueAt ? formatShortDate(new Date(p.dueAt)) : '' }}</td><td><span :class="['badge', p.status]">{{ t(`prog.status.${p.status}`) }}</span></td></tr></tbody>
       </table>
     </template>
   </div>

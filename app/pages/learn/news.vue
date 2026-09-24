@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../shared/schemas/content'
+const { formatDate } = useFormat()
 
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
@@ -48,7 +49,7 @@ async function ack(n: N) {
   }
   catch (err) { ackError.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk', { day: 'numeric', month: 'long' }) : ''
+const fmt = (d: string | null) => d ? formatDate(new Date(d), { day: 'numeric', month: 'long' }) : ''
 </script>
 
 <template>

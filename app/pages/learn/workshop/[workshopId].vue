@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
+const { formatDateTime } = useFormat()
 
 definePageMeta({ layout: false })
 
@@ -121,7 +122,7 @@ async function sendComment() {
 }
 
 const backTo = computed(() => enrollmentId ? `/learn/${enrollmentId}` : '/learn')
-const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+const fmt = (d: string | null) => d ? formatDateTime(new Date(d), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 </script>
 
 <template>

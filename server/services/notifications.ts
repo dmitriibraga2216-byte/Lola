@@ -12,6 +12,8 @@ import { tenantOverrides } from './translations'
 import type { Locale } from './translations'
 import { buildEmailHtml } from './emailRender'
 import { EMPLOYEES_ONLY } from './repo/people'
+import { formatDate } from '../../shared/domain/dateFormat'
+import { recipientLocale } from '../utils/formatLocale'
 
 /**
  * Уведомления (docs/03 §3.10, docs/06 §6.4): ни одна задача не шлёт напрямую —
@@ -193,8 +195,10 @@ export const DEFAULT_TEMPLATE_CHANNELS: Record<string, { telegram: boolean, emai
  * (docs/23 §13.4) — особый блок: содержимое не условие, а фраза для перевода по локали получателя;
  * `tr` — резолвер (по умолчанию тождественный, фраза как есть). Резолвится до общих блоков,
  * иначе `_tr` попал бы под правило {{#var}} и пропал бы, если такой переменной нет.
+ * `locale` (докс/28, долг PR-107) — локаль получателя для дат-переменных внутри тексту, за
+ * замовчуванням `uk` (лист без явно переданої локалі — старий викликач, поведінка як була).
  */
-export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s): string {
+export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s, locale: Locale = 'uk'): string {
   let out = tpl.replace(/\{\{#_tr\}\}([\s\S]*?)\{\{\/_tr\}\}/g, (_, phrase: string) => tr(phrase))
   out = out.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, inner: string) =>
     vars[key] ? inner : '')
@@ -202,7 +206,7 @@ export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (
     const v = vars[key]
     if (v === null || v === undefined) return ''
     if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      return new Date(v).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })
+      return formatDate(new Date(v), locale, { day: 'numeric', month: 'long' })
     }
     return String(v)
   })
@@ -417,7 +421,7 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       // {{#_tr}} (docs/23 §13.4): переклад фрази по локалі отримувача через ту саму таблицю `translations`
       const trMap = await tenantOverrides(tenantId, locale)
       const tr = (phrase: string) => trMap[phrase] ?? phrase
-      const text = renderTemplate(tpl.body, vars, tr)
+      const text = renderTemplate(tpl.body, vars, tr, locale)
 
       // Правило выбора канала (docs/23 §4): Telegram → SMS (обязательные) → in-app
       let channel = n.channel
@@ -448,12 +452,12 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       else {
         const { sendViaChannel } = await import('./channels')
         // docs/23 §13.4: заголовок листа з шаблону; body_mjml → HTML поверх обвʼязки тенанта (§13.5), інакше — лише текст
-        const subject = channel === 'email' && tpl.subject ? renderTemplate(tpl.subject, vars, tr) : n.code
+        const subject = channel === 'email' && tpl.subject ? renderTemplate(tpl.subject, vars, tr, locale) : n.code
         const html = channel === 'email' && tpl.bodyMjml
           ? buildEmailHtml({
-              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr),
+              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr, locale),
               fallbackText: text,
-              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr) : '' },
+              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr, locale) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr, locale) : '' },
             })
           : undefined
         const res = await sendViaChannel(tenantId, channel as 'sms' | 'email' | 'push', { userId: n.userId, text, subject, html })
@@ -472,9 +476,22 @@ export async function inbox(ctx: { tenantId: string, actorId: string }) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.select().from(notifications).where(and(eq(notifications.userId, ctx.actorId), sql`${notifications.status} in ('sent','skipped','read')`)).orderBy(sql`${notifications.createdAt} desc`).limit(50)
     const items = []
+    // Локаль — тільки для рідкого фолбеку (renderedText зазвичай вже є, докс/28): рахуємо
+    // лінько, один раз на весь список, а не на кожен рядок.
+    let locale: Locale | null = null
     for (const n of rows) {
       let text = n.renderedText
-      if (!text) { const tpl = DEFAULT_TEMPLATES[n.code]; if (tpl) text = renderTemplate(tpl, { ...(await commonVars(tx, ctx.tenantId, ctx.actorId)), ...(n.payload as Record<string, unknown>) }) }
+      if (!text) {
+        const tpl = DEFAULT_TEMPLATES[n.code]
+        if (tpl) {
+          if (locale === null) {
+            const [userRow] = await tx.select({ locale: users.locale }).from(users).where(eq(users.id, ctx.actorId))
+            const [tenantRow] = await tx.select({ locale: tenants.locale }).from(tenants).where(eq(tenants.id, ctx.tenantId))
+            locale = recipientLocale(userRow?.locale, tenantRow?.locale)
+          }
+          text = renderTemplate(tpl, { ...(await commonVars(tx, ctx.tenantId, ctx.actorId)), ...(n.payload as Record<string, unknown>) }, undefined, locale)
+        }
+      }
       items.push({ id: n.id, code: n.code, text: text ?? n.code, createdAt: n.createdAt, readAt: n.readAt, url: refUrl(n) })
     }
     const [c] = await tx.execute(sql`select count(*)::int as n from notifications where user_id = ${ctx.actorId}::uuid and read_at is null and status in ('sent','skipped')`) as unknown as { n: number }[]

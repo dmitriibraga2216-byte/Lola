@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Події (мокап Events, docs/21 §3.4): таблица Назва · Коли · Де · Запрошено · Опубліковано, «Додати подію». */
 import type { ContentBlock } from '../../../shared/schemas/content'
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'meetup.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -11,7 +12,7 @@ const adding = ref(false)
 const busy = ref(false)
 const locations = ref<{ id: string, name: string }[]>([])
 const form = reactive({ title: '', description: [{ id: 'b1', type: 'text', html: '<p></p>' }] as ContentBlock[], startsAt: '', endsAt: '', locationId: '', address: '', capacity: '', registrationRequired: false, audienceLocationIds: [] as string[], publish: true })
-const when = (s: string) => new Date(s).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const when = (s: string) => formatDateTime(new Date(s), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 async function load() { try { items.value = await api<E[]>('/events', { query: { all: '1' } }); locations.value = await api('/refs/locations') } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)
 async function save() {

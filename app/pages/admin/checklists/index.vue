@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime, formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'checklist.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -46,7 +47,7 @@ async function save() {
   try { await api('/checklists', { method: 'PUT', body: body() }); notice.value = t('common.saved'); reset(); await load() }
   catch (err) { const e = apiErrorOf(err); error.value = e.message; lockedFields.value = (e.details?.fields as string[] | undefined) ?? [] }
 }
-const fmtDate = (d: string) => new Date(d).toLocaleDateString('uk')
+const fmtDate = (d: string) => formatShortDate(new Date(d))
 // Тайный покупатель (docs/20 §7.8): волны и одноразовые ссылки
 const { hasScope } = useAuth()
 const waves = ref<Wave[]>([])
@@ -68,7 +69,7 @@ async function makeLink() {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 async function copy(text: string) { try { await navigator.clipboard.writeText(text); notice.value = t('mystery.copied') } catch { /* буфер недоступен */ } }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk') : '—'
+const fmt = (d: string | null) => d ? formatDateTime(new Date(d)) : '—'
 async function toggle(c: CL) {
   try {
     await api('/checklists', { method: 'PUT', body: { id: c.id, title: c.title, description: c.description, kind: c.kind, subjectKind: c.subject_kind, scaleId: c.scale_id, scoring: c.scoring, passScore: Number(c.pass_score), criticalFailRule: c.critical_fail_rule, whoCanRun: c.who_can_run, frequency: c.frequency, requireSignature: c.require_signature, allowSkip: c.allow_skip, allowItemComment: c.allow_item_comment, itemCommentRequired: c.item_comment_required, tags: c.tags, items: c.items, isActive: !c.is_active } })

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDate, formatTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -25,8 +26,8 @@ const monthGrid = computed(() => {
   for (let d = 1; d <= n; d++) { const key = `${month.value}-${String(d).padStart(2, '0')}`; cells.push({ d, key, n: items.value.filter(it => new Date(it.starts_at).toISOString().slice(0, 10) === key).length }) }
   return cells
 })
-const fmtT = (d: string) => new Date(d).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-const fmtD = (d: string) => new Date(d).toLocaleDateString('uk-UA', { weekday: 'short', day: 'numeric', month: 'long' })
+const fmtT = (d: string) => formatTime(new Date(d), { hour: '2-digit', minute: '2-digit' })
+const fmtD = (d: string) => formatDate(new Date(d), { weekday: 'short', day: 'numeric', month: 'long' })
 const badge = (m: M) => m.my_status === 'registered' || m.my_status === 'attended' ? t('mt.registered') : m.my_status === 'waitlist' ? t('mt.inQueue', { n: m.my_waitlist_position }) : !m.enrollOpen ? t('mt.closed') : m.seatsLeft === 0 ? t('mt.full') : m.seatsLeft != null ? t('mt.seatsLeft', { n: m.seatsLeft }) : ''
 </script>
 <template>

@@ -3,6 +3,7 @@
  * Панель оператора платформы — экран PlatformTenants (docs/24 §4.1, docs/25 §7–8, мокап PlatformTenants.html).
  * Отдельный вход, отдельная сессия, отдельный префикс API. Показывает агрегаты, не содержимое (docs/25 §7 п. 4).
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: false })
 const { t } = useI18n()
 
@@ -266,7 +267,7 @@ async function impersonate() {
 
 const hostOf = (tn: Tenant) => tn.custom_domain || (me.value?.hostBase ? `${tn.slug}.${me.value.hostBase}` : tn.slug)
 const gb = (b: string | number) => (Number(b) / 1024 / 1024 / 1024).toFixed(1)
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk') : '—'
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
 const purgeAt = (tn: Tenant) => tn.archived_at ? fmt(new Date(new Date(tn.archived_at).getTime() + PURGE_DAYS * 86_400_000).toISOString()) : '—'
 const planName = (code: string) => plans.value.find(p => p.code === code)?.name ?? code
 /** Тріал показывается как состояние, если тариф trial и тенант активен (мокап: «Тріал») */

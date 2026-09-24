@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /** Події для сотрудника (docs/21 §5.1, §3.4): афиша, куда запрошен, запись с гостями. */
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
 interface E { id: string, title: string, startsAt: string, locationName: string | null, address: string | null, registrationRequired: boolean, registered: number, capacity: number | null, mine: boolean }
 const items = ref<E[]>([])
 const error = ref('')
-const when = (s: string) => new Date(s).toLocaleString('uk-UA', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+const when = (s: string) => formatDateTime(new Date(s), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
 async function load() { try { items.value = await api<E[]>('/events') } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)
 async function register(e: E) { error.value = ''; try { await api(`/events/${e.id}/register`, { method: 'POST', body: { guestsCount: 0 } }); await load() } catch (err) { error.value = apiErrorOf(err).message } }

@@ -8,6 +8,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'aud
  * приходит одинаково для всех журналов (CLAUDE.md п. 14).
  */
 const { t, te } = useI18n()
+const { formatDate, formatDateTime, formatShortDate, formatTime } = useFormat()
 const { api, apiRaw } = useApi()
 type Kind = 'task-status' | 'task-access' | 'org-conflicts' | 'notifications' | 'sessions' | 'telegram' | 'security' | 'import' | 'automation' | 'integrations'
 type Severity = 'info' | 'warning' | 'critical'
@@ -40,7 +41,7 @@ const telegramRows = computed(() => {
 })
 const telegramStatus = (r: Row) => r.connected ? (r.blocked ? 'blocked' : 'connected') : 'notConnected'
 const maxAvgMinutes = computed(() => Math.max(1, ...sessionDaily.value.map(d => d.avgMinutes)))
-const dayLabel = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('uk', { day: '2-digit', month: '2-digit' })
+const dayLabel = (d: string) => formatDate(new Date(`${d}T00:00:00`), { day: '2-digit', month: '2-digit' })
 const CONTENT_TYPES = ['course', 'training_program', 'test', 'resource']
 const CONFLICT_KINDS = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing']
 // Коды событий журнала безпеки (docs/16 §15 Г-16.2) — фильтр «Подія»; подразделения — фильтр «Підрозділ» мокапа SecurityLog
@@ -106,10 +107,10 @@ const columns = computed(() => rows.value[0] ? Object.keys(rows.value[0]).filter
 // Даты из журналов приходят строкой Postgres («2026-09-19 20:50:39.85+00») или ISO
 const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)
 const parseDate = (v: string) => new Date(v.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'))
-const dateOf = (v: unknown) => isDate(v) ? parseDate(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
-const timeOf = (v: unknown) => isDate(v) ? parseDate(v).toLocaleTimeString('uk', { hour: '2-digit', minute: '2-digit' }) : '—'
+const dateOf = (v: unknown) => isDate(v) ? formatShortDate(parseDate(v)) : '—'
+const timeOf = (v: unknown) => isDate(v) ? formatTime(parseDate(v)) : '—'
 const geoOf = (g: Geo) => g ? [g.country, g.city].filter(Boolean).join(', ') : ''
-const fmt = (v: unknown) => v == null || v === '' ? '—' : (typeof v === 'object' && v && 'country' in (v as object)) ? geoOf(v as Geo) || '—' : isDate(v) ? parseDate(v).toLocaleString('uk', { dateStyle: 'short', timeStyle: 'short' }) : typeof v === 'object' ? JSON.stringify(v) : String(v)
+const fmt = (v: unknown) => v == null || v === '' ? '—' : (typeof v === 'object' && v && 'country' in (v as object)) ? geoOf(v as Geo) || '—' : isDate(v) ? formatDateTime(parseDate(v), { dateStyle: 'short', timeStyle: 'short' }) : typeof v === 'object' ? JSON.stringify(v) : String(v)
 // Подія — человеческий текст по коду события; неизвестный код показываем как есть
 const eventText = (r: Row) => {
   const code = String(r.event ?? '')

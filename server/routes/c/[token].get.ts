@@ -1,4 +1,5 @@
 import { publicCertificate } from '../../services/certificates'
+import { formatDate } from '../../../shared/domain/dateFormat'
 
 /** Публичная проверка сертификата (docs/14 §5.5): без входа, noindex, только безопасные поля. */
 export default defineEventHandler(async (event) => {
@@ -14,7 +15,10 @@ export default defineEventHandler(async (event) => {
     : cert.valid_until && new Date(cert.valid_until) < new Date()
       ? { text: 'Термін дії закінчився', tone: 'muted' }
       : { text: 'Дійсний', tone: 'teal' }
-  const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
+  // Локаль відвідувача сторінка не знає (публічний токен, без сесії) — `public_certificate()`
+  // не повертає ні users.locale, ні tenants.locale (docs/v2/46-progress.md: залишено боргом).
+  // Дата йде через єдину утиліту з явним `uk`, щоб не хардкодити Intl-тег напряму.
+  const fmt = (d: string | null) => d ? formatDate(d, 'uk', { day: 'numeric', month: 'long', year: 'numeric' }) : '—'
   return page(cert.number, `
     <p class="who">${esc(cert.full_name)}</p>
     <p class="course">${esc(cert.course_title ?? '')}</p>

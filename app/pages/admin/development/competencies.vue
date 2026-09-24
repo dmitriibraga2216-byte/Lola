@@ -7,6 +7,7 @@
  * (не вигадуємо новий scope, CLAUDE.md п.13); нижче — керування окремими компетенціями
  * (додати/редагувати/деактивувати), яке в мокапі не показане.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'competency.manage' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -35,7 +36,7 @@ const visible = computed(() => catFilter.value ? items.value.filter(i => i.categ
 const catName = (id: string | null) => categories.value.find(c => c.id === id)?.name ?? ''
 // «Створено» для групи (мокап Competencies) — дата останньої доданої до неї компетенції
 const lastCreated = (members: C[]) => members.reduce((max, m) => m.createdAt > max ? m.createdAt : max, members[0]?.createdAt ?? '')
-const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('uk') : '—'
+const fmtDate = (d: string) => d ? formatShortDate(new Date(d)) : '—'
 /** Библиотека для мокапа: одна строка на групу (категорію) — назва, вкладені компетенції, тип, кількість. */
 const groupRows = computed(() => {
   const groups = catFilter.value ? categories.value.filter(c => c.id === catFilter.value) : categories.value

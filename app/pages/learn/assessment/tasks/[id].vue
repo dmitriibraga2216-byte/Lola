@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -62,7 +63,7 @@ async function save() {
   saving.value = true
   try {
     await api(`/assessment/tasks/${route.params.id}`, { method: 'PUT', body: { answers: Object.entries(answers).map(([criterionId, a]) => ({ criterionId, value: a.value, comment: a.comment || null, isNa: a.isNa })), groupComments } })
-    savedAt.value = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+    savedAt.value = formatTime(new Date(), { hour: '2-digit', minute: '2-digit' })
   } catch (err) { error.value = apiErrorOf(err).message } finally { saving.value = false }
 }
 const groupAvg = (g: Group) => {

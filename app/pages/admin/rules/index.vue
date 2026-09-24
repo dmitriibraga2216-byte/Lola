@@ -3,6 +3,7 @@
  * Правила автоматизації по мокапу AutomationRules: НАЗВА · АУДИТОРІЯ · ВІДКЛАДЕННЯ · ВИКОРИСТАННЯ · СТВОРЕНО · ОПУБЛІКОВАНО,
  * «Створити правило». Правило — именованная аудитория по четырём измерениям (docs/17 §14, §14.2).
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.tenant' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -22,7 +23,7 @@ function usage(r: Rule) {
   const parts = [n('trajectory') ? t('rules.usedTrajectories', { n: n('trajectory') }) : '', n('program') ? t('rules.usedPrograms', { n: n('program') }) : '', n('assignment') ? t('rules.usedTasks', { n: n('assignment') }) : ''].filter(Boolean)
   return parts.length ? parts.join(' · ') : '—'
 }
-const fmt = (d: string) => new Date(d).toLocaleDateString('uk-UA')
+const fmt = (d: string) => formatShortDate(new Date(d))
 </script>
 
 <template>

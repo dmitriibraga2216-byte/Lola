@@ -6,6 +6,7 @@
  * («хто саме»). Каркас — той самий, що в усіх звітах репозиторію: ПІБ · посада · місто ·
  * підрозділ · мітки; відмінність одна — вид людини `candidate`.
  */
+const { formatDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'candidate.view' })
 
 const { t } = useI18n()
@@ -39,7 +40,7 @@ async function load() {
 }
 onMounted(load)
 
-const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 </script>
 
 <template>

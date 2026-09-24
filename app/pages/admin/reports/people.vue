@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -21,7 +22,7 @@ async function load() {
 }
 watch([kind, q], load, { deep: true })
 onMounted(load)
-const fmt = (d: unknown) => d ? new Date(String(d)).toLocaleDateString('uk') : '—'
+const fmt = (d: unknown) => d ? formatShortDate(new Date(String(d))) : '—'
 </script>
 <template>
   <div>

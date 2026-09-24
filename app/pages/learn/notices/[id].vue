@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Оголошення з підписом (мокап Notice): бейдж типу, назва, «Опубліковано · діє до», текст, файли, липкая кнопка «Ознайомився». */
+const { formatDate, formatDateTime } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -8,7 +9,7 @@ interface N { id: string, title: string, body: unknown[], kind: string, priority
 const n = ref<N | null>(null)
 const error = ref('')
 const busy = ref(false)
-const d = (s: string | null) => s ? new Date(s).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' }) : ''
+const d = (s: string | null) => s ? formatDate(new Date(s), { day: 'numeric', month: 'long' }) : ''
 onMounted(async () => { try { n.value = await api<N>(`/notices/${route.params.id}`) } catch (err) { error.value = apiErrorOf(err).message } })
 async function ack() {
   if (!n.value) return
@@ -30,7 +31,7 @@ async function ack() {
         <li v-for="f in n.attachments" :key="f.mediaId" class="card tight">📎 {{ f.name }}<span v-if="f.bytes" class="muted"> · {{ Math.round(f.bytes / 1024) }} {{ t('notices.kb') }}</span></li>
       </ul>
       <div class="sticky-bottom">
-        <p v-if="n.ackedAt" class="note teal">{{ t('notices.ackedOn', { d: new Date(n.ackedAt).toLocaleString('uk-UA') }) }}</p>
+        <p v-if="n.ackedAt" class="note teal">{{ t('notices.ackedOn', { d: formatDateTime(new Date(n.ackedAt)) }) }}</p>
         <template v-else>
           <p class="help">{{ t('notices.ackHint') }}</p>
           <button class="btn primary" :disabled="busy" data-testid="notice-ack" @click="ack">{{ n.ackText || t('news.iRead') }}</button>

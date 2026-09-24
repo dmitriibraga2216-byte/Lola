@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Мои траектории (docs/04 §4.4 /me/trajectories) + каталог траекторий с самозаписью/заявкой. */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'learner' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -23,7 +24,7 @@ async function enroll(c: Cat) {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 const pct = (m: Mine) => m.total ? Math.round((m.done / m.total) * 100) : Number(m.progressPct)
-const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('uk-UA') : ''
+const fmt = (d: string | null) => d ? formatShortDate(new Date(d)) : ''
 </script>
 
 <template>

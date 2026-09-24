@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CONTENT_TYPES } from '#shared/enums'
+const { formatShortDate } = useFormat()
 
 /**
  * Редактор траектории по мокапу Trajectory: палитра блоков над полотном, полотно с блоками и связями,
@@ -391,7 +392,7 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
             <input type="checkbox" :checked="traj.stopAssignAfterFinish" @change="patch({ stopAssignAfterFinish: ($event.target as HTMLInputElement).checked })">
             <span>{{ t('traj.stopAfterFinish') }}</span>
           </label>
-          <p class="help">{{ t('traj.updatedBy', { date: new Date(traj.updatedAt).toLocaleDateString('uk-UA'), name: traj.updatedByName ?? '—' }) }}</p>
+          <p class="help">{{ t('traj.updatedBy', { date: formatShortDate(new Date(traj.updatedAt)), name: traj.updatedByName ?? '—' }) }}</p>
         </div>
 
         <div class="card">

@@ -33,12 +33,12 @@ export default defineEventHandler(async (event) => {
   const overrides = await tenantOverrides(a.tenantId, p.data.locale)
   const tr = (phrase: string) => overrides[phrase] ?? phrase
   const body = p.data.body || (p.data.code ? DEFAULT_TEMPLATES[p.data.code] ?? '' : '')
-  const text = renderTemplate(body, vars, tr)
+  const text = renderTemplate(body, vars, tr, p.data.locale)
   const html = p.data.bodyMjml
     ? buildEmailHtml({
-        bodyMjml: renderTemplate(p.data.bodyMjml, vars, tr),
+        bodyMjml: renderTemplate(p.data.bodyMjml, vars, tr, p.data.locale),
         fallbackText: text,
-        layout: { headerMjml: layout.headerMjml ? renderTemplate(layout.headerMjml, vars, tr) : '', footerMjml: layout.footerMjml ? renderTemplate(layout.footerMjml, vars, tr) : '' },
+        layout: { headerMjml: layout.headerMjml ? renderTemplate(layout.headerMjml, vars, tr, p.data.locale) : '', footerMjml: layout.footerMjml ? renderTemplate(layout.footerMjml, vars, tr, p.data.locale) : '' },
       })
     : null
   return apiData({ text, html, variables: Object.keys(vars) })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Контакти (мокап Contacts, docs/21 §14.8): фильтры Підрозділ · Посада · Місто, карточки: ПІБ, посада · точка, робочий телефон, пошта. */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'people.view' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -44,7 +45,7 @@ watch([orgUnitId, positionId, cityId], load)
           <span v-if="c.workPhone">{{ t('contacts.work') }}: <a :href="`tel:${c.workPhone}`" class="link">{{ c.workPhone }}</a></span>
           <span v-if="c.workEmail"><a :href="`mailto:${c.workEmail}`" class="link">{{ c.workEmail }}</a></span>
           <span v-if="c.messenger" class="muted">{{ c.messenger }}</span>
-          <span v-if="data.showPersonal && c.phone" class="muted">{{ t('contacts.personal') }}: {{ c.phone }}<template v-if="c.email"> · {{ c.email }}</template><template v-if="c.birthDate"> · {{ new Date(c.birthDate).toLocaleDateString('uk-UA') }}</template></span>
+          <span v-if="data.showPersonal && c.phone" class="muted">{{ t('contacts.personal') }}: {{ c.phone }}<template v-if="c.email"> · {{ c.email }}</template><template v-if="c.birthDate"> · {{ formatShortDate(new Date(c.birthDate)) }}</template></span>
         </span>
       </li>
       <li v-if="!data.items.length" class="faint">{{ t('contacts.empty') }}</li>

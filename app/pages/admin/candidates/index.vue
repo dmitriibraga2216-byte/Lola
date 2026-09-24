@@ -8,6 +8,7 @@
  * скільки місць лишилось за тарифом (CLAUDE.md п. 3).
  */
 import type { CandidateState } from '#shared/enums'
+const { formatDate } = useFormat()
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'candidate.view' })
 
@@ -107,7 +108,7 @@ async function drop(col: Column) {
   finally { busy.value = '' }
 }
 
-const dateOf = (v: string | null) => v ? new Date(v).toLocaleDateString('uk', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 </script>
 
 <template>

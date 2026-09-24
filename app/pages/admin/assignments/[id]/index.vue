@@ -5,6 +5,7 @@
  * четыре блока — Контент · Налаштування · Призначення · Результати.
  * Люди и снятие живут на экране аудитории; здесь — состояние, сводка и действия над назначением.
  */
+const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'assignment.create' })
 
 const { t } = useI18n()
@@ -194,7 +195,7 @@ const createNewUrl = computed(() => a.value ? (CONTENT_CREATE_ROUTES[a.value.sub
         <!-- 4. Результати -->
         <section class="card block">
           <div class="block-head"><b>{{ t('assign.card.results') }}</b><span class="muted">{{ t('assign.card.resultsDesc') }}</span></div>
-          <p class="block-body muted">{{ t('assign.autoSyncState', { on: a.autoSync ? '✓' : '—', at: a.lastSyncAt ? new Date(a.lastSyncAt).toLocaleDateString('uk') : '—' }) }}</p>
+          <p class="block-body muted">{{ t('assign.autoSyncState', { on: a.autoSync ? '✓' : '—', at: a.lastSyncAt ? formatShortDate(new Date(a.lastSyncAt)) : '—' }) }}</p>
           <div class="block-actions"><NuxtLink :to="`/admin/reports?assignmentId=${id}`" class="btn ghost small">{{ t('assign.card.analyze') }}</NuxtLink></div>
         </section>
       </div>

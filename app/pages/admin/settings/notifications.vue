@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime, formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'settings.notifications' })
 const { t } = useI18n()
 const { api, apiRaw } = useApi()
@@ -26,7 +27,7 @@ const overridesOf = (code: string) => custom.value.filter(x => x.code === code &
 const channelOf = (code: string, channel: string) => overridesOf(code).find(x => x.channel === channel)
 const scopeOf = (code: string) => overridesOf(code).length ? 'custom' : 'global'
 const lastChanged = (code: string) => overridesOf(code).map(x => x.updatedAt).sort().at(-1) ?? null
-const fmtDate = (d: string) => new Date(d).toLocaleDateString('uk-UA')
+const fmtDate = (d: string) => formatShortDate(new Date(d))
 const scopeCounts = computed(() => ({ global: Object.keys(defaults.value).filter(c => scopeOf(c) === 'global').length, custom: Object.keys(defaults.value).filter(c => scopeOf(c) === 'custom').length }))
 const scopeFilter = ref<'all' | 'global' | 'custom'>('all')
 const versions = ref<{ version: number, body: string, createdAt: string, author: string | null }[]>([])
@@ -242,7 +243,7 @@ watch(tab, (v) => { if (v === 'schedule') loadSchedule() })
             <button v-if="customOf(form.code)" class="chip" @click="resetDefault">{{ t('ntpl.reset') }}</button>
           </div>
           <details v-if="versions.length" class="revs"><summary>{{ t('ntpl.versions', { n: versions.length }) }}</summary>
-            <ul><li v-for="v in versions" :key="v.version"><b>v{{ v.version }}</b> · {{ new Date(v.createdAt).toLocaleString('uk') }} · {{ v.author ?? '—' }}<div class="sub tpl">{{ v.body }}</div></li></ul>
+            <ul><li v-for="v in versions" :key="v.version"><b>v{{ v.version }}</b> · {{ formatDateTime(new Date(v.createdAt)) }} · {{ v.author ?? '—' }}<div class="sub tpl">{{ v.body }}</div></li></ul>
           </details>
         </template>
       </aside>

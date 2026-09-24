@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const { formatDateTime } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 const { t } = useI18n()
 const { api } = useApi()
@@ -14,7 +15,7 @@ async function open(e: E) {
   try { const r = await api<{ url: string | null, expired: boolean }>(`/exports/${e.id}`); if (r.url) window.open(r.url, '_blank'); else error.value = t('reports.exportExpired') }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-const fmt = (d: string | null) => d ? new Date(d).toLocaleString('uk') : '—'
+const fmt = (d: string | null) => d ? formatDateTime(new Date(d)) : '—'
 </script>
 <template>
   <div>

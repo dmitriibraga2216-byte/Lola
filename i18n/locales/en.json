@@ -1038,7 +1038,17 @@
     "open": "Open",
     "share": "Share",
     "copied": "Copied",
-    "downloadPdf": "Download PDF"
+    "downloadPdf": "Download PDF",
+    "pdf": {
+      "badge": "Certificate",
+      "completed": "has successfully completed the course",
+      "number": "Number",
+      "issued": "Issued",
+      "validUntil": "Valid until",
+      "unlimited": "unlimited",
+      "result": "Result",
+      "verify": "Verify authenticity"
+    }
   },
   "enrollment": {
     "not_assigned": "Not assigned",

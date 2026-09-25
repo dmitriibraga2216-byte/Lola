@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import {
-  cities, enrollments, functionalChiefs, invitations, locations, orgUnits, positionLevels, positions, roles, sessions, userNotes, userPlacements, userRoles, users,
+  cities, enrollments, functionalChiefs, invitations, locations, orgUnits, positionLevels, positions, roles, sessions, tenants, userNotes, userPlacements, userRoles, users,
 } from '../db/schema'
 import { OWNER_ROLE_CODE } from '../../shared/domain/roles'
 import { withTenant } from '../utils/withTenant'
@@ -16,6 +16,7 @@ import { ensureTags } from './tags'
 import { logOrgConflict } from './journals'
 import { scopeSql } from './access'
 import { hashToken } from './session'
+import { invitationByTokenHash } from './authLookup'
 import { applyPositionRoles } from './positionRoleMap'
 import { levelLabel } from './development'
 import type { CompetencyLevel } from './development'
@@ -473,6 +474,21 @@ export async function createInvitation(ctx: Ctx, userId: string) {
     // docs/16 §8 user_invited — человеку по SMS/Telegram (ссылка абсолютная, APP_URL из окружения)
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId, code: 'user_invited', payload: { url: `${process.env.APP_URL ?? ''}${url}` }, dedupKey: `user_invited:${userId}:${Date.now()}` })
     return { token, url }
+  })
+}
+
+/**
+ * Превью приглашения перед входом (страница `/invite`, `docs/01` §1.5 «ссылка-приглашение для
+ * первого входа»): только название пространства, без побочных эффектов и без сессии. Неизвестный,
+ * протухший (48 часов) или уже принятый токен — один и тот же `null`, чтобы страница не различала
+ * причину отказа (docs/v2/44 В-9 — публичный контур не отвечает подробностями по перебору).
+ */
+export async function previewInvitation(token: string): Promise<{ tenantName: string } | null> {
+  const invite = await invitationByTokenHash(hashToken(token))
+  if (!invite || invite.accepted_at || new Date(invite.expires_at) < new Date()) return null
+  return withTenant(invite.tenant_id, null, async (tx) => {
+    const [t] = await tx.select({ name: tenants.name }).from(tenants).where(eq(tenants.id, invite.tenant_id))
+    return t ? { tenantName: t.name } : null
   })
 }
 

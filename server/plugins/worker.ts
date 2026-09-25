@@ -169,6 +169,13 @@ export default defineNitroPlugin(async () => {
       const s = await aggregateActivitySeconds(tenantId, { windowMinutes: jobs[0]?.data?.windowMinutes })
       if (s.days) console.log(`[activity.aggregate] ${tenantId}: дней ${s.days}`)
     }))
+    // docs/v2/38 §7.2, §11 (PR-35): індекс залученості — полный пересчёт тенанта партиями по 500,
+    // каждая партия — своя транзакция withTenant(); уволенным значение не пересчитывается
+    await work('rating.recalc', () => runPerTenant('rating.recalc', async (tenantId) => {
+      const { recalcTenantEngagement } = await import('../services/engagementIndex')
+      const s = await recalcTenantEngagement(tenantId)
+      if (s.people) console.log(`[rating.recalc] ${tenantId}:`, s)
+    }))
     // docs/v2/29 §11 (PR-17): публикация и генерация текста. Ретрай — по событию на строку
     // публикации (`enqueuePublishRetry`), здоровье аккаунтов и всплеск — сканы по тенантам.
     await perTenant<{ tenantId: string, publicationId: string }>('vacancy.publish_retry', data => attemptPublish(data.tenantId, data.publicationId))

@@ -3,10 +3,11 @@ import postgres from 'postgres'
 import { ADMIN_PHONE, EMPLOYEE_PHONE, loginViaUi, resetOtp } from './helpers'
 
 /**
- * Сценарий приёмки PR-34 пакета `docs/v2` (`38` §5.1, §13 к. 11): карточка человека, вкладка
- * «Активність» — карта года. День, в котором у человека есть события, закрашен своим уровнем,
- * подсказка называет число событий, по сетке ходят стрелками, на узком экране карта
- * прокручивается внутри своего блока, а журнал действий остался на той же вкладке.
+ * Сценарий приёмки PR-34 пакета `docs/v2` (`38` §5.1, §13 к. 11): карточка человека — карта года
+ * под шапкой (с PR-35 — первым блоком «Профілю», «как на эталоне», П-16.2). День, в котором у
+ * человека есть события, закрашен своим уровнем, подсказка называет число событий, по сетке
+ * ходят стрелками, на узком экране карта прокручивается внутри своего блока, а журнал действий
+ * — на вкладке «Активність».
  *
  * Сам расчёт дня по поясу человека (22:40 UTC у человека на UTC+4 → следующий день) и карта после
  * `activity.purge` проверены на сервисе — `tests/integration/v2-user-activity.spec.ts`: там можно
@@ -46,7 +47,7 @@ test.beforeEach(resetOtp)
 
 test('картка людини: день закрашений, підказка, стрілки, вузький екран і журнал дій (к. 11)', async ({ page }) => {
   await loginViaUi(page, ADMIN_PHONE)
-  await page.goto(`/admin/people/${personId}?tab=activity`)
+  await page.goto(`/admin/people/${personId}`)
 
   const map = page.locator('section.activity')
   await expect(map.getByRole('heading', { name: /Активність за/ })).toBeVisible()
@@ -64,7 +65,10 @@ test('картка людини: день закрашений, підказка
   await page.keyboard.press('ArrowRight')
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-date'))).toBe(nextWeek)
 
+  // Журнал дій — на вкладці «Активність»; карта року — під шапкою «Профілю»
+  await page.getByRole('tab', { name: 'Активність' }).click()
   await expect(page.getByRole('heading', { name: 'Журнал дій' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Профіль' }).click()
 
   // 320px: карта не расталкивает страницу — прокручивается внутри своего блока
   await page.setViewportSize({ width: 320, height: 720 })

@@ -277,7 +277,9 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET/POST | `/people` | список с фильтрами (посада, місто, підрозділ, мітки, рівень, активність); ответ `{data, meta: {cursor, limit, counts}}` |
+| GET/POST | `/people` | список с фильтрами (посада, місто, підрозділ, мітки, рівень, активність); ответ `{data, meta: {cursor, limit, counts}}`. С PR-35 (`v2/38` §5.2, §7.3): `?ratingLt=&ratingGte=` (0…130) — порог індексу залученості, `?sort=rating` — по индексу по убыванию (курсор `KEYSETS.peopleByRating`); в строке `ratingPct`, `ratingUpdatedAt`, `ratingVisible` — цифра только в области `person.rating.view_others` смотрящего, вне её `null`; фильтр и сортировка по индексу без скоупа — `403 forbidden` |
+| POST | `/people/bulk` | массовое действие: `{action, ids[≤500]}` или `{action, filter}` — «всі за фільтром» (фильтры списка, не больше 500 человек, иначе `422 validation_failed`); ответ `{done, errors}`. Індекс залученості единственным условием «Архівувати» — `422 rating_only_filter_forbidden` (`v2/38` §7.3, критерий §13 к. 3); фильтр по индексу без скоупа — `403 forbidden` |
+| GET | `/people/export` | «Експорт в Excel» по фильтрам списка; колонка індексу залученості — только с `?includeRating=1` и скоупом `person.rating.view_others` (`v2/38` §7.3 п. 2) |
 | GET/PATCH | `/people/:id` | карточка (`16` §14.4) |
 | POST | `/people/:id/roles` | роль в области: `{roleCode, scopeType, scopeId?, validUntil?, reason?}`; повтор той же роли в той же области — редактирование срока и причины |
 | DELETE | `/people/:id/roles/:code` | снять роль; `?reason=` — в аудит; последний администратор — 409 `last_admin` |
@@ -784,6 +786,20 @@ HR и администратор — весь тенант). Кандидат и
 
 До PR-34 этот путь отдавал последние 100 записей `audit_log` человека (скоуп `people.view`) —
 журнал действий карточки переехал на `GET /people/:id/action-log` (§4.11) без изменений.
+
+### Індекс залученості и блок «Етап» карточки (`docs/v2/38` §5.1–§5.3, §7.1–§7.3, §10, `docs/v2/33` §5.3, PR-35)
+
+**Индекс — не баллы рейтинга** (`points_ledger`, «Поточний рейтинг»): справочная величина 0…130 %,
+раз в сутки пересчитываемая целиком (`rating.recalc`). Свой индекс видит каждый сотрудник без
+скоупа; чужой — `person.rating.view_others` в области, покрывающей **текущую** точку человека
+(руководитель точки), или на весь тенант (HR, администратор). Токен интеграции — только по скоупу.
+Кандидат, чужой тенант, не-uuid — `404`.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/people/:id/rating` | «Звідки взявся мій відсоток»: `{person, self, state: ok\|no_assignments\|pending, total, base, bonuses: {early, streak, help}, breakdown, window: {from, to}, calcDate, updatedAt, stale, formula: {version, changedAt}, history: [{month, total}]}` — `breakdown` — числа формулы из снимка (`formula_version`, основа с вкладом каждой записи окна, досрочность, серия, действия помощи); `stale` — старше 48 часов; `history` — последнее значение каждого месяца за 12 месяцев. `403 forbidden`, `404` |
+| POST | `/people/:id/rating/recalc` | пересчёт одного человека тем же расчётом, что `rating.recalc`, **в запросе** — ответ как у `GET` (Р-35.6; в `v2/38` §10 был `{jobId}`); не чаще раза в час — `429 recalc_too_often`, уволенному — `409 person_archived`; пересчёт чужого — `person_rating.recalc` в `audit_log` |
+| GET | `/people/:id/tracks` | блок «Етап» (`people.view`): `{current: {stageName, color, enteredAt} \| null, groups: [{stage \| null, flat, showDeadline, items: [{enrollmentId, courseId, title, status, progressPct, assignedAt, dueAt, light: none\|ok\|soon\|overdue\|done, deadlineShifted, modulesDone, modulesTotal, plannedSeconds, spentSeconds}]}], timeVisible}` — группы по этапам в порядке справочника; этап без `progress` — `flat` без процента и срока; `current` — при `lifecycle.view`; время — себе и носителю `time.metrics.view` в области точки человека (`v2/37` §2), иначе `null`. `404` |
 
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом

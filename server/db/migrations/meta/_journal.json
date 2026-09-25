@@ -645,6 +645,13 @@
       "when": 1790234700000,
       "tag": "0093_v2_user_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1790234820000,
+      "tag": "0095_v2_person_rating",
+      "breakpoints": true
     }
   ]
 }

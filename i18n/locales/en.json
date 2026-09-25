@@ -218,7 +218,8 @@
       "phone": "Phone",
       "registered": "Registered",
       "externalId": "External ID",
-      "actions": "Actions"
+      "actions": "Actions",
+      "rating": "%"
     },
     "status": {
       "invited": "Invited",
@@ -259,12 +260,23 @@
       "archive": "Archive",
       "assignLearning": "Assign learning",
       "done": "Done: {done}, errors: {errors}",
-      "confirmArchive": "Archive {n} people? Sessions will be closed and unfinished learning cancelled."
+      "confirmArchive": "Archive {n} people? Sessions will be closed and unfinished learning cancelled.",
+      "allByFilter": "All matching the filter selected: {n}",
+      "selectAllByFilter": "Select all matching the filter ({n})",
+      "ratingOnly": "The engagement index cannot be the only condition for archiving. Add another filter condition (location, position, tag…) or tick people by hand."
     },
     "hiddenBadge": "hidden",
     "blockedBadge": "blocked",
     "createTitle": "New user",
-    "created": "User created"
+    "created": "User created",
+    "ratingHelp": "This is the learning engagement index, not a completion percentage. It can exceed 100 % thanks to bonuses. A reference figure.",
+    "ratingSort": "Sort by engagement index (highest first)",
+    "ratingStale": "Data is being updated",
+    "ratingNone": "Not calculated: no assignments in 12 months",
+    "ratingGte": "Index from, %",
+    "ratingLt": "Index below, %",
+    "exportRating": "Include engagement index",
+    "exportRatingConfirm": "The index is a reference figure and is not meant for HR decisions. Export the list with it?"
   },
   "person": {
     "profile": "Profile",
@@ -401,7 +413,7 @@
     "assigned": "Assigned",
     "doneCount": "Completed",
     "overdueCount": "Overdue",
-    "rating": "Rating",
+    "rating": "Rating points",
     "daysInCompany": "{n} days with the company",
     "password": "Password",
     "passwordNone": "not set",
@@ -417,7 +429,11 @@
     "mustChangeAfterLogin": "Change password after first sign-in",
     "deadlineShifted": "moved: absence",
     "timezone": "Time zone",
-    "timezoneHint": "Only for remote staff. Empty — the location's time zone"
+    "timezoneHint": "Only for remote staff. Empty — the location's time zone",
+    "stageSince": "{stage}, since {date}",
+    "engagement": "Engagement index",
+    "engagementHint": "Reference learning engagement index for the last 12 months, 0–130 %. Not rating points and not a completion percentage.",
+    "ratingPointsHint": "Sum of points for completed tasks (“Current rating”, points and bonuses). Not the same as the engagement index."
   },
   "import": {
     "willDo": "What will happen",
@@ -3348,7 +3364,7 @@
       "done": "Done",
       "active": "Current",
       "overdue": "Overdue",
-      "rating": "Rating",
+      "rating": "Rating points",
       "bonuses": "Bonuses"
     },
     "certificates": "My certificates",
@@ -4739,7 +4755,7 @@
       "person.document.view_others": "View others' documents",
       "person.document.manage": "Manage person documents",
       "person.absence.manage": "Manage absence norms and records",
-      "person.rating.view_others": "View others' rating",
+      "person.rating.view_others": "View others’ engagement index",
       "tenant.transfer": "Hand over workspace ownership",
       "shop.manage": "Manage the gift shop",
       "shop.issue": "Hand over orders at a location",
@@ -4919,7 +4935,7 @@
         "ai_generate": "AI generation",
         "applies_to_candidate": "For candidates",
         "applies_to_employee": "For employees",
-        "counts_in_rating": "In rating"
+        "counts_in_rating": "Points & index"
       },
       "peopleCount": "People"
     }
@@ -7112,5 +7128,71 @@
       "apply": "Apply",
       "applied": "Estimate taken from actual time"
     }
+  },
+  "personTracks": {
+    "title": "Assigned tracks",
+    "noStage": "No stage",
+    "stageEmpty": "{stage} — nothing assigned",
+    "manage": "Manage tracks",
+    "assigned": "Assigned: {date}",
+    "assignedLabel": "Assigned",
+    "dueLabel": "Deadline",
+    "noDue": "No deadline",
+    "modulesLabel": "Modules completed",
+    "plannedLabel": "Planned time",
+    "spentLabel": "Time spent",
+    "progress": "Progress {n} %",
+    "overdue": "overdue",
+    "soon": "3 days or less left",
+    "empty": "Nothing assigned",
+    "loadFailed": "Could not load tracks",
+    "retry": "Retry"
+  },
+  "engagement": {
+    "value": "{value} %",
+    "titleSelf": "Where my percentage comes from",
+    "titleOther": "Where the percentage comes from: {name}",
+    "whatItIs": "Learning engagement index for the last 12 months. It can exceed 100 % thanks to bonuses (130 % at most).",
+    "calcDate": "Calculated {date}",
+    "window": "from {from} to {to}",
+    "stale": "Data is being updated — the value is older than 48 hours",
+    "recalc": "Recalculate",
+    "recalcDone": "Recalculated",
+    "formulaChanged": "The formula changed on {date}. Values before that date were calculated differently.",
+    "emptySelf": "Not calculated: you have no assignments in the last 12 months",
+    "emptyOther": "Not calculated: this person has no assignments in the last 12 months",
+    "pending": "Data is being updated: the index is recalculated every night",
+    "base": "Base: {value} of {max}",
+    "baseText": "Completed {a} of {b} assigned modules, weighted. Mandatory ones count double.",
+    "baseItems": "Assignments in the window and their contribution ({n})",
+    "mandatory": "mandatory",
+    "voluntary": "voluntary",
+    "contribution": "+{value} of {max}",
+    "status": {
+      "done": "completed",
+      "in_progress": "in progress",
+      "failed": "not passed",
+      "not_started": "not started",
+      "other": "other"
+    },
+    "early": "Early completion: +{value} of {max}",
+    "earlyTextSelf": "On average you finished {d} % ahead of the deadline.",
+    "earlyTextOther": "On average finished {d} % ahead of the deadline.",
+    "earlyNone": "No assignments with a deadline completed on time.",
+    "streak": "Regularity: +{value} of {max}",
+    "streakText": "Longest streak of learning days: {n} of {target}.",
+    "help": "Helping colleagues: +{value} of {max}",
+    "helpText": "Credited {k} of {target} actions: reviewed submissions, accepted content remarks.",
+    "total": "Total: {total} % (maximum {cap} %)",
+    "plaque": "This is a reference figure. It is not grounds for HR decisions and does not affect pay.",
+    "notPoints": "These are not rating points: points are awarded for completed tasks and spent in the shop, while the index is recalculated nightly from assignments and learning activity.",
+    "history": "Last 12 months",
+    "historyEmpty": "No earlier calculations yet",
+    "forbidden": "No access to this person’s engagement index",
+    "notFound": "Person not found",
+    "loadFailed": "Could not load the index",
+    "retry": "Retry",
+    "backProfile": "My profile",
+    "backCard": "Person card"
   }
 }

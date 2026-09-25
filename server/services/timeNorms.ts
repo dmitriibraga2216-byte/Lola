@@ -442,6 +442,43 @@ export async function plannedSecondsFor(tx: TenantTx, s: Subject): Promise<numbe
 }
 
 /**
+ * «Плановий час» трека для блока «Призначені треки» карточки человека (docs/v2/38 §5.1, PR-35):
+ * сумма «Розрахункового часу» элементов **той версии курса, на которую человек записан** — уроков
+ * версии и тестов/практикумов в них, той же нормой, что у очереди проверки (`plannedSecondsFor`).
+ * `null` — ни у одного элемента нормы нет («—»). Только показ рядом с «Часом проходження»: ни
+ * в балл, ни в зачёт, ни в індекс залученості норма не входит (§7.14 (б), сквозная проверка 13).
+ */
+export async function versionPlannedSeconds(tx: TenantTx, versionIds: readonly string[]): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>(versionIds.map(id => [id, null]))
+  if (!versionIds.length) return out
+  const lessons = await tx.execute(sql`
+    select m.course_version_id::text as version_id, l.id::text as lesson_id, l.item_type, l.item_id::text as item_id
+      from lessons l join modules m on m.id = l.module_id
+     where m.course_version_id = any(${uuidArray(versionIds)})`) as unknown as { version_id: string, lesson_id: string, item_type: string, item_id: string | null }[]
+  const byVersion = new Map<string, Subject[]>()
+  for (const l of lessons) {
+    const subjects = byVersion.get(l.version_id) ?? []
+    subjects.push({ subjectType: 'lesson', subjectId: l.lesson_id })
+    if ((l.item_type === 'quiz' || l.item_type === 'workshop') && l.item_id) subjects.push({ subjectType: l.item_type, subjectId: l.item_id })
+    byVersion.set(l.version_id, subjects)
+  }
+  const all = [...byVersion.values()].flat()
+  const [meta, rows] = await Promise.all([elementsMeta(tx, all), normRows(tx, all)])
+  for (const [versionId, subjects] of byVersion) {
+    let sum: number | null = null
+    for (const s of subjects) {
+      const m = meta.get(keyOf(s))
+      if (!m) continue
+      const row = rows.get(keyOf(s))
+      const planned = plannedSeconds(row ? { ...valuesOf(row), autoSeconds: m.autoSeconds } : defaultNorm(m))
+      if (planned !== null) sum = (sum ?? 0) + planned
+    }
+    out.set(versionId, sum)
+  }
+  return out
+}
+
+/**
  * «Орієнтовний час» материала (`resources.estimated_minutes`) — поле автора: при сохранении
  * материала оно становится нормой каждого урока с этим материалом (`37` §3.5, «синхронизируется
  * в `author_seconds` при сохранении материала»). Последнее явное действие автора выигрывает:

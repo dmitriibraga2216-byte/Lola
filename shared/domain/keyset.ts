@@ -38,6 +38,12 @@ export const KEYSETS = {
   candidateBoard: ['at', 'uuid'],
   /** Люди: `created_at desc, id desc` (docs/16 §5.1). */
   people: ['at', 'uuid'],
+  /**
+   * Люди по індексу залученості (docs/v2/38 §5.2, PR-35): `round(rating_pct × 10) desc nulls last,
+   * created_at desc, id desc`. Индекс — `numeric(5,1)`, в курсоре — целые десятые; «не рассчитан»
+   * и «не видно смотрящему» — `-1`, то есть в конце списка, а не как ноль.
+   */
+  peopleByRating: ['int', 'at', 'uuid'],
   /** Очередь проверки: `-priority, submitted_at, id` по возрастанию (docs/v2/37 §10). */
   reviewQueue: ['int', 'at', 'uuid'],
   /** История платежей тенанта: `created_at desc, id desc` (docs/v2/35 §5.3). */

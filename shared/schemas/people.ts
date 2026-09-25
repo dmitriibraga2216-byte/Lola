@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { ORG_CONFLICT_KINDS, TAG_SCOPES } from '../enums'
 import { phoneSchema } from './auth'
-import { KEYSETS } from '../domain/keyset'
-import { keysetCursorSchema } from './keyset'
+import { KEYSETS, KEYSET_CURSOR_MAX, decodeKeyset } from '../domain/keyset'
+import { ENGAGEMENT_CAP } from '../domain/engagementIndex'
 import { personTimezoneSchema } from './activity'
 
 /** Метка (docs/16 §14.2): ≤ 40 знаков, без угловых скобок. */
@@ -55,7 +55,17 @@ export const personUpdateSchema = personCreateSchema.innerType().innerType().inn
   status: z.enum(['invited', 'active', 'suspended', 'archived']).optional(),
 }).refine(p => !p.hiredAt || !p.positionSince || p.positionSince >= p.hiredAt, { message: 'Не може бути раніше дати прийняття', path: ['positionSince'] })
 
-export const personListQuerySchema = z.object({
+/** Порог фильтра по індексу залученості: 0…130 % (docs/v2/38 §7.1 — потолок 130). */
+const ratingBound = z.coerce.number().min(0, 'Від 0 %').max(ENGAGEMENT_CAP, `До ${ENGAGEMENT_CAP} %`)
+
+/** Сортировки списка людей: по дате регистрации (по умолчанию) и по індексу залученості. */
+export const PEOPLE_SORTS = ['created', 'rating'] as const
+
+/**
+ * Фильтры списка людей без страницы и сортировки — они же «всі за фільтром» массового действия
+ * (`bulkSchema.filter`): выбор людей в списке и в массовом действии строится одной функцией.
+ */
+export const peopleFilterSchema = z.object({
   q: z.string().max(200).optional(),
   tab: z.enum(['active', 'blocked', 'all']).default('active'),
   locationId: z.string().uuid().optional(),
@@ -70,8 +80,29 @@ export const personListQuerySchema = z.object({
   activeFrom: z.string().date().optional(),
   activeTo: z.string().date().optional(),
   includeHidden: z.coerce.boolean().optional(),
-  cursor: keysetCursorSchema(KEYSETS.people).optional(),
+  /**
+   * Індекс залученості «нижче N» / «від N» (docs/v2/38 §5.2, §7.3) — только носителю
+   * `person.rating.view_others`, по людям его области; «не рассчитан» не попадает ни под один
+   * порог: это не ноль. Единственным условием архивирования или блокировки быть не может —
+   * `422 rating_only_filter_forbidden` (критерий §13 к. 3).
+   */
+  ratingLt: ratingBound.optional(),
+  ratingGte: ratingBound.optional(),
+})
+
+/**
+ * Курсор проверяется ключом той сортировки, которой он выдан: битый, самодельный или чужой —
+ * 400, а не первая страница (`shared/schemas/keyset.ts`).
+ */
+export const personListQuerySchema = peopleFilterSchema.extend({
+  /** `rating` — по индексу, только по убыванию (Р-35.3): «антитопа» первой страницей нет (§7.3). */
+  sort: z.enum(PEOPLE_SORTS).optional(),
+  cursor: z.string().max(KEYSET_CURSOR_MAX).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+}).superRefine((v, ctx) => {
+  if (v.cursor && decodeKeyset(v.sort === 'rating' ? KEYSETS.peopleByRating : KEYSETS.people, v.cursor) === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['cursor'], message: 'Курсор недійсний — оновіть список і гортайте спочатку' })
+  }
 })
 
 export const placementSchema = z.object({
@@ -161,15 +192,22 @@ export const importMappingSchema = z.object({
 export type PersonCreateInput = z.infer<typeof personCreateSchema>
 export type PersonUpdateInput = z.infer<typeof personUpdateSchema>
 
+/**
+ * Массовое действие (docs/16 §5.1): над отмеченными (`ids`) или над всеми по фильтру списка
+ * (`filter`, «Вибрати всіх за фільтром») — ровно одно из двух. Индекс залученості не может быть
+ * единственным условием архивирования (docs/v2/38 §7.3) — проверяет сервис по `filter`.
+ */
 export const bulkSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1).max(500),
+  ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+  filter: peopleFilterSchema.optional(),
   action: z.enum(['add_tag', 'set_location', 'assign_role', 'invite', 'archive']),
   tag: tagNameSchema.optional(),
   locationId: z.string().uuid().optional(),
   positionId: z.string().uuid().optional(),
   roleCode: z.string().max(50).optional(),
   reason: z.enum(['dismissal', 'transfer', 'mistake', 'other']).optional(),
-}).refine(b => b.action !== 'add_tag' || b.tag, { message: 'Вкажіть мітку', path: ['tag'] })
+}).refine(b => (b.ids ? 1 : 0) + (b.filter ? 1 : 0) === 1, { message: 'Позначте людей або оберіть «всі за фільтром»', path: ['ids'] })
+  .refine(b => b.action !== 'add_tag' || b.tag, { message: 'Вкажіть мітку', path: ['tag'] })
   .refine(b => b.action !== 'set_location' || b.locationId, { message: 'Оберіть точку', path: ['locationId'] })
   .refine(b => b.action !== 'assign_role' || b.roleCode, { message: 'Оберіть роль', path: ['roleCode'] })
 

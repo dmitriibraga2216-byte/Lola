@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { EngagementView } from '#shared/domain/engagementIndex'
+
 /** Профиль сотрудника по мокапу screens/Profile.html: инициалы, должность · точка, плитки, сертификаты, ссылки. */
-const { formatDate, formatShortDate } = useFormat()
+const { formatDate, formatShortDate, formatNumber } = useFormat()
 definePageMeta({ layout: 'learner' })
 
 const { t } = useI18n()
@@ -34,7 +36,17 @@ const dayLabel = (iso: string) => formatDate(new Date(iso), { weekday: 'short' }
 const tgLink = ref<{ url: string | null, token: string } | null>(null)
 const error = ref('')
 
+// Свій індекс залученості (docs/v2/38 §2, §5.3) — окремо від балів рейтингу (плитка вище, docs/33
+// D-069): інше число, інший екран. Збій цього запиту не ховає решту профілю.
+const engagement = ref<EngagementView | null>(null)
+const engagementText = computed(() => {
+  const v = engagement.value
+  return !v || v.total === null ? '—' : t('engagement.value', { value: formatNumber(v.total, { maximumFractionDigits: 1 }) })
+})
+
 onMounted(async () => {
+  const myId = me.value?.user.id
+  if (myId) api<EngagementView>(`/people/${myId}/rating`).then((v) => { engagement.value = v }).catch(() => { engagement.value = null })
   try {
     const [c, my, w, h] = await Promise.all([
       api<Cert[]>('/learning/certificates'),
@@ -119,6 +131,9 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
       <div v-else class="tile"><b>—</b><span>{{ t('profile.tiles.bonuses') }}</span></div>
       <div class="tile teal"><b>{{ counts?.done ?? '—' }}</b><span>{{ t('profile.tiles.done') }}</span></div>
     </div>
+    <NuxtLink v-if="engagement" to="/learn/profile/rating" :class="['engagement', { stale: engagement.stale }]">
+      <span>{{ t('person.engagement') }}</span><b>{{ engagementText }}</b><span class="more">{{ t('engagement.titleSelf') }} →</span>
+    </NuxtLink>
 
     <p v-if="error" class="error-text">{{ error }}</p>
 
@@ -210,6 +225,11 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
 .name { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: -0.01em; }
 .sub { margin: 2px 0 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
 .tiles { grid-template-columns: repeat(3, 1fr); margin-bottom: var(--space-5); }
+/* Індекс залученості (docs/v2/38 §5.3) — рядком під плитками: не бали, інше число й інший екран */
+.engagement { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; margin: calc(-1 * var(--space-3)) 0 var(--space-5); padding: var(--space-3) var(--space-4); border-radius: var(--radius-m); background: var(--color-teal-soft); color: var(--color-ink); text-decoration: none; }
+.engagement b { color: var(--color-teal-ink); font-weight: 900; }
+.engagement.stale b { color: var(--color-ink-faint); }
+.engagement .more { margin-left: auto; color: var(--color-teal-ink); font-weight: 700; font-size: var(--font-size-body-s); }
 .tile b { font-size: 24px; }
 a.tile { color: inherit; text-decoration: none; }
 .bonus-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); background: var(--color-sun-soft); border: 2px solid var(--color-sun); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); }

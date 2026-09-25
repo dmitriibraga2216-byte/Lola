@@ -567,10 +567,17 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | POST | `/org-structure/nodes/:id/archive` | архивация (физического удаления узла нет); `409 has_children`, `409 has_holders` |
 | POST | `/org-structure/nodes/:id/restore` | восстановление в течение 90 дней; `409 parent_archived` |
 | POST | `/org-structure/nodes/:id/assignments` | привязка человека: `{userId, isPrimary?, roleInNode?, startedAt?, makeNamed?, transferPrimary?}`; `409 primary_exists` (в деталях — узел, где основное подчинение уже есть), `422 user_archived`, `422 validation_failed` (`detail=kind` — кандидата в дерево не ставят) |
-| DELETE | `/org-structure/assignments/:id` | снятие с узла: `{endedReason?}`; строка журнала не удаляется, а закрывается |
+| DELETE | `/org-structure/assignments/:id` | снятие с узла: `{endedReason?}`; строка журнала не удаляется, а закрывается. Руководитель снимает людей только в своей ветке — `403 forbidden` (PR-31) |
 | GET | `/org-structure/manager/:userId` | `{managerUserId, source, nodeId, chain}` — ответ `resolveManager()`; заодно пишет `unit_missing`, `no_manager` и `manager_mismatch` в `org_conflicts` |
 | GET | `/org-structure/subordinates/:userId` | `?deep=true` — подчинённые по проекции `org_manager_map` |
-| GET/POST | `/org-structure/snapshots` | список и создание снимка (`org.structure.import`). **Откат к снимку и импорт CSV — PR-31**, в этом контракте их пока нет |
+| GET | `/org-structure/snapshots` | снимки, новые сверху (`org.structure.import`): `?cursor&limit`, ответ `{rows, cursor}` — ключевой курсор §4.1; в строке — вид (`manual`, `pre_import`, `pre_bulk_move`, `auto_daily`), подпись, число узлов, автор |
+| POST | `/org-structure/snapshots` | снимок «руками» `{label}` (`org.structure.import`) |
+| POST | `/org-structure/snapshots/:id/rollback` | откат к снимку (PR-31, `v2/32` §7 п. 7, критерий 7): дерево и активные назначения — как в снимке, уволенные после снимка не возвращаются, перед откатом — снимок `pre_bulk_move`. Идёт в запросе, отвечает итогом `{nodes, archived, assignmentsCreated, assignmentsEnded, assignmentsUpdated, dismissedSkipped, preSnapshotId}`. `409 rollback_in_progress`, `409 import_in_progress`, `422 snapshot_invalid`, чужой тенант — `404` |
+| POST | `/org-structure/import` | импорт CSV, шаг «загрузка» (PR-31, `v2/32` §6.2, §9): multipart `file` → разбор, сопоставление колонок по заголовкам, предпросмотр по строкам (`create` / `update` / `same` / `error`, коды ошибок и предупреждений). В дерево ничего не пишет. `422 file_invalid`, `file_encoding`, `file_empty`, `too_many_rows`, `file_too_large` |
+| GET | `/org-structure/import/:id` | предпросмотр и ход применения (`ready` → `queued` → `applying` → `applied` \| `failed`), итог — в `stats` |
+| POST | `/org-structure/import/:id/mapping` | `{mapping?, options?}` — сопоставление колонок и опции («Створювати відсутні посади», «Архівувати вузли, яких немає у файлі», «Зробити знімок перед імпортом» — при > 50 строках всегда включён), повторная проверка тех же строк. `409 not_ready`, `422 mapping_invalid` |
+| POST | `/org-structure/import/:id/apply` | запуск фоновой задачи `org.import_apply` — весь файл одной транзакцией, снимок `pre_import`, конфликты отклонённых строк, письмо `org_structure_import_finished`; ответ `{jobId}`. `409 import_in_progress`, `409 not_ready`, `422 nothing_to_apply`, `422 mapping_invalid`, `503 queue_unavailable` |
+| GET | `/org-structure/export` | «Оргструктура» — CSV в формате импорта (UTF-8 с BOM, `;`, `v2/32` §9) |
 
 ### Кандидаты и воронка (`docs/v2/28-recruiting-candidates.md` §10, PR-13)
 

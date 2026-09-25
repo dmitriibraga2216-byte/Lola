@@ -3,7 +3,7 @@ import { requireScope } from '../../../services/access'
 import { createSnapshot } from '../../../services/orgStructure'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
-/** POST /org-structure/snapshots (docs/v2/32 §10): снимок «руками». Откат — PR-31. */
+/** POST /org-structure/snapshots (docs/v2/32 §10): снимок «руками» («Знімок»). */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'org.structure.import')
   const p = orgSnapshotCreateSchema.safeParse(await readBody(event))

@@ -67,6 +67,8 @@ export const KEYSETS = {
    * `deleted_at desc, id desc` (в `pending_delete` дата удаления обязательна, `media_assets_purge_chk`).
    */
   storageFiles: ['at', 'uuid'],
+  /** Снимки оргструктуры: `created_at desc, id desc` (docs/v2/32 §5.1 «Знімки», PR-31). */
+  orgSnapshots: ['at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

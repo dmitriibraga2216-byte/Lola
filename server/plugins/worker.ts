@@ -56,6 +56,12 @@ export default defineNitroPlugin(async () => {
       await fireTimer(data.tenantId, data.stateId)
     })
     await perTenant<{ tenantId: string, assignmentId: string }>('assignment.expand', data => expandAssignment(data.tenantId, data.assignmentId))
+    // docs/v2/32 §11 `org.import_apply` (PR-31): импорт оргструктуры — весь файл одной транзакцией
+    await perTenant<{ tenantId: string, jobId: string }>('org.import_apply', async (data) => {
+      const { applyOrgImport } = await import('../services/orgImport')
+      const r = await applyOrgImport(data.tenantId, data.jobId)
+      if (r) console.log(`[org.import_apply] ${data.tenantId}:`, r)
+    })
     // Удаление тенанта через 30 дней после команды оператора (docs/25 §8); обработчик сам проверяет срок и статус
     await work<{ tenantId: string }>('tenant.purge', async (jobs) => {
       const { runTenantPurge } = await import('../services/platformTenants')

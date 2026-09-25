@@ -4,7 +4,7 @@ import { users } from '../db/schema'
 import type { TenantTx } from '../utils/withTenant'
 import { personById } from './repo/people'
 import { DEFAULT_MAX_OPEN_ITEMS } from './reviewRules'
-import { resolveManager } from './orgManager'
+import { escalationChainOf } from './orgManager'
 import type { ReviewerLoad } from './reviewRules'
 
 /**
@@ -113,18 +113,17 @@ export async function namesOf(tx: TenantTx, ids: (string | null | undefined)[]):
 
 /**
  * Руководители человека снизу вверх — кому уходит нарушение срока и эскалация (`37` §7.19,
- * §12 «эскалация на руководителя, который сам и есть проверяющий → уровнем выше»).
+ * §12 «эскалация на руководителя, который сам и есть проверяющий → уровнем выше по
+ * `org_nodes`»), и запасной проверяющий распределения (`37` §7.16).
  *
- * Единственный источник истины о руководителе — `resolveManager()` (П-16.4, PR-30): дерево
- * подчинения, если тенант объявил его источником истины, иначе держатель точки, иначе роль в
- * области. Цепочка вверх есть только у дерева; у точки уровня выше нет, и следующим шагом
- * становится администратор тенанта (`tenantAdmins`) — это и есть «фолбэк на администратора»
- * из плана PR-19, который снимает PR-31 эскалацией по дереву.
+ * Первый — `resolveManager()` (П-16.4, PR-30), дальше — уровни выше по дереву
+ * (`escalationChainOf()`, PR-31): держатели руководящих точек над узлом руководителя. До PR-31
+ * у руководителя точки уровня выше не было, и следующим шагом сразу шёл администратор тенанта —
+ * «фолбэк на администратора» из плана PR-19. Теперь администратор — только когда выше в дереве
+ * никого нет (`escalationTarget`).
  */
 export async function managerChainOf(tx: TenantTx, tenantId: string, userId: string): Promise<string[]> {
-  const r = await resolveManager(tx, userId, { tenantId })
-  if (r.chain.length) return r.chain.filter(id => id !== userId)
-  return r.managerUserId && r.managerUserId !== userId ? [r.managerUserId] : []
+  return (await escalationChainOf(tx, userId, { tenantId })).map(s => s.id)
 }
 
 /**
@@ -147,16 +146,20 @@ export async function tenantAdmins(tx: TenantTx): Promise<string[]> {
   return rows.map(r => r.id)
 }
 
+/** Откуда адресат эскалации: прямой руководитель, уровень выше по дереву, администратор. */
+export type EscalationSource = 'manager' | 'tree' | 'admin'
+
 /**
- * Кому уходят нарушение срока и эскалация (`37` §7.19): руководитель области проверяемого, а
- * если он сам и есть проверяющий или сам сдал эту работу — уровнем выше; выше некуда —
- * администратор тенанта. `source` пишется в `review_sla_events.details`: по нему видно, что
- * сработал фолбэк, а не дерево.
+ * Кому уходят нарушение срока и эскалация (`37` §7.19, §12): руководитель области
+ * проверяемого, а если он сам и есть проверяющий, сам сдал эту работу или уже не работает —
+ * **вверх по дереву до ближайшего держателя** руководящей точки (PR-31); выше в дереве никого —
+ * администратор тенанта. `source` пишется в `review_sla_events.details.target`: по нему видно,
+ * дошла ли эскалация по дереву или упала на администратора.
  */
-export async function escalationTarget(tx: TenantTx, item: { tenantId: string, userId: string, assignedReviewerId: string | null }): Promise<{ id: string, source: 'manager' | 'admin' } | null> {
+export async function escalationTarget(tx: TenantTx, item: { tenantId: string, userId: string, assignedReviewerId: string | null }): Promise<{ id: string, source: EscalationSource } | null> {
   const skip = new Set([item.userId, item.assignedReviewerId].filter((v): v is string => !!v))
-  for (const id of await managerChainOf(tx, item.tenantId, item.userId)) {
-    if (!skip.has(id) && await isActiveEmployee(tx, id)) return { id, source: 'manager' }
+  for (const step of await escalationChainOf(tx, item.userId, { tenantId: item.tenantId })) {
+    if (!skip.has(step.id) && await isActiveEmployee(tx, step.id)) return step
   }
   for (const id of await tenantAdmins(tx)) {
     if (!skip.has(id)) return { id, source: 'admin' }

@@ -358,7 +358,7 @@ export async function listImportJobs(ctx: Ctx) {
 
 export async function getImportJob(ctx: Ctx, jobId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [job] = await tx.select().from(importJobs).where(eq(importJobs.id, jobId))
+    const [job] = await tx.select().from(importJobs).where(and(eq(importJobs.id, jobId), eq(importJobs.kind, 'users'))) // только люди: org_structure/task_audience сюда не попадают (PR-31)
     return job ?? null
   })
 }

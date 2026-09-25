@@ -1,11 +1,13 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
-import { locations, orgNodeAssignments, orgNodes, orgStructureSnapshots, orgUnits, positions, userPlacements, users } from '../db/schema'
+import { locations, orgNodeAssignments, orgNodes, orgUnits, positions, userPlacements, users } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { logOrgConflict } from './journals'
 import { rebuildManagerMap, resolveManager, resolveManagers } from './orgManager'
 import { applyPositionRoles } from './positionRoleMap'
+import { takeSnapshot } from './orgTreeWrite'
+import { ORG_BULK_MOVE_SNAPSHOT_NODES, ORG_MAX_DEPTH, ORG_MAX_ROOTS, orgNodeLabel } from '../../shared/domain/orgLayout'
 import type { OrgAssignmentEndReason, OrgAssignmentRole, OrgNodeType, OrgSnapshotKind } from '../../shared/enums'
 
 /**
@@ -17,17 +19,17 @@ import type { OrgAssignmentEndReason, OrgAssignmentRole, OrgNodeType, OrgSnapsho
  * Подразделение (`org_units`) и должность (`positions`) на этот вопрос не отвечают вовсе:
  * кухари точки А подчиняются шефу точки А, а не подразделению «Кухня» (`32` §3.1).
  *
- * **Чего здесь нет и не будет в этом PR** (`45-plan.md`, PR-31): импорта CSV, отката к снимку
- * и сравнения снимков. `org_structure_snapshots` заведена, снимок создаётся — читает его
- * следующий PR.
+ * Импорт CSV и выгрузка — `server/services/orgImport.ts`, снимки и откат —
+ * `server/services/orgSnapshots.ts` (PR-31); общая запись дерева целиком —
+ * `server/services/orgTreeWrite.ts`.
  */
 
 interface Ctx { tenantId: string, actorId: string | null }
 
 /** Максимум корней на тенант (`32` §7 п. 1 [решение]): управляющая компания + операционная ветка. */
-const MAX_ROOTS = 10
+const MAX_ROOTS = ORG_MAX_ROOTS
 /** Максимальная глубина (`32` §7 п. 1, Г-32.5): ветка эталона — 4–5 уровней. */
-export const MAX_DEPTH = 12
+export const MAX_DEPTH = ORG_MAX_DEPTH
 
 export type OrgError =
   | 'not_found' | 'validation_failed' | 'depth_exceeded' | 'cycle_detected' | 'stale_tree'
@@ -49,7 +51,7 @@ export interface NodeInput {
 }
 
 /** Метка ltree: буквы, цифры и подчёркивание. Берём id узла — она уникальна и не меняется. */
-const label = (id: string) => `n${id.replace(/-/g, '')}`
+const label = orgNodeLabel
 
 async function nodeById(tx: TenantTx, id: string) {
   const [n] = await tx.select().from(orgNodes).where(eq(orgNodes.id, id))
@@ -89,6 +91,7 @@ export async function listTree(ctx: Ctx, opts: { mode?: 'admin' | 'view', includ
     // Держатели узлов. `is_hidden` человек в витрине не показывается (`16` §7.5, `32` §12 п. 6),
     // но в расчёте руководителя участвует — поэтому фильтр стоит здесь, а не в выборке узлов.
     const holders = await tx.select({
+      assignmentId: orgNodeAssignments.id,
       nodeId: orgNodeAssignments.nodeId,
       userId: orgNodeAssignments.userId,
       fullName: users.fullName,
@@ -102,10 +105,11 @@ export async function listTree(ctx: Ctx, opts: { mode?: 'admin' | 'view', includ
       .where(isNull(orgNodeAssignments.endedAt))
       .orderBy(asc(users.fullName))
 
-    const byNode = new Map<string, { userId: string, fullName: string, email: string | null, roleInNode: string, isPrimary: boolean }[]>()
+    // Идентификатор назначения нужен только конструктору — «Зняти з вузла» (`32` §10 `DELETE /assignments/:id`).
+    const byNode = new Map<string, { assignmentId?: string, userId: string, fullName: string, email: string | null, roleInNode: string, isPrimary: boolean }[]>()
     for (const h of holders) {
       if (mode === 'view' && h.isHidden) continue
-      byNode.set(h.nodeId, [...(byNode.get(h.nodeId) ?? []), { userId: h.userId, fullName: h.fullName, email: h.email, roleInNode: h.roleInNode, isPrimary: h.isPrimary }])
+      byNode.set(h.nodeId, [...(byNode.get(h.nodeId) ?? []), { ...(mode === 'admin' ? { assignmentId: h.assignmentId } : {}), userId: h.userId, fullName: h.fullName, email: h.email, roleInNode: h.roleInNode, isPrimary: h.isPrimary }])
     }
 
     const build = (parentId: string | null): unknown[] => rows
@@ -254,9 +258,16 @@ export async function moveNode(ctx: Ctx, id: string, input: { parentId: string |
     }
 
     const newDepth = parent ? parent.depth + 1 : 1
-    const deepestRows = await tx.execute(sql`select coalesce(max(depth), ${node.depth})::int as deepest from org_nodes where path <@ ${node.path}::ltree`) as unknown as { deepest: number }[]
+    const deepestRows = await tx.execute(sql`select coalesce(max(depth), ${node.depth})::int as deepest, count(*)::int as size from org_nodes where path <@ ${node.path}::ltree`) as unknown as { deepest: number, size: number }[]
     const subtreeHeight = input.keepChildren ? 0 : (deepestRows[0]?.deepest ?? node.depth) - node.depth
     if (newDepth + subtreeHeight > MAX_DEPTH) return { ok: false as const, code: 'depth_exceeded' as const }
+
+    // Массовое перемещение (> 20 узлов) — снимок перед ним, чтобы неудачный drop можно было
+    // откатить (`32` §7 п. 7, вид `pre_bulk_move`). Ветка переезжает целиком либо её дети
+    // поднимаются к деду — в обоих случаях пути переписываются у всего поддерева.
+    if ((deepestRows[0]?.size ?? 0) > ORG_BULK_MOVE_SNAPSHOT_NODES) {
+      await takeSnapshot(tx, ctx, { label: node.title, kind: 'pre_bulk_move' })
+    }
 
     const oldPath = node.path
     if (input.keepChildren) {
@@ -426,6 +437,17 @@ export async function endAssignment(ctx: Ctx, assignmentId: string, endedReason:
 }
 
 /**
+ * Узел назначения — чтобы проверить «свою ветку» до снятия человека (`32` §2): руководитель
+ * снимает людей только в поддереве, где он держатель, как и привязывает.
+ */
+export async function assignmentNodeOf(ctx: Ctx, assignmentId: string): Promise<string | null> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [a] = await tx.select({ nodeId: orgNodeAssignments.nodeId }).from(orgNodeAssignments).where(eq(orgNodeAssignments.id, assignmentId))
+    return a?.nodeId ?? null
+  })
+}
+
+/**
  * Состояние узла — производная от активных держателей (`32` §4): `occupied`, пока есть хоть
  * один; `vacant`, когда закрылся последний. Узел при этом остаётся в дереве, и подчинённые
  * ветки не двигаются — это и есть разница между «вакансией в структуре» и архивацией.
@@ -458,7 +480,16 @@ async function notifyManagerChanges(tx: TenantTx, ctx: Ctx, path: string, seedUs
   const affected = await tx.execute(sql`
     select distinct a.user_id from org_node_assignments a join org_nodes n on n.id = a.node_id
     where a.ended_at is null and n.path <@ ${path}::ltree`) as unknown as { user_id: string }[]
-  const ids = [...new Set([...seedUserIds, ...affected.map(r => r.user_id)])]
+  await notifyManagerChangesFor(tx, ctx, [...seedUserIds, ...affected.map(r => r.user_id)], vars)
+}
+
+/**
+ * То же для заранее известного круга людей — импорт и откат меняют дерево целиком, и круг
+ * задаёт вызывающий (все, кто в дереве до и после). Уведомления — по разнице сохранённой
+ * карты и свежего резолва, карта пересобирается тут же.
+ */
+export async function notifyManagerChangesFor(tx: TenantTx, ctx: Ctx, userIds: string[], vars: { nodeTitle?: string, userName?: string } = {}): Promise<void> {
+  const ids = [...new Set(userIds)]
   if (!ids.length) return
   const before = new Map((await tx.execute(sql`
     select user_id, manager_user_id from org_manager_map
@@ -538,32 +569,12 @@ export async function validateStructure(tenantId: string): Promise<number> {
   })
 }
 
-/** Снимок дерева (`32` §7 п. 7). Откат по снимку — PR-31; здесь только создание и список. */
+/**
+ * Снимок дерева «руками» (`32` §7 п. 7, кнопка «Знімок»). Список снимков и откат к ним —
+ * `server/services/orgSnapshots.ts`.
+ */
 export async function createSnapshot(ctx: Ctx, input: { label: string, kind?: OrgSnapshotKind }) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const nodes = await tx.select().from(orgNodes).orderBy(asc(orgNodes.path))
-    const holders = await tx.select().from(orgNodeAssignments).where(isNull(orgNodeAssignments.endedAt))
-    const [snap] = await tx.insert(orgStructureSnapshots).values({
-      tenantId: ctx.tenantId,
-      label: input.label,
-      kind: input.kind ?? 'manual',
-      tree: { nodes, holders },
-      nodeCount: nodes.length,
-      createdBy: ctx.actorId,
-    }).returning({ id: orgStructureSnapshots.id, label: orgStructureSnapshots.label, kind: orgStructureSnapshots.kind, nodeCount: orgStructureSnapshots.nodeCount, createdAt: orgStructureSnapshots.createdAt })
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'org_structure.snapshot', entity: 'org_structure', entityId: snap!.id, after: { label: input.label, nodeCount: nodes.length } })
-    return snap!
-  })
-}
-
-export async function listSnapshots(ctx: Ctx) {
-  return withTenant(ctx.tenantId, ctx.actorId, tx => tx.select({
-    id: orgStructureSnapshots.id,
-    label: orgStructureSnapshots.label,
-    kind: orgStructureSnapshots.kind,
-    nodeCount: orgStructureSnapshots.nodeCount,
-    createdAt: orgStructureSnapshots.createdAt,
-  }).from(orgStructureSnapshots).orderBy(sql`${orgStructureSnapshots.createdAt} desc`).limit(50))
+  return withTenant(ctx.tenantId, ctx.actorId, tx => takeSnapshot(tx, ctx, { label: input.label, kind: input.kind ?? 'manual' }))
 }
 
 /**

@@ -1,5 +1,8 @@
 import { z } from 'zod'
 import { ORG_ASSIGNMENT_END_REASONS, ORG_ASSIGNMENT_ROLES, ORG_NODE_TYPES, ORG_SNAPSHOT_KINDS } from '../enums'
+import { KEYSETS } from '../domain/keyset'
+import { ORG_IMPORT_COLUMNS } from '../domain/orgImport'
+import { keysetCursorSchema } from './keyset'
 
 /**
  * Контракты оргструктуры (docs/v2/32-org-structure.md §6, §10). Один источник для клиента
@@ -57,6 +60,29 @@ export const orgTreeQuerySchema = z.object({
   mode: z.enum(['admin', 'view']).optional(),
   includeArchived: z.coerce.boolean().optional(),
   includeVacant: z.coerce.boolean().optional(),
+})
+
+/** Список снимков — ключевой курсор `created_at desc, id desc` (`docs/04` §4.1). */
+export const orgSnapshotListQuerySchema = z.object({
+  cursor: keysetCursorSchema(KEYSETS.orgSnapshots).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+})
+
+/** Опции импорта CSV (`32` §6.2): «Створювати відсутні посади», «Архівувати…», «Зробити знімок…». */
+export const orgImportOptionsSchema = z.object({
+  createPositions: z.boolean().optional(),
+  archiveMissing: z.boolean().optional(),
+  snapshot: z.boolean().optional(),
+})
+
+/**
+ * Шаги «сопоставление колонок» и «опции» (`32` §6.2): заголовок файла → колонка формата `32`
+ * §9 или пустая строка («не імпортувати»). Одна колонка формата — один заголовок: проверяет
+ * сервис (`422 mapping_invalid`), здесь — только допустимые значения.
+ */
+export const orgImportRemapSchema = z.object({
+  mapping: z.record(z.string().max(200), z.union([z.enum(ORG_IMPORT_COLUMNS), z.literal('')])).optional(),
+  options: orgImportOptionsSchema.optional(),
 })
 
 export type OrgNodeCreate = z.infer<typeof orgNodeCreateSchema>

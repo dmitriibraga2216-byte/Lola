@@ -22,6 +22,7 @@ const admin = postgres(process.env.DATABASE_ADMIN_URL ?? 'postgres://lola:lola_d
 test.beforeEach(resetOtp)
 
 async function cleanup() {
+  await admin`delete from import_jobs where kind = 'org_structure' and file_name = 'e2e-org-import.csv'`
   const nodes = await admin`select id from org_nodes where title like ${`${PREFIX}%`} order by depth desc`
   for (const n of nodes) {
     await admin`delete from org_node_assignments where node_id = ${n.id}`
@@ -92,4 +93,45 @@ test('рядовий співробітник бачить лише вітрин
   await expect(page.getByRole('tab', { name: 'Адмін — конструктор' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Додати дочірній вузол' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Архівувати' })).toHaveCount(0)
+})
+
+/**
+ * PR-31 (docs/v2/32 §6.2, §9): «Імпорт» — шаги загрузки и предпросмотра на экране. Применение
+ * идёт фоновой задачей, а e2e поднимает приложение без воркера (`WORKER_ENABLED=0`), поэтому
+ * здесь — только то, что видит администратор до запуска: сопоставление колонок и построчный
+ * предпросмотр, где висячий узел помечен ошибкой, а не попадает в дерево. Применение, откат и
+ * конфликты проверяет `tests/integration/v2-org-import.spec.ts`.
+ */
+test('адмін завантажує CSV: попередній перегляд показує «створити» і висячий вузол як помилку', async ({ page, request }) => {
+  await apiLogin(request, ADMIN_PHONE)
+  // Выгрузка — тот же формат, что и импорт: UTF-8 с BOM, `;`, первая колонка — ключ узла.
+  const exp = await request.get('/api/v1/org-structure/export')
+  expect(exp.status()).toBe(200)
+  const body = await exp.body()
+  expect([...body.subarray(0, 3)]).toEqual([0xEF, 0xBB, 0xBF])
+  expect(body.subarray(3).toString('utf8').startsWith('external_key;parent_external_key;')).toBe(true)
+
+  const csv = [
+    'external_key;parent_external_key;title;is_manager_point',
+    `E2E-ORG-1;;${PREFIX} Імпорт корінь;так`,
+    `E2E-ORG-2;E2E-NOPE;${PREFIX} Сирота;ні`,
+  ].join('\r\n')
+
+  await loginViaUi(page, ADMIN_PHONE)
+  await page.goto('/org-structure')
+  await page.getByRole('tab', { name: 'Адмін — конструктор' }).click()
+  await page.getByRole('button', { name: 'Імпорт', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Імпорт оргструктури' })
+  await dialog.getByLabel('Файл CSV').setInputFiles({ name: 'e2e-org-import.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') })
+  await dialog.getByRole('button', { name: 'Завантажити' }).click()
+
+  await expect(dialog.getByText('Створити: 1')).toBeVisible()
+  await expect(dialog.getByText('Помилок: 1')).toBeVisible()
+  await expect(dialog.getByText('Батьківський вузол «E2E-NOPE» не знайдено')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Запустити імпорт' })).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Закрити' }).last().click()
+
+  // Предпросмотр в дерево не пишет ничего.
+  const written = await admin`select 1 from org_nodes where external_key in ('E2E-ORG-1', 'E2E-ORG-2')`
+  expect(written.length).toBe(0)
 })

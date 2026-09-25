@@ -290,6 +290,8 @@ export function emailDefaultEnabled(code: string): boolean {
     || /_manager$/.test(code)
     // docs/v2/37 §8: нарушение срока проверки и эскалация — «push + e-mail» руководителю области
     || /^review_(sla_breach|escalated)$/.test(code)
+    // docs/v2/32 §8: итог импорта инициатору и откат администраторам — канал e-mail (PR-31)
+    || /^org_structure_(import_finished|rollback)$/.test(code)
     || eventClassOf(code) === 'managerDigest'
     || /^(scheduled_report|report_export_)/.test(code)
 }

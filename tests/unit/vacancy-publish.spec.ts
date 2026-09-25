@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { JOB_BOARD_ADAPTERS, REVOKED_STUB_SECRET, adapterFor, payloadHash } from '../../server/services/jobBoardAdapter'
 import type { JobBoardPublishPayload } from '../../server/services/jobBoardAdapter'
-import { STUB_AI_PROVIDER } from '../../server/services/vacancyAi'
+import { VACANCY_CRITERIA_PROMPT, VACANCY_TEXT_PROMPT } from '../../server/services/ai/prompts'
 import {
   JOB_BOARD_PROVIDERS, VACANCY_AI_CRITERIA_MAX, VACANCY_AI_CRITERIA_MIN, VACANCY_AI_TEXT_MAX_CHARS,
   VACANCY_PUBLICATION_STATES, VACANCY_PUBLISH_RETRY_DELAYS_SEC,
@@ -100,9 +100,11 @@ describe('состояния публикации (§3.8, пометка-исп�
   })
 })
 
+// С PR-27 заглушка — ответ профиля `driver = 'stub'` шлюза модели: `stub()` промптов
+// `vacancy.text` и `vacancy.criteria` (`server/services/ai/prompts.ts`), текст прежний.
 describe('провайдер-заглушка генерации текста (§7.10, §7.11)', () => {
   it('текст блока не длиннее лимита символов', async () => {
-    const r = await STUB_AI_PROVIDER.generateText({
+    const r = VACANCY_TEXT_PROMPT.stub({
       target: 'description', tone: null, title: 'v2-17 Бариста', city: 'Київ', employmentType: 'full_time',
       workFormat: 'on_site', experienceLevel: 'none', educationLevel: 'none',
       siblingBlocks: {}, language: 'uk',
@@ -112,7 +114,7 @@ describe('провайдер-заглушка генерации текста (�
   })
 
   it('черновик критериев — от 3 до 8 строк, без сохранения (§7.11)', async () => {
-    const r = await STUB_AI_PROVIDER.generateCriteria({
+    const r = VACANCY_CRITERIA_PROMPT.stub({
       title: 'v2-17 Бариста', city: 'Київ', employmentType: 'full_time',
       requirementsHtml: '<p>Досвід у кав\'ярні</p>', dutiesHtml: null, language: 'uk',
     })
@@ -126,8 +128,8 @@ describe('провайдер-заглушка генерации текста (�
       target: 'requirements' as const, tone: null, title: 'v2-17 Офіціант', city: null, employmentType: null,
       workFormat: null, experienceLevel: null, educationLevel: null, siblingBlocks: {}, language: 'uk' as const,
     }
-    const a = await STUB_AI_PROVIDER.generateText(input)
-    const b = await STUB_AI_PROVIDER.generateText(input)
+    const a = VACANCY_TEXT_PROMPT.stub(input)
+    const b = VACANCY_TEXT_PROMPT.stub(input)
     expect(a.html).toBe(b.html)
   })
 })

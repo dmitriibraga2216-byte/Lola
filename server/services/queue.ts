@@ -79,6 +79,8 @@ export async function getBoss(): Promise<PgBoss> {
       // импорт закрывается `failed` с письмом инициатору, дерево не тронуто (одна транзакция), а
       // повтор того же файла — осознанное действие человека, не очереди
       await b.createQueue('org.import_apply', { retryLimit: 0, expireInSeconds: 1800 })
+      // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход 90 дней, строка 400 дней
+      await b.createQueue('ai.calls_cleanup', { retryLimit: 2, expireInSeconds: 900 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -141,6 +143,7 @@ export async function getBoss(): Promise<PgBoss> {
       // раз в 30 мин (§11 vacancy.publication_health), всплеск блокировок — раз в 10 мин (§7.8)
       await b.schedule('vacancy.publication_health', '*/30 * * * *', {}, { singletonKey: 'vacancy.publication_health' })
       await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
+      await b.schedule('ai.calls_cleanup', '10 4 * * *', {}, { singletonKey: 'ai.calls_cleanup', tz: 'Europe/Kyiv' })
       return b
     })
   }

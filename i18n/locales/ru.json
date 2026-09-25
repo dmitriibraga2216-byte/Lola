@@ -3538,7 +3538,8 @@
       "storage_pending_upload_expired": "Файл не удалось дослать",
       "storage_bulk_delete_done": "Файлы удалены из хранилища",
       "content_time_deviation": "Отклонение времени от нормы",
-      "absence_deadline_shifted": "Дедлайн перенесён из-за отсутствия"
+      "absence_deadline_shifted": "Дедлайн перенесён из-за отсутствия",
+      "ai_provider_down": "Провайдер ИИ недоступен"
     }
   },
   "ntpl": {

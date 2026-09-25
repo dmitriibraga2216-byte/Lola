@@ -11,7 +11,8 @@ import { can, type Access } from './access'
 import { effectiveRoles } from './activeRole'
 import { recordAudit } from './audit'
 import { slugify } from './courses'
-import { embeddingProvider } from './embeddings'
+import { embedModelId, embedTexts } from './ai/gateway'
+import { LIBRARY_EMBEDDING_PROMPT } from './ai/prompts'
 import { blocksToText } from './knowledge'
 import { enqueueNotification } from './notifications'
 import { resourcePublishChecks } from './resources'
@@ -385,7 +386,8 @@ export function bodyStatsSql(body: SQL): SQL {
  * уходит в гибрид: к полнотексту добавляется векторный поиск по `embedding` (тело последней
  * версии, только векторы текущей модели — векторы разных моделей несравнимы), результаты
  * сливаются по RRF, лимит 50. Вектор запроса считается до транзакции: провайдер модели бывает
- * медленным, а транзакция его не ждёт.
+ * медленным, а транзакция его не ждёт. Считает его шлюз модели (`ai/gateway.ts`, PR-27) — как и
+ * вектор модуля, одной строкой `ai_calls` на запрос.
  */
 async function searchIds(tx: TenantTx, conds: (SQL | undefined)[], text: string, limit: number, queryVector: { vec: number[], model: string } | null): Promise<string[]> {
   const tsq = prefixTsQuery(text)
@@ -414,9 +416,13 @@ export async function listModules(actor: LibraryActor, q: LibraryListQuery): Pro
   const text = q.q?.trim()
   let queryVector: { vec: number[], model: string } | null = null
   if (text && isHybridQuery(text)) {
-    const provider = embeddingProvider(LIBRARY_LIMITS.embeddingDims)
-    const [vec] = await provider.embed([text])
-    if (vec) queryVector = { vec, model: provider.id }
+    // Вектор запроса — через шлюз модели (PR-27): строка `ai_calls` на поиск, вне тарифа.
+    // Метка — модели, которая реально ответила: сравниваются только векторы той же модели
+    const r = await embedTexts({ tenantId: actor.tenantId, actorId: actor.actorId }, {
+      prompt: LIBRARY_EMBEDDING_PROMPT, texts: [text], dims: LIBRARY_LIMITS.embeddingDims, ref: { kind: 'search_query', id: null },
+    })
+    const vec = r.ok ? r.vectors[0] : null
+    if (r.ok && vec) queryVector = { vec, model: r.model }
   }
   return withTenant(actor.tenantId, actor.actorId, async (tx) => {
     const conds = filterConditions(q)
@@ -1015,33 +1021,46 @@ async function enqueueHotfixPropagation(tenantId: string, moduleId: string, vers
 /**
  * Пересчёт эмбеддингов по телу **последней опубликованной версии** (§7.8), батч 20 (§11).
  * Берёт указанные модули или те, чей вектор пуст либо посчитан другой моделью
- * (`embedding_model` ≠ текущему провайдеру) — так смена провайдера сама находит устаревшие
- * строки. Без ключа работает заглушка (`embeddings.ts`). Возвращает число обновлённых модулей.
+ * (`embedding_model` ≠ модели текущего профиля) — так смена провайдера сама находит устаревшие
+ * строки. Возвращает число обновлённых модулей.
+ *
+ * Модель — через шлюз (`ai/gateway.ts#embedTexts`, PR-27): профиль роли `embed` (по умолчанию —
+ * заглушка), одна строка `ai_calls` на батч, вне тарифа. Вызов идёт **между** двумя короткими
+ * транзакциями: провайдер бывает медленным, а транзакция его не ждёт. Метка модели у вектора —
+ * того профиля, который реально ответил (запасной пометит своей, и следующий пересчёт её найдёт).
  */
 export async function refreshLibraryEmbeddings(tenantId: string, moduleIds?: string[]): Promise<number> {
-  const provider = embeddingProvider(LIBRARY_LIMITS.embeddingDims)
+  const dims = LIBRARY_LIMITS.embeddingDims
+  const current = await embedModelId(tenantId, dims)
+  if (!current) return 0 // у роли `embed` нет активного профиля — считать векторы нечем
+  const rows = await withTenant(tenantId, null, tx => tx.select({
+    id: libraryModules.id, title: libraryModules.title, summary: libraryModules.summary, tags: libraryModules.tags,
+    plainText: resourceVersions.plainText,
+  }).from(libraryModules)
+    .innerJoin(libraryModuleVersions, eq(libraryModuleVersions.id, libraryModules.currentVersionId))
+    .innerJoin(lessons, eq(lessons.id, libraryModuleVersions.lessonId))
+    .innerJoin(resourceVersions, eq(resourceVersions.id, lessons.resourceVersionId))
+    .where(and(
+      isNotNull(libraryModules.currentVersionId),
+      moduleIds?.length
+        ? inArray(libraryModules.id, moduleIds)
+        : or(isNull(libraryModules.embedding), sql`${libraryModules.embeddingModel} is distinct from ${current}`),
+    ))
+    .limit(LIBRARY_LIMITS.embeddingBatch))
+  if (!rows.length) return 0
+  const r = await embedTexts({ tenantId, actorId: null }, {
+    prompt: LIBRARY_EMBEDDING_PROMPT, texts: rows.map(row => embeddingText(row)), dims,
+    // Батч из нескольких модулей — одна строка журнала без одной сущности; единичный пересчёт
+    // после публикации версии (`moduleIds` из одного элемента) ссылается на свой модуль
+    ref: { kind: 'library_module', id: rows.length === 1 ? rows[0]!.id : null },
+  })
+  if (!r.ok) return 0
   return withTenant(tenantId, null, async (tx) => {
-    const rows = await tx.select({
-      id: libraryModules.id, title: libraryModules.title, summary: libraryModules.summary, tags: libraryModules.tags,
-      plainText: resourceVersions.plainText,
-    }).from(libraryModules)
-      .innerJoin(libraryModuleVersions, eq(libraryModuleVersions.id, libraryModules.currentVersionId))
-      .innerJoin(lessons, eq(lessons.id, libraryModuleVersions.lessonId))
-      .innerJoin(resourceVersions, eq(resourceVersions.id, lessons.resourceVersionId))
-      .where(and(
-        isNotNull(libraryModules.currentVersionId),
-        moduleIds?.length
-          ? inArray(libraryModules.id, moduleIds)
-          : or(isNull(libraryModules.embedding), sql`${libraryModules.embeddingModel} is distinct from ${provider.id}`),
-      ))
-      .limit(LIBRARY_LIMITS.embeddingBatch)
-    if (!rows.length) return 0
-    const vectors = await provider.embed(rows.map(r => embeddingText(r)))
     let updated = 0
-    for (const [i, r] of rows.entries()) {
-      const vec = vectors[i]
+    for (const [i, row] of rows.entries()) {
+      const vec = r.vectors[i]
       if (!vec) continue
-      await tx.update(libraryModules).set({ embedding: vec, embeddingModel: provider.id }).where(eq(libraryModules.id, r.id))
+      await tx.update(libraryModules).set({ embedding: vec, embeddingModel: r.model }).where(eq(libraryModules.id, row.id))
       updated++
     }
     return updated

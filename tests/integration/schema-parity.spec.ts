@@ -56,7 +56,10 @@ const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events'
   // (docs/v2/37 §3.2, §3.4, §9.4; PR-19): тем же решением. В DDL документа колонки нет, но по
   // ним разбирают, кто и откуда передал работу и почему она ушла руководителю
   'review_delegations',
-  'review_sla_events']
+  'review_sla_events',
+  // `ai_calls` — журнал вызовов модели (docs/v2/30 §3.2, §7.16; PR-27): тем же решением. По нему
+  // разбирают задним числом, кто и откуда запустил генерацию или оценку
+  'ai_calls']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

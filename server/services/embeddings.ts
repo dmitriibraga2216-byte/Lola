@@ -4,9 +4,9 @@
  * владельца продукта (`HANDOFF` §6, `docs/v2/44` §8), поэтому здесь только интерфейс и две
  * реализации:
  *
- * - `http` — OpenAI-совместимый `POST …/v1/embeddings` (`EMBEDDINGS_URL`, `EMBEDDINGS_API_KEY`,
- *   `EMBEDDINGS_MODEL`) с запросом нужной размерности (`dimensions`); ответ другой длины
- *   отвергается, а не обрезается — вектор не той модели хуже, чем никакого;
+ * - `http` — OpenAI-совместимый `POST …/v1/embeddings` с запросом нужной размерности
+ *   (`dimensions`); ответ другой длины отвергается, а не обрезается — вектор не той модели хуже,
+ *   чем никакого;
  * - `stub` — детерминированная заглушка: хеширование слов и триграмм в `dims` корзин со знаком
  *   и L2-нормировка. Работает без ключа и в тестах; тексты с общими словами получают близкие
  *   векторы, поэтому поиск по телу модуля осмыслен и без провайдера («розведення» в тексте
@@ -16,8 +16,11 @@
  * (`library_modules.embedding_model`): векторы разных моделей несравнимы, и смена провайдера
  * обязана находить устаревшие строки, а не молча смешивать их в одном поиске.
  *
- * Ключ никогда не логируется. `knowledge.ts#embed()` (база знаний, 1536 измерений) пока живёт
- * своим вызовом того же `EMBEDDINGS_URL` — перевод на эту абстракцию вместе с поиском (PR-26).
+ * **С PR-27 этот модуль — драйвер, а не точка вызова.** Какой провайдер считает вектор, решает
+ * профиль `ai_providers` с ролью `embed`, и каждый вызов идёт через шлюз модели
+ * (`server/services/ai/gateway.ts#embedTexts`) — со строкой `ai_calls`, как любой другой вызов
+ * модели в продукте. Здесь остались математика заглушки и один HTTP-запрос; выбора провайдера
+ * по `EMBEDDINGS_URL` больше нет. Ключ никогда не логируется.
  */
 
 export interface EmbeddingProvider {
@@ -88,68 +91,83 @@ export interface HttpEmbeddingConfig {
   dims: number
   timeoutMs?: number
   fetchImpl?: typeof fetch
+  /** Заголовок `Idempotency-Key` (`docs/v2/30` §7.18) — шлюз передаёт ключ вызова. */
+  idempotencyKey?: string
+  signal?: AbortSignal
+}
+
+export type EmbeddingResponse
+  = | { ok: true, vectors: (number[] | null)[], tokensIn: number | null, httpStatus: number }
+    | { ok: false, errorCode: 'http_error' | 'bad_output' | 'network' | 'timeout', httpStatus: number | null }
+
+/**
+ * Один запрос `POST …/embeddings` с подробным итогом — для шлюза модели (`server/services/ai/`),
+ * которому нужно отличить «провайдер не ответил» от «ответил не той размерностью»: первое идёт
+ * в журнал как `failed`/`timeout` и уводит на запасной профиль, второе — пустой вектор строки.
+ * Ответ другой длины отвергается, а не обрезается — вектор не той модели хуже, чем никакого.
+ * Ключ никогда не логируется.
+ */
+export async function requestEmbeddings(cfg: HttpEmbeddingConfig, texts: readonly string[]): Promise<EmbeddingResponse> {
+  const doFetch = cfg.fetchImpl ?? fetch
+  const vectors: (number[] | null)[] = texts.map(() => null)
+  const idx = texts.map((t, i) => (t.trim() ? i : -1)).filter(i => i >= 0)
+  if (!idx.length) return { ok: true, vectors, tokensIn: 0, httpStatus: 0 }
+  try {
+    const res = await doFetch(cfg.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cfg.key ? { Authorization: `Bearer ${cfg.key}` } : {}),
+        ...(cfg.idempotencyKey ? { 'Idempotency-Key': cfg.idempotencyKey } : {}),
+      },
+      body: JSON.stringify({ model: cfg.model, input: idx.map(i => texts[i]!.slice(0, 8000)), dimensions: cfg.dims }),
+      signal: cfg.signal ?? AbortSignal.timeout(cfg.timeoutMs ?? 15_000),
+    })
+    if (!res.ok) return { ok: false, errorCode: 'http_error', httpStatus: res.status }
+    const json = await res.json().catch(() => null) as { data?: { index?: number, embedding?: number[] }[], usage?: { prompt_tokens?: number } } | null
+    if (!json || !Array.isArray(json.data)) return { ok: false, errorCode: 'bad_output', httpStatus: res.status }
+    for (const [n, row] of json.data.entries()) {
+      const pos = idx[row.index ?? n]
+      if (pos === undefined) continue
+      vectors[pos] = Array.isArray(row.embedding) && row.embedding.length === cfg.dims ? row.embedding : null
+    }
+    return { ok: true, vectors, tokensIn: json.usage?.prompt_tokens ?? null, httpStatus: res.status }
+  }
+  catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    return { ok: false, errorCode: name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network', httpStatus: null }
+  }
 }
 
 export function httpEmbeddingProvider(cfg: HttpEmbeddingConfig): EmbeddingProvider {
-  const doFetch = cfg.fetchImpl ?? fetch
   return {
     id: `http:${cfg.model}:${cfg.dims}`,
     dims: cfg.dims,
     async embed(texts) {
-      const out: (number[] | null)[] = texts.map(() => null)
-      const idx = texts.map((t, i) => (t.trim() ? i : -1)).filter(i => i >= 0)
-      if (!idx.length) return out
-      try {
-        const res = await doFetch(cfg.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(cfg.key ? { Authorization: `Bearer ${cfg.key}` } : {}) },
-          body: JSON.stringify({ model: cfg.model, input: idx.map(i => texts[i]!.slice(0, 8000)), dimensions: cfg.dims }),
-          signal: AbortSignal.timeout(cfg.timeoutMs ?? 15_000),
-        })
-        if (!res.ok) {
-          console.error(`[embeddings] ${cfg.model}: HTTP ${res.status}`)
-          return out
-        }
-        const json = await res.json() as { data?: { index?: number, embedding?: number[] }[] }
-        for (const [n, row] of (json.data ?? []).entries()) {
-          const pos = idx[row.index ?? n]
-          if (pos === undefined) continue
-          out[pos] = Array.isArray(row.embedding) && row.embedding.length === cfg.dims ? row.embedding : null
-        }
-        return out
-      }
-      catch (err) {
-        console.error(`[embeddings] ${cfg.model}:`, err instanceof Error ? err.message : err)
-        return out
-      }
+      const r = await requestEmbeddings(cfg, texts)
+      if (r.ok) return r.vectors
+      console.error(`[embeddings] ${cfg.model}: ${r.errorCode}${r.httpStatus ? ` HTTP ${r.httpStatus}` : ''}`)
+      return texts.map(() => null)
     },
   }
 }
 
-// ── Выбор провайдера ─────────────────────────────────────────────────────────────────────
+// ── Подмена в тестах ─────────────────────────────────────────────────────────────────────
 
 let override: EmbeddingProvider | null = null
 
-/** Подмена провайдера (тесты). `null` — вернуть выбор по окружению. */
+/**
+ * Подмена провайдера (тесты). `null` — вернуть выбор по профилю тенанта.
+ *
+ * С PR-27 провайдера выбирает не окружение, а профиль `ai_providers` с ролью `embed`
+ * (`server/services/ai/gateway.ts`): вызов идёт через шлюз и пишется в `ai_calls`. Подмена
+ * действует внутри шлюза — журнал и учёт при ней те же, меняется только то, кто считает вектор.
+ */
 export function setEmbeddingProvider(p: EmbeddingProvider | null): void {
   override = p
 }
 
-/**
- * Провайдер для нужной размерности: HTTP, если задан `EMBEDDINGS_URL`, иначе заглушка.
- * Без ключа система не падает и не молчит — поиск работает на заглушке, а после подключения
- * провайдера `library.embedding_refresh` пересчитывает строки с чужой меткой модели.
- */
-export function embeddingProvider(dims: number): EmbeddingProvider {
-  if (override && override.dims === dims) return override
-  const url = process.env.EMBEDDINGS_URL
-  if (url) {
-    return httpEmbeddingProvider({
-      url,
-      key: process.env.EMBEDDINGS_API_KEY || undefined,
-      model: process.env.EMBEDDINGS_MODEL || 'text-embedding-3-small',
-      dims,
-    })
-  }
-  return stubEmbeddingProvider(dims)
+/** Подменённый провайдер нужной размерности или `null` (для шлюза модели). */
+export function embeddingOverride(dims: number): EmbeddingProvider | null {
+  return override && override.dims === dims ? override : null
 }

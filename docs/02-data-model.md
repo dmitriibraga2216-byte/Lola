@@ -526,6 +526,60 @@ create table vacancy_ai_generations (         -- журнал ИИ-генера�
   created_at timestamptz not null default now()
 );
 
+-- Провайдер модели и учёт вызовов (`v2/30` §3.2, §7.7, §7.12, §7.16; план `v2/45` PR-27, миграция
+-- 0092). Каждый вызов модели в продукте — генерация вакансии, эмбеддинги библиотеки и базы знаний,
+-- а дальше расшифровка, оценка, подсказка, Підсумок — идёт через шлюз server/services/ai/gateway.ts
+-- и пишет строку ai_calls. Профили платформы копируются тенанту строками (по заглушке на роль,
+-- server/db/tenantDefaults.ts); подключение вендора — правка строки, не кода. Ключ вендора в
+-- таблицу не попадает: свой ключ тенанта — зашифрованная строка tenant_secrets, ключ платформы —
+-- переменная окружения, и уходит он только на адрес платформы.
+create table ai_providers (                   -- профиль поставщика модели (`v2/30` §3.2)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  code text not null, name text not null,
+  purpose text not null,                      -- ai_purpose: одна роль на профиль
+  driver text not null,                       -- ai_driver: вендор скрыт за драйвером
+  endpoint_url text,                          -- базовый адрес …/v1; обязателен у всех, кроме stub
+  secret_ref uuid references tenant_secrets(id) on delete set null, -- свой ключ: key = 'ai_provider:<id>'
+  model_name text not null, model_version text,
+  params jsonb not null default '{}'::jsonb,  -- temperature, maxTokens
+  data_region text not null default 'eu',     -- ai_data_region; other — с комментарием в audit_log
+  provider_retention text not null default 'unknown', -- ai_provider_retention
+  max_latency_ms int not null default 30000,  -- таймаут вызова, 1–300 с
+  is_active boolean not null default true,
+  priority int not null default 100,          -- основной профиль роли — активный с наименьшим
+  fallback_provider_id uuid references ai_providers(id) on delete set null, -- та же роль, не сам на себя, глубина ≤ 2
+  updated_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, code)
+  -- ai_providers_transcribe_retention_chk: purpose <> 'transcribe' or provider_retention <> 'unknown'
+  -- (`v2/30` §7.7, сквозная проверка 18 `v2/42` §5) — голос не уходит туда, где неизвестен срок хранения
+);
+
+create table ai_calls (                       -- журнал вызовов модели (`v2/30` §3.2, §7.16), 400 дней
+  id bigserial primary key,
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  provider_id uuid references ai_providers(id) on delete set null,
+  purpose text not null,                      -- ai_purpose
+  prompt_key text not null,
+  prompt_version text not null,               -- ≤ 40; смена версии обнуляет метрику качества (`v2/30` §7.16)
+  model_name text not null, model_version text,
+  ref_kind text not null, ref_id uuid,        -- ai_call_ref_kind; мягкая ссылка, снимка названия нет (ПД)
+  subject_user_id uuid references users(id) on delete set null, -- о ком вызов — для обезличивания
+  actor_user_id uuid references users(id) on delete set null,
+  input_ref text,                             -- ключ полного входа в S3, живёт 90 дней
+  input_digest text not null,                 -- sha256 канонического JSON входа: «модель видела ровно это»
+  output jsonb, output_digest text,           -- у эмбеддинга в output — счётчики, не вектор
+  status text not null default 'queued',      -- ai_call_status
+  error_code text, http_status int, latency_ms int, tokens_in int, tokens_out int,
+  cost_minor int not null default 0, currency char(3) not null default 'EUR',
+  usage_axis text,                            -- ai_generate_ops | ai_review_ops | ai_interview_ops; null — вне тарифа
+  billed boolean not null default false,      -- списал ли операцию оси; только у status = 'ok' с осью
+  try_no int not null default 1,
+  request_context jsonb,                      -- журнал (CLAUDE.md п. 14); у фоновых задач null
+  created_at timestamptz not null default now(), finished_at timestamptz
+);
+
 create table user_placements (                -- где человек работает
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -2758,6 +2812,30 @@ vacancy_ai_generation_target: description | requirements | duties | extra | crit
 
 -- Підсумок виклику ІІ-генерації (`vacancy_ai_generations.status`, `v2/29` §3.10): limited не списує операцію
 vacancy_ai_generation_status: ok | failed | limited
+
+-- Роль профиля поставщика модели (`ai_providers.purpose`, `ai_calls.purpose`, `v2/30` §3.2, PR-27).
+-- Четыре — из документа; generate (текст вакансии, PR-17) и embed (эмбеддинги библиотеки и базы
+-- знаний, PR-25) добавлены PR-27: это тоже вызовы модели, без своей роли они шли бы мимо журнала
+ai_purpose: transcribe | interview_score | review_hint | summary | generate | embed
+
+-- Драйвер профиля (`ai_providers.driver`, `v2/30` §3.2): вендор скрыт за драйвером. stub —
+-- детерминированная заглушка без сети (`v2/44` §8), четвёртое значение сверх документа (PR-27)
+ai_driver: openai_compatible | http_custom | self_hosted | stub
+
+-- Сколько данные живут у поставщика (`ai_providers.provider_retention`, `v2/30` §3.2, §7.7):
+-- unknown запрещает профиль для transcribe — и сервис, и CHECK таблицы (сквозная проверка 18)
+ai_provider_retention: none | ephemeral | unknown
+
+-- Регион обработки данных (`ai_providers.data_region`, `v2/30` §3.2): other — только с комментарием админа в audit_log
+ai_data_region: eu | other
+
+-- Итог вызова модели (`ai_calls.status`, `v2/30` §3.2): refused — вызова не было (жёсткая ось
+-- исчерпана, ИИ-подписка не действует, профиля нет), degraded — вызова не было, операция идёт без ИИ
+ai_call_status: queued | running | ok | failed | timeout | refused | degraded
+
+-- О чём вызов (`ai_calls.ref_kind`, мягкая ссылка `v2/44` В-11). Четыре — из `v2/30` §3.2;
+-- vacancy_generation, library_module, knowledge_article, search_query добавлены PR-27
+ai_call_ref_kind: interview_session | interview_turn | review_hint | summary | vacancy_generation | library_module | knowledge_article | search_query
 ```
 
 ## Что проверяет тест схемы

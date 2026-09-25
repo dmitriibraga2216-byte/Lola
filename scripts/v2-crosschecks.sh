@@ -552,6 +552,48 @@ check13_time_norms_not_in_score() {
   report "13. норма времени и флаг отклонения не входят в балл (docs/v2/37 §7.14 б, критерий 11)" "$hits"
 }
 
+# ── Проверка 14. ИИ ничего не решает о людях ────────────────────────────────────────────────
+# docs/v2/42-stages-delta.md §5 проверка 17, docs/v2/30 §7.1, CLAUDE.md инвариант 18: код ИИ
+# (`server/services/ai/`, заведён PR-27) не трогает состояние и колонку воронки кандидата,
+# правильность ответа и сдачу практикума — вывод модели ложится «одним числом рядом с тремя
+# человеческими, а не вместо них», и записывает его сервис-владелец, а не ИИ. Команда документа —
+# дословно (snake_case), плюс те же имена в camelCase: Drizzle-запрос назвал бы колонку так,
+# и grep документа его бы не увидел. Комментарии тоже считаются — как в команде документа.
+check14_ai_no_decisions() {
+  if [ ! -d server/services/ai ]; then
+    echo "[skip] 14. ИИ ничего не решает о людях (каталог server/services/ai ещё не создан — PR-27)"
+    return
+  fi
+  local hits
+  hits="$(grep -rnE "candidate_state|candidate_status_id|is_correct|workshop_submissions|candidateState|candidateStatusId|isCorrect|workshopSubmissions" \
+    server/services/ai 2>/dev/null || true)"
+  hits="$(apply_markers "$hits" 14)"
+  report "14. ИИ ничего не решает о людях (docs/v2/42 §5 проверка 17)" "$hits"
+}
+
+# ── Проверка 15. Вызов модели — только через шлюз ───────────────────────────────────────────
+# docs/v2/45 PR-27, docs/v2/30 §7.16 «каждый вызов — строка ai_calls», docs/v2/35 §7.1: вызов
+# мимо шлюза `server/services/ai/gateway.ts` не попадает ни в журнал, ни в ось потребления, и
+# тенант получает бесплатный ИИ, а владелец продукта — невидимый счёт. Статический сторож:
+#  (а) драйверы (`runDriver`, `setAiHttp` из `server/services/ai/drivers.ts`) и HTTP эмбеддингов
+#      (`requestEmbeddings`, `httpEmbeddingProvider`, `stubEmbeddingProvider`, `embeddingOverride`)
+#      вызываются только в `server/services/ai/` и в самом `server/services/embeddings.ts`;
+#  (б) никто не выбирает провайдер эмбеддингов сам (`embeddingProvider(` — путь PR-25 до шлюза) и не
+#      зовёт его `.embed(` напрямую;
+#  (в) подключение платформы (`process.env.AI_PROVIDER_*`, `process.env.EMBEDDINGS_*`) читает
+#      только шлюз — ключ платформы уходит только на адрес платформы, и решает это одно место.
+# Комментарии нарушением не считаются.
+check15_ai_gateway_only() {
+  local hits
+  hits="$(grep -rnE "\b(runDriver|setAiHttp|requestEmbeddings|httpEmbeddingProvider|stubEmbeddingProvider|embeddingOverride|embeddingProvider)\b|\.embed\(|process\.env\.(AI_PROVIDER|EMBEDDINGS)_|/ai/drivers'" \
+    server app shared --include='*.ts' --include='*.vue' 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//)' \
+    | grep -vE '^server/services/ai/' \
+    | grep -v '^server/services/embeddings.ts:' || true)"
+  hits="$(apply_markers "$hits" 15)"
+  report "15. вызов модели — только через шлюз server/services/ai (docs/v2/30 §7.16, PR-27)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -565,5 +607,7 @@ check10_candidate_quiet_hours
 check11_time_single_writer
 check12_contours_pr39
 check13_time_norms_not_in_score
+check14_ai_no_decisions
+check15_ai_gateway_only
 
 exit $overall

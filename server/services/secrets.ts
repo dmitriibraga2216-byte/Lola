@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { tenantSecrets } from '../db/schema'
-import { withTenant } from '../utils/withTenant'
+import { withTenant, type TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
 
@@ -102,6 +102,48 @@ export async function disconnect(ctx: Ctx, provider: Provider) {
     await tx.update(tenantSecrets).set({ status: 'revoked', updatedAt: new Date() }).where(eq(tenantSecrets.provider, provider))
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'integration.disconnect', entity: 'tenant_secret', after: { provider } })
   })
+}
+
+// ── Секрет по ссылке `secret_ref` ────────────────────────────────────────────────────────
+
+/**
+ * Секрет, на который ссылается строка сущности (`secret_ref uuid → tenant_secrets.id`), а не
+ * пара `(provider, key)` одного модуля: сущностей с ключом у тенанта бывает много. Так живёт
+ * свой ключ профиля модели (`ai_providers.secret_ref`, `docs/v2/30` §3.2, PR-27) — строка
+ * `provider = 'ai'`, `key = 'ai_provider:<id профиля>'`. Значение шифруется тем же `encrypt()`,
+ * что и все секреты тенанта, и наружу (API, журнал, аудит) не уходит никогда.
+ *
+ * Функции работают внутри транзакции вызывающего: ключ профиля и сам профиль сохраняются
+ * атомарно — профиль не может сослаться на ключ, которого нет.
+ */
+export async function putRefSecret(tx: TenantTx, input: { tenantId: string, actorId: string | null, provider: string, key: string, value: string, label?: string | null }): Promise<string> {
+  const { ciphertext, nonce } = encrypt(input.value)
+  const [row] = await tx.insert(tenantSecrets).values({
+    tenantId: input.tenantId, provider: input.provider, key: input.key, valueEncrypted: ciphertext, nonce,
+    accountLabel: input.label ?? null, status: 'active', createdBy: input.actorId,
+  }).onConflictDoUpdate({
+    target: [tenantSecrets.tenantId, tenantSecrets.provider, tenantSecrets.key],
+    set: { valueEncrypted: ciphertext, nonce, accountLabel: input.label ?? null, status: 'active', lastError: null, updatedAt: new Date() },
+  }).returning({ id: tenantSecrets.id })
+  return row!.id
+}
+
+/** Расшифрованное значение по `secret_ref`; `null` — строки нет, она отозвана или не расшифровывается. */
+export async function readRefSecret(tx: TenantTx, id: string): Promise<string | null> {
+  const [row] = await tx.select({ value: tenantSecrets.valueEncrypted, nonce: tenantSecrets.nonce })
+    .from(tenantSecrets).where(and(eq(tenantSecrets.id, id), sql`${tenantSecrets.status} <> 'revoked'`))
+  if (!row) return null
+  try {
+    return decrypt(row.value, row.nonce)
+  }
+  catch {
+    return null
+  }
+}
+
+/** Удалить секрет по ссылке (ключ снят с профиля). Ссылка в сущности обнуляется `on delete set null`. */
+export async function dropRefSecret(tx: TenantTx, id: string): Promise<void> {
+  await tx.delete(tenantSecrets).where(eq(tenantSecrets.id, id))
 }
 
 export async function markSecretResult(tenantId: string, provider: Provider, ok: boolean, error?: string) {

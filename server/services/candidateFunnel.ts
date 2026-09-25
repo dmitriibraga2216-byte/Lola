@@ -6,7 +6,7 @@ import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { currentRequestContext } from '../utils/requestContext'
 import type { CandidateState } from '../../shared/enums'
 import type {
-  CandidateBoardFilter, CandidateBulkStatusInput, FunnelReportFilter,
+  CandidateBoardFilter, CandidateBulkStatusInput, FunnelReportFilter, RecruitingReportFilter,
 } from '../../shared/schemas/candidates'
 import { candidateOnly, candidates as candidatesQuery } from './repo/people'
 import { COLUMNS, canMove, maskRow, scopeCond } from './candidates'
@@ -414,5 +414,214 @@ export async function funnelReport(v: Viewer, f: FunnelReportFilter): Promise<Fu
       },
       rows: people,
     }
+  })
+}
+
+/**
+ * Четыре отчёта пакета `28` §9 п. 2–5 (PR-38, П-22, `⟵` PR-14). Один и тот же кандидатопоток,
+ * группировка на сервере — по рекрутеру, джерелу, вакансії/точці или причині відмови. Людина
+ * відбирається тим самим каркасом, що й воронка (`frameWhere({kind: 'candidate'})`), тому
+ * область видимості й фільтр архіву не розʼїжджаються між чотирма звітами.
+ *
+ * «Найнято» рахується конверсією `converted_from_candidate_at` (§7.6): після найму людина —
+ * співробітник, `recruiter_id`/`source`/`vacancy_id` зберігаються без зміни (той самий факт,
+ * що використовує підсумок воронки вище).
+ */
+
+/**
+ * Мінімальний «глядач» для чотирьох звітів нижче: тільки те, що потрібно для розрізу за
+ * рекрутером і області видимості (`locations`). Повний `Viewer` (`fullPd`/`reviewOnly`) тут
+ * не потрібен — жоден із чотирьох звітів не показує ПД кандидата, лише агреговані числа й
+ * імена рекрутерів, тому їх можна дістати і з конструктора виgrузок (`report.builder`), не
+ * тільки з екрана воронки (`candidate.view`).
+ */
+export interface RecruitingReportViewer { tenantId: string, actorId: string, locations: string[] | null }
+
+interface RecruiterEfficiencyRow {
+  recruiterId: string | null
+  recruiter: string | null
+  added: number
+  inProgress: number
+  onReview: number
+  hired: number
+  rejected: number
+  archived: number
+  avgDaysToDecision: number | null
+  hireSharePct: number
+}
+
+/**
+ * «Ефективність рекрутера» (`28` §9 п. 2). «На перевірці» — кандидати з відкритим елементом
+ * єдиної черги перевірки (`review_queue_items.completed_at is null`, `subject_kind = 'candidate'`):
+ * інтерв'ю чи тестове чекає рішення проверяющего, а не рекрутера (`docs/v2/37` §3.1).
+ */
+export async function recruiterEfficiencyReport(v: RecruitingReportViewer, f: RecruitingReportFilter): Promise<RecruiterEfficiencyRow[]> {
+  return withTenant(v.tenantId, v.actorId, async (tx) => {
+    const mine = v.locations !== null ? sql`and u.recruiter_id = ${v.actorId}::uuid` : sql``
+    const source = f.source ? sql`and u.source = ${f.source}` : sql``
+    const vacancy = f.vacancyId ? sql`and u.vacancy_id = ${f.vacancyId}::uuid` : sql``
+    const recruiterFilter = f.recruiterId ? sql`and u.recruiter_id = ${f.recruiterId}::uuid` : sql``
+
+    const inFlight = await tx.execute(sql`
+      select u.recruiter_id,
+             count(*)::int as added,
+             count(*) filter (where u.candidate_state = 'active')::int as in_progress,
+             count(*) filter (where u.candidate_state = 'active' and exists (
+               select 1 from review_queue_items rq where rq.user_id = u.id and rq.subject_kind = 'candidate' and rq.completed_at is null
+             ))::int as on_review,
+             count(*) filter (where u.candidate_state = 'rejected')::int as rejected,
+             count(*) filter (where u.candidate_state = 'archived')::int as archived
+        from users u
+       where true ${frameWhere({ kind: 'candidate' })} ${periodSql(sql`u.created_at`, f)}
+             ${source} ${vacancy} ${recruiterFilter} ${mine}
+       group by u.recruiter_id`) as unknown as { recruiter_id: string | null, added: number, in_progress: number, on_review: number, rejected: number, archived: number }[]
+
+    const hired = await tx.execute(sql`
+      select u.recruiter_id,
+             count(*)::int as hired,
+             avg(extract(epoch from (u.converted_from_candidate_at - u.created_at)) / 86400)::float as avg_days
+        from users u
+       where u.kind = 'employee' and u.converted_from_candidate_at is not null
+             ${periodSql(sql`u.converted_from_candidate_at`, f)} ${source} ${vacancy} ${recruiterFilter} ${mine}
+       group by u.recruiter_id`) as unknown as { recruiter_id: string | null, hired: number, avg_days: number | null }[]
+
+    const ids = [...new Set([...inFlight, ...hired].map(r => r.recruiter_id).filter((x): x is string => !!x))]
+    const names = ids.length ? await tx.execute(sql`select id, full_name from users where id in (${sql.join(ids.map(id => sql`${id}::uuid`), sql`, `)})`) as unknown as { id: string, full_name: string }[] : []
+    const nameOf = new Map(names.map(n => [n.id, n.full_name]))
+    const byRecruiter = new Map<string | null, RecruiterEfficiencyRow>()
+    for (const r of inFlight) {
+      byRecruiter.set(r.recruiter_id, {
+        recruiterId: r.recruiter_id, recruiter: r.recruiter_id ? nameOf.get(r.recruiter_id) ?? null : null,
+        added: Number(r.added), inProgress: Number(r.in_progress), onReview: Number(r.on_review),
+        hired: 0, rejected: Number(r.rejected), archived: Number(r.archived), avgDaysToDecision: null, hireSharePct: 0,
+      })
+    }
+    for (const r of hired) {
+      const row = byRecruiter.get(r.recruiter_id) ?? {
+        recruiterId: r.recruiter_id, recruiter: r.recruiter_id ? nameOf.get(r.recruiter_id) ?? null : null,
+        added: 0, inProgress: 0, onReview: 0, hired: 0, rejected: 0, archived: 0, avgDaysToDecision: null, hireSharePct: 0,
+      }
+      row.hired = Number(r.hired)
+      row.avgDaysToDecision = r.avg_days == null ? null : Math.round(Number(r.avg_days) * 10) / 10
+      byRecruiter.set(r.recruiter_id, row)
+    }
+    return [...byRecruiter.values()].map(r => ({ ...r, hireSharePct: r.added + r.hired ? Math.round((r.hired / (r.added + r.hired)) * 1000) / 10 : 0 }))
+      .sort((a, b) => (b.added + b.hired) - (a.added + a.hired))
+  })
+}
+
+interface SourceRow {
+  source: string
+  candidates: number
+  reachedFinal: number
+  hired: number
+  avgBudget: number | null
+}
+
+/**
+ * «Джерела» (`28` §9 п. 3). «Дошло до фіналу» — кандидат хоч раз потрапив у статус з
+ * максимальним `sort` серед активних (`maps_to = 'active'`) статусів воронки: він пройшов усі
+ * проміжні кроки, а не тільки перший. «Вартість найму» — середній `vacancies.source_budget`
+ * серед найнятих цим джерелом, якщо бюджет площадки вказаний у вакансії (`docs/29`); вакансій
+ * без бюджету в середнє не входять.
+ */
+export async function candidateSourcesReport(v: RecruitingReportViewer, f: RecruitingReportFilter): Promise<SourceRow[]> {
+  return withTenant(v.tenantId, v.actorId, async (tx) => {
+    const mine = v.locations !== null ? sql`and u.recruiter_id = ${v.actorId}::uuid` : sql``
+    const recruiterFilter = f.recruiterId ? sql`and u.recruiter_id = ${f.recruiterId}::uuid` : sql``
+    const vacancy = f.vacancyId ? sql`and u.vacancy_id = ${f.vacancyId}::uuid` : sql``
+    const sourceFilter = f.source ? sql`and u.source = ${f.source}` : sql``
+    const finalStatus = sql`(select id from candidate_statuses where maps_to = 'active' and is_active order by sort desc limit 1)`
+
+    const inFlight = await tx.execute(sql`
+      select u.source, count(*)::int as candidates,
+             count(*) filter (where exists (
+               select 1 from candidate_status_history h where h.candidate_id = u.id and h.to_status_id = ${finalStatus}
+             ))::int as reached_final
+        from users u
+       where true ${frameWhere({ kind: 'candidate' })} ${periodSql(sql`u.created_at`, f)}
+             ${recruiterFilter} ${vacancy} ${sourceFilter} ${mine}
+       group by u.source`) as unknown as { source: string, candidates: number, reached_final: number }[]
+
+    const hired = await tx.execute(sql`
+      select u.source, count(*)::int as hired, avg(v.source_budget)::numeric as avg_budget
+        from users u left join vacancies v on v.id = u.vacancy_id
+       where u.kind = 'employee' and u.converted_from_candidate_at is not null
+             ${periodSql(sql`u.converted_from_candidate_at`, f)} ${recruiterFilter} ${vacancy} ${sourceFilter} ${mine}
+       group by u.source`) as unknown as { source: string, hired: number, avg_budget: string | null }[]
+
+    const byS = new Map<string, SourceRow>()
+    for (const r of inFlight) byS.set(r.source, { source: r.source, candidates: Number(r.candidates), reachedFinal: Number(r.reached_final), hired: 0, avgBudget: null })
+    for (const r of hired) {
+      const row = byS.get(r.source) ?? { source: r.source, candidates: 0, reachedFinal: 0, hired: 0, avgBudget: null }
+      row.hired = Number(r.hired)
+      row.avgBudget = r.avg_budget == null ? null : Math.round(Number(r.avg_budget) * 100) / 100
+      byS.set(r.source, row)
+    }
+    return [...byS.values()].sort((a, b) => b.candidates - a.candidates)
+  })
+}
+
+interface TimeToHireRow {
+  vacancyId: string | null
+  vacancy: string | null
+  location: string | null
+  hired: number
+  medianDays: number | null
+  p90Days: number | null
+}
+
+/** «Час до найму» (`28` §9 п. 4): медіана і 90-й перцентиль від створення до `hired`, у розрізі вакансій і точок. */
+export async function timeToHireReport(v: RecruitingReportViewer, f: RecruitingReportFilter): Promise<TimeToHireRow[]> {
+  return withTenant(v.tenantId, v.actorId, async (tx) => {
+    const mine = v.locations !== null ? sql`and u.recruiter_id = ${v.actorId}::uuid` : sql``
+    const recruiterFilter = f.recruiterId ? sql`and u.recruiter_id = ${f.recruiterId}::uuid` : sql``
+    const vacancy = f.vacancyId ? sql`and u.vacancy_id = ${f.vacancyId}::uuid` : sql``
+    const sourceFilter = f.source ? sql`and u.source = ${f.source}` : sql``
+    const rows = await tx.execute(sql`
+      select u.vacancy_id, v.title as vacancy, l.name as location,
+             count(*)::int as hired,
+             round((percentile_cont(0.5) within group (order by extract(epoch from (u.converted_from_candidate_at - u.created_at)) / 86400))::numeric, 1) as median_days,
+             round((percentile_cont(0.9) within group (order by extract(epoch from (u.converted_from_candidate_at - u.created_at)) / 86400))::numeric, 1) as p90_days
+        from users u
+        left join vacancies v on v.id = u.vacancy_id
+        left join locations l on l.id = v.location_id
+       where u.kind = 'employee' and u.converted_from_candidate_at is not null
+             ${periodSql(sql`u.converted_from_candidate_at`, f)} ${recruiterFilter} ${vacancy} ${sourceFilter} ${mine}
+       group by u.vacancy_id, v.title, l.name
+       order by hired desc`) as unknown as { vacancy_id: string | null, vacancy: string | null, location: string | null, hired: number, median_days: string | null, p90_days: string | null }[]
+    return rows.map(r => ({
+      vacancyId: r.vacancy_id, vacancy: r.vacancy, location: r.location, hired: Number(r.hired),
+      medianDays: r.median_days == null ? null : Number(r.median_days), p90Days: r.p90_days == null ? null : Number(r.p90_days),
+    }))
+  })
+}
+
+interface RejectionReasonRow {
+  reasonCode: string | null
+  vacancy: string | null
+  count: number
+  sharePct: number
+}
+
+/** «Відмови по причинах» (`28` §9 п. 5): причина · число · частка · розріз по вакансіям. */
+export async function rejectionReasonsReport(v: RecruitingReportViewer, f: RecruitingReportFilter): Promise<RejectionReasonRow[]> {
+  return withTenant(v.tenantId, v.actorId, async (tx) => {
+    const mine = v.locations !== null ? sql`and u.recruiter_id = ${v.actorId}::uuid` : sql``
+    const recruiterFilter = f.recruiterId ? sql`and u.recruiter_id = ${f.recruiterId}::uuid` : sql``
+    const vacancy = f.vacancyId ? sql`and u.vacancy_id = ${f.vacancyId}::uuid` : sql``
+    const sourceFilter = f.source ? sql`and u.source = ${f.source}` : sql``
+    const rows = await tx.execute(sql`
+      select h.reason_code, v.title as vacancy, count(distinct h.candidate_id)::int as n
+        from candidate_status_history h
+        join users u on u.id = h.candidate_id
+        join candidate_statuses s on s.id = h.to_status_id and s.maps_to = 'rejected'
+        left join vacancies v on v.id = u.vacancy_id
+       where true ${frameWhere({ kind: 'candidate' })} ${periodSql(sql`h.created_at`, f)}
+             ${recruiterFilter} ${vacancy} ${sourceFilter} ${mine}
+       group by h.reason_code, v.title
+       order by n desc`) as unknown as { reason_code: string | null, vacancy: string | null, n: number }[]
+    const total = rows.reduce((s, r) => s + Number(r.n), 0)
+    return rows.map(r => ({ reasonCode: r.reason_code, vacancy: r.vacancy, count: Number(r.n), sharePct: total ? Math.round((Number(r.n) / total) * 1000) / 10 : 0 }))
   })
 }

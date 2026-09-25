@@ -13,6 +13,8 @@ import { createAssignmentTx, expandAssignment } from './assignments'
 import { enterStageByCodeTx, enterStageTx, stageByCode } from './lifecycleState'
 import { isLastAdmin, isLastOwner, splitName } from './people'
 import { emitWebhook } from './webhooks'
+import { periodSql } from './reportFrame'
+import type { ReportFilter } from '../../shared/schemas/reports'
 
 /**
  * Офбординг и повторный найм (docs/v2/33-lifecycle.md §3.6, §4.2, §7.7, §7.8).
@@ -559,5 +561,54 @@ export async function offboardingStage(ctx: Ctx) {
     if (!stage) return null
     const [row] = await tx.select({ id: lifecycleStages.id, nameUk: lifecycleStages.nameUk, isEnabled: lifecycleStages.isEnabled }).from(lifecycleStages).where(eq(lifecycleStages.id, stage.id))
     return { ...row!, courseIds: await offboardingStageCourses(tx) }
+  })
+}
+
+export interface OffboardingReasonRow {
+  reasonCode: string
+  tenureBucket: 'lt_3m' | '3_12m' | 'gt_1y' | 'unknown'
+  n: number
+  sharePct: number
+  avgTenureDays: number | null
+  interviewDoneSharePct: number
+}
+
+/**
+ * «Офбординг» (`33` §9 п. 3, PR-38, П-22). Строка — причина × строк роботи; лише завершені
+ * випадки (`state = 'done'`) — план ще не факт. Точка — за останнім розміщенням людини
+ * (з `ended_at`, а не тільки чинним: у звільненого воно вже закрито, і звичний `frameJoins()`
+ * тут показав би `null` для кожного рядка). Стаж — цілими днями `last_working_day − hired_at`
+ * (обидві колонки `date`).
+ */
+export async function offboardingReasonsReport(ctx: Ctx, f: ReportFilter): Promise<OffboardingReasonRow[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const location = f.locationId ? sql`and pl2.location_id = ${f.locationId}::uuid` : sql``
+    const rows = await tx.execute(sql`
+      select oc.reason_code,
+             case
+               when u.hired_at is null then 'unknown'
+               when (oc.last_working_day - u.hired_at) < 90 then 'lt_3m'
+               when (oc.last_working_day - u.hired_at) < 365 then '3_12m'
+               else 'gt_1y'
+             end as tenure_bucket,
+             count(*)::int as n,
+             round(avg(oc.last_working_day - u.hired_at)::numeric, 1) as avg_tenure_days,
+             count(*) filter (where ei.status = 'done')::int as interview_done
+        from offboarding_cases oc
+        join users u on u.id = oc.user_id
+        left join enrollments ei on ei.id = oc.exit_interview_enrollment_id
+        left join lateral (
+          select location_id from user_placements where user_id = u.id order by is_primary desc, started_at desc limit 1
+        ) pl2 on true
+       where oc.state = 'done' ${periodSql(sql`oc.completed_at`, f)} ${location}
+       group by oc.reason_code, tenure_bucket
+       order by n desc`) as unknown as { reason_code: string, tenure_bucket: OffboardingReasonRow['tenureBucket'], n: number, avg_tenure_days: string | null, interview_done: number }[]
+    const total = rows.reduce((s, r) => s + Number(r.n), 0)
+    return rows.map(r => ({
+      reasonCode: r.reason_code, tenureBucket: r.tenure_bucket, n: Number(r.n),
+      sharePct: total ? Math.round((Number(r.n) / total) * 1000) / 10 : 0,
+      avgTenureDays: r.avg_tenure_days == null ? null : Number(r.avg_tenure_days),
+      interviewDoneSharePct: r.n ? Math.round((Number(r.interview_done) / Number(r.n)) * 1000) / 10 : 0,
+    }))
   })
 }

@@ -252,6 +252,24 @@ export const funnelReportSchema = z
 export type FunnelReportFilter = z.infer<typeof funnelReportSchema>
 
 /**
+ * Отчёты «Ефективність рекрутера», «Джерела», «Час до найму», «Відмови по причинах»
+ * (`28` §9 п. 2–5, PR-38, П-22). Один контракт на все четыре: они читают тот же кандидатопоток,
+ * что и воронка, разница только в разрезе группировки на сервере.
+ */
+export const recruitingReportFilterSchema = z
+  .object({
+    from: z.string().date().optional(),
+    to: z.string().date().optional(),
+    recruiterId: z.string().uuid().optional(),
+    source: z.enum(CANDIDATE_SOURCES).optional(),
+    vacancyId: z.string().uuid().optional(),
+    format: z.enum(['json', 'xlsx']).default('json'),
+  })
+  .strict()
+
+export type RecruitingReportFilter = z.infer<typeof recruitingReportFilterSchema>
+
+/**
  * Колонка воронки (`28` §3.3, §10 `/candidate-statuses`). `mapsTo` обязателен: колонка без
  * терминального состояния ломает отчётность по воронке, поэтому `422 maps_to.required`
  * появляется здесь, а не в сервисе.

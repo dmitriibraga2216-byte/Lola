@@ -20,7 +20,8 @@
     "confirmDelete": "Видалити? Дію не можна скасувати",
     "search": "Пошук",
     "yes": "Так",
-    "no": "Ні"
+    "no": "Ні",
+    "actions": "Дії"
   },
   "login": {
     "phoneLabel": "Номер телефону",
@@ -5265,7 +5266,8 @@
     },
     "tab": {
       "vacancies": "Вакансії",
-      "templates": "Шаблони"
+      "templates": "Шаблони",
+      "integrations": "Інтеграції"
     },
     "tpl": {
       "name": "Назва шаблону",
@@ -5277,6 +5279,7 @@
     },
     "sec": {
       "main": "Про вакансію",
+      "blocks": "Тексти вакансії",
       "template": "Параметри призначення",
       "criteria": "Оцінка кандидата по критеріях"
     },
@@ -5299,6 +5302,49 @@
       "min": "Мінімум шкали",
       "max": "Максимум шкали",
       "empty": "Критеріїв ще немає"
+    },
+    "ai": {
+      "generate": "Створити з AI",
+      "generating": "Генерується…",
+      "unreviewed": "Перевірте згенерований текст перед публікацією",
+      "acknowledge": "Текст перевірено",
+      "criteriaGenerate": "Згенерувати критерії (AI)",
+      "criteriaDraftHint": "Чернетка — перегляньте і додайте потрібні критерії",
+      "addDraft": "Додати",
+      "limitExceeded": "Ліміт ШІ-операцій вичерпано. Залишилось: 0"
+    },
+    "pub": {
+      "title": "Публікації",
+      "empty": "Ще не публікували на жодному майданчику",
+      "account": "Акаунт",
+      "publish": "Опублікувати",
+      "manualTitle": "Додати посилання вручну",
+      "manualUrl": "Посилання на оголошення",
+      "removeAction": "Зняти",
+      "linkExternal": "Прив'язати",
+      "noAccounts": "Немає підключених інтеграцій",
+      "goIntegrations": "Перейти до вкладки «Інтеграції»"
+    },
+    "integrations": {
+      "connect": "Підключити",
+      "disconnect": "Відключити",
+      "provider": "Майданчик",
+      "ownerType": "Кому належить",
+      "label": "Назва (необов'язково)",
+      "empty": "Немає підключених акаунтів"
+    },
+    "applications": {
+      "title": "Відгуки",
+      "empty": "Відгуків ще немає",
+      "accept": "Прийняти",
+      "reject": "Відхилити",
+      "spam": "Позначити спамом",
+      "name": "Ім'я",
+      "contact": "Контакт",
+      "source": "Джерело",
+      "received": "Отримано",
+      "resume": "Резюме",
+      "reasons": "Ознаки"
     }
   },
   "vacancy": {
@@ -5357,6 +5403,43 @@
       "requirements": "Вимоги",
       "duties": "Обов’язки",
       "extra": "Додатково"
+    },
+    "applicationState": {
+      "pending": "Нові",
+      "pending_review": "На модерації",
+      "accepted": "Прийняті",
+      "merged": "Уже кандидат",
+      "rejected": "Відхилені",
+      "spam": "Спам",
+      "expired": "Просрочені"
+    },
+    "jobBoardProvider": {
+      "work_ua": "Work.ua",
+      "robota_ua": "Robota.ua",
+      "telegram": "Telegram"
+    },
+    "jobBoardOwnerType": {
+      "company": "Компанія",
+      "personal": "Персональний",
+      "recruiter": "Рекрутер"
+    },
+    "jobBoardStatus": {
+      "not_connected": "Не підключено",
+      "connecting": "Підключення…",
+      "active": "Підключено",
+      "failing": "Мовчить",
+      "revoked": "Відкликано",
+      "disabled": "Вимкнено"
+    },
+    "publicationState": {
+      "queued": "У черзі",
+      "publishing": "Публікується",
+      "active": "Активна",
+      "failed": "Помилка",
+      "removed": "Знято",
+      "expired": "Завершилась",
+      "conflict": "Конфлікт",
+      "manual": "Вручну"
     }
   },
   "apply": {

@@ -629,6 +629,15 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | GET/POST | `/vacancy-templates` | шаблоны вакансий (`vacancy.template.manage`); `409 template.name_exists` |
 | POST | `/vacancy-templates/from-vacancy/:id` | «Зберегти шаблон» из формы: без точки и рекрутера, вместе с критериями и языками |
 | POST | `/vacancies/from-template/:tid` | вакансия-черновик из шаблона: точка и рекрутер приходят телом (`vacancy.edit`) |
+| POST | `/vacancies/:id/ai-text` | «Створити з AI» (`vacancy.ai.use`, PR-17): `{target: description\|requirements\|duties\|extra, tone?}` → `{html, generationId}`; списывает 1 `ai_generate_ops` только при успехе; `409 limit_exceeded` с `details.axis=ai_generate_ops` |
+| POST | `/vacancies/:id/ai-text/:gid/acknowledge` | «Текст перевірено» (`vacancy.ai.use`, PR-17): снимает блокировку публикации без правки текста |
+| POST | `/vacancies/:id/criteria/generate` | «Згенерувати критерії (AI)» (`vacancy.ai.use`, PR-17): черновик 3–8 критериев, ни одна строка `vacancy_criteria` не создаётся без явного `POST .../criteria` по каждому |
+| GET/POST | `/vacancies/:id/publications` | журнал публикаций на площадках (`vacancy.view` / `jobboard.publish`, PR-17): `{accountIds[]}` — через адаптер, `{manual:{accountId, externalUrl}}` — обходной путь `44` §8; оба под `{confirm:true}`; `409 publication.duplicate`, `422 jobboard.account_not_active` |
+| DELETE | `/vacancies/:id/publications/:pid` | снятие публикации (`jobboard.publish`, PR-17): помечает `removed`, адаптер не вызывается |
+| POST | `/vacancies/:id/publications/:pid/link-external` | «Прив'язати існуюче оголошення» при `conflict` (`jobboard.publish`, PR-17): `409 publication.not_conflict` |
+| GET | `/job-board-accounts` | аккаунты площадок, сгруппированные по владельцу (`jobboard.connect`, PR-17): чужие личные видны только админу |
+| POST | `/job-board-accounts` | подключение (`jobboard.connect`, PR-17): синхронное — заглушка не делает сетевого вызова, поэтому пары `auth-url`/`callback` из документа здесь нет (`[решение]`, `docs/v2/46-progress.md`); `403 jobboard.owner_forbidden` |
+| POST | `/job-board-accounts/:id/disconnect` | отключение (`jobboard.connect`, PR-17): `company` — только админ, `personal` — только владелец, `recruiter` — он сам или админ |
 
 | GET | `/vacancies/:id/applications` | отклики вакансии, фильтр `state` (`vacancy.view`); вкладка «На модерації» — это `state=pending_review` |
 | POST | `/vacancies/:id/applications/:aid/accept` | принять придержанный отклик вручную (`candidate.edit`): создаётся кандидат и назначение; `409 limit.candidates_exceeded`, `409 application.wrong_state` |
@@ -643,9 +652,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | GET | `/public/j/:token` | публичная страница вакансии и `formNonce`; вилка — только при `salary_visible`, курса, рекрутера и внутренних идентификаторов в ответе нет. `404 vacancy.not_found` (чужой и несуществующий токен неразличимы, время выровнено), `410 vacancy.paused`, `429 rate.too_many` |
 | POST | `/public/j/:token/apply` | отклик: `{fullName, phone?, email?, comment?, consent, formNonce, website, s?}`. **`202` при любом исходе проверок §7.6–§7.7** — форма не сообщает отправителю, какая сработала; `422 consent.required` и `422 form.stale` — единственные исключения, оба про человека, а не про спам |
 | POST | `/public/j/:token/apply/:aid/confirm` | подтверждение контакта кодом: `200 {status:"accepted"}`; `400 otp.invalid`, `429 otp.too_many`, `410 application.expired` |
-
-AI-генерация текста и критериев, площадки и журнал публикаций — PR-17 плана
-`docs/v2/45-plan.md`. Приём резюме из публичного контура — там же (`29` §6.3, пометка PR-16).
+| POST | `/public/j/:token/apply/:aid/resume` | резюме, multipart `file` (PR-17, отложено из PR-16, `29` §6.3): PDF/DOC/DOCX/зображення до 10 МБ; принимается только после подтверждения контакта — до того `409 application.not_confirmed`; `413 media.too_big`, `415 file.type` |
 
 ### Жалоба на материал (`docs/v2/36-content-feedback.md` §10, PR-23)
 

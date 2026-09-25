@@ -207,6 +207,11 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   storage_pending_upload_done: 'Ваш файл до завдання «{{task}}» відправлено',
   storage_pending_upload_expired: 'Файл до завдання «{{task}}» не вдалося відправити за 14 днів. Робота залишається зарахованою',
   storage_bulk_delete_done: 'Видалено {{n}} файлів, звільнено {{size}}. Пропущено: {{skipped}}',
+  // docs/v2/29 §8 (PR-17): публікація і генерація тексту. Шаблони цих кодів уже завела PR-37
+  // (нижче, разом з рештою «недостающих кодів пакета») — реалізація PR-17 шле саме їх, з
+  // полем `platform` у payload (а не `provider`), щоб не заводити другий, дублюючий набір.
+  // `vacancy.ai_quota` з документа сюди свідомо не входить — рішення В-16 зводить його до
+  // звичайного `limit_exceeded` з `axis=ai_generate_ops` (той самий код, що вже шле `billing.limit_scan`).
   // docs/28 «Вхід: код на e-mail» (Spec: канал OTP): лист не йде через чергу — шле напряму otpChannel.ts,
   // але текст лежить тут, як і решта, — тенант бачить і може переозначити на /admin/settings/notifications
   otp_code: 'Код для входу до Lola: {{code}}. Дійсний {{minutes}} хв. Нікому не повідомляйте цей код.',
@@ -348,6 +353,24 @@ export function eventClassOf(code: string): keyof NotificationSchedule | null {
   if (/^enrollment_(due_soon|due_today)$/.test(code)) return 'dueTasks'
   if (code === 'program_reminder') return 'programReminder' // докс/33 D-049
   return null
+}
+
+/**
+ * Держатели ролей `admin`/`owner` тенанта — адресат уведомлений «адміну» (`limitNotices.ts`,
+ * `docs/v2/29` §8, PR-17). `[решение]` (`docs/v2/46-progress.md`, запись PR-17): в `SYSTEM_ROLES`
+ * (`shared/domain/roles.ts`) нет отдельного кода роли «HR» — только `employee`, `mentor`,
+ * `manager`, `author`, `admin`, `owner`, «HR» и «Рекрутер» из документов пакета — кастомные
+ * роли тенанта со своим набором скоупов. Везде, где документ называет адресатом «HR», этой
+ * функцией берётся `admin`/`owner`; кастомная роль со скоупом действия получит уведомление,
+ * когда для неё завести отдельный путь — без миграции, отдельным PR.
+ */
+export async function tenantAdminIds(tx: TenantTx, tenantId: string): Promise<string[]> {
+  const rows = await tx.execute(sql`
+    select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
+    where ur.tenant_id = ${tenantId}::uuid and r.code in ('admin', 'owner') and (ur.valid_until is null or ur.valid_until > now())
+      and a.status = 'active' and not a.is_blocked ${EMPLOYEES_ONLY('a')}
+  `) as unknown as { user_id: string }[]
+  return rows.map(r => r.user_id)
 }
 
 export interface EnqueueInput {

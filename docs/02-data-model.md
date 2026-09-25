@@ -469,10 +469,62 @@ create table public_apply_attempts (          -- журнал обращений
 -- миграция 0074), null = язык пространства: язык администратора, открывшего форму, к
 -- посетителю отношения не имеет, а §7.20 требует записать откликнувшемуся comm_language.
 
+-- Всплеск блокировок публичной формы (`v2/29` §7.8, PR-17) — колонка
+-- vacancies.spam_hardened_until, null = хардненинга нет. vacancy_public_lookup() (0074)
+-- переопределён, чтобы отдавать это поле публичному контуру без второго обращения к БД.
+
 -- Развязка цикла «кандидаты ↔ вакансии» (`v2/44` В-13, миграция 0071): колонка users.vacancy_id
 -- и её ключ users_vacancy_id_fk (on delete set null) заводятся ОТДЕЛЬНОЙ миграцией после
 -- vacancies — порядка создания таблиц, снимающего цикл, не существует. Плюс частичный индекс
 -- idx_users_tenant_vacancy (tenant_id, vacancy_id) where kind = 'candidate'.
+
+-- Публикация и генерация текста (`v2/29` §3.7–§3.10, §7.9–§7.18, план `v2/45` PR-17).
+-- Реальные аккаунты площадок не заводятся (`v2/HANDOFF` §6): подключение работает через
+-- провайдер-заглушку (адаптер с семью операциями §7.18, детерминированный, без сети).
+create table job_board_accounts (             -- аккаунт внешней площадки (§3.7)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  provider text not null,                     -- job_board_provider
+  owner_type text not null,                    -- job_board_owner_type
+  owner_user_id uuid references users(id) on delete cascade, -- null у company, обязателен иначе
+  label text,
+  status text not null default 'not_connected', -- job_board_account_status
+  secret_ref uuid references tenant_secrets(id) on delete set null, -- строка со своим key = 'jobboard:<id>'
+  scopes text[] not null default '{}',
+  last_ok_at timestamptz, last_error text,
+  connected_by uuid references users(id) on delete set null, connected_at timestamptz,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, provider, owner_type, coalesce(owner_user_id, '00000000-0000-0000-0000-000000000000'::uuid))
+);
+
+create table vacancy_publications (           -- журнал публикаций (§3.8)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid not null references vacancies(id) on delete cascade,
+  account_id uuid not null references job_board_accounts(id) on delete restrict,
+  state text not null default 'queued',       -- vacancy_publication_state (8 значений — см. перечень)
+  external_id text, external_url text, payload_hash text,
+  published_at timestamptz, expires_at timestamptz, removed_at timestamptz,
+  attempts int not null default 0, last_error_code text, last_error text,
+  requested_by uuid not null references users(id),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+  -- не более одной активной публикации той же вакансии в тот же аккаунт —
+  -- uq_vacancy_publications_active, частичный индекс по state in (queued,publishing,active,conflict,manual)
+);
+
+create table vacancy_ai_generations (         -- журнал ИИ-генераций текста и критериев (§3.10)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid references vacancies(id) on delete cascade,
+  target text not null,                       -- vacancy_ai_generation_target
+  input jsonb not null,                       -- поля вакансии, ушедшие в модель — без вилки и контактов
+  output_chars int, model text,
+  ops_charged int not null default 1,         -- списывается 1 ai_generate_ops; 0 у status='limited'
+  status text not null default 'ok',          -- vacancy_ai_generation_status
+  error_code text,
+  author_id uuid not null references users(id),
+  created_at timestamptz not null default now()
+);
 
 create table user_placements (                -- где человек работает
   id uuid primary key default gen_random_uuid(),
@@ -2655,6 +2707,25 @@ announcement_audience: all | plans | tenants
 -- Уровень нормы отсутствий (`absence_norms.scope_type`, `v2/38` §3.6, §7.13): разрешение снизу
 -- вверх по каждому виду отдельно — человек → точка → компания → системный дефолт (24 и 5)
 absence_norm_scope: tenant | location | user
+
+-- Площадка публикации вакансии (`job_board_accounts.provider`, `v2/29` §3.7, PR-17)
+job_board_provider: work_ua | robota_ua | telegram
+
+-- Кто распоряжается аккаунтом площадки (`job_board_accounts.owner_type`, `v2/29` §3.7 [решение])
+job_board_owner_type: company | personal | recruiter
+
+-- Состояние аккаунта площадки (`job_board_accounts.status`, `v2/29` §3.7, статусы `docs/09` §9.3)
+job_board_account_status: not_connected | connecting | active | failing | revoked | disabled
+
+-- Состояние публикации (`vacancy_publications.state`, `v2/29` §3.8, §4). `manual` — рекрутер
+-- опублікував сам і вставив посилання, без викликів адаптера (`v2/44` §8, обхідний шлях)
+vacancy_publication_state: queued | publishing | active | failed | removed | expired | conflict | manual
+
+-- Блок форми вакансії, який уміє генерувати ІІ (`vacancy_ai_generations.target`, `v2/29` §3.6, §3.10)
+vacancy_ai_generation_target: description | requirements | duties | extra | criteria
+
+-- Підсумок виклику ІІ-генерації (`vacancy_ai_generations.status`, `v2/29` §3.10): limited не списує операцію
+vacancy_ai_generation_status: ok | failed | limited
 ```
 
 ## Что проверяет тест схемы

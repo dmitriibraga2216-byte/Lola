@@ -63,6 +63,12 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
       // docs/v2/37 §11 (PR-22): нормы времени — факт, флаг отклонения, уведомление автору
       await b.createQueue('time.norms_recalc', { retryLimit: 2, expireInSeconds: 1800 })
+      // docs/v2/29 §11 (PR-17): публикация и генерация текста. `vacancy.publish_retry` —
+      // повтор временной ошибки адаптера (§7.16, 1/5/25 мин задаёт startAfter при отправке,
+      // а не расписание очереди); `vacancy.publication_health` и `vacancy.spam_watch` — сканы.
+      await b.createQueue('vacancy.publish_retry', { retryLimit: 1, expireInSeconds: 300 })
+      await b.createQueue('vacancy.publication_health', { retryLimit: 2, expireInSeconds: 600 })
+      await b.createQueue('vacancy.spam_watch', { retryLimit: 2, expireInSeconds: 300 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -116,6 +122,10 @@ export async function getBoss(): Promise<PgBoss> {
       // Нормы времени (docs/v2/37 §11): еженедельно, в ночь на воскресенье — медиана факта, флаг
       // отклонения и уведомление автору. Свёртка идёт каждые 10 минут, витрина к этому часу свежая
       await b.schedule('time.norms_recalc', '30 2 * * 0', {}, { singletonKey: 'time.norms_recalc', tz: 'Europe/Kyiv' })
+      // Публикация и генерация текста (docs/v2/29 §11, PR-17): здоровье активных аккаунтов —
+      // раз в 30 мин (§11 vacancy.publication_health), всплеск блокировок — раз в 10 мин (§7.8)
+      await b.schedule('vacancy.publication_health', '*/30 * * * *', {}, { singletonKey: 'vacancy.publication_health' })
+      await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
       return b
     })
   }
@@ -148,3 +158,8 @@ export async function enqueueTrajectoryTimer(tenantId: string, stateId: string, 
   await b.send('trajectory.timer', { tenantId, stateId }, { singletonKey: `trajectory:${stateId}`, startAfter: at })
 }
 
+/** Повтор публикации после временной ошибки адаптера (docs/v2/29 §7.16): 1/5/25 мин через `startAfter`. */
+export async function enqueuePublishRetry(tenantId: string, publicationId: string, delaySec: number): Promise<void> {
+  const b = await getBoss()
+  await b.send('vacancy.publish_retry', { tenantId, publicationId }, { singletonKey: `publish_retry:${publicationId}`, startAfter: delaySec })
+}

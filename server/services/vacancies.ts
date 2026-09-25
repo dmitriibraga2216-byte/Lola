@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm'
 import {
   candidateScores, courses, users, vacancies, vacancyCriteria, vacancyCriterionScores,
-  vacancyLanguages,
+  vacancyLanguages, vacancyPublications,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -20,6 +20,7 @@ import type {
 import { candidates as candidatesQuery } from './repo/people'
 import { recordAudit } from './audit'
 import { createAssignmentTx } from './assignments'
+import { enqueueNotification, tenantAdminIds } from './notifications'
 
 /**
  * Вакансии: реестр, состояния, критерии оценки, шаблон параметров назначения
@@ -247,7 +248,8 @@ export async function listVacancies(v: Viewer, filter: VacancyListFilter): Promi
   })
 }
 
-async function rowById(tx: TenantTx, v: Viewer, id: string): Promise<VacancyRow | null> {
+/** Экспортирована для `vacancyPublications.ts`/`vacancyAi.ts` (PR-17): им нужна строка вакансии внутри своей транзакции, а не второй `withTenant()`. */
+export async function rowById(tx: TenantTx, v: Viewer, id: string): Promise<VacancyRow | null> {
   const cond = scopeCond(v)
   const [row] = await tx.select(COLUMNS).from(vacancies)
     .where(cond ? and(eq(vacancies.id, id), cond) : eq(vacancies.id, id))
@@ -419,7 +421,31 @@ export async function updateVacancy(v: Viewer, id: string, input: VacancyUpdateI
     if (input.updatedAt && new Date(input.updatedAt).getTime() !== before.updatedAt.getTime()) {
       return { ok: false, code: 'conflict', vacancy: await cardOf(tx, before) } as UpdateResult
     }
-    const fields = writableFields(input)
+    const fields = writableFields(input) as Record<string, unknown>
+
+    // Правка текстового блока людиною знімає позначку «непроверено» (§3.6, §7.9): без
+    // цього единственным виходом залишалась б кнопка «Текст перевірено», а людина, що просто
+    // переписала абзац і зберегла форму, й далі бачила б блок неперевіреним.
+    const AI_HTML_FIELDS: Record<string, string> = { descriptionHtml: 'description', requirementsHtml: 'requirements', dutiesHtml: 'duties', extraHtml: 'extra' }
+    const touchedHtml = Object.keys(AI_HTML_FIELDS).filter(k => k in fields)
+    if (touchedHtml.length) {
+      const [full] = await tx.select({
+        descriptionHtml: vacancies.descriptionHtml, requirementsHtml: vacancies.requirementsHtml,
+        dutiesHtml: vacancies.dutiesHtml, extraHtml: vacancies.extraHtml, aiBlocks: vacancies.aiBlocks,
+      }).from(vacancies).where(eq(vacancies.id, id))
+      const aiBlocks = { ...(full?.aiBlocks as Record<string, { editedAt?: string | null, acknowledged?: boolean } | undefined> ?? {}) }
+      let changed = false
+      for (const field of touchedHtml) {
+        const target = AI_HTML_FIELDS[field]!
+        const block = aiBlocks[target]
+        if (block && !block.editedAt && fields[field] !== (full as Record<string, unknown> | undefined)?.[field]) {
+          aiBlocks[target] = { ...block, editedAt: new Date().toISOString() }
+          changed = true
+        }
+      }
+      if (changed) fields.aiBlocks = aiBlocks
+    }
+
     if (Object.keys(fields).length) {
       await tx.update(vacancies).set({ ...fields, updatedAt: new Date() } as Partial<typeof vacancies.$inferInsert>)
         .where(eq(vacancies.id, id))
@@ -435,7 +461,8 @@ export async function updateVacancy(v: Viewer, id: string, input: VacancyUpdateI
   })
 }
 
-async function cardOf(tx: TenantTx, row: VacancyRow): Promise<VacancyCard> {
+/** Экспортирована для `vacancyPublications.ts`/`vacancyAi.ts` (PR-17) — см. `rowById()`. */
+export async function cardOf(tx: TenantTx, row: VacancyRow): Promise<VacancyCard> {
   const [full] = await tx.select({
     descriptionHtml: vacancies.descriptionHtml,
     requirementsHtml: vacancies.requirementsHtml,
@@ -569,6 +596,32 @@ export async function closeVacancy(v: Viewer, id: string, input: VacancyCloseInp
       tenantId: v.tenantId, actorId: v.actorId, action: 'vacancy.close', entity: 'vacancy', entityId: id,
       before: { state: row.state }, after: { state: 'closed', reason: input.reason, reasonText: input.reasonText ?? null, candidates: inProgress.length },
     })
+    // §4 «публикации в очередь на снятие», чекбокс «Зняти оголошення з майданчиків» (§6.4,
+    // включён по умолчанию — `removeExternal`). PR-17 не заводит фоновую задачу
+    // `vacancy.remove_external` (нет в объёме этого PR, `docs/v2/46-progress.md`): строки
+    // сразу переводятся в `removed` без вызова `adapter.remove()`, ровно как это уже делает
+    // `vacancyPublications.ts#removePublication()` для одиночного снятия — второй логики нет.
+    if (input.removeExternal) {
+      await tx.update(vacancyPublications).set({ state: 'removed', removedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(vacancyPublications.vacancyId, id), inArray(vacancyPublications.state, ['queued', 'publishing', 'active', 'manual', 'conflict'])))
+    }
+    // `vacancy.closed_with_candidates` (`29` §8, критерий §13 к. 13): прохождение не
+    // прерывается, рекрутер и HR/админ решают по каждому кандидату отдельно.
+    if (inProgress.length) {
+      const day = new Date().toISOString().slice(0, 10)
+      const recipients = new Set<string>(await tenantAdminIds(tx, v.tenantId))
+      if (row.recruiterId) recipients.add(row.recruiterId)
+      for (const userId of recipients) {
+        await enqueueNotification(tx, {
+          tenantId: v.tenantId, userId, code: 'vacancy_closed_with_candidates',
+          payload: { vacancy: row.title, n: inProgress.length },
+          // dedupKey несёт userId (как `notifyAdmins` в limitNotices.ts): без него второй
+          // получатель в этом же цикле молча теряет уведомление — dedupKey рассчитан на
+          // одного адресата, а не на рассылку нескольким (найдено этим PR при тестировании).
+          dedupKey: `vacancy_closed_with_candidates:${id}:${day}:${userId}`,
+        }).catch(() => false)
+      }
+    }
     return { ok: true, vacancy: await cardOf(tx, (await rowById(tx, v, id))!), candidates: inProgress }
   })
 }

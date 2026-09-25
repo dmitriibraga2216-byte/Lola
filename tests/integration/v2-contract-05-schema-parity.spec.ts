@@ -51,6 +51,11 @@ const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
  * Колонки `attempts_count` из `docs/v2/37` §3.1 здесь нет: она заведена под именем
  * `attempt_no` — как в `workshop_submissions`, где тот же смысл («какая по счёту сдача»).
  *
+ * - `vacancy_publications.attempts` — сколько раз адаптер площадки уже пробовал опубликовать
+ *   объявление (`29` §7.16: ретраи 1/5/25 мин на временную ошибку). Счётчик обращений к
+ *   внешнему сервису, а не разрешённое число попыток прохождения — кандидат об этой колонке
+ *   не знает и на его назначение она не ссылается.
+ *
  * Список закрытый: правило прохождения, попавшее в таблицу пакета, по-прежнему красит тест.
  */
 const PACKAGE_COLUMN_EXCEPTIONS = new Set([
@@ -60,6 +65,7 @@ const PACKAGE_COLUMN_EXCEPTIONS = new Set([
   'review_delegations.due_at',
   'review_sla_events.due_at',
   'storage_pending_uploads.attempts',
+  'vacancy_publications.attempts',
 ])
 
 const adminUrl = process.env.DATABASE_ADMIN_URL

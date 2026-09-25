@@ -74,6 +74,12 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // здесь не формальность, а единственное, что отделяет отклики разных пространств.
   'vacancy_applications',
   'public_apply_attempts',
+  // 29. Публикация и генерация текста (PR-17, миграция — см. заголовок файла миграции).
+  // Аккаунты площадок — бухгалтерская запись, не реальное подключение (`v2/HANDOFF` §6):
+  // секрет в `secret_ref` — токен адаптера-заглушки, не вендора.
+  'job_board_accounts',
+  'vacancy_publications',
+  'vacancy_ai_generations',
   // 32. Оргструктура: дерево подчинения (PR-30, миграция 0075_v2_org_structure).
   // Пятой таблицы пакета — `org_structure_conflicts` — здесь нет и не будет: решение
   // `docs/v2/44` В-7 свело её к `alter table org_conflicts` (таблица существует с 0033

@@ -827,7 +827,7 @@ API отклоняет фильтр `{rating_pct:{lt:N}}` без второго 
 | PATCH/DELETE | `/people/:id/documents/:docId` | `{expiresAt?,status?,note?}` | объект | `403`, `409 document_is_evidence` |
 | CRUD | `/person-document-types` | поля §3.5 | | `409 type_in_use` при деактивации используемого |
 | GET | `/people/:id/absences?year=` | — | `{norms:{vacation:{value,source},sick:{…}},used,remaining,records:[…]}` | `403` |
-| PUT | `/absence-norms` | `{scopeType,scopeId,year,vacationDays?,sickDays?,reason?}` | объект | `422 reason_required`, `403 forbidden` |
+| PUT | `/absence-norms` | `{scopeType,scopeId,year,vacationDays?,sickDays?,reason?}` | объект | `422 reason_required`, `403 forbidden`, `409 absence_norm.self_edit` |
 | POST/PATCH | `/people/:id/absences` | `{kind,dateFrom,dateTo,status,comment?}` | объект | `409 absence_overlap`, `422 absence_record.range_invalid` |
 | GET | `/reports/documents` · `/reports/absences` · `/reports/activity` · `/reports/rating` | фильтры §9 | курсорная страница | `403` |
 
@@ -870,6 +870,14 @@ API отклоняет фильтр `{rating_pct:{lt:N}}` без второго 
 > (коллизия `41` §8.2.6: модульный документ побеждает, у отсутствия проверяющего —
 > `reviewer_absence.range_invalid`). Видеть чужие отсутствия — тот же `person.absence.manage` в
 > области точки: отдельного скоупа просмотра `38` §2 не вводит.
+
+> [решение, добавлено 25.09.2026] `PUT /absence-norms` уровня `user` отвечает `409
+> absence_norm.self_edit`, если `scopeId` совпадает с самим вызывающим — свою собственную
+> индивидуальную норму отсутствий нельзя скорректировать самому себе, даже имея
+> `person.absence.manage` и область, покрывающую свою точку. Тот же принцип, что уже принят для
+> бонусов (`21` §14.9, `server/services/bonuses.ts`, `adjustBonuses`: «Себе начислить нельзя,
+> даже администратору: деньги в своих руках — конфликт интересов; начисление себе делает
+> коллега»). Норм компании и точки правило не касается — там нет уровня «свой».
 
 ## 11. Фоновые задачи
 

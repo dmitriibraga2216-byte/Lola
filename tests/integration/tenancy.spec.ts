@@ -416,6 +416,23 @@ function hfetch(url: string, init: { method?: string, headers?: Record<string, s
   })
 }
 
+/**
+ * Опрос условия вместо фиксированной паузы (тот же приём, что PR #123 для хуков
+ * траектории/программы, `tests/integration/spec17-trajectories.spec.ts`). `platform.request`
+ * пишется в `platform_audit` через `event.waitUntil(...)` (`server/middleware/01.session.ts`) —
+ * намеренно после отправки ответа оператору, тем же приёмом, что и `touchSession` там же
+ * («не блокируем ответ»), а не багом: запись не теряется, просто её момент коммита не
+ * гарантирован к моменту, когда тест уже успел сделать следующий HTTP-запрос за журналом.
+ */
+async function waitFor(cond: () => Promise<boolean>, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await cond()) return
+    if (Date.now() >= deadline) throw new Error(`тайм-аут ожидания (${timeoutMs}ms) — platform.request не записался в аудит`)
+    await new Promise(r => setTimeout(r, 20))
+  }
+}
+
 describe.skipIf(!BUILT)('docs/25 по HTTP (собранное приложение, Host-резолв включён)', () => {
   let server: ChildProcess | undefined
   const HOST_KAPPI = `kappi.${HOST_BASE}`
@@ -558,8 +575,14 @@ describe.skipIf(!BUILT)('docs/25 по HTTP (собранное приложен�
     expect((await hfetch(`${BASE}/api/v1/platform/tenants`, { headers: { cookie: opsCookie } })).status).toBe(200)
     // просмотр карточки — лимиты конкретного тенанта, GET, должен писаться
     expect((await hfetch(`${BASE}/api/v1/platform/tenants/${kappiId}/limits`, { headers: { cookie: opsCookie } })).status).toBe(200)
-    const after = await (await hfetch(`${BASE}/api/v1/platform/audit?tenantId=${kappiId}&limit=200`, { headers: { cookie: opsCookie } })).json() as { data: { id: string, action: string, entityId: string }[] }
-    const fresh = after.data.filter(r => !seenIds.has(r.id))
+    const freshRows = async () => {
+      const after = await (await hfetch(`${BASE}/api/v1/platform/audit?tenantId=${kappiId}&limit=200`, { headers: { cookie: opsCookie } })).json() as { data: { id: string, action: string, entityId: string }[] }
+      return after.data.filter(r => !seenIds.has(r.id))
+    }
+    // Запись platform.request по карточке лимитов идёт фоном (waitFor выше) — ждём её опросом,
+    // а не одним немедленным чтением сразу после ответа ручки.
+    await waitFor(async () => (await freshRows()).some(r => r.action === 'platform.request' && r.entityId.includes('/limits')))
+    const fresh = await freshRows()
     expect(fresh.some(r => r.action === 'platform.request' && r.entityId.includes('/limits'))).toBe(true)
     expect(fresh.some(r => r.action === 'platform.request' && r.entityId === 'GET /api/v1/platform/tenants')).toBe(false)
   })

@@ -7,7 +7,9 @@ import { apiData, apiError } from '../../../utils/apiResponse'
  * PUT /absence-norms (docs/04 §4.11, docs/v2/38 §10): `{scopeType, scopeId, year, vacationDays?,
  * sickDays?, reason?}`. Норму компании правит только право на весь тенант, точку и человека —
  * право в области этой точки (`38` §2: руководитель — своих точек). Чужая точка или человек —
- * 404 (CLAUDE.md п. 15); своя, но вне области — 403; уровень человека без причины — 422.
+ * 404 (CLAUDE.md п. 15); своя, но вне области — 403; уровень человека без причины — 422;
+ * собственная индивидуальная норма — `409 absence_norm.self_edit` (`putAbsenceNorm`), даже
+ * если право есть и точка своя.
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'person.absence.manage')
@@ -24,5 +26,11 @@ export default defineEventHandler(async (event) => {
   if (!target.found) return apiError(event, 404, 'not_found', p.data.scopeType === 'location' ? 'Точку не знайдено' : 'Співробітника не знайдено')
   const allowed = area === null || (p.data.scopeType !== 'tenant' && !!target.locationId && area.includes(target.locationId))
   if (!allowed) return apiError(event, 403, 'forbidden', p.data.scopeType === 'tenant' ? 'Норму компанії змінює лише HR або адміністратор простору' : 'Ви можете змінювати норми лише своїх точок')
-  return apiData(await putAbsenceNorm(ctx, p.data))
+  const r = await putAbsenceNorm(ctx, p.data)
+  if (!r.ok) {
+    switch (r.code) {
+      case 'self': return apiError(event, 409, 'absence_norm.self_edit', 'Не можна коригувати власну норму відсутностей — попросіть іншого адміністратора або HR')
+    }
+  }
+  return apiData(r.row)
 })

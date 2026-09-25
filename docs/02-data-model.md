@@ -1806,8 +1806,14 @@ trajectory_nodes(
   mentor_id uuid,          -- для mentor: явный наставник; null — керівник точки людини [решение spec-17]
   params jsonb,            -- для task: правила назначения, которое создаст узел (ключи assignments.params
                            -- по типу, `15` §14.3, + dueDays) — узел = шаблон назначения, не контент [решение spec-17]
+  library_version_id uuid  -- узел-ссылка на модуль библиотеки (`v2/31` §3.1, П-17, PR-26): FK
+                           -- library_module_versions on delete restrict; только у task с content_type
+                           -- 'resource' (материал-тело модуля) — trajectory_nodes_library_ref_ck.
+                           -- Человек получает снимок ЭТОЙ версии, а не последней
   x int, y int             -- положение на полотне
 )
+create index idx_trajectory_nodes_tenant_library on trajectory_nodes (tenant_id, library_version_id)
+  where library_version_id is not null;
 
 trajectory_edges(
   id, tenant_id, trajectory_id, from_node_id, to_node_id,

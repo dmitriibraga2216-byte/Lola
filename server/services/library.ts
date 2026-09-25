@@ -24,8 +24,9 @@ import type {
 import type { LibraryModuleStatus } from '../../shared/enums'
 import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import {
-  LIBRARY_LIMITS, authorIdsOf, canEditModule, deletionVerdict, diffBlocks, embeddingText, mediaIdsOf,
-  restoredStatus, type BlockDiff, type LibraryActorRights,
+  LIBRARY_LIMITS, authorIdsOf, canEditModule, deletionVerdict, diffBlocks, embeddingText, isHybridQuery, mediaIdsOf,
+  prefixTsQuery, restoredStatus, rrfMerge, skippedVersions, typeIconOf,
+  type BlockDiff, type LibraryActorRights, type LibraryTypeIcon,
 } from '../../shared/domain/library'
 
 /**
@@ -232,6 +233,11 @@ export interface LibraryModuleCard {
   ownerName: string | null
   authorIds: string[]
   status: LibraryModuleStatus
+  /**
+   * Иконка колонки «Тип» и палитры (§7.7, критерий 7): `article` уточняется доминирующим блоком
+   * тела последней версии (черновика — пока версий нет). `contentKind` при этом не меняется.
+   */
+  typeIcon: LibraryTypeIcon
   usageCount: number
   staleUsages: number
   currentVersion: LibraryVersionRef | null
@@ -265,6 +271,19 @@ async function toCards(tx: TenantTx, rows: ModuleRow[]): Promise<LibraryModuleCa
     .where(and(inArray(libraryModuleUsages.libraryModuleId, ids), isNull(libraryModuleUsages.detachedAt), eq(libraryModuleUsages.isStale, true)))
     .groupBy(libraryModuleUsages.libraryModuleId)
   const staleBy = new Map(stale.map(s => [s.moduleId, s.n]))
+  // §7.7: состав тела — последней версии, а пока версий нет — черновика; тела не выгружаются
+  const stats = await tx.execute(sql`
+    select m.id, s.blocks, s.checklists, s.has_table
+    from library_modules m
+    left join library_module_versions v on v.id = m.current_version_id
+    left join lessons vl on vl.id = v.lesson_id
+    left join resource_versions rv on rv.id = vl.resource_version_id
+    left join lessons dl on dl.id = m.draft_lesson_id
+    left join resources r on r.id = dl.item_id
+    cross join lateral (${bodyStatsSql(sql`coalesce(rv.body, r.body, '[]'::jsonb)`)}) s
+    where m.id in (${sql.join(ids.map(id => sql`${id}::uuid`), sql`, `)})
+  `) as unknown as { id: string, blocks: number, checklists: number, has_table: boolean }[]
+  const statsBy = new Map(stats.map(r => [r.id, { blocks: Number(r.blocks), checklists: Number(r.checklists), hasTable: !!r.has_table }]))
   return rows.map(r => ({
     id: r.id,
     title: r.title,
@@ -280,6 +299,7 @@ async function toCards(tx: TenantTx, rows: ModuleRow[]): Promise<LibraryModuleCa
     ownerName: ownerName.get(r.ownerId) ?? null,
     authorIds: r.authorIds,
     status: r.status as LibraryModuleStatus,
+    typeIcon: typeIconOf(r.contentKind, statsBy.get(r.id) ?? null),
     usageCount: r.usageCount,
     staleUsages: staleBy.get(r.id) ?? 0,
     currentVersion: r.currentVersionId ? versionById.get(r.currentVersionId) ?? null : null,
@@ -329,10 +349,10 @@ export async function getModule(actor: LibraryActor, id: string): Promise<Librar
   return withTenant(actor.tenantId, actor.actorId, tx => loadDetail(tx, actor, id))
 }
 
-// ── Список и палитра (§5.1, §5.4) ────────────────────────────────────────────────────────
+// ── Список, поиск и палитра (§5.1, §5.4, §7.8) ───────────────────────────────────────────
 
-function listConditions(q: LibraryListQuery): (SQL | undefined)[] {
-  const text = q.q?.trim()
+/** Фильтры списка без строки поиска: одни и те же для страницы списка и для поиска. */
+function filterConditions(q: LibraryListQuery): (SQL | undefined)[] {
   return [
     q.status === 'active' ? inArray(libraryModules.status, ['draft', 'published'])
     : q.status === 'all' ? undefined
@@ -343,14 +363,71 @@ function listConditions(q: LibraryListQuery): (SQL | undefined)[] {
     q.ownerId ? eq(libraryModules.ownerId, q.ownerId) : undefined,
     q.onlyUnused ? eq(libraryModules.usageCount, 0) : undefined,
     q.onlyStale ? sql`exists (select 1 from library_module_usages su where su.library_module_id = ${libraryModules.id} and su.detached_at is null and su.is_stale)` : undefined,
-    // Полнотекстовый по названию, описанию и меткам (§7.8); векторный по телу — PR-26
-    text ? or(sql`${libraryModules.searchTsv} @@ plainto_tsquery('simple', ${text})`, ilike(libraryModules.title, `%${text}%`)) : undefined,
   ]
 }
 
+/**
+ * Состав тела для иконки (§7.7) одним подзапросом: число блоков, из них чек-листов, есть ли
+ * таблица (блок `table` или `<table` в HTML текстового блока — `shared/domain/library.ts#blockIsTable`).
+ * Тела на сервер приложения не выгружаются.
+ */
+export function bodyStatsSql(body: SQL): SQL {
+  return sql`select jsonb_array_length(coalesce(${body}, '[]'::jsonb))::int as blocks,
+    (select count(*)::int from jsonb_array_elements(coalesce(${body}, '[]'::jsonb)) e where e->>'type' = 'checklist') as checklists,
+    exists (select 1 from jsonb_array_elements(coalesce(${body}, '[]'::jsonb)) e
+            where e->>'type' = 'table' or (e->>'type' = 'text' and e->>'html' ilike '%<table%')) as has_table`
+}
+
+/**
+ * Поиск (§7.8, критерий 8). Полнотекст — всегда: `search_tsv` несёт название (A), описание и
+ * метки (B) и тело последней опубликованной версии (C, миграция 0088), запрос — префиксный,
+ * чтобы палитра находила недописанное слово; плюс `ilike` по названию. Запрос длиннее трёх слов
+ * уходит в гибрид: к полнотексту добавляется векторный поиск по `embedding` (тело последней
+ * версии, только векторы текущей модели — векторы разных моделей несравнимы), результаты
+ * сливаются по RRF, лимит 50. Вектор запроса считается до транзакции: провайдер модели бывает
+ * медленным, а транзакция его не ждёт.
+ */
+async function searchIds(tx: TenantTx, conds: (SQL | undefined)[], text: string, limit: number, queryVector: { vec: number[], model: string } | null): Promise<string[]> {
+  const tsq = prefixTsQuery(text)
+  const like = `%${text}%`
+  const fullText = await tx.select({ id: libraryModules.id }).from(libraryModules)
+    .where(and(...conds, or(tsq ? sql`${libraryModules.searchTsv} @@ to_tsquery('simple', ${tsq})` : undefined, ilike(libraryModules.title, like))))
+    .orderBy(
+      desc(sql`${libraryModules.title} ilike ${like}`),
+      desc(tsq ? sql`ts_rank(${libraryModules.searchTsv}, to_tsquery('simple', ${tsq}))` : sql`0`),
+      desc(libraryModules.updatedAt),
+    )
+    .limit(LIBRARY_LIMITS.searchLimit)
+  let semantic: string[] = []
+  if (queryVector) {
+    const literal = `[${queryVector.vec.join(',')}]`
+    const rows = await tx.select({ id: libraryModules.id, sim: sql<number>`1 - (${libraryModules.embedding} <=> ${literal}::vector)` }).from(libraryModules)
+      .where(and(...conds, isNotNull(libraryModules.embedding), eq(libraryModules.embeddingModel, queryVector.model)))
+      .orderBy(sql`${libraryModules.embedding} <=> ${literal}::vector`)
+      .limit(LIBRARY_LIMITS.searchLimit)
+    semantic = rows.filter(r => Number(r.sim) >= LIBRARY_LIMITS.vectorMinSimilarity).map(r => r.id)
+  }
+  return rrfMerge([fullText.map(r => r.id), semantic], limit)
+}
+
 export async function listModules(actor: LibraryActor, q: LibraryListQuery): Promise<{ items: LibraryModuleCard[], nextCursor: string | null, total: number }> {
+  const text = q.q?.trim()
+  let queryVector: { vec: number[], model: string } | null = null
+  if (text && isHybridQuery(text)) {
+    const provider = embeddingProvider(LIBRARY_LIMITS.embeddingDims)
+    const [vec] = await provider.embed([text])
+    if (vec) queryVector = { vec, model: provider.id }
+  }
   return withTenant(actor.tenantId, actor.actorId, async (tx) => {
-    const conds = listConditions(q)
+    const conds = filterConditions(q)
+    if (text) {
+      // Поиск — одна страница по релевантности (§7.8 «лимит 50»), курсора у него нет
+      const ids = await searchIds(tx, conds, text, Math.min(q.limit, LIBRARY_LIMITS.searchLimit), queryVector)
+      const rows = ids.length ? await tx.select().from(libraryModules).where(inArray(libraryModules.id, ids)) : []
+      const byId = new Map(rows.map(r => [r.id, r]))
+      const ordered = ids.map(id => byId.get(id)).filter((r): r is ModuleRow => !!r)
+      return { items: await toCards(tx, ordered), nextCursor: null, total: ordered.length }
+    }
     // Ключевой курсор (updated_at, id) — общая утилита: момент текстом из Postgres с микросекундами
     const rows = await tx.select({ row: libraryModules, cursorAt: keysetAt(libraryModules.updatedAt) }).from(libraryModules)
       .where(and(...conds, keysetAfter(KEYSETS.libraryModules, q.cursor, [libraryModules.updatedAt, libraryModules.id], 'desc')))
@@ -364,6 +441,33 @@ export async function listModules(actor: LibraryActor, q: LibraryListQuery): Pro
       nextCursor: rows.length > q.limit && last ? encodeKeyset(KEYSETS.libraryModules, [last.cursorAt, last.row.id]) : null,
       total,
     }
+  })
+}
+
+/**
+ * «До 8 последних использованных модулей» палитры вставки (§5.4): сначала те, что вставлял
+ * сам автор, затем — недавно вставленные коллегами (новому автору палитра не пуста). Только
+ * опубликованные: архивного модуля в палитре нет (§7.6, критерий 4), у черновика нет версии.
+ */
+export async function recentModules(actor: LibraryActor): Promise<LibraryModuleCard[]> {
+  return withTenant(actor.tenantId, actor.actorId, async (tx) => {
+    const lastUsed = sql`max(${libraryModuleUsages.attachedAt})`
+    const pick = (mine: boolean, except: string[]) => tx.select({ id: libraryModuleUsages.libraryModuleId }).from(libraryModuleUsages)
+      .innerJoin(libraryModules, eq(libraryModules.id, libraryModuleUsages.libraryModuleId))
+      .where(and(
+        eq(libraryModules.status, 'published'),
+        mine ? eq(libraryModuleUsages.attachedBy, actor.actorId) : undefined,
+        except.length ? sql`${libraryModuleUsages.libraryModuleId} not in (${sql.join(except.map(id => sql`${id}::uuid`), sql`, `)})` : undefined,
+      ))
+      .groupBy(libraryModuleUsages.libraryModuleId)
+      .orderBy(desc(lastUsed))
+      .limit(LIBRARY_LIMITS.paletteRecent)
+    const ids = (await pick(true, [])).map(r => r.id)
+    if (ids.length < LIBRARY_LIMITS.paletteRecent) ids.push(...(await pick(false, ids)).map(r => r.id))
+    const top = ids.slice(0, LIBRARY_LIMITS.paletteRecent)
+    const rows = top.length ? await tx.select().from(libraryModules).where(inArray(libraryModules.id, top)) : []
+    const byId = new Map(rows.map(r => [r.id, r]))
+    return toCards(tx, top.map(id => byId.get(id)).filter((r): r is ModuleRow => !!r))
   })
 }
 
@@ -483,7 +587,7 @@ export type PublishVersionResult
  * `current_version_id`, `is_stale = true` всем активным местам на других версиях (§7.9).
  * Ни одно место не переключается само: публикация не имеет права менять содержание трека,
  * который человек проходит (Р-31.2); исключение — «Критичне виправлення» с `hotfix_auto`, его
- * применяет `library.hotfix_propagate` (PR-26), здесь флаг только записывается.
+ * после фиксации разносит фоновая `library.hotfix_propagate` (`libraryUsages.ts#propagateHotfix`).
  *
  * Параллельная публикация (§12): строка модуля блокируется `for update`, номер берётся
  * `max + 1`; если автор публиковал, глядя на устаревшую страницу (`expectedVersion`), —
@@ -597,7 +701,11 @@ export async function publishVersion(actor: LibraryActor, id: string, input: Lib
     if ((err as { code?: string }).code === '23505') return { ok: false as const, code: 'version_conflict' as const, current: null }
     throw err
   })
-  if (result.ok) await enqueueEmbeddingRefresh(actor.tenantId, id)
+  if (result.ok) {
+    await enqueueEmbeddingRefresh(actor.tenantId, id)
+    // §7.4, §11: «Критичне виправлення» разносится по местам фоном — по событию публикации
+    if (result.version.isHotfix) await enqueueHotfixPropagation(actor.tenantId, id, result.version.id)
+  }
   return result
 }
 
@@ -665,6 +773,70 @@ export async function getVersion(actor: LibraryActor, id: string, versionNo: num
       mediaId: snap.snapshot.mediaId,
       externalUrl: snap.snapshot.externalUrl,
     }
+  })
+}
+
+/** Версия для сравнения и диалога обновления (§5.2 «Порівняти з v3», §5.5). */
+export interface VersionCompareRef extends LibraryVersionRef {
+  title: string
+}
+
+export interface VersionCompare {
+  moduleId: string
+  moduleTitle: string
+  from: VersionCompareRef
+  to: VersionCompareRef
+  /** Changelog каждой версии после `from` до `to` включительно — «що змінилось» между ними (§5.5). */
+  changelogs: VersionCompareRef[]
+  /** Поблочный diff по `block.id` (§3.3): добавленные бирюзой, удалённые кораллом, изменённые — «було / стало». */
+  diff: BlockDiff
+  before: ContentBlock[]
+  after: ContentBlock[]
+}
+
+const compareRef = (v: typeof libraryModuleVersions.$inferSelect): VersionCompareRef => ({
+  id: v.id, version: v.version, publishedAt: v.publishedAt, changelog: v.changelog, isHotfix: v.isHotfix, title: v.title,
+})
+
+/**
+ * Сравнение двух версий модуля по номерам (внутри транзакции): тела неизменяемых снимков и
+ * поблочный diff между ними — не цепочка сохранённых diff соседних версий, а прямое сравнение,
+ * иначе блок, изменённый в v3 и возвращённый в v4, показался бы изменённым в v2→v4.
+ */
+export async function compareVersionsTx(tx: TenantTx, moduleId: string, fromNo: number, toNo: number): Promise<VersionCompare | null> {
+  const [m] = await tx.select({ id: libraryModules.id, title: libraryModules.title }).from(libraryModules).where(eq(libraryModules.id, moduleId))
+  if (!m) return null
+  const versions = await tx.select().from(libraryModuleVersions).where(eq(libraryModuleVersions.libraryModuleId, moduleId))
+  const from = versions.find(v => v.version === fromNo)
+  const to = versions.find(v => v.version === toNo)
+  if (!from || !to) return null
+  const fromSnap = await versionSnapshot(tx, from.id)
+  const toSnap = await versionSnapshot(tx, to.id)
+  if (!fromSnap || !toSnap) return null
+  const before = fromSnap.snapshot.body as ContentBlock[]
+  const after = toSnap.snapshot.body as ContentBlock[]
+  return {
+    moduleId: m.id,
+    moduleTitle: m.title,
+    from: compareRef(from),
+    to: compareRef(to),
+    changelogs: skippedVersions(versions, Math.min(fromNo, toNo), Math.max(fromNo, toNo)).map(compareRef),
+    diff: diffBlocks(before, after),
+    before,
+    after,
+  }
+}
+
+export type CompareResult
+  = | { ok: true, compare: VersionCompare }
+    | { ok: false, code: 'not_found' | 'same_version' }
+
+/** `GET /library/modules/:id/versions/:from/diff/:to` (§10): «Порівняти з v3» на вкладке «Версії». */
+export async function compareVersions(actor: LibraryActor, moduleId: string, fromNo: number, toNo: number): Promise<CompareResult> {
+  if (fromNo === toNo) return { ok: false, code: 'same_version' }
+  return withTenant(actor.tenantId, actor.actorId, async (tx): Promise<CompareResult> => {
+    const compare = await compareVersionsTx(tx, moduleId, fromNo, toNo)
+    return compare ? { ok: true, compare } : { ok: false, code: 'not_found' }
   })
 }
 
@@ -831,6 +1003,13 @@ async function enqueueEmbeddingRefresh(tenantId: string, moduleId: string): Prom
   const { enqueueForTenant } = await import('./tenantQueue')
   await enqueueForTenant('library.embedding_refresh', tenantId, { moduleId }, { singletonKey: `library.embed:${moduleId}` })
     .catch(err => console.error('[library.embedding_refresh] enqueue', moduleId, err))
+}
+
+/** `library.hotfix_propagate` (§11): места с `hotfix_auto` без людей в процессе переключаются на хотфикс. */
+async function enqueueHotfixPropagation(tenantId: string, moduleId: string, versionId: string): Promise<void> {
+  const { enqueueForTenant } = await import('./tenantQueue')
+  await enqueueForTenant('library.hotfix_propagate', tenantId, { moduleId, versionId }, { singletonKey: `library.hotfix:${versionId}` })
+    .catch(err => console.error('[library.hotfix_propagate] enqueue', versionId, err))
 }
 
 /**

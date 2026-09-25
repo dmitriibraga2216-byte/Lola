@@ -36,6 +36,21 @@ export const LIBRARY_LIMITS = {
   embeddingBatch: 20,
   /** Страница списка (§5.1: 25/50/100). */
   pageSizes: [25, 50, 100] as const,
+  /** Поиск (§7.8): «результаты сливаются по RRF, лимит 50». */
+  searchLimit: 50,
+  /** Константа RRF: 1 / (k + ранг). 60 — общепринятое значение, при котором первые места списков не заглушают остальные. */
+  rrfK: 60,
+  /** «Запрос длиннее трёх слов уходит в гибрид» (§7.8): с четырёх слов к полнотексту добавляется вектор. */
+  hybridMinWords: 4,
+  /**
+   * Нижняя граница косинусной близости векторной части. Без неё вектор «находит» любой модуль,
+   * и «Нічого не знайшли» (§5.1) не показалось бы никогда. `[решение]` PR-26 — см. `31` §7.8.
+   */
+  vectorMinSimilarity: 0.2,
+  /** Сколько слов запроса учитывается (как у поиска базы знаний, `knowledge.ts#search`). */
+  searchWordsMax: 8,
+  /** Палитра вставки (§5.4): «до 8 последних использованных модулей». */
+  paletteRecent: 8,
 } as const
 
 // ── Права (§2, §7.12) ───────────────────────────────────────────────────────────────────
@@ -184,4 +199,137 @@ export function mediaIdsOf(mediaId: string | null | undefined, body: readonly un
 export function embeddingText(v: { title: string, summary?: string | null, tags?: readonly string[], plainText?: string | null }): string {
   return [v.title, v.summary ?? '', (v.tags ?? []).join(' '), v.plainText ?? '']
     .map(s => s.trim()).filter(Boolean).join('\n').slice(0, 8000)
+}
+
+// ── Иконка колонки «Тип» (§7.7, Р-31.5, критерий 7) ──────────────────────────────────────
+
+/**
+ * Что показывает колонка «Тип» и палитра вставки. Это вывод для экрана, а не перечень БД:
+ * `content_kind` остаётся перечнем `resources.kind` и в API не меняется (критерий 7).
+ */
+export const LIBRARY_TYPE_ICONS = ['text', 'checklist', 'table', 'file', 'video', 'link'] as const
+export type LibraryTypeIcon = typeof LIBRARY_TYPE_ICONS[number]
+
+/** Состав тела, по которому выбирается иконка `article` (§7.7) — сервер считает его запросом, тесты — `bodyStats`. */
+export interface BodyStats {
+  blocks: number
+  checklists: number
+  hasTable: boolean
+}
+
+/**
+ * Таблица в теле. `11` §3.3 называет блок `table`, но в репозитории его нет (`blockSchema` —
+ * десять типов): таблица живёт в HTML блока `text` (санитайзер `11` §3.3 пропускает `table`).
+ * Поэтому признак — блок `table` (если он появится) **или** `<table` в HTML текстового блока.
+ * Тот же признак считает SQL сервера (`library.ts#bodyStatsSql`, `ilike '%<table%'`).
+ */
+export function blockIsTable(b: { type: string, html?: unknown }): boolean {
+  return b.type === 'table' || (b.type === 'text' && typeof b.html === 'string' && /<table/i.test(b.html))
+}
+
+export function bodyStats(blocks: readonly { type: string, html?: unknown }[]): BodyStats {
+  return {
+    blocks: blocks.length,
+    checklists: blocks.filter(b => b.type === 'checklist').length,
+    hasTable: blocks.some(blockIsTable),
+  }
+}
+
+/**
+ * Иконка (§7.7): `file` — документ, `video` — плёнка, `link` — цепочка; `article` уточняется
+ * доминирующим блоком тела: доля `checklist` ≥ 50 % → чек-лист, иначе есть таблица →
+ * таблица, иначе «T». Пустое тело — «T»: доли у пустого тела нет.
+ */
+export function typeIconOf(contentKind: string, stats: BodyStats | null): LibraryTypeIcon {
+  if (contentKind === 'file' || contentKind === 'video' || contentKind === 'link') return contentKind
+  if (!stats || stats.blocks === 0) return 'text'
+  if (stats.checklists * 2 >= stats.blocks) return 'checklist'
+  if (stats.hasTable) return 'table'
+  return 'text'
+}
+
+// ── Поиск (§7.8, критерий 8) ────────────────────────────────────────────────────────────
+
+/** Слова запроса: буквы и цифры любого алфавита, от двух знаков, не больше восьми. */
+export function searchWords(q: string): string[] {
+  const words = q.toLowerCase().normalize('NFC').match(/[\p{L}\p{N}]+/gu) ?? []
+  return [...new Set(words.filter(w => w.length >= 2))].slice(0, LIBRARY_LIMITS.searchWordsMax)
+}
+
+/**
+ * Полнотекстовый запрос с префиксами (`розвед:* & хім:*`): палитра ищет по мере набора, и
+ * недописанное слово тоже должно находиться. В строку попадают только буквы и цифры —
+ * операторы `to_tsquery` из пользовательского ввода не пропускаются. Пусто — `null`.
+ */
+export function prefixTsQuery(q: string): string | null {
+  const words = searchWords(q)
+  return words.length ? words.map(w => `${w}:*`).join(' & ') : null
+}
+
+/** «Запрос длиннее трёх слов уходит в гибрид» (§7.8). */
+export function isHybridQuery(q: string): boolean {
+  return (q.trim().match(/\S+/g) ?? []).length >= LIBRARY_LIMITS.hybridMinWords
+}
+
+/**
+ * Reciprocal Rank Fusion (§7.8): у каждого документа — сумма 1 / (k + ранг) по спискам, где он
+ * есть (ранг с единицы). Документ, найденный обоими способами, поднимается выше найденного
+ * одним; при равенстве — порядок первого списка (полнотекста), затем второго.
+ */
+export function rrfMerge(lists: readonly (readonly string[])[], limit: number = LIBRARY_LIMITS.searchLimit, k: number = LIBRARY_LIMITS.rrfK): string[] {
+  const score = new Map<string, number>()
+  const firstSeen = new Map<string, number>()
+  let order = 0
+  for (const list of lists) {
+    list.forEach((id, i) => {
+      score.set(id, (score.get(id) ?? 0) + 1 / (k + i + 1))
+      if (!firstSeen.has(id)) firstSeen.set(id, order++)
+    })
+  }
+  return [...score.keys()]
+    .sort((a, b) => (score.get(b)! - score.get(a)!) || (firstSeen.get(a)! - firstSeen.get(b)!))
+    .slice(0, limit)
+}
+
+// ── Обновление места и хотфикс (§7.3, §7.4, критерии 2 и 6) ─────────────────────────────
+
+export type UpdateVerdict
+  = | { ok: true }
+    | { ok: false, code: 'already_latest' | 'version_downgrade' | 'version_retired' }
+
+/**
+ * Можно ли перевести место с закреплённой версии на целевую (§7.3). Только вперёд: «отката
+ * версии нет» (§12) — откат это новая версия с прежним телом. На ту же версию — `already_latest`;
+ * на выведенную из оборота (`retired`) — нельзя: её уже никто не закрепляет и не должен.
+ */
+export function updateVerdict(pinnedVersion: number, target: { version: number, status: string }): UpdateVerdict {
+  if (target.version === pinnedVersion) return { ok: false, code: 'already_latest' }
+  if (target.version < pinnedVersion) return { ok: false, code: 'version_downgrade' }
+  if (target.status === 'retired') return { ok: false, code: 'version_retired' }
+  return { ok: true }
+}
+
+export type HotfixDecision = 'apply' | 'skip_fixed' | 'skip_newer' | 'blocked_in_progress' | 'blocked_published'
+
+/**
+ * Что делает «Критичне виправлення» с одним местом (§7.4, Р-31.4, критерий 6):
+ * - `fixed` — хотфикс сам не доезжает (`skip_fixed`), место остаётся устаревшим до явного обновления;
+ * - место уже на хотфиксе или новее — делать нечего (`skip_newer`);
+ * - по контейнеру есть хоть одно прохождение `in_progress` — не трогаем: человек доучивается на
+ *   том, что начал (`blocked_in_progress`, автору — `library_hotfix_blocked`);
+ * - держатель в опубликованной версии курса — версия курса неизменяема (`11` §7.1), править
+ *   можно только черновик (`blocked_published`, тот же код уведомления);
+ * - иначе — применить.
+ */
+export function hotfixDecision(p: { pinMode: string, pinnedVersion: number, hotfixVersion: number, inProgress: number, holderMutable: boolean }): HotfixDecision {
+  if (p.pinnedVersion >= p.hotfixVersion) return 'skip_newer'
+  if (p.pinMode !== 'hotfix_auto') return 'skip_fixed'
+  if (p.inProgress > 0) return 'blocked_in_progress'
+  if (!p.holderMutable) return 'blocked_published'
+  return 'apply'
+}
+
+/** Changelog пропущенных версий для диалога обновления (§5.5): строго после закреплённой и до целевой включительно, по возрастанию. */
+export function skippedVersions<T extends { version: number }>(versions: readonly T[], from: number, to: number): T[] {
+  return versions.filter(v => v.version > from && v.version <= to).sort((a, b) => a.version - b.version)
 }

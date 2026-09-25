@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
-  LIBRARY_LIMITS, authorIdsOf, canEditModule, canTransition, deletionVerdict, diffBlocks, embeddingText,
-  isEmptyDiff, isStale, mediaIdsOf, restoredStatus,
+  LIBRARY_LIMITS, authorIdsOf, bodyStats, canEditModule, canTransition, deletionVerdict, diffBlocks, embeddingText,
+  hotfixDecision, isEmptyDiff, isHybridQuery, isStale, mediaIdsOf, prefixTsQuery, restoredStatus, rrfMerge, searchWords,
+  skippedVersions, typeIconOf, updateVerdict,
 } from '../../shared/domain/library'
-import { libraryAttachSchema, libraryListQuerySchema, libraryModuleCreateSchema, libraryPublishVersionSchema } from '../../shared/schemas/library'
+import {
+  libraryAttachSchema, libraryDetachSchema, libraryListQuerySchema, libraryModuleCreateSchema, libraryPublishVersionSchema,
+  libraryUpdatePreviewQuerySchema, libraryUpdateVersionSchema,
+} from '../../shared/schemas/library'
 import { httpEmbeddingProvider, stubEmbeddingProvider, stubVector, tokenize } from '../../server/services/embeddings'
 
 /**
@@ -234,5 +238,111 @@ describe('контракты §6, §10', () => {
     expect(libraryListQuerySchema.safeParse({ cursor: 'not-a-cursor' }).success).toBe(false)
     expect(libraryListQuerySchema.safeParse({ cursor: Buffer.from('["2026-09-24T10:00:00.123Z","x"]').toString('base64url') }).success).toBe(false)
     expect(libraryListQuerySchema.safeParse({ cursor: '' }).success).toBe(true)
+  })
+})
+
+// ── PR-26: иконка «Тип», поиск, обновление места, хотфикс ──────────────────────────────
+
+describe('§7.7 иконка колонки «Тип» (критерий 7)', () => {
+  const block = (type: string, html?: string) => ({ type, ...(html === undefined ? {} : { html }) })
+
+  it('article с 6 чек-листами из 10 — чек-лист; ровно половина — тоже чек-лист', () => {
+    const body = [...Array.from({ length: 6 }, () => block('checklist')), ...Array.from({ length: 4 }, () => block('text', '<p>x</p>'))]
+    expect(typeIconOf('article', bodyStats(body))).toBe('checklist')
+    expect(typeIconOf('article', bodyStats([block('checklist'), block('text', '<p>x</p>')]))).toBe('checklist')
+  })
+
+  it('меньше половины чек-листов: таблица (блок table или <table> в тексте), иначе «T»', () => {
+    expect(typeIconOf('article', bodyStats([block('checklist'), block('text', '<TABLE><tr><td>1</td></tr></TABLE>'), block('text', '<p>x</p>')]))).toBe('table')
+    expect(typeIconOf('article', bodyStats([block('table'), block('text', '<p>x</p>')]))).toBe('table')
+    expect(typeIconOf('article', bodyStats([block('checklist'), block('text', '<p>tablet</p>'), block('heading')]))).toBe('text')
+  })
+
+  it('file — документ, video — плёнка, link — цепочка; пустое тело и тело неизвестно — «T»', () => {
+    expect(typeIconOf('file', null)).toBe('file')
+    expect(typeIconOf('video', bodyStats([block('checklist')]))).toBe('video')
+    expect(typeIconOf('link', null)).toBe('link')
+    expect(typeIconOf('article', bodyStats([]))).toBe('text')
+    expect(typeIconOf('article', null)).toBe('text')
+  })
+})
+
+describe('§7.8 поиск: слова, префиксы, гибрид, RRF (критерий 8)', () => {
+  it('слова: буквы и цифры, от двух знаков, без повторов, не больше восьми', () => {
+    expect(searchWords('  Розведення, розведення 1:10 — а ще!')).toEqual(['розведення', '10', 'ще'])
+    expect(searchWords('a b c d e f g h i j k l m n o p q r s t u v w x y z aa bb cc dd ee ff gg hh ii')).toHaveLength(LIBRARY_LIMITS.searchWordsMax)
+  })
+
+  it('префиксный запрос не пропускает операторы to_tsquery из ввода', () => {
+    expect(prefixTsQuery('розвед хім')).toBe('розвед:* & хім:*')
+    expect(prefixTsQuery("x' | !y & (z) <-> :*")).toBeNull()
+    expect(prefixTsQuery("хлор' | !кислота")).toBe('хлор:* & кислота:*')
+    expect(prefixTsQuery('   ')).toBeNull()
+  })
+
+  it('гибрид — с четырёх слов («длиннее трёх»)', () => {
+    expect(isHybridQuery('розведення')).toBe(false)
+    expect(isHybridQuery('як розводити засоби')).toBe(false)
+    expect(isHybridQuery('як правильно розводити засоби')).toBe(true)
+  })
+
+  it('RRF: найденное обоими способами выше найденного одним; при равенстве — порядок полнотекста; лимит', () => {
+    // c: 1/63 + 1/61 — выше всех; b и d — по 1/62, при равенстве раньше полнотекстовый b
+    expect(rrfMerge([['a', 'b', 'c'], ['c', 'd']])).toEqual(['c', 'a', 'b', 'd'])
+    expect(rrfMerge([['a', 'b'], ['b', 'a']])).toEqual(['a', 'b'])
+    expect(rrfMerge([['a', 'b', 'c'], []], 2)).toEqual(['a', 'b'])
+    expect(rrfMerge([[], []])).toEqual([])
+  })
+
+  it('порог вектора отсекает посторонний длинный запрос и пропускает свой (заглушка без ключа)', () => {
+    const cos = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * b[i]!, 0)
+    const body = stubVector('Використання хімії\nПравила розведення засобів для підлоги: 1:10 у теплій воді', 768)!
+    expect(cos(stubVector('як правильно розводити засоби для миття підлоги', 768)!, body)).toBeGreaterThanOrEqual(LIBRARY_LIMITS.vectorMinSimilarity)
+    expect(cos(stubVector('зовсім інша тема про погоду завтра вранці', 768)!, body)).toBeLessThan(LIBRARY_LIMITS.vectorMinSimilarity)
+  })
+})
+
+describe('§7.3 обновление места: только вперёд (критерий 2)', () => {
+  it('новее и опубликована — можно; та же — already_latest; старее — отката нет; retired — нельзя', () => {
+    expect(updateVerdict(2, { version: 4, status: 'published' })).toEqual({ ok: true })
+    expect(updateVerdict(4, { version: 4, status: 'published' })).toEqual({ ok: false, code: 'already_latest' })
+    expect(updateVerdict(4, { version: 2, status: 'published' })).toEqual({ ok: false, code: 'version_downgrade' })
+    expect(updateVerdict(2, { version: 3, status: 'retired' })).toEqual({ ok: false, code: 'version_retired' })
+  })
+
+  it('changelog пропущенных версий — строго после закреплённой и до целевой, по возрастанию', () => {
+    const versions = [4, 1, 3, 2, 5].map(version => ({ version }))
+    expect(skippedVersions(versions, 2, 4).map(v => v.version)).toEqual([3, 4])
+    expect(skippedVersions(versions, 4, 4)).toEqual([])
+  })
+
+  it('контракты: toVersion необязателен и только положительный; makeCopy по умолчанию включён', () => {
+    expect(libraryUpdateVersionSchema.parse({})).toEqual({})
+    expect(libraryUpdateVersionSchema.safeParse({ toVersion: 0 }).success).toBe(false)
+    expect(libraryUpdatePreviewQuerySchema.parse({ toVersion: '4' })).toEqual({ toVersion: 4 })
+    expect(libraryDetachSchema.parse({})).toEqual({ makeCopy: true })
+  })
+})
+
+describe('§7.4 «Критичне виправлення» (критерий 6)', () => {
+  const base = { pinMode: 'hotfix_auto', pinnedVersion: 2, hotfixVersion: 3, inProgress: 0, holderMutable: true }
+
+  it('hotfix_auto и ни одного прохождения в процессе — применить', () => {
+    expect(hotfixDecision(base)).toBe('apply')
+  })
+
+  it('пять человек в процессе — место остаётся устаревшим, автору — library_hotfix_blocked', () => {
+    expect(hotfixDecision({ ...base, inProgress: 5 })).toBe('blocked_in_progress')
+  })
+
+  it('fixed хотфикс сам не получает; место уже на хотфиксе или новее — делать нечего', () => {
+    expect(hotfixDecision({ ...base, pinMode: 'fixed' })).toBe('skip_fixed')
+    expect(hotfixDecision({ ...base, pinnedVersion: 3 })).toBe('skip_newer')
+    expect(hotfixDecision({ ...base, pinnedVersion: 4, pinMode: 'fixed', inProgress: 9 })).toBe('skip_newer')
+  })
+
+  it('урок опубликованной версии курса не правится даже без людей в процессе', () => {
+    expect(hotfixDecision({ ...base, holderMutable: false })).toBe('blocked_published')
+    expect(hotfixDecision({ ...base, holderMutable: false, inProgress: 2 })).toBe('blocked_in_progress')
   })
 })

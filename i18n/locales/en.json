@@ -3523,6 +3523,9 @@
       "library_module_archived": "Library module archived",
       "library_proposal_created": "Library proposal submitted",
       "library_proposal_decided": "Decision on a library proposal",
+      "library_hotfix_applied": "Critical module fix applied",
+      "library_hotfix_blocked": "Critical module fix not applied",
+      "library_stale_digest": "Outdated links to library modules",
       "person_document_expiring": "Document expiring",
       "person_document_expired": "Document expired",
       "person_note_shared": "A manager shared a note",
@@ -4057,6 +4060,74 @@
       "waiting": "waiting"
     },
     "short": "Trajectories"
+  },
+  "library": {
+    "palette": {
+      "open": "Module library ▸",
+      "title": "Module library",
+      "search": "Search by title or content",
+      "recent": "Recently used",
+      "results": "Found",
+      "loadError": "Could not load the library",
+      "retry": "Try again",
+      "nothing": "Nothing found for “{q}”",
+      "clear": "Clear search",
+      "noRecent": "No modules have been inserted yet. Find one by searching or open the whole library.",
+      "showAll": "Show all",
+      "allTitle": "Module library — pick a module",
+      "kindAll": "All types",
+      "empty": "The library is empty. A module created once can be inserted into several tracks",
+      "pick": "Pick",
+      "minutes": "{n} min",
+      "versionAt": "v{v} · {date}",
+      "col": {
+        "type": "Type",
+        "title": "Title",
+        "category": "Category",
+        "version": "Version",
+        "owner": "Owner"
+      }
+    },
+    "icon": {
+      "text": "Text",
+      "checklist": "Checklist",
+      "table": "Table",
+      "file": "Document",
+      "video": "Video",
+      "link": "Link"
+    },
+    "node": {
+      "caption": "Library · v{v}",
+      "isLink": "This is a link to a library module",
+      "archived": "Archived module",
+      "pending": "Version v{v} will be pinned to the block when the canvas is saved",
+      "newVersion": "New version v{v} is available",
+      "update": "Update to the latest version",
+      "preview": "View v{v}",
+      "previewTitle": "“{title}” · v{v}",
+      "detach": "Detach and make a copy",
+      "detachConfirm": "Detach the block from the module? It becomes a regular resource — a copy of v{v} — and new module versions will no longer reach it.",
+      "detached": "Block detached: it is now a regular resource copy",
+      "replace": "Replace with a library module ▸",
+      "updated": "Block updated to v{v}",
+      "bodyLocked": "Module content is not edited on the canvas — only in the library."
+    },
+    "update": {
+      "title": "Update “{title}” from v{from} to v{to}",
+      "changes": "What changed",
+      "hotfix": "Critical fix",
+      "diff": "Changes by block",
+      "noBlockChanges": "Blocks did not change — only the title or settings did",
+      "added": "Added",
+      "removed": "Removed",
+      "changed": "Changed",
+      "beforeAfter": "before / after",
+      "before": "Before",
+      "after": "After",
+      "consequence": "The update will not change the progress of {n} people who have already started. They will stay on v{from}",
+      "noOneStarted": "Nobody has started this block yet — everyone will get v{to}",
+      "confirm": "Update"
+    }
   },
   "frame": {
     "col": {

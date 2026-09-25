@@ -53,6 +53,8 @@ async function cleanup() {
   await admin`delete from library_module_proposals where tenant_id in ${admin(tenants)}`
   await admin`update library_modules set current_version_id = null, draft_lesson_id = null where tenant_id in ${admin(tenants)}`
   await admin`update lessons set library_version_id = null where tenant_id in ${admin(tenants)} and library_version_id is not null`
+  // PR-26: узел-ссылка держит версию (restrict) — снять ссылку до удаления версий
+  await admin`update trajectory_nodes set library_version_id = null where tenant_id in ${admin(tenants)} and library_version_id is not null`
   await admin`delete from library_module_versions where tenant_id in ${admin(tenants)}`
   await admin`delete from lessons where tenant_id in ${admin(tenants)} and library_module_id is not null`
   await admin`delete from library_modules where tenant_id in ${admin(tenants)}`
@@ -186,6 +188,101 @@ describe.skipIf(!BUILT)('Библиотека модулей по HTTP', () => {
       const v1 = await send(author, 'GET', `/library/modules/${moduleId}/versions/1`)
       expect(v1.status).toBe(200)
       expect((await data<{ body: unknown[] }>(v1)).body).toHaveLength(1)
+    })
+  })
+
+  describe('PR-26: обновление места, сравнение версий, палитра, полотно', () => {
+    let author: string
+    let moduleId: string
+    let usageId: string
+    let trackId: string
+
+    beforeAll(async () => {
+      author = await login(AUTHOR_PHONE)
+      const created = await send(author, 'POST', '/library/modules', { title: `${P}Використання хімії`, body: [{ id: 'b1', type: 'text', html: '<p>Розводимо 1:20</p>' }] })
+      moduleId = (await data<{ id: string }>(created)).id
+      await send(author, 'POST', `/library/modules/${moduleId}/versions`, { changelog: 'Перша версія' })
+      const t = await track(26)
+      trackId = t.trajectoryId
+      const attached = await send(author, 'POST', '/library/usages', { libraryModuleId: moduleId, holderType: 'trajectory_node', holderId: t.nodeId, containerType: 'trajectory', containerId: t.trajectoryId })
+      usageId = (await data<{ id: string }>(attached)).id
+      await send(author, 'PATCH', `/library/modules/${moduleId}`, { body: [{ id: 'b1', type: 'text', html: '<p>Розводимо 1:10</p>' }, { id: 'b2', type: 'text', html: '<p>Рукавички</p>' }] })
+      await send(author, 'POST', `/library/modules/${moduleId}/versions`, { changelog: 'Друга версія' })
+    })
+
+    it('диалог обновления: changelog и поблочный diff v1→v2 (критерий 2)', async () => {
+      const res = await send(author, 'GET', `/library/usages/${usageId}/update-preview`)
+      expect(res.status).toBe(200)
+      const p = await data<{ compare: { from: { version: number }, to: { version: number }, changelogs: { version: number }[], diff: unknown }, alreadyStarted: number }>(res)
+      expect(p.compare.from.version).toBe(1)
+      expect(p.compare.to.version).toBe(2)
+      expect(p.compare.changelogs.map(c => c.version)).toEqual([2])
+      expect(p.compare.diff).toEqual({ added: ['b2'], removed: [], changed: ['b1'] })
+      expect(p.alreadyStarted).toBe(0)
+    })
+
+    it('«Оновити до останньої»: 200 и v2; повтор — 409 already_latest; назад — 422 version_downgrade', async () => {
+      const ok = await send(author, 'POST', `/library/usages/${usageId}/update-version`, {})
+      expect(ok.status).toBe(200)
+      expect(await data<{ version: number, isStale: boolean, updatedFrom: number, updatedTo: number }>(ok)).toMatchObject({ version: 2, isStale: false, updatedFrom: 1, updatedTo: 2 })
+      const again = await send(author, 'POST', `/library/usages/${usageId}/update-version`, {})
+      expect(again.status).toBe(409)
+      expect((await error(again)).code).toBe('already_latest')
+      const back = await send(author, 'POST', `/library/usages/${usageId}/update-version`, { toVersion: 1 })
+      expect(back.status).toBe(422)
+      expect((await error(back)).code).toBe('version_downgrade')
+    })
+
+    it('сравнение версий: 200; одна и та же — 422 same_version; нет такой — 404', async () => {
+      const ok = await send(author, 'GET', `/library/modules/${moduleId}/versions/1/diff/2`)
+      expect(ok.status).toBe(200)
+      expect((await data<{ diff: unknown }>(ok)).diff).toEqual({ added: ['b2'], removed: [], changed: ['b1'] })
+      const same = await send(author, 'GET', `/library/modules/${moduleId}/versions/2/diff/2`)
+      expect(same.status).toBe(422)
+      expect((await error(same)).code).toBe('same_version')
+      expect((await send(author, 'GET', `/library/modules/${moduleId}/versions/1/diff/9`)).status).toBe(404)
+      expect((await send(author, 'GET', `/library/modules/${foreignModuleId}/versions/1/diff/2`)).status).toBe(404)
+    })
+
+    it('«Оновити все» — только library.manage: методисту 403, администратору 200', async () => {
+      const denied = await send(author, 'POST', `/library/modules/${moduleId}/update-all-usages`, {})
+      expect(denied.status).toBe(403)
+      const adm = await login(ADMIN_PHONE)
+      const ok = await send(adm, 'POST', `/library/modules/${moduleId}/update-all-usages`, {})
+      expect(ok.status).toBe(200)
+      expect(await data<{ updated: number, skipped: unknown[], toVersion: number }>(ok)).toEqual({ updated: 0, skipped: [], toVersion: 2 })
+      expect((await send(adm, 'POST', `/library/modules/${foreignModuleId}/update-all-usages`, {})).status).toBe(404)
+    })
+
+    it('палитра: последние использованные — со вставленным модулем и иконкой типа', async () => {
+      const res = await send(author, 'GET', '/library/modules/recent')
+      expect(res.status).toBe(200)
+      const items = await data<{ id: string, typeIcon: string }[]>(res)
+      expect(items.find(i => i.id === moduleId)).toMatchObject({ typeIcon: 'text' })
+    })
+
+    it('полотно: узел из палитры сохраняется с графом; архивный модуль — 409 module_archived и откат', async () => {
+      const graph = await data<{ nodes: { id: string, kind: string }[] }>(await send(author, 'GET', `/trajectories/${trackId}/graph`))
+      const task = graph.nodes.find(n => n.kind === 'task')!
+      const put = (libraryModuleId: string) => send(author, 'PUT', `/trajectories/${trackId}/graph`, {
+        nodes: [
+          { id: task.id, kind: 'task', libraryModuleId: moduleId, params: {}, x: 0, y: 0 },
+          { tmpId: 'tmp:new', kind: 'task', libraryModuleId, params: {}, x: 200, y: 0 },
+        ],
+        edges: [],
+      })
+      const ok = await put(moduleId)
+      expect(ok.status).toBe(200)
+      const saved = await data<{ nodes: { id: string, library: { moduleId: string, version: number } | null }[], ids: Record<string, string> }>(ok)
+      expect(saved.nodes.find(n => n.id === saved.ids['tmp:new'])!.library).toMatchObject({ moduleId, version: 2 })
+
+      const [archived] = await admin`insert into library_modules (tenant_id, title, slug, owner_id, author_ids, created_by, status, archived_at, archive_reason)
+        values (${tenantId}, ${`${P}Архівний`}, 'v2-26-http-archived', ${adminId}, ${[adminId]}, ${adminId}, 'archived', now(), 'Застарів повністю') returning id`
+      const bad = await put(archived!.id as string)
+      expect(bad.status).toBe(409)
+      const err = await error(bad)
+      expect(err.code).toBe('module_archived')
+      expect(err.details).toMatchObject({ nodeRef: 'tmp:new' })
     })
   })
 

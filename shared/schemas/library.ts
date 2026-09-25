@@ -140,3 +140,27 @@ export const libraryProposalAcceptSchema = z.object({
 export const libraryProposalRejectSchema = z.object({
   decisionComment: z.string().trim().min(L.decisionCommentMin, 'Поясніть рішення — його побачить автор пропозиції').max(L.decisionCommentMax),
 })
+
+/**
+ * «Оновити до останньої версії» (§5.5, §7.3, §10 `POST /library/usages/:id/update-version`) и
+ * массовое «Оновити все до v4» (§5.3, `POST /library/modules/:id/update-all-usages`). Без
+ * `toVersion` — последняя опубликованная; явная — только вперёд (отката версий нет, §12).
+ */
+export const libraryUpdateVersionSchema = z.object({
+  toVersion: z.number().int().min(1).optional(),
+})
+export type LibraryUpdateVersionInput = z.infer<typeof libraryUpdateVersionSchema>
+
+/** Тот же номер из query-строки — для предпросмотра диалога обновления. */
+export const libraryUpdatePreviewQuerySchema = z.object({
+  toVersion: z.coerce.number().int().min(1).optional(),
+})
+
+/**
+ * «Відʼєднати і зробити копією» (§7.10, §10 `{makeCopy}`). Узел траектории с копией получает
+ * обычный опубликованный материал с телом закреплённой версии; без копии — пустое задание, в
+ * которое автор выберет другой контент. Урок курса отвязывается только с копией (Р-25.7).
+ */
+export const libraryDetachSchema = z.object({
+  makeCopy: z.boolean().default(true),
+})

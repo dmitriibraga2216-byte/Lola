@@ -1,10 +1,11 @@
 import { sql } from 'drizzle-orm'
 import {
-  boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
+  boolean, check, foreignKey, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 import { automationRules } from './assignments'
+import { libraryModuleVersions } from './library'
 
 /**
  * Траектории (docs/17 §14.3, docs/02 «Программы и траектории»): маршрут из узлов.
@@ -42,10 +43,21 @@ export const trajectoryNodes = pgTable('trajectory_nodes', {
   days: integer('days'), // delay «пропустити через N днів», stop_delay «закрити доступ через N днів»
   mentorId: uuid('mentor_id').references(() => users.id, { onDelete: 'set null' }), // mentor: явный наставник; null — керівник точки людини
   params: jsonb('params').notNull().default(sql`'{}'::jsonb`), // task: правила назначения, которое создаст узел (assignments.params по типу)
+  /**
+   * Узел-задание как место использования модуля библиотеки (docs/v2/31 §3.1, П-17; миграция
+   * 0088): контент — материал-тело модуля (`content_type = 'resource'`), человек получает снимок
+   * **этой** версии, а не последней (Р-31.2). Переключают только «Оновити до останньої версії»
+   * и «Критичне виправлення» с `hotfix_auto` (§7.3, §7.4) — `libraryUsages.ts`.
+   */
+  libraryVersionId: uuid('library_version_id'),
   x: integer('x').notNull().default(0),
   y: integer('y').notNull().default(0),
 }, t => [
   index().on(t.tenantId, t.trajectoryId),
+  // Имя внешнего ключа явное: сгенерированное длиннее 63 символов (миграция 0088)
+  foreignKey({ name: 'trajectory_nodes_library_version_fk', columns: [t.libraryVersionId], foreignColumns: [libraryModuleVersions.id] }).onDelete('restrict'),
+  index('idx_trajectory_nodes_tenant_library').on(t.tenantId, t.libraryVersionId).where(sql`library_version_id is not null`),
+  check('trajectory_nodes_library_ref_ck', sql`${t.libraryVersionId} is null or (${t.kind} = 'task' and ${t.contentType} = 'resource' and ${t.contentId} is not null)`),
 ])
 
 export const trajectoryEdges = pgTable('trajectory_edges', {

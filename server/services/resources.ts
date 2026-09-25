@@ -8,7 +8,7 @@ import {
 import type { TenantTx } from '../utils/withTenant'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
-import { notLibraryBody } from './libraryBody'
+import { isLibraryBody, notLibraryBody } from './libraryBody'
 import { blocksToText } from './knowledge'
 import { enqueueNotification } from './notifications'
 import { sanitizeBody } from './sanitize'
@@ -686,16 +686,26 @@ export async function catalogResources(ctx: Ctx, opts: { q?: string, categoryId?
  */
 export async function viewResource(ctx: Ctx, id: string, opts: { assignmentId?: string } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted(), eq(resources.status, 'published')))
+    const [r] = await tx.select().from(resources).where(and(eq(resources.id, id), notDeleted()))
     if (!r) return null
-    if (!(await canAccessResource(tx, ctx.actorId, id))) return null
     let pinnedVersionId: string | null = null
+    let audience: unknown = null
     if (opts.assignmentId) {
-      const [a] = await tx.select({ subjectId: assignments.subjectId, subjectType: assignments.subjectType, versionId: assignments.subjectVersionId })
+      const [a] = await tx.select({ subjectId: assignments.subjectId, subjectType: assignments.subjectType, versionId: assignments.subjectVersionId, audience: assignments.audience })
         .from(assignments).where(eq(assignments.id, opts.assignmentId))
       if (!a || a.subjectType !== 'resource' || a.subjectId !== id) return null
       pinnedVersionId = a.versionId
+      audience = a.audience
     }
+    if (r.status !== 'published') {
+      // Тело модуля библиотеки (docs/v2/31 §3.1) ресурсом не публикуется, но узел траектории
+      // выдаёт его назначением, закреплённым за снимком версии (П-17). Читается только так:
+      // по своему назначению и только закреплённый снимок — ни рабочая редакция, ни чужое назначение
+      if (!pinnedVersionId || !audience || !(await isLibraryBody(tx, id))) return null
+      const { resolveAudience } = await import('./audience')
+      if (!(await resolveAudience(tx, audience as Parameters<typeof resolveAudience>[1])).has(ctx.actorId)) return null
+    }
+    else if (!(await canAccessResource(tx, ctx.actorId, id))) return null
     const v = await currentVersion(tx, id, pinnedVersionId)
     if (!v) return null
     await tx.update(resources).set({ viewsCount: sql`${resources.viewsCount} + 1` }).where(eq(resources.id, id))

@@ -254,7 +254,7 @@
 | POST | `/automation-rules/preview` | то же по несохранённым `dimensions` формы (живая сводка) |
 | GET | `/automation-rules/:id/usages` | «Використовується для»: обратные ссылки `{kind: trajectory\|program\|assignment, id, title}` |
 | CRUD | `/trajectories` | траектория: `assignMode`, `automationRuleId` (только `program.link_rule`), `stopAssignAfterFinish` |
-| GET/PUT | `/trajectories/:id/graph` | полотно целиком: узлы (`kind` — `trajectory_node_kind`, новые — `tmpId`) и связи; условие — только на гілках `branch` (`17` §14.3, Г-17.1); ответ — сохранённый граф, `ids` (tmpId → id), `problems`. У опубликованной — только координаты (409) |
+| GET/PUT | `/trajectories/:id/graph` | полотно целиком: узлы (`kind` — `trajectory_node_kind`, новые — `tmpId`) и связи; условие — только на гілках `branch` (`17` §14.3, Г-17.1); ответ — сохранённый граф, `ids` (tmpId → id), `problems`. У опубликованной — только координаты (409). Задание с `libraryModuleId` вместо `contentType`/`contentId` — модуль из палитры «Бібліотека модулів ▸» (`v2/31` §5.4, PR-26): вставка с закреплением текущей версии той же транзакцией, нужен ещё `library.use`; отказ вставки (`409 module_archived`, `409 module_not_published`, `403 forbidden`…) откатывает всё сохранение, `details.nodeRef` — какой узел. Узел-ссылка в ответе несёт `library` (закреплённая `version`, `latestVersion`, `isStale`, `typeIcon`, `usageId`); её контент и версию полотно не меняет |
 | POST | `/trajectories/:id/validate` | «Перевірити»: недостижимые блоки, пути к Finish, циклы, «І» с одним входом, закриття перед Finish, гілка без «інакше», пустые поля — с `nodeId` и текстом, что исправить |
 | POST | `/trajectories/:id/publish` | публикация с проверками; 422 `trajectory.invalid` + `problems` |
 | POST | `/trajectories/:id/duplicate` | копия (черновик) — способ перестроить опубликованную |
@@ -683,23 +683,29 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/library/modules` | список и палитра (`library.view`): `?q=&kind=&categoryId=&tag=&ownerId=&status=active\|draft\|published\|archived\|all&onlyUnused=&onlyStale=&cursor=&limit=25\|50\|100`; по умолчанию `active` — архив скрыт, палитра просит `published`. Ответ — `{items, nextCursor, total}`, у карточки `usageCount`, `staleUsages`, `currentVersion` |
+| GET | `/library/modules` | список и палитра (`library.view`): `?q=&kind=&categoryId=&tag=&ownerId=&status=active\|draft\|published\|archived\|all&onlyUnused=&onlyStale=&cursor=&limit=25\|50\|100`; по умолчанию `active` — архив скрыт, палитра просит `published`. Ответ — `{items, nextCursor, total}`, у карточки `usageCount`, `staleUsages`, `currentVersion`, `typeIcon` (иконка «Тип», `31` §7.7; `contentKind` при этом не меняется). С `q` — поиск (`31` §7.8, PR-26): полнотекст по названию, описанию, меткам и телу последней версии, с четырёх слов — гибрид с вектором и RRF; одна страница по релевантности, до 50, без курсора |
+| GET | `/library/modules/recent` | палитра вставки (PR-26): до 8 последних использованных опубликованных модулей — сначала вставленные самим автором |
 | POST | `/library/modules` | создать черновик (`library.publish`): поля `31` §6.1 плюс `body`/`mediaId`/`externalUrl` тела. `422 validation_failed` (текст — из формы §6.1), `409 slug_taken`, `422 owner_forbidden` («У цієї людини немає прав на бібліотеку») |
 | GET/PATCH/DELETE | `/library/modules/:id` | карточка + черновик тела + `canEdit`; правка — автор из `author_ids` или `library.manage` (иначе `403 forbidden`, `details.reason = 'not_author'`), архивный — `409 module_archived`; удаление — только `library.manage`, используемый модуль — **`409 library_module.in_use`** с `details = {reason, usages[≤50], total, detached, versions, suggest: 'archive'}`; удалён — `204`. Чужой тенант — `404` |
 | POST | `/library/modules/:id/archive`, `/restore`, `/duplicate` | архив `{reason}` (без причины — `422 reason_required`), возврат из архива, копия-черновик `{title?}` |
 | GET/POST | `/library/modules/:id/versions` | список версий (changelog, `isHotfix`, `diff` с предыдущей, мест на версии); публикация `{changelog, isHotfix, notify, expectedVersion?}` — места на прежних версиях помечаются `isStale`, не переключаются. `422 changelog_required`, `422 empty_body`, `409 module_archived`, `409 version_conflict` |
 | GET | `/library/modules/:id/versions/:version` | тело закреплённой версии — им читает себя место на v2, когда вышла v3 |
+| GET | `/library/modules/:id/versions/:from/diff/:to` | «Порівняти з v3» (PR-26): `{from, to, changelogs[], diff: {added, removed, changed}, before, after}` по `block.id`; одна и та же версия — `422 same_version`, нет такой — `404` |
 | GET | `/library/modules/:id/usages` | «Де використовується»: `{active, detached}` (`?includeDetached=true`), у места — `version`, `latestVersion`, `isStale`, `pinMode` |
 | POST | `/library/usages` | вставить модуль (`library.use` + `course.edit` для урока / `program.manage` для узла, иначе `403 container.forbidden`): `{libraryModuleId, holderType, holderId, containerType, containerId, pinMode}`. `409 already_attached`, `409 module_archived`, `409 module_not_published`, `409 container.published`, `422 holder_not_content` |
-| POST | `/library/usages/:id/detach` | отвязать: урок курса получает копию тела закреплённой версии (`{lessonId}`), у узла трека до PR-26 закрывается строка реестра |
+| GET | `/library/usages/:id/update-preview` | данные диалога «Оновити до останньої версії» (PR-26, `?toVersion`): changelog пропущенных версий, поблочный diff закреплённой и целевой, `alreadyStarted` — сколько людей уже начали и останутся на своей версии |
+| POST | `/library/usages/:id/update-version` | «Оновити до останньої версії» `{toVersion?}` (PR-26): право на контейнер как у вставки; `409 already_latest`, `422 version_downgrade` (отката нет), `422 version_retired`, урок опубликованной версии курса — `409 container.published`. Ответ — место + `{updatedFrom, updatedTo}` |
+| POST | `/library/modules/:id/update-all-usages` | «Оновити все до v4» `{toVersion?}` (PR-26, только `library.manage`): `{updated, skipped[], toVersion}`; пропуск — место, которое обновить нельзя (урок опубликованной версии курса) |
+| POST | `/library/usages/:id/detach` | отвязать `{makeCopy}`: урок курса всегда получает копию тела закреплённой версии (`{lessonId}`), узел трека — опубликованный материал-копию (`{resourceId}`, PR-26) или, без `makeCopy`, пустое задание. Опубликованный трек или версия курса — `409 container.published` |
 | GET/POST | `/library/proposals` | предложения (куратор видит все, остальные — свои); подать `{sourceLessonId, proposedTitle?, proposedCategoryId?, comment}` (`library.use`) — `pending`, модуль не создаётся; повтор — `409 proposal_pending` |
 | POST | `/library/proposals/:id/accept`, `/reject`, `/withdraw` | принять `{categoryId?, ownerId?}` → `{libraryModuleId}` (черновик с копией тела урока), отклонить `{decisionComment}` (`422 comment_required`), отозвать своё; повторное решение — `409 proposal.already_decided` |
 
 Урок-ссылка на библиотеку в плане курса: `PATCH /lessons/:id` с `body` — `409 lesson.library_reference`
 (тело читает закреплённую версию); урок-тело модуля по `/lessons/:id` — `404`. Файл, который
 держит опубликованная версия модуля: `DELETE /media/:id` — `409 media.in_library_version` со
-списком версий. Обновление мест до новой версии, массовое обновление, `diff` между версиями,
-хотфикс и поиск по телу — PR-26.
+списком версий. «Критичне виправлення» (`isHotfix`) после публикации разносит фоновая
+`library.hotfix_propagate` (PR-26): место с `hotfix_auto` без людей в процессе переключается само,
+иначе автору контейнера — `library_hotfix_blocked`.
 
 ### Заметки и документы человека (`docs/v2/38-people-extensions.md` §10, PR-32)
 

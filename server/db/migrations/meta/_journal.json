@@ -603,6 +603,13 @@
       "when": 1790234340000,
       "tag": "0087_v2_review_mirror_drop",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1790234400000,
+      "tag": "0088_v2_library_trajectory",
+      "breakpoints": true
     }
   ]
 }

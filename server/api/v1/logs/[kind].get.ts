@@ -12,7 +12,9 @@ export default defineEventHandler(async (event) => {
   if (!LOG_KINDS.includes(kind)) return apiError(event, 404, 'not_found', 'Невідомий журнал')
   const q = logFilterSchema.safeParse(getQuery(event))
   if (!q.success) return apiError(event, 400, 'validation_failed', 'Перевірте фільтри', { issues: q.error.issues })
-  const ctx = { tenantId: a.tenantId, actorId: a.userId }
+  // Кандидат в строке журнала — только смотрящему с candidate.view (docs/28 §28.9.1 п.1, решение
+  // владельца 25.09); `security` этот флаг игнорирует (см. `kindGate` в logs.ts).
+  const ctx = { tenantId: a.tenantId, actorId: a.userId, canSeeCandidates: can(a, 'candidate.view') }
   if (q.data.format === 'xlsx') {
     if (!can(a, 'report.export')) return apiError(event, 403, 'forbidden', 'Немає права на вивантаження')
     const rows = await logRows(ctx, kind, q.data)

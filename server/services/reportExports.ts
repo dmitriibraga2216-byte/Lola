@@ -69,7 +69,9 @@ export async function reportRows(tenantId: string, userId: string, report: strin
     const { logFilterSchema } = await import('../../shared/schemas/reports')
     const kind = report.slice(4) as typeof LOG_KINDS[number]
     const q = logFilterSchema.safeParse(filters)
-    return LOG_KINDS.includes(kind) && q.success ? logRows(ctx, kind, q.data) : []
+    // docs/28 §28.9.1 п.1 (решение владельца 25.09): кандидат в строке журнала — только с candidate.view
+    const canSeeCandidates = access.grants.some(g => g.scopes.includes('candidate.view'))
+    return LOG_KINDS.includes(kind) && q.success ? logRows({ ...ctx, canSeeCandidates }, kind, q.data) : []
   }
   if (report.startsWith('saved:')) {
     const { runReport } = await import('./reportBuilder')

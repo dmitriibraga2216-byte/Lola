@@ -29,7 +29,7 @@ let tenantId: string, adminId: string, learnerId: string, mentorId: string, laza
 let courseId: string, courseTaskId: string, enrollmentId: string, lessonId: string
 let bankId: string, quizId: string, quizTaskId: string, attemptId: string
 const userIds: string[] = []
-const ctx = () => ({ tenantId, actorId: adminId })
+const ctx = () => ({ tenantId, actorId: adminId, canSeeCandidates: true })
 const learner = () => ({ tenantId, actorId: learnerId })
 
 async function makePerson(name: string, locationId: string) {

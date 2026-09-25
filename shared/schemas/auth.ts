@@ -26,6 +26,34 @@ export const inviteAcceptSchema = z.object({
   token: z.string().min(1),
 })
 
+/**
+ * Путь этого же сайта для перехода после входа: `/…`, но не `//хост` и не `/\хост` — иначе ссылка
+ * уводила бы на чужой сайт. Управляющие символы и обратная косая отвергаются по всей строке: браузер
+ * выбрасывает из адреса табуляцию и перевод строки, и `/⇥/хост` превратился бы в тот же `//хост`.
+ */
+export function isLocalPath(v: string): boolean {
+  if (!v.startsWith('/') || v[1] === '/') return false
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i)
+    if (c < 0x20 || c === 0x7F || c === 0x5C) return false // управляющие и «\»
+  }
+  return true
+}
+export const localPathSchema = z.string().max(2000).refine(isLocalPath)
+
+/**
+ * `GET /tg/go` — кнопка входа из бота (docs/23 §6 п. 7, docs/04 §4.19). Вход — только по
+ * одноразовому токену `t`, выпущенному при отправке сообщения; `to` — куда вести после входа,
+ * `n` — уведомление, под которым нажата кнопка (реакция для эскалации, docs/23 §6 п. 6).
+ * Поля разбираются порознь: негодный `to` не лишает входа (ведём на главную), негодный токен
+ * входа не даёт. Прочие параметры адреса не читаются.
+ */
+export const botLoginQuerySchema = z.object({
+  t: z.string().regex(/^[\w-]{16,128}$/).optional().catch(undefined),
+  to: localPathSchema.optional().catch(undefined),
+  n: z.string().uuid().optional().catch(undefined),
+})
+
 export type OtpRequestInput = z.infer<typeof otpRequestSchema>
 export type OtpVerifyInput = z.infer<typeof otpVerifySchema>
 

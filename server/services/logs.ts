@@ -224,6 +224,9 @@ export async function retentionScan(tenantId: string): Promise<Record<string, nu
     await del('automation', sql`delete from automation_runs where created_at < now() - (${RETENTION_DAYS.automation} || ' days')::interval returning id`)
     await del('integrations', sql`delete from webhook_deliveries where created_at < now() - (${RETENTION_DAYS.integrations} || ' days')::interval returning id`)
     await del('search', sql`delete from search_queries where created_at < now() - interval '365 days' returning id`)
+    // Одноразовые токены бота (привязка чата, кнопка входа — строка на каждое сообщение с кнопкой):
+    // после срока они ничего не открывают, хранить их незачем
+    await del('telegram-tokens', sql`delete from telegram_tokens where expires_at < now() - interval '1 day' returning id`)
     return out
   })
 }

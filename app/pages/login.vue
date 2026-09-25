@@ -92,7 +92,9 @@ onMounted(async () => {
   catch { /* промежуточной сессии нет */ }
   const err = route.query.error as string | undefined
   // Браузерные входы (Google, кнопка бота) возвращаются сюда с кодом отказа в адресе
-  if (err) error.value = err === 'google_no_user' ? t('login.errors.google_no_user') : err === 'candidate_access_expired' ? t('login.errors.candidate_access_expired') : t('login.errors.oauth')
+  if (err === 'tg_link_expired') error.value = t('login.errors.tg_link_expired')
+  else if (err === 'tg_too_many') error.value = t('login.errors.tg_too_many')
+  else if (err) error.value = err === 'google_no_user' ? t('login.errors.google_no_user') : err === 'candidate_access_expired' ? t('login.errors.candidate_access_expired') : t('login.errors.oauth')
   try { await rawFetch<unknown>(`/api/v1/auth/google/url?tenant=${encodeURIComponent(tenantSlug.value)}`); googleAvailable.value = true } catch { googleAvailable.value = false }
 })
 async function loginGoogle() {

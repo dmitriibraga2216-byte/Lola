@@ -43,7 +43,11 @@ test('17. ІІ-текст блокує публікацію до перевір�
   await page.getByLabel('Рекрутинговий курс').selectOption({ index: 1 })
   await page.getByLabel('Точка').selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Зберегти', exact: true }).click()
-  await expect(page.getByText(/Зміни вплинуть лише на нові відгуки/)).toBeVisible()
+  // Ответ на «Зберегти» — сообщение `role="status"`. Тот же текст постоянно стоит подсказкой в
+  // разделе шаблона (`note sun`), поэтому голый `getByText` ловил её ещё до ответа сервера (проверка
+  // проходила, ничего не дождавшись), а когда ответ успевал раньше первой проверки — находил два
+  // элемента и падал strict mode. Гонка шла на единицах миллисекунд (трейс CI #130).
+  await expect(page.getByRole('status').filter({ hasText: /Зміни вплинуть лише на нові відгуки/ })).toBeVisible()
 
   // §7.10, §7.11: «Створити з AI» на першому блоці («Про вакансію») заповнює textarea.
   await page.getByRole('button', { name: 'Створити з AI' }).first().click()
@@ -52,7 +56,9 @@ test('17. ІІ-текст блокує публікацію до перевір�
   // Критерій §13 к. 9: неперевірений блок блокує публікацію.
   await expect(page.getByText('Перевірте згенерований текст перед публікацією')).toBeVisible()
   await page.getByRole('button', { name: 'Опублікувати' }).click()
-  await expect(page.getByText(/Перевірте згенерований текст перед публікацією/)).toBeVisible()
+  // Отказ публикации (`409 vacancy.ai_text_unreviewed`) — сообщение `role="alert"`; тот же текст
+  // уже стоит плашкой у блока (строкой выше), поэтому ждём именно отказ, а не любой из двух.
+  await expect(page.getByRole('alert').filter({ hasText: /Перевірте згенерований текст перед публікацією/ })).toBeVisible()
   await expect(page.getByText('Чернетка')).toBeVisible()
 
   // «Текст перевірено» знімає блокування без правки тексту.

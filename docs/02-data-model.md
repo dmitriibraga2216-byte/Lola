@@ -1111,6 +1111,32 @@ create table lesson_progress (
   unique (tenant_id, enrollment_id, lesson_id)
 );
 
+-- [дополнено, fix-resource-node, миграция 0092] Ресурс **как задание** вне курса — узел траектории
+-- «Завдання», элемент программы, прямое назначение (`11` Г-11.5, `17` §14.3). Те же факты, что у
+-- lesson_progress, решение о зачёте — сервер по правилу типа материала (`lessonRules.ts`); правил
+-- прохождения в таблице нет (CLAUDE.md п. 11). Пишет только `server/services/resourcePass.ts`.
+create table resource_progress (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  resource_id uuid not null references resources(id) on delete cascade,
+  assignment_id uuid references assignments(id) on delete cascade, -- назначение (узел траектории, прямое); пусто — элемент программы
+  resource_version_id uuid references resource_versions(id) on delete set null, -- открытый снимок: по нему время чтения и страницы
+  status text not null default 'opened',      -- opened | completed
+  seconds_spent int not null default 0,       -- тиками (`11` §7.4)
+  blocks_state jsonb not null default '{}',   -- чек-листы страницы
+  video_pct int not null default 0,
+  scroll_pct int not null default 0,
+  acknowledged_at timestamptz,                -- «Я ознайомився» (ссылка)
+  downloaded_at timestamptz,                  -- документ скачан
+  last_tick_at timestamptz,
+  first_opened_at timestamptz not null default now(),
+  completed_at timestamptz,
+  device text,                                -- mobile | desktop
+  unique nulls not distinct (tenant_id, user_id, resource_id, assignment_id)
+);
+create index on resource_progress (tenant_id, resource_id, status);
+
 create table attempts (                       -- попытка теста/аттестации
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,

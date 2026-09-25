@@ -1,10 +1,12 @@
 import { sql } from 'drizzle-orm'
 import {
-  index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
+  check, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
+import { tenants } from './tenants'
 import { users } from './people'
-import { courses, courseVersions, lessons } from './content'
+import { courses, courseVersions, lessons, resources, resourceVersions } from './content'
+import { assignments } from './assignments'
 
 /**
  * Прохождение (docs/10-catalog-learning.md): enrollment — запись человека
@@ -89,4 +91,42 @@ export const lessonProgress = pgTable('lesson_progress', {
 }, t => [
   unique().on(t.tenantId, t.enrollmentId, t.lessonId),
   index().on(t.tenantId, t.enrollmentId),
+])
+
+/**
+ * Прохождение ресурса **как задания** — вне курса (docs/11 Г-11.5, миграция `0092_fix_resource_node`):
+ * узел траектории «Завдання» с материалом, элемент программы, прямое назначение ресурса. Те же факты,
+ * что у `lesson_progress` (время тиками, прокрутка, видео, «Я ознайомився», скачивание), но ключ —
+ * человек × ресурс × назначение; у элемента программы назначения нет (`assignment_id` пуст).
+ * Решение о зачёте принимает сервер по типу материала (`lessonRules.ts`); пишет только
+ * `server/services/resourcePass.ts`.
+ */
+export const resourceProgress = pgTable('resource_progress', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  resourceId: uuid('resource_id').notNull().references(() => resources.id, { onDelete: 'cascade' }),
+  /** Назначение (узел траектории, прямое); пусто — элемент программы. Снятое назначение уносит запись. */
+  assignmentId: uuid('assignment_id').references(() => assignments.id, { onDelete: 'cascade' }),
+  /** Снимок, открытый человеком: по нему считается время чтения и страницы документа. */
+  resourceVersionId: uuid('resource_version_id').references(() => resourceVersions.id, { onDelete: 'set null' }),
+  status: text('status').notNull().default('opened'), // opened | completed
+  secondsSpent: integer('seconds_spent').notNull().default(0),
+  blocksState: jsonb('blocks_state').notNull().default('{}'), // чек-листы страницы
+  videoPct: integer('video_pct').notNull().default(0),
+  scrollPct: integer('scroll_pct').notNull().default(0),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }), // «Я ознайомився» для ссылки
+  downloadedAt: timestamp('downloaded_at', { withTimezone: true }), // документ скачан
+  lastTickAt: timestamp('last_tick_at', { withTimezone: true }),
+  firstOpenedAt: timestamp('first_opened_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  device: text('device'), // mobile | desktop
+}, t => [
+  unique('uq_resource_progress_key').on(t.tenantId, t.userId, t.resourceId, t.assignmentId).nullsNotDistinct(),
+  index('idx_resource_progress_resource').on(t.tenantId, t.resourceId, t.status),
+  index('idx_resource_progress_assignment').on(t.tenantId, t.assignmentId).where(sql`${t.assignmentId} is not null`),
+  check('resource_progress_status_chk', sql`${t.status} in ('opened', 'completed')`),
+  check('resource_progress_facts_chk', sql`${t.secondsSpent} >= 0 and ${t.videoPct} between 0 and 100 and ${t.scrollPct} between 0 and 100`),
+  check('resource_progress_device_chk', sql`${t.device} is null or ${t.device} in ('mobile', 'desktop')`),
+  check('resource_progress_completed_chk', sql`(${t.status} = 'completed') = (${t.completedAt} is not null)`),
 ])

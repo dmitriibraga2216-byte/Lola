@@ -115,7 +115,8 @@ export async function startPart(ctx: Ctx, complexAttemptId: string, quizId: stri
 
 /** Синхронизация состояния частей по попыткам тестов; когда все части закрыты — подсчёт (docs/18 §7.8). */
 export async function syncComplex(ctx: Ctx, complexAttemptId: string) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  let finished: { complexTestId: string, userId: string, passed: boolean, score: number } | null = null
+  const res = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [a] = await tx.select().from(complexTestAttempts).where(and(eq(complexTestAttempts.id, complexAttemptId), eq(complexTestAttempts.userId, ctx.actorId)))
     if (!a) return null
     const [ct] = await tx.select().from(complexTests).where(eq(complexTests.id, a.complexTestId))
@@ -159,12 +160,21 @@ export async function syncComplex(ctx: Ctx, complexAttemptId: string) {
       // docs/33 D-020: комплексний тест завершено — єдиний хук (passed → done, інакше failed)
       const { onTaskCompleted } = await import('./taskCompletion')
       await onTaskCompleted(tx, ctx.tenantId, a.userId, { contentType: 'complex_test', contentId: a.complexTestId, status: passed ? 'done' : 'failed', result: score, assignmentId: a.assignmentId, sourceKind: 'complex_attempt', sourceId: a.id })
+      finished = { complexTestId: a.complexTestId, userId: a.userId, passed: !!passed, score }
     }
     else if (JSON.stringify(ps) !== JSON.stringify(a.partsState)) {
       await tx.update(complexTestAttempts).set({ partsState: ps, updatedAt: new Date() }).where(eq(complexTestAttempts.id, a.id))
     }
     return { id: a.id, status, score, passed, partsState: ps, expiresAt: a.expiresAt, showPartsResult: ct!.showPartsResult, passScore, parts: parts.map(p => ({ quizId: p.quizId, weight: p.weight, minScore: p.minScore ?? null })) }
   })
+  // Узел траектории «Завдання» с комплексным тестом: тот же хук результата, что у теста, — после
+  // фиксации итога (раньше итог писал только журнал, и узел не засчитывался никогда)
+  const done = finished as { complexTestId: string, userId: string, passed: boolean, score: number } | null
+  if (done) {
+    await import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, done.userId, 'complex_test', done.complexTestId, { passed: done.passed, score: done.score }))
+      .catch(err => console.error('trajectory complex_test hook', err))
+  }
+  return res
 }
 
 async function finalize(ctx: Ctx, id: string, status: 'expired') {

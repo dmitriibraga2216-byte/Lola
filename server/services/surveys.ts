@@ -246,6 +246,14 @@ export async function answerQuestion(ctx: Ctx, surveyId: string, questionId: str
     await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'poll', contentId: surveyId, status: 'done', enrollmentId: part.enrollmentId, sourceKind: 'survey_response', sourceId: part.id })
     const results = s.showResults ? await reportTx(tx, s, { withRespondents: false }) : null
     return { ok: true as const, done: true as const, results }
+  }).then(async (res) => {
+    // Узел траектории «Завдання» с опитуванням: тот же хук результата, что у курса и теста, — после
+    // фиксации ответа (раньше опитування писало только журнал, и узел не засчитывался никогда)
+    if (res.ok && res.done) {
+      await import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, ctx.actorId, 'poll', surveyId, { passed: true }))
+        .catch(err => console.error('trajectory poll hook', err))
+    }
+    return res
   })
 }
 

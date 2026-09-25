@@ -1,13 +1,14 @@
 import { z } from 'zod'
-import { requireScope } from '../../../../services/access'
-import { viewResource } from '../../../../services/resources'
-import { apiData, apiError } from '../../../../utils/apiResponse'
+import { requireScope } from '../../../../../services/access'
+import { viewResource } from '../../../../../services/resources'
+import { apiData, apiError } from '../../../../../utils/apiResponse'
 
 const querySchema = z.object({ assignmentId: z.string().uuid().optional() })
 
 /**
  * Ресурс для ученика вне курса: текущая версия, только при доступе по группам; чужой тенант или нет доступа — 404.
  * `?assignmentId=` — версия, закреплённая назначением на момент выдачи (D-007).
+ * Это чтение, а не зачёт: ресурс как задание проходится `POST …/open` → `tick` → `complete` (Г-11.5).
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'learn.view')

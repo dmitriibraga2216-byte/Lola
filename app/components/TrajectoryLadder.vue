@@ -5,7 +5,7 @@
  * Только фактический путь человека, без канвы (docs/17 §5.2). Сервер считает, компонент показывает.
  */
 const { formatDate } = useFormat()
-export interface Step { nodeId: string, kind: string, title: string | null, contentTitle: string | null, contentType: string | null, days: number | null, status: string, activatedAt: string | null, finishedAt: string | null, firesAt: string | null, score: string | null, passed: boolean | null, reason: string | null, assignmentId: string | null, courseEnrollmentId: string | null, courseProgress: string | null }
+export interface Step { nodeId: string, kind: string, title: string | null, contentTitle: string | null, contentType: string | null, contentId: string | null, days: number | null, status: string, activatedAt: string | null, finishedAt: string | null, firesAt: string | null, score: string | null, passed: boolean | null, reason: string | null, assignmentId: string | null, courseEnrollmentId: string | null, courseProgress: string | null }
 export interface Ladder { id: string, title: string, status: string, progressPct: string, mentorId: string | null, total: number, done: number, steps: Step[] }
 
 const props = defineProps<{ ladder: Ladder, mine?: boolean, canConfirm?: boolean }>()
@@ -37,11 +37,27 @@ function stepSub(s: Step) {
   return s.status === 'done' ? t('traj.step.done') : t('traj.step.waiting')
 }
 const tone = (s: Step) => s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : s.status === 'available' || s.status === 'in_progress' ? 'current' : 'future'
+/**
+ * Куда ведёт открытый шаг «Завдання»: на экран прохождения своего типа. Раньше всё, кроме курса,
+ * вело в «Мої завдання», где есть только курсы, — ресурс, тест, практикум, заняття, оголошення
+ * открыть из траектории было негде (docs/28 «fix-resource-node»). Ресурс проходится по назначению
+ * узла: оно закрепляет версию и возвращает человека в эту ленту.
+ */
 function stepLink(s: Step) {
-  if (!props.mine || (s.status !== 'available' && s.status !== 'in_progress')) return null
-  if (s.kind === 'task' && s.contentType === 'course' && s.courseEnrollmentId) return `/learn/${s.courseEnrollmentId}`
-  if (s.kind === 'task') return '/learn'
-  return null
+  if (!props.mine || s.kind !== 'task' || (s.status !== 'available' && s.status !== 'in_progress') || !s.contentId) return null
+  switch (s.contentType) {
+    case 'course': return s.courseEnrollmentId ? `/learn/${s.courseEnrollmentId}` : '/learn'
+    case 'resource': return s.assignmentId ? `/learn/resources/${s.contentId}?assignmentId=${s.assignmentId}` : null
+    case 'test': return `/learn/quiz/${s.contentId}`
+    case 'complex_test': return `/learn/complex/${s.contentId}`
+    case 'workshop': return `/learn/workshop/${s.contentId}`
+    case 'meetup':
+    case 'webinar': return `/learn/meetups/${s.contentId}`
+    case 'notice': return `/learn/notices/${s.contentId}`
+    case 'training_program': return '/learn/programs'
+    case 'poll': return '/learn/surveys'
+    default: return null
+  }
 }
 </script>
 
@@ -66,7 +82,10 @@ function stepLink(s: Step) {
           <template v-else>→</template>
         </span>
         <div class="body">
-          <component :is="stepLink(s) ? 'NuxtLink' : 'span'" :to="stepLink(s) ?? undefined" class="step-title">{{ stepTitle(s) }}</component>
+          <!-- Статический NuxtLink: `<component :is="'NuxtLink'">` строкой не резолвится и рисовал
+               мёртвый тег `<nuxtlink>` вместо ссылки — шаги ленты не открывались вовсе -->
+          <NuxtLink v-if="stepLink(s)" :to="stepLink(s)!" class="step-title">{{ stepTitle(s) }}</NuxtLink>
+          <span v-else class="step-title">{{ stepTitle(s) }}</span>
           <span class="step-sub">{{ stepSub(s) }}</span>
           <button v-if="s.kind === 'mentor' && s.status === 'available' && canConfirm" class="btn primary small confirm" type="button" @click="emit('confirm', s.nodeId)">{{ t('traj.confirmStep') }}</button>
         </div>

@@ -5,7 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 /**
  * Spec 17 по HTTP (docs/04 §4.10): траектория — создать → полотно → validate с понятными ошибками → publish;
- * правило с измерениями → preview/usages; employee — 403; чужой тенант — 404 (CLAUDE.md п. 15).
+ * правило с измерениями → preview/usages; employee — 403; чужой тенант — 404 (CLAUDE.md п. 15);
+ * узел-материал проходится учащимся из ленты (fix-resource-node, docs/11 Г-11.5).
  * Гоняется против собранного приложения (.output), как scopes-http.spec.ts.
  */
 
@@ -21,7 +22,9 @@ const stamp = Date.now()
 const trajIds: string[] = []
 const ruleIds: string[] = []
 let foreignTrajectoryId: string | undefined
+let foreignResourceId: string | undefined
 let otherTenantId: string | undefined
+const resourceIds: string[] = []
 
 async function login(phone: string): Promise<string> {
   const reqRes = await fetch(`${BASE}/api/v1/auth/otp/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) })
@@ -49,6 +52,8 @@ describe.skipIf(!BUILT)('Spec 17 по HTTP', () => {
     otherTenantId = other!.id as string
     const [t] = await admin`insert into trajectories (tenant_id, title, status) values (${otherTenantId}, ${`Чужа траєкторія ${stamp}`}, 'published') returning id`
     foreignTrajectoryId = t!.id as string
+    const [r] = await admin`insert into resources (tenant_id, title, slug, kind, body, status) values (${otherTenantId}, ${`Чужий матеріал ${stamp}`}, ${`foreign-rn-${stamp}`}, 'article', '[]', 'published') returning id`
+    foreignResourceId = r!.id as string
 
     server = spawn('node', ['.output/server/index.mjs'], {
       env: { ...process.env, PORT: String(PORT), NITRO_PORT: String(PORT), OTP_DEBUG: '1', NUXT_DATABASE_URL: process.env.DATABASE_URL },
@@ -66,9 +71,19 @@ describe.skipIf(!BUILT)('Spec 17 по HTTP', () => {
 
   afterAll(async () => {
     server?.kill()
-    if (trajIds.length) await admin`delete from trajectories where id in ${admin(trajIds)}`
+    if (trajIds.length) {
+      await admin`delete from notifications where ref_type = 'trajectory_enrollment' and ref_id in (select id from trajectory_enrollments where trajectory_id in ${admin(trajIds)})`
+      await admin`delete from assignments where audience->>'trajectoryId' in ${admin(trajIds)}`
+      await admin`delete from trajectories where id in ${admin(trajIds)}`
+    }
     if (ruleIds.length) await admin`delete from automation_rules where id in ${admin(ruleIds)}`
     if (foreignTrajectoryId) await admin`delete from trajectories where id = ${foreignTrajectoryId}`
+    if (foreignResourceId) await admin`delete from resources where id = ${foreignResourceId}`
+    if (resourceIds.length) {
+      await admin`delete from task_status_log where content_id in ${admin(resourceIds)}`
+      await admin`delete from task_access_log where content_id in ${admin(resourceIds)}`
+      await admin`delete from resources where id in ${admin(resourceIds)}`
+    }
     await admin.end()
   })
 
@@ -175,5 +190,53 @@ describe.skipIf(!BUILT)('Spec 17 по HTTP', () => {
     expect(usages).toEqual([{ kind: 'trajectory', id: t.id, title: `HTTP s17 auto-${stamp}` }])
     expect((await fetch(`${BASE}/api/v1/automation-rules/${rule.id}`, json(cookie, 'DELETE'))).status).toBe(409)
     expect((await fetch(`${BASE}/api/v1/automation-rules/${crypto.randomUUID()}/preview`, { headers: { cookie } })).status).toBe(404)
+  })
+
+  it('учащийся проходит узел-материал из ленты: open → 422 без «Я ознайомився» → acknowledge → complete; траектория — done; чужой — 404', async () => {
+    const adminCookie = await login(ADMIN_PHONE)
+    const res = await data<{ id: string }>(await fetch(`${BASE}/api/v1/resources`, json(adminCookie, 'POST', { kind: 'link', title: `HTTP s17 посилання ${stamp}`, externalUrl: 'https://example.com/rules' })))
+    resourceIds.push(res.id)
+    expect((await fetch(`${BASE}/api/v1/resources/${res.id}/publish`, json(adminCookie, 'POST', { notifyAssigned: false }))).status).toBe(200)
+    const t = await data<{ id: string }>(await fetch(`${BASE}/api/v1/trajectories`, json(adminCookie, 'POST', { title: `HTTP s17 матеріал-${stamp}`, tags: [] })))
+    trajIds.push(t.id)
+    const g0 = await data<{ nodes: { id: string, kind: string }[] }>(await fetch(`${BASE}/api/v1/trajectories/${t.id}/graph`, { headers: { cookie: adminCookie } }))
+    const start = g0.nodes.find(n => n.kind === 'start')!.id, finish = g0.nodes.find(n => n.kind === 'finish')!.id
+    const put = await fetch(`${BASE}/api/v1/trajectories/${t.id}/graph`, json(adminCookie, 'PUT', {
+      nodes: [{ id: start, kind: 'start', x: 0, y: 0 }, { id: finish, kind: 'finish', x: 500, y: 0 }, { tmpId: 'tmp:res', kind: 'task', contentType: 'resource', contentId: res.id, params: {}, x: 200, y: 0 }],
+      edges: [{ fromNodeId: start, toNodeId: 'tmp:res' }, { fromNodeId: 'tmp:res', toNodeId: finish }],
+    }))
+    expect(put.status).toBe(200)
+    expect((await fetch(`${BASE}/api/v1/trajectories/${t.id}/publish`, json(adminCookie, 'POST', {}))).status).toBe(200)
+    const [employee] = await admin`select u.id from users u join tenants t on t.id = u.tenant_id where t.slug = 'kappi' and u.phone = ${EMPLOYEE_PHONE}`
+    expect((await fetch(`${BASE}/api/v1/trajectories/${t.id}/audience`, json(adminCookie, 'POST', { userIds: [employee!.id] }))).status).toBe(200)
+
+    const cookie = await login(EMPLOYEE_PHONE)
+    const mine = (await data<{ id: string, trajectoryId: string }[]>(await fetch(`${BASE}/api/v1/me/trajectories`, { headers: { cookie } }))).find(m => m.trajectoryId === t.id)!
+    const ladder = await data<{ steps: { contentType: string | null, contentId: string | null, assignmentId: string | null, status: string }[] }>(await fetch(`${BASE}/api/v1/me/trajectories/${mine.id}`, { headers: { cookie } }))
+    const step = ladder.steps.find(s => s.contentType === 'resource')!
+    expect(step).toMatchObject({ contentId: res.id, status: 'available' })
+    const ref = { assignmentId: step.assignmentId }
+    const base = `${BASE}/api/v1/learning/resources/${res.id}`
+
+    const opened = await fetch(`${base}/open`, json(cookie, 'POST', { ...ref, device: 'mobile' }))
+    expect(opened.status).toBe(200)
+    expect(await data(opened)).toMatchObject({ resource: { kind: 'link', externalUrl: 'https://example.com/rules' }, progress: { ready: false, missing: ['ack_link'] }, context: { type: 'trajectory', enrollmentId: mine.id } })
+    const early = await fetch(`${base}/complete`, json(cookie, 'POST', ref))
+    expect(early.status).toBe(422)
+    expect(((await early.json()) as { error: { code: string, details: { missing: string[] } } }).error).toMatchObject({ code: 'resource.conditions_not_met', details: { missing: ['ack_link'] } })
+    expect((await fetch(`${base}/tick`, json(cookie, 'POST', { ...ref, seconds: 15 }))).status).toBe(200)
+    const ack = await fetch(`${base}/acknowledge`, json(cookie, 'POST', ref))
+    expect(await data(ack)).toMatchObject({ acknowledged: true, ready: true })
+    const done = await fetch(`${base}/complete`, json(cookie, 'POST', ref))
+    expect(done.status).toBe(200)
+    // Хук результата траектории отработал до ответа: лента уже показывает материал зачтённым
+    const after = await data<{ status: string, steps: { contentType: string | null, status: string }[] }>(await fetch(`${BASE}/api/v1/me/trajectories/${mine.id}`, { headers: { cookie } }))
+    expect(after).toMatchObject({ status: 'done' })
+    expect(after.steps.find(s => s.contentType === 'resource')!.status).toBe('done')
+
+    // Некорректное назначение — 400; чужой тенант и не открытый материал — 404 (CLAUDE.md п. 15)
+    expect((await fetch(`${base}/open`, json(cookie, 'POST', { assignmentId: 'nope' }))).status).toBe(400)
+    expect((await fetch(`${BASE}/api/v1/learning/resources/${foreignResourceId}/open`, json(cookie, 'POST', {}))).status).toBe(404)
+    expect((await fetch(`${BASE}/api/v1/learning/resources/${foreignResourceId}/complete`, json(cookie, 'POST', {}))).status).toBe(404)
   })
 })

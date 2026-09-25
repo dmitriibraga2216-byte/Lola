@@ -4,6 +4,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { escalationTarget, namesOf } from './reviewPeople'
+import type { EscalationSource } from './reviewPeople'
 import { dueSlaSteps, notifyStep, overdueHours } from './reviewRules'
 import type { SlaStep } from './reviewRules'
 
@@ -19,7 +20,8 @@ import type { SlaStep } from './reviewRules'
  *     когда работу видят двое — эскалация не должна выглядеть как отъём).
  *
  * Руководитель, который сам и есть проверяющий, эскалацию на себя не получает — она уходит
- * выше, а выше некуда — администратору тенанта (`reviewPeople.escalationTarget`).
+ * вверх по дереву до ближайшего держателя руководящей точки (PR-31), а если выше в дереве
+ * никого — администратору тенанта (`reviewPeople.escalationTarget`).
  *
  * Отметки времени — по факту события, а не доставки: предупреждение, выпавшее на ночь,
  * доставляется в 09:00 по тихим часам, но `sla_warned_at` фиксируется сейчас (§7.20).
@@ -38,7 +40,7 @@ export async function reviewSlaScan(tenantId: string, now: Date = new Date()): P
       const steps = dueSlaSteps(item, now)
       if (!steps.length) continue
       const set: Partial<typeof reviewQueueItems.$inferInsert> = { updatedAt: now }
-      let target: { id: string, source: 'manager' | 'admin' } | null = null
+      let target: { id: string, source: EscalationSource } | null = null
       if (steps.includes('breach') || steps.includes('escalate')) target = await escalationTarget(tx, item)
 
       if (steps.includes('warn')) set.slaWarnedAt = now

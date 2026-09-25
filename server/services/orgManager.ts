@@ -237,6 +237,52 @@ export async function resolveManager(tx: TenantTx, userId: string, opts: Resolve
   return (await resolveManagers(tx, [userId], opts)).get(userId) ?? NONE(userId)
 }
 
+/** Звено цепочки эскалации: прямой руководитель (`manager`) или уровень выше по дереву (`tree`). */
+export interface EscalationStep {
+  id: string
+  source: 'manager' | 'tree'
+}
+
+/**
+ * Руководитель и уровни выше — кому поднимать эскалацию (`docs/v2/37` §7.19, §12; PR-31).
+ *
+ * Первое звено — ответ `resolveManager()`: единственный источник истины о руководителе.
+ * Дальше — **вверх по дереву**: держатели руководящих точек над узлом этого руководителя,
+ * ближайший первым, вакантные точки пропускаются («до ближайшего держателя»).
+ *
+ * До PR-31 цепочка вверх была только у дерева и только при включённом флаге
+ * `org_structure_is_source_of_truth`; у точки (`locations.manager_id`) и у роли в области
+ * уровня выше нет, и следующим шагом сразу становился администратор тенанта — фолбэк PR-19.
+ * Теперь уровни выше берутся из дерева и при выключенном флаге: флаг решает спор двух
+ * источников о **прямом** руководителе, а на вопрос «кто над руководителем точки» у поля точки
+ * ответа нет вовсе — дерево тут не соперник, а единственный источник.
+ *
+ * Подъём идёт от основного узла руководителя; если руководителя в дереве нет — от узла самого
+ * человека. Нет и его — цепочка из одного руководителя: что делать, когда выше некуда, решает
+ * вызывающий (эскалация SLA — администратор тенанта, `37` §12).
+ */
+export async function escalationChainOf(tx: TenantTx, userId: string, opts: ResolveOptions = {}): Promise<EscalationStep[]> {
+  const r = await resolveManager(tx, userId, opts)
+  const out: EscalationStep[] = []
+  const push = (id: string, source: EscalationStep['source']) => {
+    if (id !== userId && !out.some(x => x.id === id)) out.push({ id, source })
+  }
+  if (r.source === 'org_tree') {
+    // Цепочка резолва — это уже подъём по дереву от узла человека, снизу вверх до корня.
+    r.chain.forEach((id, i) => push(id, i === 0 ? 'manager' : 'tree'))
+    return out
+  }
+  if (r.managerUserId) push(r.managerUserId, 'manager')
+  for (const anchor of [r.managerUserId, userId]) {
+    if (!anchor) continue
+    const up = (await fromTree(tx, [anchor])).get(anchor)
+    if (!up?.chain.length) continue
+    up.chain.forEach(id => push(id, 'tree'))
+    break
+  }
+  return out
+}
+
 /**
  * Короткая форма для вызывающих, которым нужен только адресат уведомления.
  * Именно она заменила пятнадцать копий `select l.manager_id from user_placements …`.

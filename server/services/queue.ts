@@ -73,6 +73,10 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('vacancy.publish_retry', { retryLimit: 1, expireInSeconds: 300 })
       await b.createQueue('vacancy.publication_health', { retryLimit: 2, expireInSeconds: 600 })
       await b.createQueue('vacancy.spam_watch', { retryLimit: 2, expireInSeconds: 300 })
+      // docs/v2/32 §11 (PR-31): применение импорта оргструктуры по запуску. Без повторов: упавший
+      // импорт закрывается `failed` с письмом инициатору, дерево не тронуто (одна транзакция), а
+      // повтор того же файла — осознанное действие человека, не очереди
+      await b.createQueue('org.import_apply', { retryLimit: 0, expireInSeconds: 1800 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })

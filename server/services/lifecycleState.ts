@@ -275,7 +275,7 @@ export async function stageSpeedReport(ctx: Ctx & { scope?: string[] | null }, f
         join lifecycle_stages ls on ls.id = els.stage_id
         ${frameJoins()}
        where els.left_at is not null
-             ${frameWhere({ positionIds: f.positionIds, orgUnitId: f.orgUnitId, tags: f.tags, includeArchived: f.includeArchived, scope: ctx.scope ?? null })}
+             ${frameWhere({ kind: 'employee', positionIds: f.positionIds, orgUnitId: f.orgUnitId, tags: f.tags, includeArchived: f.includeArchived, scope: ctx.scope ?? null })}
              ${periodSql(sql`els.left_at`, f)} ${stageFilter}
        group by ls.id, ls.name_uk, ls.code, ls.expected_days, ls.sort
        order by ls.sort`) as unknown as { stage_id: string, stage: string, code: string, expected_days: number | null, n: number, median_days: string | null, p90_days: string | null, exceeded: number }[]

@@ -329,7 +329,7 @@ export async function engagementIndexReport(ctx: Ctx, confirmed: boolean): Promi
         from person_rating_snapshots prs
         join users u on u.id = prs.user_id
         ${frameJoins()}
-       where prs.is_current ${frameWhere({})}
+       where prs.is_current ${frameWhere({ kind: 'employee' })}
        order by prs.total_pct desc`) as unknown as {
       full_name: string, location: string | null, base_pct: number, bonus_early: number, bonus_streak: number, bonus_help: number, total_pct: number
     }[]

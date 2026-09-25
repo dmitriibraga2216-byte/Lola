@@ -329,7 +329,7 @@ export async function learningActivityReport(ctx: Ctx & { scope?: string[] | nul
         ${frameJoins()}
         left join user_activity_daily uad on uad.user_id = u.id ${period}
        where true
-             ${frameWhere({ positionIds: f.positionIds, orgUnitId: f.orgUnitId, tags: f.tags, includeArchived: f.includeArchived, q: f.q, scope: ctx.scope ?? null })}
+             ${frameWhere({ kind: 'employee', positionIds: f.positionIds, orgUnitId: f.orgUnitId, tags: f.tags, includeArchived: f.includeArchived, q: f.q, scope: ctx.scope ?? null })}
        group by u.id, full_name, user_status, position, city, unit, location, tags
        order by days_active desc`) as unknown as Record<string, unknown>[]
     return rows

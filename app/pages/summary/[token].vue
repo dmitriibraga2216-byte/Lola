@@ -9,6 +9,8 @@
  * автоматично…» — завжди, з тексту документа. Минулий строк і відкликаний доступ — окремими
  * зрозумілими рядками, а не «помилкою».
  */
+import type { SummaryBody } from '#shared/domain/candidateSummary'
+
 definePageMeta({ layout: false })
 
 const { t, setLocale } = useI18n()
@@ -22,7 +24,8 @@ interface PublicSummary {
   lang: 'uk' | 'en' | 'ru'
   sentAt: string
   expiresAt: string
-  document: Record<string, unknown>
+  /** `candidateView()` сервера: включённые разделы без ПД третьих лиц и всегда `disclaimer`. */
+  document: Partial<SummaryBody>
   disclaimerLine: string
 }
 

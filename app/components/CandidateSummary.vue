@@ -8,6 +8,8 @@
  * датою і кнопкою «Скасувати» (§8 «Можна скасувати»). Внизу — незнімний рядок «Документ
  * сформовано автоматично…» з тексту самого документа: ні розділи, ні правка його не прибирають.
  */
+import type { SummaryBody } from '#shared/domain/candidateSummary'
+
 const props = defineProps<{ candidateId: string }>()
 
 const { t } = useI18n()
@@ -23,7 +25,8 @@ interface Summary {
   state: 'draft' | 'ready' | 'sent' | 'revoked' | 'expired'
   completeness: 'full' | 'partial'
   sections: string[]
-  body: Record<string, unknown> & { strengthsRisks?: { strengths: string[], risks: string[] } } | null
+  /** Тело целиком (`SummaryBody` сервера); `null` — стёрто отзывом согласия или обезличиванием. */
+  body: SummaryBody | null
   disclaimerLine: string | null
   isLatest: boolean
   sentAt: string | null
@@ -84,8 +87,8 @@ function build() {
 const saveSections = () => run(() => api(`/candidate-summaries/${latest.value!.id}`, { method: 'PATCH', body: { sections: sections.value } }), t('candidateSummary.saved'))
 
 function startEdit() {
-  strengths.value = (latest.value?.body?.strengthsRisks?.strengths ?? []).join('\n')
-  risks.value = (latest.value?.body?.strengthsRisks?.risks ?? []).join('\n')
+  strengths.value = (latest.value?.body?.strengthsRisks.strengths ?? []).join('\n')
+  risks.value = (latest.value?.body?.strengthsRisks.risks ?? []).join('\n')
   editing.value = true
 }
 

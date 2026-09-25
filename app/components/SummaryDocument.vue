@@ -7,18 +7,13 @@
  * Рядок «Документ сформовано автоматично…» — завжди внизу і завжди з тексту документа (`disclaimerLine`),
  * а не з перекладу інтерфейсу: це частина самого документа, і вимкнути її нічим (§13 к. 14).
  */
-interface Criterion { name: string, value: number | null, scaleMax: number, humanValue: number | null, rationale: string | null, quote: string | null }
-interface Doc {
-  candidate?: { fullName: string, vacancyTitle: string | null }
-  progress?: { items: { title: string, kind: string, status: string, score: number | null, finishedAt: string | null }[] }
-  scores?: { items: { kind: string, value: number | null, authorName: string | null, at: string, aiStub: boolean }[] }
-  interview?: { scenarioName: string, finishedAt: string | null, aiScore: number | null, confidenceWord: string | null, aiStub: boolean, needsHuman: boolean, criteria: Criterion[] } | null
-  strengthsRisks?: { status: 'ready' | 'unavailable', strengths: string[], risks: string[], caveat: string, aiStub: boolean }
-  incomplete?: { items: { title: string, status: string }[] }
-  passport?: { generatedAt: string, model: string | null, promptVersion: string | null, humanChecked: boolean, aiStub: boolean }
-}
+import type { SummaryBody } from '#shared/domain/candidateSummary'
 
-const props = defineProps<{ doc: Doc, disclaimerLine: string | null, off?: string[] }>()
+/**
+ * Документ — тот же контракт, что собирает сервер (`SummaryBody`, `shared/domain/candidateSummary.ts`):
+ * рекрутеру приходит тело целиком, кандидату — `candidateView()` (часть разделов), отсюда `Partial`.
+ */
+const props = defineProps<{ doc: Partial<SummaryBody>, disclaimerLine: string | null, off?: string[] }>()
 
 const { t } = useI18n()
 const { formatDate } = useFormat()

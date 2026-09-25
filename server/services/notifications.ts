@@ -653,7 +653,8 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
 
       if (channel === 'telegram') {
         const url = refUrl(n)
-        const res = await sendTelegram(tenantId, user.telegramChatId!, text, { url, notificationId: n.id, buttons: tpl.buttons, mandatory: tpl.isMandatory })
+        // `userId` — адресат: на него выпускается одноразовый токен кнопки «Пройти» (docs/23 §6 п. 7)
+        const res = await sendTelegram(tenantId, user.telegramChatId!, text, { url, userId: n.userId, notificationId: n.id, buttons: tpl.buttons, mandatory: tpl.isMandatory })
         if (res.ok) await sent(n.id, text, channel, tpl.version)
         else if (res.blocked) {
           // Бот заблокирован (docs/23 §6.5): помечаем, критичное — сразу SMS, руководителю уведомление
@@ -727,9 +728,13 @@ export async function markRead(ctx: { tenantId: string, actorId: string }, ids?:
   })
 }
 
-/** Клик по ссылке из уведомления — реакция (docs/23 §8 «Реакція», §6.6 эскалация). */
-export async function markReacted(tenantId: string, notificationId: string) {
-  await withTenant(tenantId, null, tx => tx.update(notifications).set({ reactedAt: new Date(), readAt: sql`coalesce(${notifications.readAt}, now())` }).where(and(eq(notifications.id, notificationId), sql`${notifications.reactedAt} is null`)))
+/**
+ * Клик по ссылке из уведомления — реакция (docs/23 §8 «Реакція», §6.6 эскалация). С `userId`
+ * отмечается только своё: кнопка входа входит одним человеком, и номер чужого уведомления
+ * в её адресе ничего не отметит.
+ */
+export async function markReacted(tenantId: string, notificationId: string, userId?: string) {
+  await withTenant(tenantId, userId ?? null, tx => tx.update(notifications).set({ reactedAt: new Date(), readAt: sql`coalesce(${notifications.readAt}, now())` }).where(and(eq(notifications.id, notificationId), sql`${notifications.reactedAt} is null`, userId ? eq(notifications.userId, userId) : undefined)))
 }
 
 export async function listPrefs(ctx: { tenantId: string, actorId: string }) {

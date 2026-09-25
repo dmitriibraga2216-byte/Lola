@@ -1,14 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, gt, isNull, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { telegramTokens, users } from '../db/schema'
+import type { TwoFactorStep } from '../../shared/domain/twoFactor'
 import { withTenant } from '../utils/withTenant'
 import { enqueueNotification } from './notifications'
 import { createSession } from './session'
 import { logSecurity } from './securityLog'
 import { getSecret, SECRET_KEYS } from './secrets'
 import { frameJoins, frameSelect } from './reportFrame'
-import { EMPLOYEES_ONLY } from './repo/people'
+import { EMPLOYEES_ONLY, personById } from './repo/people'
 
 /**
  * Telegram-бот (docs/04 §4.12, docs/06 §6.4; docs/09 §9.7.2, Spec 23): токен бота —
@@ -38,15 +39,44 @@ export function setTelegramHttp(f: typeof fetch | null) { http = f ?? ((...args)
 
 export interface SendResult { ok: boolean, blocked?: boolean, error?: string }
 
-/** sendMessage с inline-кнопками «Пройти». Без токена — заглушка в лог (dev/CI). */
-export interface SendOpts { enrollmentId?: string, url?: string | null, notificationId?: string, buttons?: { text: string, action: string }[], mandatory?: boolean }
+/** Срок кнопки входа из бота (docs/23 §6 п. 7, docs/04 §4.19): 10 минут с момента отправки сообщения. */
+export const BOT_LOGIN_TTL_MINUTES = 10
 
-/** Кнопки под уведомлением (docs/23 §7): «Пройти» (автологин), «Відкласти на день» (до двух раз), «Не нагадувати» (только необязательные). */
-export function keyboardFor(chatId: bigint, opts: SendOpts): unknown {
-  const appUrl = process.env.APP_URL || 'http://localhost:3000'
+/** sendMessage с inline-кнопками «Пройти». Без токена бота — заглушка в лог (dev/CI). */
+export interface SendOpts {
+  enrollmentId?: string
+  url?: string | null
+  /** Подпись кнопки со ссылкой, по умолчанию «Пройти». */
+  urlText?: string
+  /**
+   * Адресат сообщения. Кнопка входа выпускается на него в момент отправки (docs/23 §6 п. 7);
+   * без адресата кнопка — обычная ссылка, и войти придётся кодом.
+   */
+  userId?: string
+  notificationId?: string
+  buttons?: { text: string, action: string }[]
+  mandatory?: boolean
+}
+
+const appUrl = () => (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '')
+const linkOf = (opts: SendOpts) => opts.url ?? (opts.enrollmentId ? `/learn/${opts.enrollmentId}` : null)
+
+/** Адрес кнопки входа: `/tg/go?t=<токен>&to=<путь>[&n=<уведомление>]` (docs/23 §6 п. 7). */
+export function botLoginUrl(token: string, to: string, notificationId?: string): string {
+  const q = new URLSearchParams({ t: token, to })
+  if (notificationId) q.set('n', notificationId)
+  return `${appUrl()}/tg/go?${q}`
+}
+
+/**
+ * Кнопки под уведомлением (docs/23 §7): «Пройти» (вход по одноразовому токену), «Відкласти на день»
+ * (до двух раз), «Не нагадувати» (только необязательные). `loginToken` — токен, выпущенный для этого
+ * сообщения (`issueLoginToken`); без него «Пройти» ведёт на страницу напрямую, через обычный вход.
+ */
+export function keyboardFor(opts: SendOpts, loginToken: string | null): unknown {
   const row: Record<string, unknown>[] = []
-  const url = opts.url ?? (opts.enrollmentId ? `/learn/${opts.enrollmentId}` : null)
-  if (url) row.push({ text: 'Пройти', url: `${appUrl}/tg/go?to=${encodeURIComponent(url)}&c=${chatId}${opts.notificationId ? `&n=${opts.notificationId}` : ''}` })
+  const url = linkOf(opts)
+  if (url) row.push({ text: opts.urlText ?? 'Пройти', url: loginToken ? botLoginUrl(loginToken, url, opts.notificationId) : `${appUrl()}${url}` })
   if (opts.notificationId) row.push({ text: 'Відкласти на день', callback_data: `snooze:${opts.notificationId}` })
   if (opts.notificationId && !opts.mandatory) row.push({ text: 'Не нагадувати про це', callback_data: `mute:${opts.notificationId}` })
   for (const b of opts.buttons ?? []) row.push(b.action.startsWith('http') ? { text: b.text, url: b.action } : { text: b.text, callback_data: b.action.slice(0, 60) })
@@ -60,7 +90,9 @@ export async function sendTelegram(tenantId: string | null, chatId: bigint, text
     return { ok: true }
   }
   const body: Record<string, unknown> = { chat_id: String(chatId), text, parse_mode: 'HTML' }
-  const kb = opts ? keyboardFor(chatId, opts) : undefined
+  // Токен кнопки входа выпускается здесь — в момент отправки, на адресата этого сообщения (docs/23 §6 п. 7)
+  const loginToken = opts?.userId && tenantId && linkOf(opts) ? await issueLoginToken(tenantId, opts.userId) : null
+  const kb = opts ? keyboardFor(opts, loginToken) : undefined
   if (kb) body.reply_markup = kb
   try {
     const res = await http(`${API(token)}/sendMessage`, {
@@ -128,35 +160,63 @@ export async function linkChat(token: string, chatId: bigint): Promise<{ ok: boo
   return { ok: true, fullName, tenantId: row.tenant_id }
 }
 
-/** Автологин по ссылке из бота: одноразовый токен 10 минут, привязан к chat_id. */
-export async function createLoginToken(chatId: bigint): Promise<{ token: string, tenantId: string } | null> {
-  const rows = await db.execute(sql`select * from telegram_chat_lookup(${chatId})`)
-  const row = (rows as unknown as { tenant_id: string, user_id: string }[])[0]
-  if (!row) return null
+/**
+ * Токен кнопки входа (docs/23 §6 п. 7, docs/04 §4.19). Выпускается в момент, когда бот отправляет
+ * сообщение конкретному человеку, и уходит только в ссылку этого сообщения. Одноразовый, живёт
+ * `BOT_LOGIN_TTL_MINUTES`, в базе — только sha256-хеш (как коды OTP), привязан к человеку и пространству.
+ */
+export async function issueLoginToken(tenantId: string, userId: string): Promise<string> {
   const token = randomBytes(24).toString('base64url')
-  await withTenant(row.tenant_id, row.user_id, async (tx) => {
+  await withTenant(tenantId, userId, async (tx) => {
     await tx.insert(telegramTokens).values({
-      tenantId: row.tenant_id, userId: row.user_id, kind: 'login',
-      tokenHash: hash(token), expiresAt: new Date(Date.now() + 10 * 60_000),
+      tenantId, userId, kind: 'login',
+      tokenHash: hash(token), expiresAt: new Date(Date.now() + BOT_LOGIN_TTL_MINUTES * 60_000),
     })
   })
-  return { token, tenantId: row.tenant_id }
+  return token
 }
 
-export async function consumeLoginToken(token: string, meta: { userAgent?: string | null, ip?: string | null }): Promise<{ sessionToken: string, twoFactor: 'verify' | 'enroll' | null } | null> {
+/** Экран отказа кнопки входа: один на все причины, текст — «Посилання застаріло, попросіть у бота нове». */
+export const BOT_LINK_EXPIRED_REDIRECT = '/login?error=tg_link_expired'
+
+/** Итог перехода по кнопке входа. Отказ один на все причины — маршрут показывает на него один экран. */
+export type BotLoginResult =
+  | { ok: true, tenantId: string, userId: string, sessionToken: string, twoFactor: TwoFactorStep | null }
+  | { ok: false }
+
+/**
+ * Переход по кнопке входа из бота (`GET /tg/go`). Отказ — неизвестный, просроченный или уже
+ * использованный токен; токен другого пространства на хосте пространства; человек, который
+ * больше не может войти через бота (не активен, заблокирован, Telegram отвязан). Токен гасится
+ * атомарно и до создания сессии: из двух одновременных переходов по одной кнопке входит один.
+ * Сессию создаёт `createSession()` — со всеми её проверками (закрытое пространство, форма входа,
+ * второй фактор, …); её отказ пробрасывается как есть, токен при этом уже потрачен.
+ */
+export async function consumeLoginToken(token: string, meta: { userAgent?: string | null, ip?: string | null, hostTenantId?: string | null }): Promise<BotLoginResult> {
+  // До контекста тенанта — только функция SECURITY DEFINER (правило контура, docs/27 §27.8.1 п. 2)
   const rows = await db.execute(sql`select * from telegram_token_lookup(${hash(token)})`)
   const row = (rows as unknown as TokenRow[])[0]
-  if (!row || row.kind !== 'login' || row.consumed_at || new Date(row.expires_at) < new Date()) return null
-  await withTenant(row.tenant_id, row.user_id, async (tx) => {
-    await tx.update(telegramTokens).set({ consumedAt: new Date() }).where(eq(telegramTokens.id, row.token_id))
+  if (!row || row.kind !== 'login' || row.consumed_at || new Date(row.expires_at) <= new Date()) return { ok: false }
+  // На хосте пространства входят только в него (docs/25 §16.1): чужой токен здесь не действует и не тратится
+  if (meta.hostTenantId && meta.hostTenantId !== row.tenant_id) return { ok: false }
+  const usable = await withTenant(row.tenant_id, row.user_id, async (tx) => {
+    const [spent] = await tx.update(telegramTokens).set({ consumedAt: new Date() })
+      .where(and(eq(telegramTokens.id, row.token_id), eq(telegramTokens.kind, 'login'), isNull(telegramTokens.consumedAt), gt(telegramTokens.expiresAt, new Date())))
+      .returning({ id: telegramTokens.id })
+    if (!spent) return false
+    // Право войти через бота — на момент перехода, а не отправки; поиск идёт под RLS пространства
+    // токена, так что человек из другого пространства здесь не найдётся
+    const [person] = await personById(tx, { status: users.status, isBlocked: users.isBlocked, chatId: users.telegramChatId }, row.user_id)
+    return Boolean(person && person.status === 'active' && !person.isBlocked && person.chatId !== null)
   })
+  if (!usable) return { ok: false }
   const { token: sessionToken, twoFactor } = await createSession({ tenantId: row.tenant_id, userId: row.user_id, userAgent: meta.userAgent, ip: meta.ip, loginMethod: 'otp_telegram' })
   // Второй фактор (docs/24 §3.4): вход завершит код — `login.success` пишется тогда
   if (!twoFactor) await logSecurity({ tenantId: row.tenant_id, userId: row.user_id, event: 'login.success', meta: { method: 'telegram' }, ip: meta.ip })
-  return { sessionToken, twoFactor }
+  return { ok: true, tenantId: row.tenant_id, userId: row.user_id, sessionToken, twoFactor }
 }
 
-const HELP = 'Команди: /menu — мої завдання, /stop — вимкнути необовʼязкові нагадування, /help — довідка. Навчання проходиться у вебі: натискайте «Пройти» під повідомленням.'
+const HELP = `Команди: /menu — мої завдання і свіже посилання для входу, /stop — вимкнути необовʼязкові нагадування, /help — довідка. Навчання проходиться у вебі: натискайте «Пройти» під повідомленням — кнопка діє ${BOT_LOGIN_TTL_MINUTES} хвилин.`
 
 /** Обработка апдейта от Telegram (webhook): /start, /menu, /help, /stop, кнопки (docs/23 §7). */
 export async function handleUpdate(update: Record<string, unknown>): Promise<void> {
@@ -171,10 +231,9 @@ export async function handleUpdate(update: Record<string, unknown>): Promise<voi
       const rows = await withTenant(who.tenant_id, who.user_id, tx => tx.execute(sql`
         select e.id, coalesce(c.title, '') as title, e.due_at, e.progress_pct from enrollments e left join courses c on c.id = e.subject_id
         where e.user_id = ${who.user_id}::uuid and e.cancelled_at is null and e.status in ('not_started','in_progress') order by e.due_at nulls last limit 5`)) as unknown as { id: string, title: string, due_at: string | null, progress_pct: number }[]
-      const appUrl = process.env.APP_URL || 'http://localhost:3000'
       const text = rows.length ? `Мої завдання:\n${rows.map((r, i) => `${i + 1}. ${r.title} — ${r.progress_pct}%${r.due_at ? ` (до ${String(r.due_at).slice(0, 10)})` : ''}`).join('\n')}` : 'Активних завдань немає 🎉'
-      await sendTelegram(who.tenant_id, chatId, text, rows[0] ? { url: `/learn/${rows[0].id}` } : undefined)
-      void appUrl
+      // Свежая кнопка входа на каждый /menu (docs/23 §6 п. 7): ею человек заменяет просроченную
+      await sendTelegram(who.tenant_id, chatId, text, rows[0] ? { url: `/learn/${rows[0].id}`, userId: who.user_id } : { url: '/', urlText: 'Відкрити Lola', userId: who.user_id })
       return
     }
     if (cmd === '/stop') {

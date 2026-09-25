@@ -37,7 +37,9 @@
     "errors": {
       "candidate_access_expired": "Your access period has ended. Please contact your recruiter.",
       "google_no_user": "This Google account is not linked to any employee",
-      "oauth": "Google sign-in failed. Try again or use your phone"
+      "oauth": "Google sign-in failed. Try again or use your phone",
+      "tg_link_expired": "This link has expired. Ask the bot for a new one by sending it /menu, or sign in here",
+      "tg_too_many": "Too many bot links opened from this network. Wait a few minutes or sign in here"
     },
     "demoCode": "Demo stand, no SMS is sent — your code",
     "enterCode": "Enter the code",

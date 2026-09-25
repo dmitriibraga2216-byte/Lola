@@ -37,6 +37,7 @@ const { bulkStatus } = await import('../../server/services/candidateFunnel')
 const { candidateAutoArchive } = await import('../../server/services/candidateJobs')
 const { createInvitation } = await import('../../server/services/people')
 const { hashPassword } = await import('../../server/services/password')
+const { issueLoginToken } = await import('../../server/services/telegram')
 const oauth = await import('../../server/services/oauth')
 const { withTenant } = await import('../../server/utils/withTenant')
 
@@ -318,13 +319,14 @@ describe('архивный кандидат: отказ на каждом пут
     expect((await sessionsOf(person.id)).total).toBe(0)
   })
 
-  // Пока вход из бота переводится на одноразовый токен, /tg/go ведёт на обычный вход без сессии.
-  it('кнопка бота /tg/go: редирект на экран входа, сессии нет', async () => {
+  it('кнопка бота /tg/go: редирект на экран входа с тем же кодом, сессии нет', async () => {
     const chatId = String(9_700_000_000 + Math.floor(Math.random() * 99_999_999))
     const person = await seedPerson({ candidate_state: 'archived', status: 'active', telegram_chat_id: chatId })
-    const event = makeEvent({ path: '/tg/go', query: { c: chatId, to: '/learn' } })
+    // Кнопку с одноразовым токеном выпускает бот, отправляя сообщение этому человеку (docs/23 §6 п. 7)
+    const t = await issueLoginToken(tenantId, person.id)
+    const event = makeEvent({ path: '/tg/go', query: { t, to: '/learn' } })
     await tgGo(event)
-    expect(event._redirect).toMatch(/^\/login/)
+    expect(event._redirect).toBe('/login?error=candidate_access_expired')
     expect(cookieOf(event, SESSION_COOKIE)).toBeUndefined()
     expect((await sessionsOf(person.id)).total).toBe(0)
   })

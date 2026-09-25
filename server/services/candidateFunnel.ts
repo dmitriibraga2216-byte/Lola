@@ -11,6 +11,7 @@ import type {
 import { candidateOnly, candidates as candidatesQuery } from './repo/people'
 import { COLUMNS, canMove, maskRow, scopeCond } from './candidates'
 import type { CandidateRow, Viewer } from './candidates'
+import { closeCandidateSessionsTx } from './candidateAccess'
 import { frameJoins, frameSelect, frameWhere, periodSql } from './reportFrame'
 import { recordAudit } from './audit'
 
@@ -244,6 +245,8 @@ export async function bulkStatus(v: Viewer, input: CandidateBulkStatusInput): Pr
       candidateStateAt: new Date(),
       updatedAt: new Date(),
     }).where(and(inArray(users.id, movable.map(r => r.id)), candidateOnly()))
+    // Пачкой в отказ или архив — те же последствия, что поштучно (§4.2, §7.7): сессии гаснут
+    if (to !== 'active') await closeCandidateSessionsTx(tx, v.tenantId, movable.map(r => r.id), { by: v.actorId, state: to })
 
     await tx.insert(candidateStatusHistory).values(movable.map(r => ({
       tenantId: v.tenantId,

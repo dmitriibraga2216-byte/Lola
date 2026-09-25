@@ -12,6 +12,7 @@ import type {
   CandidateStatusMoveInput, CandidateUpdateInput,
 } from '../../shared/schemas/candidates'
 import { candidateOnly, candidates as candidatesQuery, personById } from './repo/people'
+import { closeCandidateSessionsTx } from './candidateAccess'
 import { recordAudit } from './audit'
 import { splitName } from './people'
 
@@ -291,8 +292,18 @@ export async function listCandidates(v: Viewer, filter: CandidateListFilter): Pr
   })
 }
 
+/**
+ * Контакты в ответе по объёму видимости (§2, §7.10). Три случая, а не два:
+ *  - `candidate.view` на сеть — как есть;
+ *  - `candidate.view` с областью «точка» (керівник точки, §2 «✓ маскировано») — маска
+ *    `+380** *** ** 67` / `a****@gmail.com`;
+ *  - наставник без `candidate.view` (§2 «—», критерий §13 к. 10) — `null`. Не маска: маска —
+ *    это часть ПД (код страны, последние цифры, первая буква и домен почты), а наставнику
+ *    контакты не положены вовсе — он оценивает работу, а не человека. Экран показывает «—».
+ */
 export function maskRow<T extends { phone: string | null, email: string | null }>(v: Viewer, row: T): T {
   if (v.fullPd) return row
+  if (v.reviewOnly) return { ...row, phone: null, email: null }
   return { ...row, phone: maskPhone(row.phone), email: maskEmail(row.email) }
 }
 
@@ -719,6 +730,9 @@ export async function moveStatus(v: Viewer, id: string, input: CandidateStatusMo
       candidateState: to,
       updatedAt: new Date(),
     }).where(and(eq(users.id, id), candidateOnly()))
+    // Колонка с `maps_to` отказа, архива или самоотвода закрывает доступ так же, как кнопка
+    // (§4.2, §7.7): перенос на доске — такой же путь смены состояния, и сессии гаснут и здесь
+    if (to !== 'active') await closeCandidateSessionsTx(tx, v.tenantId, [id], { by: v.actorId, state: to })
 
     await tx.insert(candidateStatusHistory).values({
       tenantId: v.tenantId,

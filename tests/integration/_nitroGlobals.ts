@@ -21,9 +21,11 @@ export interface FakeEvent {
   _cookies: { name: string, value: string }[]
   _redirect: string | null
   _status: number | null
+  /** Тело POST-запроса — то, что вернёт `readBody` */
+  _body?: unknown
 }
 
-export function makeEvent(input: { path?: string, query?: Record<string, string>, params?: Record<string, string>, headers?: Record<string, string> } = {}): FakeEvent {
+export function makeEvent(input: { path?: string, query?: Record<string, string>, params?: Record<string, string>, headers?: Record<string, string>, body?: unknown } = {}): FakeEvent {
   const path = input.path ?? '/'
   return {
     node: { req: { method: 'GET', url: path, headers: { 'user-agent': 'vitest', ...input.headers }, socket: { remoteAddress: '127.0.0.1' } } },
@@ -35,6 +37,7 @@ export function makeEvent(input: { path?: string, query?: Record<string, string>
     _cookies: [],
     _redirect: null,
     _status: null,
+    _body: input.body,
   }
 }
 
@@ -52,4 +55,8 @@ g.getCookie = (event: FakeEvent, name: string) => cookieOf(event, name)
 g.setCookie = (event: FakeEvent, name: string, value: string) => { event._cookies.push({ name, value }) }
 g.deleteCookie = (event: FakeEvent, name: string) => { event._cookies = event._cookies.filter(c => c.name !== name) }
 g.sendRedirect = (event: FakeEvent, location: string, status = 302) => { event._redirect = location; event._status = status; return Promise.resolve('') }
+g.readBody = (event: FakeEvent) => Promise.resolve(event._body)
+// `apiError()` ставит статус ответа — его и проверяет тест, когда обработчик отвечает, а не бросает
+g.setResponseStatus = (event: FakeEvent, status: number) => { event._status = status }
+g.setResponseHeader = (event: FakeEvent, name: string, value: string | number) => { event._headers[name.toLowerCase()] = String(value) }
 g.createError = (init: { statusCode?: number, data?: unknown }) => Object.assign(new Error(`http ${init.statusCode ?? 500}`), init)

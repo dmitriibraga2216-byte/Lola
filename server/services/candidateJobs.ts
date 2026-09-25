@@ -5,6 +5,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { currentRequestContext } from '../utils/requestContext'
 import { candidateOnly, candidates as candidatesQuery, personById } from './repo/people'
 import { anonymizeCandidate } from './candidateHire'
+import { closeCandidateSessionsTx } from './candidateAccess'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { readSettings } from './settings'
@@ -83,6 +84,9 @@ export async function candidateAutoArchive(tenantId: string): Promise<number> {
         after: { state: 'archived', reasonCode: 'auto_archive', afterDays: days },
       })
     }
+    // Архивация закрывает доступ (§7.5, критерий §13 к. 7): сессии, пережившие отказ (открытые
+    // до того, как отказ стал их гасить), кончаются здесь — тем же проходом, что и архив
+    await closeCandidateSessionsTx(tx, tenantId, rows.map(r => r.id), { by: null, state: 'archived' })
     return rows.length
   })
 }

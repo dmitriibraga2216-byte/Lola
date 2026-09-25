@@ -666,6 +666,13 @@
       "when": 1790234880000,
       "tag": "0096_v2_ai_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1790235000000,
+      "tag": "0098_fix_candidate_access",
+      "breakpoints": true
     }
   ]
 }

@@ -450,8 +450,12 @@ describe('доступ к карточке (§2, §7.10; критерии §13 �
       const card = await getCandidate(mentor, created[0]!)
       expect(card, 'наставник не видит кандидата, чью работу проверяет').not.toBeNull()
       expect(card!.fullName).toBeTruthy()
-      expect(card!.phone).toBe(maskPhone(PHONE))
-      expect(card!.email).toBe(maskEmail(EMAIL))
+      // [исправлено, fix-candidate-access: `28` §2 «—» для наставника] Ранее здесь ожидалась маска
+      // (`maskPhone(PHONE)`, `maskEmail(EMAIL)`) — а маска и есть часть ПД: код страны, последние
+      // цифры, первая буква и домен почты. Наставнику контактов не положено никаких.
+      expect(card!.phone, 'телефон (хоть бы и маской) ушёл наставнику').toBeNull()
+      expect(card!.email, 'почта (хоть бы и маской) ушла наставнику').toBeNull()
+      expect(card!.pdMasked).toBe(true)
       expect(card!.resumeAssetId, 'резюме ушло наставнику').toBeNull()
       expect(card!.comments, 'комментарии рекрутеров ушли наставнику').toEqual([])
     }

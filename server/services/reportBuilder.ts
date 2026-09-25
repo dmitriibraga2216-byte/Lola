@@ -1,6 +1,5 @@
 import { desc, eq, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
-import type { z } from 'zod'
 import { savedReports, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { UserKind } from '../../shared/enums'
@@ -13,10 +12,13 @@ import {
   candidateSourcesReport, funnelReport, recruiterEfficiencyReport, rejectionReasonsReport, timeToHireReport,
 } from './candidateFunnel'
 import { funnelReportSchema, recruitingReportFilterSchema } from '../../shared/schemas/candidates'
+import type { FunnelReportFilter, RecruitingReportFilter } from '../../shared/schemas/candidates'
 import { contentQualityReport } from './contentQuality'
 import { contentQualityQuerySchema } from '../../shared/schemas/contentIssues'
+import type { ContentQualityQuery } from '../../shared/schemas/contentIssues'
 import { planFactExportRows, timePlanFactReport } from './timeNorms'
 import { timePlanFactQuerySchema } from '../../shared/schemas/timeNorms'
+import type { TimePlanFactQuery } from '../../shared/schemas/timeNorms'
 import { stageSpeedReport } from './lifecycleState'
 import { offboardingReasonsReport } from './offboarding'
 import { learningActivityReport } from './activity'
@@ -241,7 +243,18 @@ export type Entity = keyof typeof ENTITIES
  */
 interface FixedReportDef { fields: string[], filters: string[], run: (ctx: Ctx, filters: Record<string, unknown>, scope: string[] | null) => Promise<Record<string, unknown>[]> }
 
-function parseOr<T>(schema: z.ZodType<T>, input: Record<string, unknown>, fallback: T): T {
+/**
+ * `schema` типізовано структурно, а не через `z.ZodType<T>`: у `ZodType<Output, Def, Input>`
+ * `Input` і `Output` — різні типи для будь-якої схеми з `.default()`/`.transform()` (усі наші
+ * фільтри такі — `format` за замовчуванням, `tags` приймає рядок або масив), а `z.ZodType<T>`
+ * зводить обидва до одного `T` і псує висновок типу то в один, то в інший бік (форматом
+ * необов'язковим на виході або вхідним типом `tags`, що не збігається з вихідним). Метод
+ * `safeParse()` в самому Zod бере `unknown` і повертає `data: Output` — точнісінько це й описано
+ * нижче, без другого (вхідного) боку. Виклик — завжди з явним `T` (`parseOr<X>(schema, …)`):
+ * коли `T` не вказано явно, той самий висновок типу намагається вивести його одразу і зі
+ * `schema`, і з `fallback`, і для деяких схем це давало ту ж плутанину.
+ */
+function parseOr<T>(schema: { safeParse: (v: unknown) => { success: true, data: T } | { success: false } }, input: Record<string, unknown>, fallback: T): T {
   const p = schema.safeParse({ ...input, format: 'json' })
   return p.success ? p.data : fallback
 }
@@ -252,7 +265,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['status', 'entered', 'current', 'share_pct', 'avg_days', 'to_next_pct'],
     filters: ['recruiterId', 'source', 'from', 'to'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(funnelReportSchema, filters, { format: 'json' as const })
+      const f = parseOr<FunnelReportFilter>(funnelReportSchema, filters, { format: 'json' })
       const r = await funnelReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, locations: scope, fullPd: false, reviewOnly: false }, f)
       return r.stages.map(s => ({ status: s.nameUk, entered: s.entered, current: s.current, share_pct: s.sharePct, avg_days: s.avgDays, to_next_pct: s.toNextPct }))
     },
@@ -261,7 +274,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['recruiter', 'added', 'in_progress', 'on_review', 'hired', 'rejected', 'archived', 'avg_days_to_decision', 'hire_share_pct'],
     filters: ['recruiterId', 'source', 'vacancyId', 'from', 'to'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(recruitingReportFilterSchema, filters, { format: 'json' as const })
+      const f = parseOr<RecruitingReportFilter>(recruitingReportFilterSchema, filters, { format: 'json' })
       const rows = await recruiterEfficiencyReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, locations: scope }, f)
       return rows.map(r => ({ recruiter: r.recruiter, added: r.added, in_progress: r.inProgress, on_review: r.onReview, hired: r.hired, rejected: r.rejected, archived: r.archived, avg_days_to_decision: r.avgDaysToDecision, hire_share_pct: r.hireSharePct }))
     },
@@ -270,7 +283,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['source', 'candidates', 'reached_final', 'hired', 'avg_budget'],
     filters: ['recruiterId', 'source', 'vacancyId', 'from', 'to'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(recruitingReportFilterSchema, filters, { format: 'json' as const })
+      const f = parseOr<RecruitingReportFilter>(recruitingReportFilterSchema, filters, { format: 'json' })
       const rows = await candidateSourcesReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, locations: scope }, f)
       return rows.map(r => ({ source: r.source, candidates: r.candidates, reached_final: r.reachedFinal, hired: r.hired, avg_budget: r.avgBudget }))
     },
@@ -279,7 +292,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['vacancy', 'location', 'hired', 'median_days', 'p90_days'],
     filters: ['recruiterId', 'source', 'vacancyId', 'from', 'to'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(recruitingReportFilterSchema, filters, { format: 'json' as const })
+      const f = parseOr<RecruitingReportFilter>(recruitingReportFilterSchema, filters, { format: 'json' })
       const rows = await timeToHireReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, locations: scope }, f)
       return rows.map(r => ({ vacancy: r.vacancy, location: r.location, hired: r.hired, median_days: r.medianDays, p90_days: r.p90Days }))
     },
@@ -288,7 +301,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['reason_code', 'vacancy', 'count', 'share_pct'],
     filters: ['recruiterId', 'source', 'vacancyId', 'from', 'to'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(recruitingReportFilterSchema, filters, { format: 'json' as const })
+      const f = parseOr<RecruitingReportFilter>(recruitingReportFilterSchema, filters, { format: 'json' })
       const rows = await rejectionReasonsReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, locations: scope }, f)
       return rows.map(r => ({ reason_code: r.reasonCode, vacancy: r.vacancy, count: r.count, share_pct: r.sharePct }))
     },
@@ -325,7 +338,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['element', 'type', 'tracks', 'authors', 'passes', 'complaints', 'per100', 'confirmed', 'rejected', 'avg_days_to_fix', 'open_now'],
     filters: ['from', 'to', 'categoryId', 'authorId', 'issueType', 'targetType', 'locationId'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(contentQualityQuerySchema, filters, { format: 'json' as const, groupBy: 'element' as const })
+      const f = parseOr<ContentQualityQuery>(contentQualityQuerySchema, filters, { format: 'json', groupBy: 'element' })
       const r = await contentQualityReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, scope }, f)
       return r.rows.map(x => ({
         element: x.title, type: x.targetType, tracks: x.tracks.map(t => t.title).join(', '), authors: x.authors.join(', '),
@@ -343,7 +356,7 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
     fields: ['element', 'type', 'track', 'planned_min', 'source', 'median_min', 'p25_min', 'p75_min', 'sample', 'deviation', 'factor', 'unreliable_share'],
     filters: ['subjectType', 'trackId', 'deviation', 'minSample', 'from', 'to', 'locationId'],
     run: async (ctx, filters, scope) => {
-      const f = parseOr(timePlanFactQuerySchema, filters, { format: 'json' as const })
+      const f = parseOr<TimePlanFactQuery>(timePlanFactQuerySchema, filters, { format: 'json' })
       const r = await timePlanFactReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, scope }, f)
       return planFactExportRows(r)
     },

@@ -252,12 +252,17 @@ describe('каждый вызов — строка ai_calls; списание о
 
   it('лимит оси 0, но ось никто не трогал — баннер не мигает (ни сразу, ни при плановом обходе)', async () => {
     await setLimits({ ai_review_ops: 0 })
-    expect(await activeNotices(tenantId)).toEqual([])
+    // Смотрим только на свою ось: `activeNotices()` — общий список тенанта «Каппі» на весь файл
+    // billing-тестов (`v2-billing-usage.spec.ts`), и параллельный воркер вполне может в этот
+    // момент держать открытым баннер другой оси — это не имеет отношения к тому, что проверяет
+    // этот тест. Немасштабированная проверка «весь список пуст» однажды уже словила такой
+    // баннер и упала ложно (CI #136).
+    const forAxis = async () => (await activeNotices(tenantId)).filter(n => n.axis === 'ai_review_ops')
+    expect(await forAxis()).toEqual([])
     // Плановый ежечасный обход (`billing.limit_scan`) не должен сам по себе поднять баннер
     // неиспользуемой оси — только реальная попытка вызова умеет это (см. тест выше).
     await limitScan(tenantId)
-    const open = await activeNotices(tenantId)
-    expect(open.find(n => n.axis === 'ai_review_ops'), 'неиспользуемая ось замигала баннером').toBeUndefined()
+    expect(await forAxis(), 'неиспользуемая ось замигала баннером').toEqual([])
   })
 
   it('повтор с тем же ключом и тем же входом отдаёт сохранённый выход и не тратит лимит (30 §7.18)', async () => {

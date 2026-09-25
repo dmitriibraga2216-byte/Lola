@@ -333,7 +333,7 @@ describe('импорт по ключу: обновление, перенос в�
 describe('§13 к. 7 — откат неудачной реорганизации', () => {
   let snapshotId: string
   let before: { nodes: Record<string, unknown>[], holders: string[] }
-  const ids: Record<string, string> = {}
+  const ids = { r: '', x: '', y: '', z: '' }
 
   beforeAll(async () => {
     await cleanupTree()
@@ -445,10 +445,10 @@ describe('§13 к. 7 — откат неудачной реорганизаци�
   it('перенос ветки больше 20 узлов делает снимок pre_bulk_move', async () => {
     const big = await node('Велика гілка')
     for (let i = 0; i < 21; i++) await node(`Лист ${i}`, { parentId: big.id })
-    const [{ n: before }] = await admin`select count(*)::int as n from org_structure_snapshots where tenant_id = ${tenantId} and kind = 'pre_bulk_move'` as unknown as { n: number }[]
+    const count = async () => (await admin`select count(*)::int as n from org_structure_snapshots where tenant_id = ${tenantId} and kind = 'pre_bulk_move'`)[0]!.n as number
+    const before = await count()
     expect((await moveNode(ctx, big.id, { parentId: ids.r })).ok).toBe(true)
-    const [{ n: after }] = await admin`select count(*)::int as n from org_structure_snapshots where tenant_id = ${tenantId} and kind = 'pre_bulk_move'` as unknown as { n: number }[]
-    expect(after).toBe(before + 1)
+    expect(await count()).toBe(before + 1)
   })
 })
 

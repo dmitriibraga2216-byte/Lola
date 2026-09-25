@@ -2,6 +2,7 @@ import { and, eq, isNull, lt, sql } from 'drizzle-orm'
 import { candidateStatusHistory, candidateStatuses, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
+import { currentRequestContext } from '../utils/requestContext'
 import { candidateOnly, candidates as candidatesQuery, personById } from './repo/people'
 import { anonymizeCandidate } from './candidateHire'
 import { recordAudit } from './audit'
@@ -231,6 +232,52 @@ export async function syncCandidateStatusTx(
     })
   }
   return target
+}
+
+/**
+ * Кандидат выбрал живое собеседование вместо ИИ (`docs/v2/30` §7.5: «`human_interview` —
+ * рекрутеру уходит `interview.declined` с пометкой «потрібна жива співбесіда», кандидат в статусе
+ * `on_review`»). Тот же приём, что у провала обязательного задания: карточка встаёт в «На
+ * перевірці», решение — за человеком. Состояние воронки (`candidate_state`) не меняется, отказа
+ * нет. Колонка не меняется «в себя»: если карточка уже на проверке, строки истории нет.
+ *
+ * Возвращает, кому сообщить (рекрутер карточки) и как человека назвать в уведомлении;
+ * сотрудник и неактивный кандидат воронки не имеют — `null`.
+ */
+export async function interviewAlternativeTx(
+  tx: TenantTx,
+  tenantId: string,
+  userId: string,
+  opts: { liveInterview: boolean, reasonText: string | null, actorId: string | null },
+): Promise<{ recruiterId: string | null, fullName: string } | null> {
+  const [person] = await personById(tx, {
+    kind: users.kind,
+    state: users.candidateState,
+    statusId: users.candidateStatusId,
+    recruiterId: users.recruiterId,
+    fullName: users.fullName,
+  }, userId) as unknown as { kind: string, state: string | null, statusId: string | null, recruiterId: string | null, fullName: string }[]
+  if (!person) return null
+  if (person.kind !== 'candidate' || person.state !== 'active') return { recruiterId: person.recruiterId, fullName: person.fullName }
+  if (opts.liveInterview) {
+    const status = await statusByCode(tx, 'on_review')
+    if (status && status.id !== person.statusId) {
+      await tx.update(users).set({ candidateStatusId: status.id, updatedAt: new Date() })
+        .where(and(eq(users.id, userId), candidateOnly()))
+      await tx.insert(candidateStatusHistory).values({
+        tenantId,
+        candidateId: userId,
+        fromStatusId: person.statusId,
+        toStatusId: status.id,
+        reasonCode: 'interview_alternative',
+        reasonText: opts.reasonText,
+        actorId: opts.actorId,
+        isAutomatic: true,
+        requestContext: currentRequestContext(),
+      })
+    }
+  }
+  return { recruiterId: person.recruiterId, fullName: person.fullName }
 }
 
 /** Кандидаты без движения дольше недели — дайджест рекрутеру (§8 `candidate.stale`). */

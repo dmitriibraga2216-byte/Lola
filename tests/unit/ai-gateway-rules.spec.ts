@@ -247,7 +247,9 @@ describe('драйверы (30 §3.2: вендор скрыт за драйве�
     setAiHttp(null)
   })
 
-  it('свой HTTP-контракт и честный отказ расшифровки до PR-28', async () => {
+  // С PR-28 расшифровка по HTTP есть (multipart с аудио из S3, `v2-interview.spec.ts`); промпт без
+  // аудио во входе по-прежнему честно отказывает `driver_unsupported`, а не шлёт JSON вместо файла
+  it('свой HTTP-контракт и честный отказ расшифровки промптом без аудио', async () => {
     setAiHttp(reply(200, { output: { html: '<p>Свій</p>' }, usage: { tokensIn: 3, tokensOut: 2 } }))
     expect(await runDriver(req({ driver: 'http_custom', endpointUrl: 'https://proxy.example.test/generate' }))).toMatchObject({ ok: true, output: { html: '<p>Свій</p>' } })
     expect(await runDriver(req({ purpose: 'transcribe' }))).toMatchObject({ ok: false, errorCode: 'driver_unsupported' })

@@ -276,6 +276,17 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // Код — `snake_case`, как весь реестр; текст обобщён: профиль обслуживает не только
   // собеседование («Співбесіди йдуть альтернативним шляхом» документа верно лишь для него)
   ai_provider_down: 'Провайдер ШІ «{{provider}}» не відповідає: {{n}} невдалих викликів поспіль. Функції ШІ йдуть запасним шляхом — перевірте налаштування провайдера',
+  // docs/v2/30 §8 (PR-28): ИИ-собеседование. Коды — `snake_case`. Рекрутеру — in-app и e-mail,
+  // кандидату — только ход собеседования (`interview_abandoned`), без флагов, расхождений и
+  // внутренней деградации (§8). `interview_abandoned_recruiter` — «рекрутер уведомлён» из §4 и
+  // §7.12, в таблице §8 своей строки не имел. Оценка заглушки подписана прямо в тексте (Р-28.4):
+  // по случайному числу решение принимать нельзя.
+  interview_declined: '{{name}} обрав альтернативний формат співбесіди: {{alternative}}.{{#reason}} Причина: {{reason}}.{{/reason}}{{#preferredTime}} Зручний час для дзвінка: {{preferredTime}}.{{/preferredTime}}{{#live}} Потрібна жива співбесіда.{{/live}}',
+  interview_completed: '{{name}} завершив співбесіду. Оцінка ШІ: {{score}}{{#stub}} (тестова заглушка, а не модель — не підстава для рішення){{/stub}}. Потрібне рішення людини',
+  interview_needs_human: 'Оцінку співбесіди {{name}} не сформовано: {{reason}}. Відповіді збережено — потрібне рішення людини',
+  interview_consent_withdrawn: '{{name}} відкликав згоду на запис співбесіди. Записи видалено',
+  interview_abandoned: 'Співбесіду не завершено.{{#until}} Посилання діє до {{until}}.{{/until}} Продовжіть з того ж питання',
+  interview_abandoned_recruiter: '{{name}} не завершив співбесіду: добу без активності. Спробу збережено',
 }
 
 /**
@@ -300,6 +311,8 @@ export function emailDefaultEnabled(code: string): boolean {
     || /^review_(sla_breach|escalated)$/.test(code)
     // docs/v2/32 §8: итог импорта инициатору и откат администраторам — канал e-mail (PR-31)
     || /^org_structure_(import_finished|rollback)$/.test(code)
+    // docs/v2/30 §8 (PR-28): рекрутеру — «in-app, email», кандидату о брошенной сессии — e-mail
+    || /^interview_(declined|completed|needs_human|consent_withdrawn|abandoned|abandoned_recruiter)$/.test(code)
     || eventClassOf(code) === 'managerDigest'
     || /^(scheduled_report|report_export_)/.test(code)
 }

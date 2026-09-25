@@ -626,6 +626,14 @@ grep -rn "candidate_state\|candidate_status_id\|is_correct\|workshop_submissions
 > каталог `server/services/ai/` появился (шлюз модели PR-27), — плюс те же имена в camelCase: запрос
 > Drizzle назвал бы колонку `candidateState`, и grep документа его бы не увидел. Тест на
 > `interview_criterion_scores` — PR-28, вместе с таблицей.
+> [дополнено, PR-28] Вторая половина исполняется тремя путями. Тест —
+> `tests/integration/v2-interview.spec.ts` (критерий `30` §13 к. 4): модель вернула балл без цитаты —
+> повтор с усиленной инструкцией, строк оценок нет, сессия `needs_human`, `candidate_scores` пуста; мимо
+> сервиса ту же строку не принимает база (`ics_rationale_chk`, `ics_evidence_chk`,
+> `ics_evidence_quote_chk`, триггер `ics_insert_guard`). Статически — **проверка 16**
+> `scripts/v2-crosschecks.sh`: модуль собеседования `server/services/interview/`, который и обрабатывает
+> вывод модели, не называет колонок решения о человеке (та же команда, что в проверке 14); оценки ИИ по
+> критериям пишет только он; ни одна миграция не снимает ограничений `ics_*`.
 
 **18. Голос не живёт дольше срока** (`30` §7.7).
 ```sql

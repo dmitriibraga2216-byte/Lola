@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
 import { aiCalls, aiProviders } from '../../db/schema'
-import { withTenant } from '../../utils/withTenant'
+import { withTenant, type TenantTx } from '../../utils/withTenant'
 import { keysetAfter, keysetAt } from '../../utils/keyset'
 import { KEYSETS, encodeKeyset } from '../../../shared/domain/keyset'
 import type { AiCallsQuery } from '../../../shared/schemas/ai'
@@ -82,18 +82,44 @@ export const AI_CALLS_KEEP_DAYS = 400
 
 /**
  * `ai.calls_cleanup` (`30` §11, ежедневно 04:10): ссылка на вход старше 90 дней обнуляется,
- * строки старше 400 дней удаляются. Сейчас вход в S3 не пишет ни один вызов — первым его начнёт
- * писать собеседование (PR-28), и удаление самого объекта приедет вместе с ним; обнуление
- * ссылки заведено уже здесь, чтобы срок жизни журнала был один с первого дня.
+ * строки старше 400 дней удаляются. С PR-28 вход пишут оценка собеседования (своим файлом
+ * `origin = 'ai_artifact'`) и расшифровка (ссылкой на аудио реплики): файл входа уходит в корзину
+ * с немедленной очисткой — `storage.purge` доводит его до `purged` тем же путём, что и любой файл
+ * (`34` §7.2). Аудио реплики этой задачей не трогается: у голоса свой срок (`30` §7.7,
+ * `interview.media_purge`), и ссылка на него из журнала просто обнуляется.
  */
-export async function aiCallsCleanup(tenantId: string): Promise<{ inputRefs: number, rows: number }> {
+export async function aiCallsCleanup(tenantId: string): Promise<{ inputRefs: number, rows: number, files: number }> {
   return withTenant(tenantId, null, async (tx) => {
-    const refs = await tx.update(aiCalls).set({ inputRef: null })
-      .where(and(sql`${aiCalls.inputRef} is not null`, lt(aiCalls.createdAt, sql`now() - ${`${AI_INPUT_REF_DAYS} days`}::interval`)))
-      .returning({ id: aiCalls.id })
+    // `returning` отдаёт новое значение (уже `null`) — прежний ключ берётся из снимка строк до правки
+    const refs = await tx.execute(sql`
+      with old as (
+        select id, input_ref from ai_calls
+         where input_ref is not null and created_at < now() - ${`${AI_INPUT_REF_DAYS} days`}::interval
+         for update)
+      update ai_calls c set input_ref = null from old where c.id = old.id
+      returning old.input_ref as input_ref`) as unknown as { input_ref: string }[]
+    const keys = [...new Set(refs.map(r => r.input_ref).filter(Boolean))]
+    const files = keys.length ? await discardInputFiles(tx, keys, 'ai_input_expired') : 0
     const gone = await tx.delete(aiCalls)
       .where(lt(aiCalls.createdAt, sql`now() - ${`${AI_CALLS_KEEP_DAYS} days`}::interval`))
       .returning({ id: aiCalls.id })
-    return { inputRefs: refs.length, rows: gone.length }
+    return { inputRefs: refs.length, rows: gone.length, files }
   })
+}
+
+/**
+ * Файлы полного входа (`origin = 'ai_artifact'`, владелец — субъект вызова) — в корзину с
+ * немедленной очисткой. Общая точка для уборки журнала и для стирания записей человека
+ * (`server/services/interview/redaction.ts`). Аудио реплик и чужие файлы по тем же ключам не
+ * трогаются: фильтр по происхождению.
+ */
+export async function discardInputFiles(tx: TenantTx, keys: string[], reason: string): Promise<number> {
+  if (!keys.length) return 0
+  const rows = await tx.execute(sql`
+    update media_assets
+       set lifecycle = 'pending_delete', deleted_at = now(), delete_reason = ${reason}, purge_after = now(), updated_at = now()
+     where origin = 'ai_artifact' and lifecycle = 'active'
+       and key in (${sql.join(keys.map(k => sql`${k}`), sql`, `)})
+    returning id`) as unknown as { id: string }[]
+  return rows.length
 }

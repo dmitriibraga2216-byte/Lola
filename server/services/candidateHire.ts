@@ -20,6 +20,7 @@ import { emitWebhook } from './webhooks'
 import { readSettings } from './settings'
 import { enterStageByCodeTx } from './lifecycleState'
 import { applyPositionRoles } from './positionRoleMap'
+import { redactInterviewData } from './interview/redaction'
 
 /**
  * Решения по кандидату: найм, отказ, архивация, самоотвод, повторное открытие
@@ -391,6 +392,9 @@ export async function anonymizeCandidate(tx: TenantTx, tenantId: string, id: str
   }).where(and(eq(users.id, id), candidateOnly(), isNull(users.anonymizedAt))).returning({ id: users.id })
   if (!row) return false
   await tx.delete(candidateComments).where(eq(candidateComments.candidateId, id))
+  // Записи ИИ-собеседования стираются тем же проходом и в той же транзакции (`docs/v2/30` §7.9):
+  // аудио, расшифровки, обоснования и цитаты, вход и выход модели — второго механизма сроков ПД нет
+  await redactInterviewData(tx, tenantId, id, { reason: 'anonymized', actorId })
   await recordAudit(tx, {
     tenantId,
     actorId,

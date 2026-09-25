@@ -599,6 +599,43 @@ check15_ai_gateway_only() {
   report "15. вызов модели — только через шлюз server/services/ai (docs/v2/30 §7.16, PR-27)" "$hits"
 }
 
+# ── Проверка 16. ИИ ничего не решает о людях: модуль собеседования и неснимаемое обоснование ──
+# docs/v2/42-stages-delta.md §5 проверка 17 (вторая половина), docs/v2/30 §3.5, §7.1, §7.2,
+# CLAUDE.md инвариант 18; план `45` PR-28. Проверка 14 держит команду документа над
+# `server/services/ai/` — шлюзом и промптами. Вывод модели обрабатывает модуль собеседования
+# `server/services/interview/`: кладёт расшифровку в реплику, баллы по критериям — в
+# `interview_criterion_scores`, одно число — в карточку. Правило 17 распространяется и на него:
+#  (а) модуль собеседования не называет колонок решения о человеке — состояния и колонки воронки
+#      кандидата, правильности ответа, сдачи практикума (snake_case и camelCase, как проверка 14;
+#      комментарии тоже считаются — как в команде документа). Оценку в карточку он кладёт только
+#      владельцем оценок `candidates.ts#writeAiScoreTx`, колонку канбана при отказе от ИИ двигает
+#      `candidateJobs.ts#interviewAlternativeTx` — решения там, где им место, и по воле человека;
+#  (б) оценки ИИ по критериям пишет только модуль собеседования: Drizzle-запись
+#      `insert|update|delete(interviewCriterionScores)` и сырой `insert into | update
+#      interview_criterion_scores` вне `server/services/interview/` — нарушение (комментарии — нет);
+#  (в) ни одна миграция не снимает ограничений «балл без обоснования и цитаты не сохраняется»:
+#      `drop constraint ics_*` и `drop trigger ics_insert_guard` в `server/db/migrations/`.
+# Тест на саму запись (балл без цитаты отклоняется, сессия уходит в `needs_human`) —
+# `tests/integration/v2-interview.spec.ts`, критерий `30` §13 к. 4.
+check16_interview_no_decisions() {
+  if [ ! -d server/services/interview ]; then
+    echo "[skip] 16. ИИ ничего не решает о людях: модуль собеседования (каталог server/services/interview ещё не создан — PR-28)"
+    return
+  fi
+  local own writers drops hits
+  own="$(grep -rnE "candidate_state|candidate_status_id|is_correct|workshop_submissions|candidateState|candidateStatusId|isCorrect|workshopSubmissions" \
+    server/services/interview 2>/dev/null || true)"
+  writers="$(grep -rnE "\b(insert|update|delete)\(interviewCriterionScores\)|(insert[[:space:]]+into|update)[[:space:]]+\"?interview_criterion_scores\b" \
+    server app shared --include='*.ts' --include='*.vue' 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//)' \
+    | grep -vE '^server/services/interview/' || true)"
+  drops="$(grep -rniE "drop[[:space:]]+(constraint|trigger)([[:space:]]+if[[:space:]]+exists)?[[:space:]]+\"?ics_" \
+    server/db/migrations 2>/dev/null || true)"
+  hits="$(printf '%s\n%s\n%s\n' "$own" "$writers" "$drops" | sed '/^[[:space:]]*$/d')"
+  hits="$(apply_markers "$hits" 16)"
+  report "16. ИИ ничего не решает о людях: модуль собеседования, балл без обоснования (docs/v2/42 §5 проверка 17)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -614,5 +651,6 @@ check12_contours_pr39
 check13_time_norms_not_in_score
 check14_ai_no_decisions
 check15_ai_gateway_only
+check16_interview_no_decisions
 
 exit $overall

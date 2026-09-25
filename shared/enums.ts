@@ -1101,6 +1101,73 @@ export type AiCallRefKind = typeof AI_CALL_REF_KINDS[number]
 export const AI_USAGE_AXES = ['ai_interview_ops', 'ai_review_ops', 'ai_generate_ops'] as const satisfies readonly LimitAxis[]
 export type AiUsageAxis = typeof AI_USAGE_AXES[number]
 
+// ── ИИ-собеседование: сценарий, согласие, прохождение (docs/v2/30 §3.3–§3.5, §4; план `45` PR-28) ──
+
+/**
+ * Вид теста (`quizzes.kind`, решение docs/v2/44 В-12): собеседование — третье значение вида, а не
+ * колонка `mode` (отменена): ни одна строка логики по `kind` не ветвилась, и две колонки «что это за
+ * тест» допускали бы бессмысленную пару. `interview` — тест, который проходят через экран согласия.
+ */
+export const QUIZ_KINDS = ['quiz', 'certification', 'interview'] as const
+export type QuizKind = typeof QUIZ_KINDS[number]
+
+/** Статус сценария собеседования (`interview_scenarios.status`, `30` §3.3): опубликован — один на тест. */
+export const INTERVIEW_SCENARIO_STATUSES = ['draft', 'published', 'archived'] as const
+export type InterviewScenarioStatus = typeof INTERVIEW_SCENARIO_STATUSES[number]
+
+/**
+ * Альтернатива ИИ-собеседованию (`interview_scenarios.alternative_path`,
+ * `interview_consents.alternative_chosen`, `30` §3.3, §7.5). Значения «нет» нет намеренно:
+ * сценарий, который нечем заменить, не публикуется (`422 scenario.alternative_required`).
+ */
+export const INTERVIEW_ALTERNATIVE_PATHS = ['human_interview', 'text_form'] as const
+export type InterviewAlternativePath = typeof INTERVIEW_ALTERNATIVE_PATHS[number]
+
+/** Как можно отвечать (`interview_scenarios.answer_modes`, `interview_sessions.answer_mode`, `30` §6.1). */
+export const INTERVIEW_ANSWER_MODES = ['voice', 'text'] as const
+export type InterviewAnswerMode = typeof INTERVIEW_ANSWER_MODES[number]
+
+/** Чем ответили на реплику (`interview_turns.answer_mode`): `none` — молчание после трёх подсказок (`30` §7.12). */
+export const INTERVIEW_TURN_MODES = ['voice', 'text', 'none'] as const
+export type InterviewTurnMode = typeof INTERVIEW_TURN_MODES[number]
+
+/** Кто говорит в реплике (`interview_turns.role`, `30` §3.4). */
+export const INTERVIEW_TURN_ROLES = ['interviewer', 'candidate'] as const
+export type InterviewTurnRole = typeof INTERVIEW_TURN_ROLES[number]
+
+/** Решение по согласию на запись (`interview_consents.decision`, `30` §3.3, §7.4–§7.6). */
+export const INTERVIEW_CONSENT_DECISIONS = ['accepted', 'declined', 'withdrawn'] as const
+export type InterviewConsentDecision = typeof INTERVIEW_CONSENT_DECISIONS[number]
+
+/** Состояние сессии (`interview_sessions.state`, `30` §4). `needs_human` — не провал, а состояние системы. */
+export const INTERVIEW_SESSION_STATES = [
+  'created', 'consent_pending', 'in_progress', 'paused', 'submitted', 'transcribing', 'scoring',
+  'scored', 'needs_human', 'abandoned', 'expired', 'failed',
+] as const
+export type InterviewSessionState = typeof INTERVIEW_SESSION_STATES[number]
+
+/**
+ * Почему оценки ИИ нет и нужен человек (`interview_sessions.degraded_reason`, `30` §3.4, §4, §7.12).
+ * Шесть — из документа; `unexplained` добавлен PR-28: «оценка без обоснования» из таблицы переходов
+ * `30` §4 своего значения не имела, а это ровно тот случай, ради которого `needs_human` и заведён.
+ */
+export const INTERVIEW_DEGRADED_REASONS = [
+  'provider_down', 'limit_exhausted', 'transcribe_failed', 'low_confidence', 'consent_withdrawn', 'timeout', 'unexplained',
+] as const
+export type InterviewDegradedReason = typeof INTERVIEW_DEGRADED_REASONS[number]
+
+/** Состояние расшифровки реплики (`interview_turns.transcript_status`, `30` §3.4, §7.10). */
+export const INTERVIEW_TRANSCRIPT_STATUSES = ['pending', 'ok', 'low_confidence', 'failed', 'skipped', 'manual', 'not_needed'] as const
+export type InterviewTranscriptStatus = typeof INTERVIEW_TRANSCRIPT_STATUSES[number]
+
+/** Откуда критерий (`interview_criteria.source`, `30` §6.2): предложенный ИИ требует подтверждения человеком. */
+export const INTERVIEW_CRITERION_SOURCES = ['manual', 'ai_suggested'] as const
+export type InterviewCriterionSource = typeof INTERVIEW_CRITERION_SOURCES[number]
+
+/** Расхождение оценки ИИ с человеком (`interview_criterion_scores.agreement`, `30` §7.3). */
+export const INTERVIEW_SCORE_AGREEMENTS = ['pending', 'match', 'minor', 'major'] as const
+export type InterviewScoreAgreement = typeof INTERVIEW_SCORE_AGREEMENTS[number]
+
 /**
  * Вид события ленты активности (`user_activity_events.kind`, docs/v2/38 §3.3, §7.9; PR-34).
  * Закрытый список из двенадцати: карта отвечает на «людина вчилася?», поэтому вход в систему,
@@ -1227,4 +1294,16 @@ export const ENUMS: Record<string, readonly string[]> = {
   ai_call_status: AI_CALL_STATUSES,
   ai_call_ref_kind: AI_CALL_REF_KINDS,
   user_activity_kind: USER_ACTIVITY_KINDS,
+  quiz_kind: QUIZ_KINDS,
+  interview_scenario_status: INTERVIEW_SCENARIO_STATUSES,
+  interview_alternative_path: INTERVIEW_ALTERNATIVE_PATHS,
+  interview_answer_mode: INTERVIEW_ANSWER_MODES,
+  interview_turn_mode: INTERVIEW_TURN_MODES,
+  interview_turn_role: INTERVIEW_TURN_ROLES,
+  interview_consent_decision: INTERVIEW_CONSENT_DECISIONS,
+  interview_session_state: INTERVIEW_SESSION_STATES,
+  interview_degraded_reason: INTERVIEW_DEGRADED_REASONS,
+  interview_transcript_status: INTERVIEW_TRANSCRIPT_STATUSES,
+  interview_criterion_source: INTERVIEW_CRITERION_SOURCES,
+  interview_score_agreement: INTERVIEW_SCORE_AGREEMENTS,
 }

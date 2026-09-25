@@ -96,6 +96,8 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/people': "hasScope('people.view')",
   '/admin/candidates': "recruitingOn() && hasScope('candidate.view')",
   '/admin/vacancies': "recruitingOn() && hasScope('vacancy.view')",
+  // PR-28 (docs/v2/30 §5.6): сценарії ШІ-співбесіди — тим самим прапорцем рекрутингу
+  '/admin/settings/interviews': "recruitingOn() && hasScope('interview.configure')",
   '/admin/people/groups': "hasScope('people.view')",
   '/admin/org': "hasScope('people.view')",
   '/admin/refs': "hasScope('people.view')",

@@ -73,7 +73,9 @@ export const quizzes = pgTable('quizzes', {
   title: text('title').notNull(),
   description: jsonb('description'),
   coverKey: text('cover_key'),
-  kind: text('kind').notNull().default('quiz'), // quiz | certification
+  // Одно из `QUIZ_KINDS`: quiz | certification | interview (решение docs/v2/44 В-12, миграция 0095 —
+  // `quizzes_kind_chk`). `interview` — тест, который проходят через экран согласия (docs/v2/30 §3.1)
+  kind: text('kind').notNull().default('quiz'),
   tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   authorIds: uuid('author_ids').array().notNull().default(sql`'{}'::uuid[]`),
   selectionMode: text('selection_mode').notNull().default('fixed'), // fixed | random
@@ -87,6 +89,7 @@ export const quizzes = pgTable('quizzes', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, t => [
   index().on(t.tenantId),
+  check('quizzes_kind_chk', sql`${t.kind} in ('quiz', 'certification', 'interview')`),
 ])
 
 export const quizQuestions = pgTable('quiz_questions', {

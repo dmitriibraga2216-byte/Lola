@@ -87,6 +87,13 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('org.import_apply', { retryLimit: 0, expireInSeconds: 1800 })
       // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход 90 дней, строка 400 дней
       await b.createQueue('ai.calls_cleanup', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/30 §11 (PR-28): собеседование. Расшифровка и оценка — по событию; повторы после
+      // отказа провайдера ставит сам сервис с отсрочкой (5/30 мин и 1/5/30 мин, §7.10, §7.12),
+      // поэтому у очереди своих повторов нет — иначе попыток было бы больше, чем обещано.
+      // `interview.reap` — каждые 15 минут: сутки без активности → `abandoned`
+      await b.createQueue('interview.transcribe', { retryLimit: 0, expireInSeconds: 600 })
+      await b.createQueue('interview.score', { retryLimit: 0, expireInSeconds: 600 })
+      await b.createQueue('interview.reap', { retryLimit: 2, expireInSeconds: 600 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -160,6 +167,7 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('vacancy.publication_health', '*/30 * * * *', {}, { singletonKey: 'vacancy.publication_health' })
       await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
       await b.schedule('ai.calls_cleanup', '10 4 * * *', {}, { singletonKey: 'ai.calls_cleanup', tz: 'Europe/Kyiv' })
+      await b.schedule('interview.reap', '*/15 * * * *', {}, { singletonKey: 'interview.reap' })
       return b
     })
   }

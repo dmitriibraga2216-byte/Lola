@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { PutObjectCommand } from '@aws-sdk/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { aiCalls, aiProviders } from '../../db/schema'
+import { aiCalls, aiProviders, mediaAssets } from '../../db/schema'
 import { ensureAiProviders } from '../../db/tenantDefaults'
 import { withTenant, type TenantTx } from '../../utils/withTenant'
 import { currentRequestContext } from '../../utils/requestContext'
@@ -11,8 +12,9 @@ import { syncNotice } from '../limitNotices'
 import { readRefSecret } from '../secrets'
 import { enqueueNotification, tenantAdminIds } from '../notifications'
 import { embeddingOverride } from '../embeddings'
+import { S3_BUCKET, ensureBucket, s3 } from '../media'
 import { runDriver, type DriverResult } from './drivers'
-import { AI_PURPOSE_METER, aiUnavailable, buildChain, digestOf, idempotencyKey, normalizeEndpoint, sha256Hex, type AiUnavailableReason } from './policy'
+import { AI_PURPOSE_METER, aiUnavailable, buildChain, canonicalJson, digestOf, idempotencyKey, normalizeEndpoint, sha256Hex, type AiUnavailableReason } from './policy'
 import type { EmbedInput, EmbedOutput, PromptDef } from './prompts'
 
 /**
@@ -194,6 +196,8 @@ interface CallBase {
   ref: AiRef
   subjectUserId: string | null
   inputDigest: string
+  /** Ключ полного входа в S3 (`30` §3.2): свой файл `ai_artifact` или объект, который уже есть. */
+  inputRef?: string | null
   usageAxis: AiUsageAxis | null
   tryNo: number
 }
@@ -218,6 +222,7 @@ async function insertCall(ctx: AiCtx, base: CallBase, model: ModelInfo, status: 
     subjectUserId: base.subjectUserId,
     actorUserId: ctx.actorId,
     inputDigest: base.inputDigest,
+    inputRef: base.inputRef ?? null,
     status,
     errorCode: extra.errorCode ?? null,
     usageAxis: base.usageAxis,
@@ -271,6 +276,48 @@ async function checkProviderDown(ctx: AiCtx, p: ChainEntry): Promise<void> {
       })
     }
   })
+}
+
+// ── Полный вход в S3 (`30` §3.2, §7.7; PR-28) ─────────────────────────────────────────
+
+/**
+ * Полный вход вызова — файлом в S3, в БД только дайджест и ключ (`30` §3.2 [решение]: иначе журнал
+ * стал бы второй копией ПД кандидата, которую забудут стереть при обезличивании). Файл
+ * регистрируется строкой `media_assets` с `origin = 'ai_artifact'` и владельцем — тем, о ком
+ * вызов: так его видит хранилище (квота и разбивка по происхождению — один реестр, `34` §7.1), а
+ * обезличивание и отзыв согласия находят и стирают его вместе с остальными записями человека.
+ * Живёт 90 дней: `ai.calls_cleanup` обнуляет ссылку и отправляет файл в корзину с немедленной
+ * очисткой. Квота хранилища здесь не проверяется: это журнал системы, а не загрузка человека,
+ * и отказ записать вход не должен останавливать собеседование (`25` §10).
+ *
+ * Сбой записи не роняет вызов: модель всё равно вызывается, в журнале остаётся дайджест входа.
+ */
+async function storeCallInput(ctx: AiCtx, base: CallBase, input: unknown): Promise<string | null> {
+  const body = Buffer.from(canonicalJson(input), 'utf8')
+  const now = new Date()
+  const key = `t/${ctx.tenantId}/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/ai-input-${randomUUID()}.json`
+  try {
+    await ensureBucket()
+    await s3().send(new PutObjectCommand({ Bucket: S3_BUCKET(), Key: key, Body: body, ContentType: 'application/json' }))
+    await withTenant(ctx.tenantId, ctx.actorId, tx => tx.insert(mediaAssets).values({
+      tenantId: ctx.tenantId,
+      key,
+      originalName: `ai-input-${base.promptKey}.json`,
+      kind: 'file',
+      mime: 'application/json',
+      bytes: body.length,
+      status: 'ready',
+      ownerUserId: base.subjectUserId ?? ctx.actorId,
+      origin: 'ai_artifact',
+      sourceEntity: 'ai_calls',
+      isEvidence: false,
+    }))
+    return key
+  }
+  catch (err) {
+    console.error('[ai.input_ref]', err)
+    return null
+  }
 }
 
 // ── Вызов ───────────────────────────────────────────────────────────────────────────────
@@ -356,6 +403,8 @@ export async function callModel<I, O>(ctx: AiCtx, prompt: PromptDef<I, O>, input
   const key = cacheRef
     ? idempotencyKey({ tenantId: ctx.tenantId, refKind: opts.ref.kind, refId: cacheRef, promptKey: prompt.key, promptVersion: prompt.version, tryNo: base.tryNo })
     : sha256Hex(randomUUID())
+  // Вход — один на все профили цепочки: запасной видит ровно то же, что основной
+  base.inputRef = prompt.inputRef ? prompt.inputRef(input) : prompt.storeInput ? await storeCallInput(ctx, base, input) : null
   let lastFail: { status: 'failed' | 'timeout', errorCode: string, callId: number } | null = null
 
   for (const p of chain) {
@@ -431,11 +480,8 @@ export async function reserveSessionOp(ctx: AiCtx, axis: AiUsageAxis, ref: { kin
   if (reason) return { ok: false, code: 'ai_unavailable', reason }
 
   const refKind = AXIS_METER[axis].refKind!
-  const [already] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`
-    select 1 from usage_events
-     where axis = ${axis} and ref_kind = ${refKind} and ref_id = ${ref.id}::uuid and delta > 0
-     limit 1`) as unknown as Promise<unknown[]>)
-  if (already) return { ok: true, reserved: false }
+  // Резерв считается по сумме строк расхода сессии: снятый резерв (`releaseSessionOp`) — уже не резерв
+  if (await sessionNet(ctx, axis, refKind, ref.id) > 0) return { ok: true, reserved: false }
 
   const m = await meterOrDegrade(ctx.tenantId, axis)
   if (!m.state.ok) {
@@ -446,6 +492,26 @@ export async function reserveSessionOp(ctx: AiCtx, axis: AiUsageAxis, ref: { kin
   }
   await recordUsage(ctx.tenantId, axis, 1, { refKind, refId: ref.id, actorUserId: ctx.actorId, meta: { reservedFor: ref.kind } })
   return { ok: true, reserved: true }
+}
+
+async function sessionNet(ctx: AiCtx, axis: AiUsageAxis, refKind: string, refId: string): Promise<number> {
+  const [row] = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`
+    select coalesce(sum(delta), 0)::int as net from usage_events
+     where axis = ${axis} and ref_kind = ${refKind} and ref_id = ${refId}::uuid`) as unknown as Promise<{ net: number }[]>)
+  return Number(row?.net ?? 0)
+}
+
+/**
+ * Снять резерв сессии (`30` §12 п. 1, §7.12 [решение]; хвост PR-27): сессия закончилась, не
+ * получив ни одного ответа, — ИИ не сделал для тенанта ничего, и операция возвращается строкой
+ * расхода с `delta = -1`. Идемпотентно: снимается только то, что зарезервировано и ещё не снято.
+ * Возвращает, было ли что снимать.
+ */
+export async function releaseSessionOp(ctx: AiCtx, axis: AiUsageAxis, ref: { kind: AiCallRefKind, id: string }, reason: string): Promise<boolean> {
+  const refKind = AXIS_METER[axis].refKind!
+  if (await sessionNet(ctx, axis, refKind, ref.id) <= 0) return false
+  await recordUsage(ctx.tenantId, axis, -1, { refKind, refId: ref.id, actorUserId: ctx.actorId, meta: { releasedFor: ref.kind, reason } })
+  return true
 }
 
 // ── Эмбеддинги ──────────────────────────────────────────────────────────────────────────

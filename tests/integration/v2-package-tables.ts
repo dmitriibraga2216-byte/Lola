@@ -148,6 +148,16 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // формулы — источник истины для `users.rating_pct`. Tenant-first индекс — уникальный ключ
   // `(tenant_id, user_id, calc_date)`; «текущий» снимок — частичный уникальный рядом.
   'person_rating_snapshots',
+  // 30. ИИ-собеседование: сценарий, согласие, прохождение (PR-28, миграция 0095_v2_interview).
+  // Сессия живёт поверх строки `attempts`, реплика — поверх `attempt_answers` (`30` §3.1):
+  // здесь только то, чего в модели попытки нет. `candidate_summaries`, `ai_review_hints` и
+  // `ai_quality_reviews` — PR-29.
+  'interview_scenarios',
+  'interview_criteria',
+  'interview_consents',
+  'interview_sessions',
+  'interview_turns',
+  'interview_criterion_scores',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

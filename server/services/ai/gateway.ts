@@ -339,8 +339,11 @@ export async function callModel<I, O>(ctx: AiCtx, prompt: PromptDef<I, O>, input
       const status = m.allowed ? 'degraded' : 'refused'
       const callId = await insertCall(ctx, base, modelOf(chain[0]), status, { errorCode: 'limit_exceeded', finished: true })
       // «Админу ушло ai_ops_exhausted» (`30` §13 к. 7) = `limit_exceeded` с `axis` (`44` В-16);
-      // уже открытое предупреждение второй раз не шлётся — дедупликация `limitNotices.ts`
-      await syncNotice(ctx.tenantId, axis, m.state.used, m.state.limit)
+      // уже открытое предупреждение второй раз не шлётся — дедупликация `limitNotices.ts`.
+      // `[fix-night-debts §3]` +1 — эта самая попытка: при лимите оси 0 запись блокируется до
+      // счётчика (`recordUsage` ниже не вызывается), и `m.state.used` навсегда остаётся 0 —
+      // без +1 `syncNotice`/`levelOf` не отличили бы «была попытка» от «ось никто не трогал».
+      await syncNotice(ctx.tenantId, axis, m.state.used + 1, m.state.limit)
       return { ok: false, status, code: 'limit_exceeded', callId, check: m.state, degradation: m.degradation }
     }
   }
@@ -436,7 +439,9 @@ export async function reserveSessionOp(ctx: AiCtx, axis: AiUsageAxis, ref: { kin
 
   const m = await meterOrDegrade(ctx.tenantId, axis)
   if (!m.state.ok) {
-    await syncNotice(ctx.tenantId, axis, m.state.used, m.state.limit)
+    // `[fix-night-debts §3]` +1 — та же самая причина, что в `callModel()` выше: при лимите
+    // оси 0 счётчик не растёт (резерв не состоялся), `used` без поправки навсегда 0.
+    await syncNotice(ctx.tenantId, axis, m.state.used + 1, m.state.limit)
     return { ok: false, code: 'limit_exceeded', check: m.state, degradation: m.degradation }
   }
   await recordUsage(ctx.tenantId, axis, 1, { refKind, refId: ref.id, actorUserId: ctx.actorId, meta: { reservedFor: ref.kind } })

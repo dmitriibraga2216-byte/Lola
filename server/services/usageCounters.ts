@@ -353,8 +353,17 @@ export interface AxisUsage {
 /** Порог предупреждения (`35` §7.9 п. 1; `platform_settings.limit_warn_pct` — см. docs/28). */
 export const LIMIT_WARN_PCT = 0.8
 
+/**
+ * `[fix-night-debts §3]` Нулевой лимит — не «без обмежень» (`null`), а «вимкнено зовсім»: ось,
+ * которую тенант не трогал (`used=0`), не должна мигать баннером вечно — только `ok`; но ось,
+ * по которой была попытка (вызывающий на месте блокировки передаёт `used` уже с учётом попытки,
+ * `server/services/ai/gateway.ts`), обязана дать `exceeded`, а не молчать. Прежняя строка
+ * `limit <= 0 → 'ok'` глушила оба случая одинаково — баннер и `limit_exceeded` не поднимались
+ * никогда, даже при реальном отказе вызова.
+ */
 export function levelOf(used: number, limit: number | null): 'ok' | 'warn' | 'exceeded' {
-  if (limit == null || limit <= 0) return 'ok'
+  if (limit == null) return 'ok'
+  if (limit <= 0) return used > 0 ? 'exceeded' : 'ok'
   if (used >= limit) return 'exceeded'
   return used / limit >= LIMIT_WARN_PCT ? 'warn' : 'ok'
 }

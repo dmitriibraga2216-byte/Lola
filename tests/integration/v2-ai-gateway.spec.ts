@@ -33,6 +33,7 @@ const { aiCallsCleanup, listAiCalls } = await import('../../server/services/ai/c
 const { LIBRARY_EMBEDDING_PROMPT } = await import('../../server/services/ai/prompts')
 const { currentUsage, currentWindow } = await import('../../server/services/usageCounters')
 const { invalidateLimits } = await import('../../server/services/tenantLimits')
+const { limitScan, activeNotices } = await import('../../server/services/limitNotices')
 const { recordAudit } = await import('../../server/services/audit')
 const { generateVacancyText } = await import('../../server/services/vacancyAi')
 const { createVacancy, viewerOf } = await import('../../server/services/vacancies')
@@ -228,6 +229,35 @@ describe('каждый вызов — строка ai_calls; списание о
     if (!r.ok) expect(r.check?.axis).toBe('ai_generate_ops')
     expect(await currentUsage(tenantId, 'ai_generate_ops')).toBe(1)
     expect((await callsOf(GENERATE.key)).at(-1)).toMatchObject({ status: 'refused', error_code: 'limit_exceeded', billed: false })
+  })
+
+  /**
+   * `[fix-night-debts §3]` Тариф без ИИ вовсе (`ai_generate_ops = 0`) — не то же самое, что
+   * ось никто не трогал: PR-27 (`#134`) отклонял такой вызов правильно (`checkLimit()` не
+   * менялся), но `levelOf()` считал любой `limit <= 0` за `'ok'` — баннер оператора и
+   * уведомление `limit_exceeded` не поднимались никогда, даже при реальном отказе.
+   */
+  it('лимит оси 0 с первой же попытки: вызов отклонён, и теперь баннер exceeded поднимается', async () => {
+    await setLimits({ ai_generate_ops: 0 })
+    expect(await currentUsage(tenantId, 'ai_generate_ops'), 'до попытки счётчик пуст').toBe(0)
+    const r = await callModel(ctx(), GENERATE, { n: 22 }, { ref: { kind: 'vacancy_generation', id: randomUUID() } })
+    expect(r).toMatchObject({ ok: false, status: 'refused', code: 'limit_exceeded', degradation: 'reject' })
+    expect(await currentUsage(tenantId, 'ai_generate_ops'), 'отказ до учёта — счётчик не сдвинулся').toBe(0)
+
+    const [notice] = await admin`select level from limit_notices where tenant_id = ${tenantId} and axis = 'ai_generate_ops' and resolved_at is null`
+    expect(notice?.level, 'баннер не поднялся при лимите 0 — долг §3').toBe('exceeded')
+    const sent = await admin`select payload from notifications where tenant_id = ${tenantId} and code = 'limit_exceeded'`
+    expect(sent.some(n => (n.payload as { axis: string }).axis === 'ai_generate_ops'), 'адміну не пішло limit_exceeded').toBe(true)
+  })
+
+  it('лимит оси 0, но ось никто не трогал — баннер не мигает (ни сразу, ни при плановом обходе)', async () => {
+    await setLimits({ ai_review_ops: 0 })
+    expect(await activeNotices(tenantId)).toEqual([])
+    // Плановый ежечасный обход (`billing.limit_scan`) не должен сам по себе поднять баннер
+    // неиспользуемой оси — только реальная попытка вызова умеет это (см. тест выше).
+    await limitScan(tenantId)
+    const open = await activeNotices(tenantId)
+    expect(open.find(n => n.axis === 'ai_review_ops'), 'неиспользуемая ось замигала баннером').toBeUndefined()
   })
 
   it('повтор с тем же ключом и тем же входом отдаёт сохранённый выход и не тратит лимит (30 §7.18)', async () => {

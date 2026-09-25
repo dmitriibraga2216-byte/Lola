@@ -80,6 +80,8 @@ export const KEYSETS = {
    * как у остальных журналов — id у `ai_calls` тоже `bigint`.
    */
   aiCalls: ['at', 'text'],
+  /** Сценарии собеседования (docs/v2/30 §5.6, §10 `GET /interview-scenarios`; PR-28): `updated_at desc, id desc`. */
+  interviewScenarios: ['at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

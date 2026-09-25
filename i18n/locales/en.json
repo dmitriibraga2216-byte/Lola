@@ -158,7 +158,8 @@
       "reviewWorkload": "Reviewer workload",
       "reviewRouting": "Routing rules",
       "storage": "Storage",
-      "platformAnnouncements": "Lola announcements"
+      "platformAnnouncements": "Lola announcements",
+      "interviews": "Interview scenarios"
     },
     "section": {
       "learning": "Learning",
@@ -1053,7 +1054,15 @@
     "addGroup": "Group",
     "recalc": "Recalculate",
     "recalcReason": "Reason for recalculation (goes to the audit log)",
-    "recalcDone": "Recalculated attempts: {total}, changed: {changed}"
+    "recalcDone": "Recalculated attempts: {total}, changed: {changed}",
+    "kind": "Test kind",
+    "kinds": {
+      "quiz": "Test",
+      "certification": "Certification",
+      "interview": "Interview"
+    },
+    "kindInterviewHint": "An interview is taken through the consent screen. How to run it and by which criteria to assess — in “Interview scenarios”.",
+    "kindSaved": "Test kind changed"
   },
   "review": {
     "title": "Review queue",
@@ -3558,7 +3567,13 @@
       "storage_bulk_delete_done": "Files deleted from storage",
       "content_time_deviation": "Time deviates from the estimate",
       "absence_deadline_shifted": "Deadline moved because of an absence",
-      "ai_provider_down": "AI provider is unavailable"
+      "ai_provider_down": "AI provider is unavailable",
+      "interview_declined": "Candidate chose an alternative interview format",
+      "interview_completed": "Interview completed — decision needed",
+      "interview_needs_human": "Interview assessment not produced",
+      "interview_consent_withdrawn": "Candidate withdrew recording consent",
+      "interview_abandoned": "Interview not finished",
+      "interview_abandoned_recruiter": "Candidate did not finish the interview"
     }
   },
   "ntpl": {
@@ -5185,7 +5200,8 @@
       "overview": "Overview",
       "scores": "Scores",
       "comments": "Comments",
-      "history": "History"
+      "history": "History",
+      "interview": "Interview"
     },
     "state": {
       "active": "In selection",
@@ -7194,5 +7210,227 @@
     "retry": "Retry",
     "backProfile": "My profile",
     "backCard": "Person card"
+  },
+  "interview": {
+    "title": "Online interview",
+    "loading": "Loading the interview",
+    "loadError": "Could not open the interview",
+    "retry": "Try again",
+    "consent": {
+      "interviewer": "Interviewer: {name}",
+      "agree": "I agree and start",
+      "decline": "I do not agree",
+      "fullText": "Full consent text",
+      "hideFullText": "Hide full text"
+    },
+    "decline": {
+      "title": "You did not agree to the online interview. That is fine and does not affect your chances.",
+      "choose": "What we offer instead",
+      "human": "An interview with a recruiter — you will be contacted within 3 business days",
+      "textForm": "A written form — the same questions in writing, no recording",
+      "preferredTime": "Convenient time for a call",
+      "preferredTimeHint": "Optional, e.g. “weekdays after 6 pm”",
+      "send": "Send",
+      "back": "Back to consent",
+      "sent": "Thank you, the recruiter has received your choice"
+    },
+    "alternative": {
+      "unavailable": "A recruiter is holding interviews right now",
+      "unavailableText": "The online interview is not available right now. A recruiter will interview you — leave a convenient time for a call.",
+      "unavailableForm": "The online interview is not available right now. Answer in writing — the same questions, no recording.",
+      "openForm": "Open the written form",
+      "waiting": "A recruiter will contact you within 3 business days. The selection is not closed for you.",
+      "continue": "Choose another format"
+    },
+    "mic": {
+      "title": "Microphone check",
+      "say": "Say a few words to check the microphone",
+      "check": "Turn on the microphone",
+      "level": "Sound level",
+      "works": "The microphone works",
+      "denied": "No access to the microphone. You can answer in writing",
+      "deniedNoText": "No access to the microphone. This interview is voice only — we will offer another format.",
+      "useText": "Answer in writing",
+      "start": "Start the interview"
+    },
+    "session": {
+      "recording": "Recording in progress",
+      "stop": "Stop the interview",
+      "stopConfirm": "Stop the interview and withdraw consent? Recordings and transcripts will be deleted, and the attempt will not count as failed.",
+      "stopYes": "Yes, stop",
+      "stopNo": "Continue the interview",
+      "question": "Question {n} of {total}",
+      "think": "Time to think: {s} s",
+      "timeLeft": "Minutes left: {m}",
+      "record": "Record the answer",
+      "stopRecording": "Stop",
+      "duration": "Duration: {s} s",
+      "overLimit": "longer than {max} s, please finish your answer",
+      "recorded": "Answer recorded: {s} s",
+      "sending": "Saving the recording",
+      "retake": "Record again ({n} left)",
+      "answerText": "Answer in writing",
+      "answerVoice": "Answer by voice",
+      "textLabel": "Your answer",
+      "next": "Next",
+      "finish": "Finish the interview",
+      "silence": "We cannot hear you. Please try again",
+      "resumed": "Connection restored, let’s continue",
+      "offline": "No connection. What you wrote is saved on this device — we will continue once the network is back",
+      "doneTitle": "Thank you! Your answers have been sent.",
+      "doneText": "The result will arrive by email within a few days.",
+      "degraded": "We could not process the answers right now — a recruiter will contact you. Your attempt is saved.",
+      "withdrawn": "You withdrew consent. Recordings and transcripts have been deleted. A recruiter will contact you.",
+      "expired": "The time for the attempt is over. Your answers are saved."
+    },
+    "textForm": {
+      "title": "Written form",
+      "hint": "The same questions as in the interview, no recording. A person will review the answers.",
+      "saved": "Saved",
+      "submit": "Send the answers",
+      "submitted": "Answers sent. A person will review them."
+    },
+    "card": {
+      "none": "No interview assigned",
+      "version": "version {n}",
+      "humanDecides": "This is the program’s assessment. A person makes the decision.",
+      "stub": "AI test stub, not a model: this number is not a basis for a decision",
+      "confidence": "Confidence",
+      "confidenceWord": {
+        "high": "high",
+        "medium": "medium",
+        "low": "low"
+      },
+      "passport": "model {model} · prompt {prompt} · {date}",
+      "needsHuman": "AI assessment not produced — a person’s decision is needed",
+      "redacted": "Recordings, transcripts and rationale erased {date}; scores remain",
+      "criteria": "Criteria",
+      "rationaleRedacted": "Rationale erased together with the recordings",
+      "turn": "question {n}",
+      "flagsTitle": "Worth checking by a person",
+      "flagsHint": "Measurable facts only: none affects the score or is shown to the candidate.",
+      "flag": {
+        "ip_changed": "IP address changed during the interview",
+        "device_changed": "Device or browser changed",
+        "tab_switches": "More than 5 tab switches",
+        "too_fast": "A long answer started less than 1.5 s after the question",
+        "read_aloud": "The answer almost repeats the question text",
+        "lang_mismatch": "Answer in another language",
+        "duplicate_answer": "The answer matches another candidate’s answer",
+        "long_silence_pattern": "Long pauses in several answers"
+      },
+      "transcript": "Transcript",
+      "transcriptMissing": "Transcript not received",
+      "unreliable": "Unreliable transcript — not used as evidence for the score",
+      "listen": "Listen",
+      "audioDeleted": "Audio deleted {date}. The transcript is kept",
+      "noAnswer": "no answer",
+      "sec": "s",
+      "mode": {
+        "voice": "by voice",
+        "text": "in writing",
+        "none": "silence"
+      },
+      "metrics": "Answers {answered} of {total} · connection drops {disconnects} · re-recordings {retakes} · silent pauses {silence}",
+      "state": {
+        "created": "created",
+        "consent_pending": "awaiting consent",
+        "in_progress": "in progress",
+        "paused": "paused",
+        "submitted": "answers sent",
+        "transcribing": "transcribing",
+        "scoring": "scoring",
+        "scored": "scored",
+        "needs_human": "needs a person",
+        "abandoned": "not finished",
+        "expired": "time is over",
+        "failed": "no answers"
+      }
+    },
+    "history": {
+      "declined": "Chose an alternative interview format",
+      "withdrawn": "Withdrew consent to interview recording",
+      "liveNeeded": "A live interview is needed",
+      "alternative": {
+        "human_interview": "interview with a recruiter",
+        "text_form": "written form"
+      }
+    }
+  },
+  "interviewAdmin": {
+    "title": "Interview scenarios",
+    "subtitle": "Online AI interview: the questions live in a test of the “Interview” kind, here — how to run it and by which criteria to assess.",
+    "new": "New scenario",
+    "create": "Create",
+    "quiz": "Interview module",
+    "quizPick": "Choose a test of the “Interview” kind",
+    "noInterviewQuizzes": "There are no tests of the “Interview” kind. Create a test and choose the kind in its settings.",
+    "name": "Name",
+    "empty": "No scenarios yet",
+    "version": "version {n}",
+    "col": {
+      "name": "Scenario",
+      "quiz": "Module",
+      "criteria": "Criteria",
+      "sessions": "Interviews",
+      "needsHuman": "Needs a person",
+      "status": "Status",
+      "updated": "Updated"
+    },
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "archived": "Archived"
+    },
+    "defaultIntro": "Hello! My name is Lola. I will ask a few questions about your work experience. Answer the way you prefer — by voice or in writing. At the end, a recruiter will receive your answers.",
+    "defaultOutro": "Thank you! Your answers have been sent to the recruiter.",
+    "form": "Interview settings",
+    "interviewerName": "Interviewer name",
+    "interviewerHint": "This is how the program introduces itself to the candidate",
+    "intro": "Welcome text",
+    "introHint": "The first thing the candidate hears",
+    "outro": "Closing text",
+    "modes": "Answer format",
+    "modesHint": "Text is needed for those without a microphone",
+    "mode": {
+      "voice": "Voice",
+      "text": "Text"
+    },
+    "maxAnswer": "Max answer duration, s",
+    "think": "Time to think, s",
+    "retakes": "Re-recordings allowed",
+    "minConfidence": "Minimum confidence",
+    "minConfidenceHint": "Below the threshold we do not produce a score and hand it over to a person",
+    "lang": "Transcription language",
+    "langs": {
+      "uk": "Ukrainian",
+      "en": "English",
+      "ru": "Russian"
+    },
+    "video": "Record video",
+    "videoHint": "Off: video recording with the candidate’s separate consent will come later",
+    "alternative": "Alternative path",
+    "alternativeHint": "What we offer a candidate who declines AI",
+    "alt": {
+      "human_interview": "Interview with a person",
+      "text_form": "Written form"
+    },
+    "publish": "Publish",
+    "archive": "Archive",
+    "saved": "Saved",
+    "published": "Published: new interviews will follow this scenario",
+    "publishedHint": "The scenario is published. Saving changes creates a new draft version — ongoing interviews keep their version.",
+    "versionCreated": "Version {n} created: publish it when ready",
+    "criteria": "Assessment criteria",
+    "criteriaEmpty": "Add at least one criterion",
+    "critName": "Criterion name",
+    "critDescription": "Description",
+    "critDescriptionHint": "Describe what counts as a strong answer: both the model and the person next to the score see this definition",
+    "critWeight": "Weight",
+    "critMax": "Maximum score",
+    "critical": "Critical",
+    "critMeta": "weight {weight} · scale up to {max}",
+    "addCriterion": "Add criterion",
+    "removeCriterion": "Remove criterion “{name}”"
   }
 }

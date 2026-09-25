@@ -30,13 +30,17 @@ interface Score {
   comment: string | null
   authorId: string | null
   isCurrent: boolean
+  /** Оцінку ШІ дала заглушка, а не модель — не підстава для рішення (docs/v2/30 §7.2, Р-28.4). */
+  aiStub: boolean
   createdAt: string
 }
 interface History {
   id: string
+  event: 'status' | 'interview_declined' | 'interview_withdrawn'
   toStatusNameUk: string | null
   reasonCode: string | null
   reasonText: string | null
+  alternative: string | null
   isAutomatic: boolean
   createdAt: string
 }
@@ -66,8 +70,9 @@ interface Card {
 }
 interface Status { id: string, nameUk: string, color: string, mapsTo: CandidateState, isActive: boolean }
 
-type Tab = 'overview' | 'scores' | 'comments' | 'history'
-const TABS: Tab[] = ['overview', 'scores', 'comments', 'history']
+type Tab = 'overview' | 'scores' | 'interview' | 'comments' | 'history'
+/** «Співбесіда» (docs/v2/30 §5.3) — лише з `interview.view`: оцінки ШІ, розшифровка, флаги. */
+const TABS = computed<Tab[]>(() => ['overview', 'scores', ...(hasScope('interview.view') ? ['interview' as const] : []), 'comments', 'history'])
 const tab = ref<Tab>('overview')
 
 const card = ref<Card | null>(null)
@@ -385,6 +390,9 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
             <strong>{{ t(`candidate.scoreKind.${s.kind}`) }}</strong>: {{ s.valueNum ?? '—' }}
             <span class="sub">{{ dateOf(s.createdAt) }}</span>
             <div v-if="s.comment" class="sub">{{ s.comment }}</div>
+            <!-- Оцінка ШІ — одне число поруч із людськими, а не замість них (docs/v2/30 §7.1) -->
+            <div v-if="s.kind === 'ai'" class="sub">{{ t('interview.card.humanDecides') }}</div>
+            <div v-if="s.kind === 'ai' && s.aiStub" class="stub" role="note">{{ t('interview.card.stub') }}</div>
           </li>
           <li v-if="currentScores.length === 0" class="sub">{{ t('candidate.noScores') }}</li>
         </ul>
@@ -421,12 +429,27 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
         <p class="sub">{{ t('candidate.commentsHint') }}</p>
       </section>
 
+      <section v-else-if="tab === 'interview'" class="panel">
+        <CandidateInterview :candidate-id="id" />
+      </section>
+
       <section v-else class="panel">
         <ul class="list">
           <li v-for="h in card.history" :key="h.id">
-            <strong>{{ h.toStatusNameUk ?? '—' }}</strong> <span class="sub">{{ dateOf(h.createdAt) }}</span>
-            <span v-if="h.isAutomatic" class="sub"> · {{ t('candidate.automatic') }}</span>
-            <div v-if="h.reasonText || h.reasonCode" class="sub">{{ h.reasonText ?? h.reasonCode }}</div>
+            <!-- Нейтральні рядки співбесіди (docs/v2/30 §7.5, §7.6): відмова від ШІ — не мінус -->
+            <template v-if="h.event === 'interview_declined'">
+              <strong>{{ t('interview.history.declined') }}</strong> <span class="sub">{{ dateOf(h.createdAt) }}</span>
+              <div v-if="h.alternative" class="sub">{{ t(`interview.history.alternative.${h.alternative}`) }}</div>
+            </template>
+            <template v-else-if="h.event === 'interview_withdrawn'">
+              <strong>{{ t('interview.history.withdrawn') }}</strong> <span class="sub">{{ dateOf(h.createdAt) }}</span>
+            </template>
+            <template v-else>
+              <strong>{{ h.toStatusNameUk ?? '—' }}</strong> <span class="sub">{{ dateOf(h.createdAt) }}</span>
+              <span v-if="h.isAutomatic" class="sub"> · {{ t('candidate.automatic') }}</span>
+              <div v-if="h.reasonCode === 'interview_alternative'" class="sub">{{ t('interview.history.liveNeeded') }}<template v-if="h.reasonText"> · {{ h.reasonText }}</template></div>
+              <div v-else-if="h.reasonText || h.reasonCode" class="sub">{{ h.reasonText ?? h.reasonCode }}</div>
+            </template>
           </li>
           <li v-if="card.history.length === 0" class="sub">{{ t('candidate.noHistory') }}</li>
         </ul>
@@ -459,6 +482,7 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
 .ok { color: var(--color-teal-ink); }
 .warn { color: var(--color-sun-ink); }
 .bad { color: var(--color-coral-ink); }
+.stub { margin-top: var(--space-1); color: var(--color-coral-ink); font-weight: 700; font-size: var(--font-size-body-s); }
 @media (max-width: 480px) {
   .filters { flex-direction: column; align-items: stretch; }
   .card-grid dl { grid-template-columns: 1fr; }

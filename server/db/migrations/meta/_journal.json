@@ -652,6 +652,13 @@
       "when": 1790234760000,
       "tag": "0094_v2_person_rating",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1790234820000,
+      "tag": "0095_v2_interview",
+      "breakpoints": true
     }
   ]
 }

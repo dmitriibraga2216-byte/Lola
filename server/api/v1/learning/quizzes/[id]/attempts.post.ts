@@ -21,6 +21,8 @@ export default defineEventHandler(async (event) => {
       case 'attempts_exhausted': return apiError(event, 422, 'quiz.attempts_exhausted', 'Спроби вичерпано')
       case 'cooldown': return apiError(event, 422, 'quiz.cooldown', 'Зачекайте перед наступною спробою', { retryAt: r.retryAt })
       case 'not_enough_questions': return apiError(event, 422, 'quiz.not_enough_questions', 'У тесті недостатньо питань')
+      // docs/v2/30 §7.4, §13 к. 1: тест-співбесіда стартує тільки після рішення щодо згоди
+      case 'interview_required': return apiError(event, 409, 'interview_consent.required', 'Спочатку потрібна згода на запис співбесіди — відкрийте співбесіду зі свого навчання', { quizId: getRouterParam(event, 'id') })
     }
   }
   return apiData({ attemptId: r.attemptId, attemptNo: r.attemptNo, deadlineAt: r.deadlineAt, resumed: false })

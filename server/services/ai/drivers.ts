@@ -1,5 +1,7 @@
+import { GetObjectCommand } from '@aws-sdk/client-s3'
 import type { AiDriver, AiPurpose } from '../../../shared/enums'
 import { requestEmbeddings } from '../embeddings'
+import { S3_BUCKET, s3 } from '../media'
 import type { AnyPrompt, EmbedInput } from './prompts'
 
 /**
@@ -14,9 +16,12 @@ import type { AnyPrompt, EmbedInput } from './prompts'
  * - `http_custom` — один `POST {endpoint}` с `{purpose, promptKey, promptVersion, model, input}`
  *   и ответом `{output, usage?}` — для прокси и сервисов, которые говорят не по OpenAI.
  *
- * Расшифровка (`transcribe`) по HTTP приезжает с собеседованием (PR-28): звук идёт из S3
- * multipart-запросом, которого до появления реплик не из чего собрать. Сейчас такой вызов у
- * сетевых драйверов честно падает `driver_unsupported`, а у заглушки — работает.
+ * Расшифровка (`transcribe`, PR-28) — не JSON, а файл: драйвер читает аудио реплики из S3 сам
+ * (`prompt.audio`) и шлёт его multipart-запросом — `openai_compatible`/`self_hosted` на
+ * `{endpoint}/audio/transcriptions` (`model`, `language`, `response_format=verbose_json`),
+ * `http_custom` — на свой адрес с полем `meta` (`{purpose, promptKey, promptVersion, model,
+ * input}` без ключа файла). Голос уходит только профилю с известным сроком хранения — это
+ * держат сервис профилей и CHECK таблицы (сквозная проверка 18), а не драйвер.
  */
 
 export interface DriverProfile {
@@ -80,6 +85,56 @@ function parsed(req: DriverRequest, raw: unknown, tokensIn: number | null, token
   }
 }
 
+// ── Расшифровка: аудио из S3 multipart-запросом (PR-28) ─────────────────────────────────
+
+async function loadAudio(key: string): Promise<Uint8Array> {
+  const obj = await s3().send(new GetObjectCommand({ Bucket: S3_BUCKET(), Key: key }))
+  return obj.Body!.transformToByteArray()
+}
+
+/**
+ * Один multipart-запрос с файлом ответа. `fields` — поля формы вендора, `pick` — где в ответе
+ * лежит результат (у OpenAI — сам ответ, у `http_custom` — `output`). Нет файла в хранилище —
+ * `audio_unavailable`: повтор расшифровки имеет смысл, пока аудио не удалено.
+ */
+async function runTranscribe(
+  req: DriverRequest,
+  url: string,
+  fields: (audio: { key: string, mime: string, lang: string }) => Record<string, string>,
+  pick: (json: unknown) => unknown,
+): Promise<DriverResult> {
+  const audio = req.prompt.audio?.(req.input)
+  if (!audio) return failed('driver_unsupported')
+  let bytes: Uint8Array
+  try {
+    bytes = await loadAudio(audio.key)
+  }
+  catch {
+    return failed('audio_unavailable')
+  }
+  const form = new FormData()
+  const ext = audio.key.split('.').pop() || 'bin'
+  form.append('file', new Blob([new Uint8Array(bytes)], { type: audio.mime }), `answer.${ext}`)
+  for (const [k, v] of Object.entries(fields(audio))) form.append(k, v)
+  try {
+    const res = await doFetch(url, {
+      method: 'POST',
+      // Без Content-Type: границу multipart ставит сам fetch
+      headers: { 'Idempotency-Key': req.idempotencyKey, ...(req.apiKey ? { Authorization: `Bearer ${req.apiKey}` } : {}) },
+      body: form,
+      signal: req.signal,
+    })
+    if (!res.ok) return failed('http_error', res.status)
+    const json = await res.json().catch(() => null)
+    const out = pick(json)
+    if (out === undefined || out === null) return failed('bad_output', res.status)
+    return parsed(req, out, null, null, res.status)
+  }
+  catch (err) {
+    return isTimeout(err) ? { ok: false, status: 'timeout', errorCode: 'timeout', httpStatus: null } : failed('network')
+  }
+}
+
 // ── Драйверы ────────────────────────────────────────────────────────────────────────────
 
 async function runStub(req: DriverRequest): Promise<DriverResult> {
@@ -90,7 +145,9 @@ async function runOpenAi(req: DriverRequest): Promise<DriverResult> {
   const base = (req.profile.endpointUrl ?? '').replace(/\/+$/, '')
   if (!base) return failed('provider_not_configured')
   const { purpose } = req.profile
-  if (purpose === 'transcribe') return failed('driver_unsupported')
+  if (purpose === 'transcribe') {
+    return runTranscribe(req, `${base}/audio/transcriptions`, audio => ({ model: req.profile.modelName, language: audio.lang, response_format: 'verbose_json' }), json => json)
+  }
 
   if (purpose === 'embed') {
     const input = req.input as EmbedInput
@@ -140,7 +197,12 @@ async function runOpenAi(req: DriverRequest): Promise<DriverResult> {
 async function runHttpCustom(req: DriverRequest): Promise<DriverResult> {
   const url = req.profile.endpointUrl
   if (!url) return failed('provider_not_configured')
-  if (req.profile.purpose === 'transcribe') return failed('driver_unsupported')
+  if (req.profile.purpose === 'transcribe') {
+    const { audioKey: _key, ...input } = (req.input ?? {}) as Record<string, unknown>
+    return runTranscribe(req, url, () => ({
+      meta: JSON.stringify({ purpose: req.profile.purpose, promptKey: req.prompt.key, promptVersion: req.prompt.version, model: req.profile.modelName, input }),
+    }), json => (json as { output?: unknown } | null)?.output)
+  }
   try {
     const res = await doFetch(url, {
       method: 'POST',

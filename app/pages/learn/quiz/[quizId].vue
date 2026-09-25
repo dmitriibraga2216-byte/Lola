@@ -16,6 +16,7 @@ const presetAttemptId = (route.query.attemptId as string) || undefined
 
 interface Intro {
   title: string
+  kind: string
   description: ContentBlock[] | null
   questionCount: number
   timeLimitSec: number | null
@@ -88,6 +89,11 @@ onUnmounted(() => clearInterval(timer))
 async function loadIntro() {
   try {
     intro.value = await api<Intro>(`/learning/quizzes/${quizId}`, { query: enrollmentId ? { enrollmentId } : {} })
+    // Тест-співбесіду проходять через екран згоди (docs/v2/30 §5.1, §7.4): звичайний шлях
+    // тесту для нього закритий сервером (`409 interview_consent.required`)
+    if (intro.value.kind === 'interview') {
+      await navigateTo({ path: `/interview/${quizId}`, query: { ...(enrollmentId ? { enrollmentId } : {}), ...(lessonId ? { lessonId } : {}) } }, { replace: true })
+    }
   }
   catch (err) {
     error.value = apiErrorOf(err).message

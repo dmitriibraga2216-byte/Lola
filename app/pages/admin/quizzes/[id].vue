@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
+import { QUIZ_KINDS } from '#shared/enums'
 
 /**
  * Редактор теста (docs/12 §14.1, §14.3, Г-12.2): вкладки «Питання» / «Опис та налаштування»,
@@ -148,6 +149,24 @@ async function publish() {
   await load()
 }
 
+/** Вид тесту (`QUIZ_KINDS`): змінити на «Співбесіда» і назад можна, доки немає жодної спроби. */
+const kind = ref<string>('quiz')
+watch(quiz, q => { if (q) kind.value = q.kind }, { immediate: true })
+async function saveKind() {
+  busy.value = true
+  error.value = ''
+  try {
+    await api(`/quizzes/${quizId}`, { method: 'PATCH', body: { kind: kind.value } })
+    notice.value = t('quizAdmin.kindSaved')
+    await load()
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+    kind.value = quiz.value?.kind ?? 'quiz'
+  }
+  finally { busy.value = false }
+}
+
 async function recalculate() {
   const comment = prompt(t('quizAdmin.recalcReason')) ?? ''
   busy.value = true
@@ -268,7 +287,13 @@ async function recalculate() {
       </div>
     </div>
 
-    <div v-else class="card">
+    <div v-else class="card stack-s">
+      <!-- Вид тесту (docs/v2/44 В-12): «Співбесіда» проходять через екран згоди, сценарій — у «Сценарії співбесід» -->
+      <label class="label" for="quiz-kind">{{ t('quizAdmin.kind') }}</label>
+      <select id="quiz-kind" v-model="kind" class="field" :disabled="!canEdit || busy" @change="saveKind">
+        <option v-for="k in QUIZ_KINDS" :key="k" :value="k">{{ t(`quizAdmin.kinds.${k}`) }}</option>
+      </select>
+      <p v-if="kind === 'interview'" class="help">{{ t('quizAdmin.kindInterviewHint') }}</p>
       <p class="help">{{ t('quizAdmin.rulesInTask') }}</p>
       <NuxtLink to="/admin/assignments/new?type=test" class="link">{{ t('quizAdmin.goAssign') }}</NuxtLink>
     </div>
@@ -278,6 +303,7 @@ async function recalculate() {
 
 <style scoped>
 .tabs { margin-bottom: var(--space-4); }
+.stack-s { display: grid; gap: var(--space-2); max-width: 32rem; }
 .split { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--space-4); align-items: start; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 .stack { display: grid; gap: var(--space-4); }

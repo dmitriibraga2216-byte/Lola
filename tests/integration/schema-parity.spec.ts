@@ -25,6 +25,9 @@ const CONTENT_TABLES = [
   'courses', 'course_versions', 'modules', 'lessons', 'resources', 'resource_versions', 'quizzes', 'questions', 'question_banks',
   'complex_tests', 'workshops', 'meetups', 'webinars', 'programs', 'program_nodes', 'trajectories', 'trajectory_nodes', 'knowledge_articles', 'news', 'surveys',
   'notices', 'simple_notices', // Spec 21: объявление — контент, срок подтверждения — в назначении
+  // docs/v2/30 §3.1 (PR-28): сценарий и критерии собеседования — материал модуля; попытки,
+  // дедлайн и порог живут в назначении теста, а `retake_limit` — перезапись ответа, не попытка
+  'interview_scenarios', 'interview_criteria',
 ]
 /**
  * Исключения, заданные самим ТЗ:
@@ -59,7 +62,10 @@ const LOG_TABLES = ['audit_log', 'security_log', 'sessions', 'enrollment_events'
   'review_sla_events',
   // `ai_calls` — журнал вызовов модели (docs/v2/30 §3.2, §7.16; PR-27): тем же решением. По нему
   // разбирают задним числом, кто и откуда запустил генерацию или оценку
-  'ai_calls']
+  'ai_calls',
+  // `interview_consents` — журнал решений по согласию на запись (docs/v2/30 §3.3, PR-28): тем же
+  // решением. IP и браузер согласия — колонками DDL документа, контекст — как у всех журналов
+  'interview_consents']
 
 let tenantTables: string[] = []
 let columns: { table: string, column: string, type: string }[] = []

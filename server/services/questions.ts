@@ -198,6 +198,13 @@ export async function updateQuiz(ctx: Ctx, id: string, input: z.infer<typeof qui
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [before] = await tx.select().from(quizzes).where(and(eq(quizzes.id, id), isNull(quizzes.deletedAt)))
     if (!before) return null
+    // Вид «Співбесіда» (docs/v2/44 В-12) меняет путь прохождения — через экран согласия
+    // (docs/v2/30 §7.4). Пока по тесту есть попытки, вид в/из `interview` не меняется: иначе
+    // прошлые попытки задним числом оказались бы «без согласия» или «мимо сценария».
+    if (input.kind !== undefined && input.kind !== before.kind && (input.kind === 'interview' || before.kind === 'interview')) {
+      const [used] = await tx.select({ id: attempts.id }).from(attempts).where(eq(attempts.quizId, id)).limit(1)
+      if (used) return 'kind_locked' as const
+    }
     const [after] = await tx.update(quizzes).set({
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.description !== undefined ? { description: sanitizeBody(input.description as ContentBlock[]) } : {}),

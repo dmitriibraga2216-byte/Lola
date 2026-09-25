@@ -8,6 +8,7 @@ import type { ContentBlock } from '../../shared/schemas/content'
 import { STORAGE_CONFIRM_PHRASE } from '../../shared/schemas/storage'
 import type { MediaOrigin } from '../../shared/enums'
 import { PERSON_DOCUMENT_LIMITS } from '../../shared/enums'
+import { INTERVIEW_AUDIO_MAX_MB } from '../../shared/domain/interview'
 import { DEFAULT_TRASH_DAYS } from '../db/tenantDefaults'
 import { GIB } from './tenantLimits'
 import { recordUsage, syncCounter } from './usageCounters'
@@ -42,6 +43,10 @@ const ALLOWED: Record<string, { kind: MediaKind, ext: string }> = {
   'video/webm': { kind: 'video', ext: 'webm' },
   'audio/mpeg': { kind: 'audio', ext: 'mp3' },
   'audio/mp4': { kind: 'audio', ext: 'm4a' },
+  // Голосовой ответ собеседования (docs/v2/30 §5.2, PR-28): браузерный MediaRecorder пишет
+  // Opus в webm (Chrome, Edge) или ogg (Firefox); Safari — `audio/mp4` выше
+  'audio/webm': { kind: 'audio', ext: 'webm' },
+  'audio/ogg': { kind: 'audio', ext: 'ogg' },
   'application/pdf': { kind: 'file', ext: 'pdf' },
   'text/csv': { kind: 'file', ext: 'csv' },
   'text/plain': { kind: 'file', ext: 'txt' },
@@ -111,6 +116,12 @@ export const SELF_SERVICE_ORIGINS: readonly MediaOrigin[] = ['person_document']
  * или PNG до 20 МБ (docs/v2/38 §6.2). Отказ — до начала передачи, как у общих лимитов.
  */
 export function checkOriginRules(origin: MediaOrigin, mime: string, bytes: number): { ok: true } | { ok: false, code: 'mime_not_allowed' | 'too_big', message: string } {
+  // Ответ собеседования — только аудио и до 25 МБ (docs/v2/30 §10 «multipart audio ≤25 МБ»)
+  if (origin === 'interview_answer') {
+    if (ALLOWED[mime]?.kind !== 'audio') return { ok: false, code: 'mime_not_allowed', message: 'Відповідь на співбесіді — лише аудіозапис' }
+    if (bytes > INTERVIEW_AUDIO_MAX_MB * 1024 * 1024) return { ok: false, code: 'too_big', message: `Запис завеликий. Максимум — ${INTERVIEW_AUDIO_MAX_MB} МБ` }
+    return { ok: true }
+  }
   if (origin !== 'person_document') return { ok: true }
   if (!(PERSON_DOCUMENT_LIMITS.fileMimes as readonly string[]).includes(mime)) return { ok: false, code: 'mime_not_allowed', message: 'Дозволені формати: PDF, JPG, PNG' }
   if (bytes > PERSON_DOCUMENT_LIMITS.fileMaxMb * 1024 * 1024) return { ok: false, code: 'too_big', message: `Файл завеликий. Максимум для документа людини — ${PERSON_DOCUMENT_LIMITS.fileMaxMb} МБ` }
@@ -354,6 +365,24 @@ export async function signedReadUrl(key: string, isEvidence = false): Promise<st
     Key: key,
     ...(svg ? { ResponseContentType: 'image/svg+xml', ResponseContentDisposition: 'attachment' } : {}),
   }), { expiresIn: isEvidence ? EVIDENCE_URL_TTL_SEC : DEFAULT_URL_TTL_SEC })
+}
+
+/** Срок ссылки на прослушивание записи собеседования — 15 минут (`docs/v2/30` §7.8). */
+export const LISTEN_URL_TTL_SEC = 900
+
+/**
+ * Ссылка на прослушивание аудио ответа собеседования (`docs/v2/30` §7.8): 15 минут, `inline` —
+ * плеер открывает файл, кнопки «скачать» нет ни у одной роли («доступ есть, выноса нет»).
+ * Журнал прослушивания пишет вызывающий: он знает, чья это запись.
+ */
+export async function signedListenUrl(key: string, mime: string): Promise<string> {
+  return getSignedUrl(s3(), new GetObjectCommand({
+    Bucket: S3_BUCKET(),
+    Key: key,
+    ResponseContentType: mime,
+    ResponseContentDisposition: 'inline',
+    ResponseCacheControl: 'no-store',
+  }), { expiresIn: LISTEN_URL_TTL_SEC })
 }
 
 /**

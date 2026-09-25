@@ -343,6 +343,51 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.stdout).toContain('[ok]   15.')
   })
 
+  /**
+   * Проверка 16 скрипта (PR-28, `docs/v2/42` §5 проверка 17, `docs/v2/30` §3.5, §7.1): модуль
+   * собеседования, обрабатывающий вывод модели, не трогает решений о человеке; оценки ИИ по
+   * критериям пишет только он; миграция не снимает ограничений «балл без обоснования и цитаты».
+   */
+  it('16. модуль собеседования сам переводит кандидата в отказ', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/interview'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/interview/pipeline.ts'), 'export const low = (tx) => tx.update(users).set({ candidateStatusId: rejected.id })\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('16. ИИ ничего не решает о людях: модуль собеседования')
+  })
+
+  it('16. оценку ИИ по критерию пишет чужой модуль — в обход проверки обоснования', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/interview'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/interview/pipeline.ts'), 'export const x = 1\n')
+    writeFileSync(join(dir, 'server/services/reviewCard.ts'), 'export const put = (tx, v) => tx.insert(interviewCriterionScores).values(v)\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('16. ИИ')
+  })
+
+  it('16. миграция снимает CHECK «балл без обоснования не сохраняется»', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/interview'), { recursive: true })
+    mkdirSync(join(dir, 'server/db/migrations'), { recursive: true })
+    writeFileSync(join(dir, 'server/db/migrations/0200_relax.sql'), 'ALTER TABLE interview_criterion_scores DROP CONSTRAINT ics_evidence_chk;\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('16. ИИ')
+  })
+
+  it('16. запись оценок внутри модуля и комментарий снаружи нарушением не считаются; без модуля — пропуск', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/interview'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/interview/pipeline.ts'), 'export const put = (tx, v) => tx.insert(interviewCriterionScores).values(v)\nexport const r = sql`update interview_criterion_scores set rationale = null`\n')
+    writeFileSync(join(dir, 'server/services/reviewCard.ts'), '// оценки ИИ пишет только модуль собеседования: tx.insert(interviewCriterionScores) — не здесь\nexport const x = 1\n')
+    const res = run(dir)
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.stdout).toContain('[ok]   16.')
+    expect(run(fixture()).stdout).toContain('[skip] 16.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

@@ -193,6 +193,22 @@ export default defineNitroPlugin(async () => {
       const r = await aiCallsCleanup(tenantId)
       if (r.rows || r.inputRefs) console.log(`[ai.calls_cleanup] ${tenantId}: рядків ${r.rows}, посилань на вхід ${r.inputRefs}`)
     }))
+    // docs/v2/30 §11 (PR-28): ИИ-собеседование — расшифровка реплики и оценка сессии по событию
+    // (задача несёт tenantId, обработчик открывает withTenant сам), брошенные сессии — круг по
+    // тенантам с включённым рекрутингом: у остальных собеседований нет
+    await perTenant<{ tenantId: string, turnId: string, tryNo?: number }>('interview.transcribe', async (data) => {
+      const { transcribeTurn } = await import('../services/interview/pipeline')
+      await transcribeTurn(data.tenantId, data.turnId, data.tryNo ?? 1)
+    })
+    await perTenant<{ tenantId: string, sessionId: string, tryNo?: number }>('interview.score', async (data) => {
+      const { scoreSession } = await import('../services/interview/pipeline')
+      await scoreSession(data.tenantId, data.sessionId, data.tryNo ?? 1)
+    })
+    await work('interview.reap', () => runPerTenant('interview.reap', async (tenantId) => {
+      const { reapSessions } = await import('../services/interview/pipeline')
+      const r = await reapSessions(tenantId)
+      if (r.abandoned) console.log(`[interview.reap] ${tenantId}: брошено ${r.abandoned}`)
+    }, recruitingTenantIds))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

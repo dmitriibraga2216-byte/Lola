@@ -154,69 +154,102 @@ export function effectiveAttemptsAllowed(params: QuizParams, extra: number): num
 
 export type StartResult
   = | { ok: true, attemptId: string, attemptNo: number, deadlineAt: Date | null }
-    | { ok: false, code: 'not_found' | 'attempts_exhausted' | 'cooldown' | 'not_enough_questions' | 'in_progress', attemptId?: string, retryAt?: Date }
+    | { ok: false, code: 'not_found' | 'attempts_exhausted' | 'cooldown' | 'not_enough_questions' | 'in_progress' | 'interview_required', attemptId?: string, retryAt?: Date }
+
+export interface StartOptions {
+  enrollmentId?: string
+  lessonId?: string
+  device?: string
+  ip?: string
+  /**
+   * Старт из модуля собеседования (`server/services/interview/`, docs/v2/30 §3.1, §7.4): у теста
+   * вида `interview` попытка создаётся только **после** решения по согласию — ИИ-сессией или
+   * письменной формой (альтернатива §7.5). Обычный путь теста такую попытку не создаёт.
+   */
+  interview?: boolean
+}
 
 /**
  * Старт попытки (docs/12 §7.1): проверка попыток и cooldown, снапшот с эталонами,
  * params с теста (с этапа 4 — из назначения), deadline.
  */
-export async function startAttempt(ctx: Ctx, quizId: string, opts: { enrollmentId?: string, lessonId?: string, device?: string, ip?: string } = {}): Promise<StartResult> {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, quizId), isNull(quizzes.deletedAt)))
-    if (!quiz) return { ok: false as const, code: 'not_found' as const }
+export async function startAttempt(ctx: Ctx, quizId: string, opts: Omit<StartOptions, 'interview'> = {}): Promise<StartResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, tx => startAttemptTx(tx, ctx, quizId, opts))
+}
 
-    // Правила — из назначения, не из теста (CLAUDE.md п. 11)
-    const { params, assignmentId } = await resolveQuizParams(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, quizId, enrollmentId: opts.enrollmentId, lessonId: opts.lessonId })
+/**
+ * Тело старта внутри чужой транзакции. Тест вида `interview` (docs/v2/44 В-12) обычным путём не
+ * стартует: `interview_required` → `409 interview_consent.required` — попытки до решения по
+ * согласию быть не должно (docs/v2/30 §7.4, §13 к. 1), и проверка — на сервере, а не в интерфейсе.
+ */
+export async function startAttemptTx(tx: TenantTx, ctx: Ctx, quizId: string, opts: StartOptions = {}): Promise<StartResult> {
+  const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, quizId), isNull(quizzes.deletedAt)))
+  if (!quiz) return { ok: false as const, code: 'not_found' as const }
+  if (quiz.kind === 'interview' && !opts.interview) return { ok: false as const, code: 'interview_required' as const }
 
-    const prior = await tx.select().from(attempts)
-      .where(and(
-        eq(attempts.quizId, quizId),
-        eq(attempts.userId, ctx.actorId),
-        ...(opts.enrollmentId ? [eq(attempts.enrollmentId, opts.enrollmentId)] : []),
-        sql`${attempts.status} <> 'annulled'`,
-      ))
-      .orderBy(desc(attempts.attemptNo))
+  // Правила — из назначения, не из теста (CLAUDE.md п. 11)
+  const { params, assignmentId } = await resolveQuizParams(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, quizId, enrollmentId: opts.enrollmentId, lessonId: opts.lessonId })
 
-    const active = prior.find(a => a.status === 'in_progress')
-    if (active) return { ok: false as const, code: 'in_progress' as const, attemptId: active.id }
+  const prior = await tx.select().from(attempts)
+    .where(and(
+      eq(attempts.quizId, quizId),
+      eq(attempts.userId, ctx.actorId),
+      ...(opts.enrollmentId ? [eq(attempts.enrollmentId, opts.enrollmentId)] : []),
+      sql`${attempts.status} <> 'annulled'`,
+    ))
+    .orderBy(desc(attempts.attemptNo))
 
-    const allowed = effectiveAttemptsAllowed(params, await approvedExtraAttempts(tx, ctx.actorId, quizId, opts.enrollmentId))
-    if (allowed > 0 && prior.length >= allowed) {
-      return { ok: false as const, code: 'attempts_exhausted' as const }
-    }
-    const last = prior[0]
-    if (last?.submittedAt && params.attemptCooldownMin > 0) {
-      const retryAt = new Date(last.submittedAt.getTime() + params.attemptCooldownMin * 60_000)
-      if (retryAt > new Date()) return { ok: false as const, code: 'cooldown' as const, retryAt }
-    }
+  const active = prior.find(a => a.status === 'in_progress')
+  if (active) return { ok: false as const, code: 'in_progress' as const, attemptId: active.id }
 
-    const built = await buildSnapshot(tx, quiz, params)
-    if (!built.ok) return { ok: false as const, code: built.code }
+  const allowed = effectiveAttemptsAllowed(params, await approvedExtraAttempts(tx, ctx.actorId, quizId, opts.enrollmentId))
+  if (allowed > 0 && prior.length >= allowed) {
+    return { ok: false as const, code: 'attempts_exhausted' as const }
+  }
+  const last = prior[0]
+  if (last?.submittedAt && params.attemptCooldownMin > 0) {
+    const retryAt = new Date(last.submittedAt.getTime() + params.attemptCooldownMin * 60_000)
+    if (retryAt > new Date()) return { ok: false as const, code: 'cooldown' as const, retryAt }
+  }
 
-    const now = new Date()
-    const deadlineAt = params.timeLimitSec ? new Date(now.getTime() + params.timeLimitSec * 1000) : null
-    const [attempt] = await tx.insert(attempts).values({
-      tenantId: ctx.tenantId,
-      quizId,
-      enrollmentId: opts.enrollmentId ?? null,
-      lessonId: opts.lessonId ?? null,
-      assignmentId,
-      userId: ctx.actorId,
-      attemptNo: (last?.attemptNo ?? 0) + 1,
-      snapshot: built.snapshot,
-      params,
-      maxScore: String(built.snapshot.reduce((s, q) => s + q.points, 0)),
-      startedAt: now,
-      deadlineAt,
-      device: opts.device ?? null,
-      ip: opts.ip ?? null,
-    }).returning({ id: attempts.id, attemptNo: attempts.attemptNo })
+  const built = await buildSnapshot(tx, quiz, params)
+  if (!built.ok) return { ok: false as const, code: built.code }
 
-    // docs/22 §13.4: старт попытки — обращение к заданию (каждое, не первое)
-    await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'test', contentId: quizId, title: quiz.title, assignmentId: assignmentId ?? null, enrollmentId: opts.enrollmentId ?? null })
-    business.inc({ event: 'attempt_started' })
-    return { ok: true as const, attemptId: attempt!.id, attemptNo: attempt!.attemptNo, deadlineAt }
-  })
+  const now = new Date()
+  const deadlineAt = params.timeLimitSec ? new Date(now.getTime() + params.timeLimitSec * 1000) : null
+  const [attempt] = await tx.insert(attempts).values({
+    tenantId: ctx.tenantId,
+    quizId,
+    enrollmentId: opts.enrollmentId ?? null,
+    lessonId: opts.lessonId ?? null,
+    assignmentId,
+    userId: ctx.actorId,
+    attemptNo: (last?.attemptNo ?? 0) + 1,
+    snapshot: built.snapshot,
+    params,
+    maxScore: String(built.snapshot.reduce((s, q) => s + q.points, 0)),
+    startedAt: now,
+    deadlineAt,
+    device: opts.device ?? null,
+    ip: opts.ip ?? null,
+  }).returning({ id: attempts.id, attemptNo: attempts.attemptNo })
+
+  // docs/22 §13.4: старт попытки — обращение к заданию (каждое, не первое)
+  await logTaskAccess(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, contentType: 'test', contentId: quizId, title: quiz.title, assignmentId: assignmentId ?? null, enrollmentId: opts.enrollmentId ?? null })
+  business.inc({ event: 'attempt_started' })
+  return { ok: true as const, attemptId: attempt!.id, attemptNo: attempt!.attemptNo, deadlineAt }
+}
+
+/**
+ * Попытка — основа ИИ-сессии собеседования (docs/v2/30 §3.1): её ответы приходят репликами
+ * (`POST /interviews/:sessionId/turns/:ordinal/answer`), а завершает её сессия. Прямые
+ * «сохранить ответ» и «отправить» к такой попытке не применяются — иначе ответ миновал бы
+ * реплику, а завершение — состояние сессии. Письменная форма (альтернатива §7.5) сессии не
+ * имеет и отвечается обычным путём.
+ */
+async function isInterviewSessionAttempt(tx: TenantTx, attemptId: string): Promise<boolean> {
+  const [row] = await tx.execute(sql`select 1 from interview_sessions where attempt_id = ${attemptId}::uuid limit 1`) as unknown as unknown[]
+  return !!row
 }
 
 /** Состояние попытки для ученика — без эталонов (docs/12 §10, тест attempt-leak). */
@@ -271,6 +304,7 @@ export async function saveAnswer(ctx: Ctx, attemptId: string, questionId: string
     if (!attempt) return { ok: false as const, code: 'not_found' as const }
     if (attempt.status !== 'in_progress') return { ok: false as const, code: 'locked' as const }
     if (attempt.deadlineAt && attempt.deadlineAt < new Date()) return { ok: false as const, code: 'deadline' as const }
+    if (await isInterviewSessionAttempt(tx, attemptId)) return { ok: false as const, code: 'locked' as const }
 
     const snapshot = attempt.snapshot as SnapshotQuestion[]
     const q = snapshot.find(s => s.id === questionId)
@@ -450,6 +484,8 @@ export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<Submit
       .where(and(eq(attempts.id, attemptId), eq(attempts.userId, ctx.actorId)))
     if (!attempt) return { ok: false as const, code: 'not_found' as const }
     if (attempt.status !== 'in_progress') return { ok: false as const, code: 'locked' as const }
+    // Попытку ИИ-сессии завершает сессия (`POST /interviews/:sessionId/finish`), docs/v2/30 §4
+    if (await isInterviewSessionAttempt(tx, attemptId)) return { ok: false as const, code: 'locked' as const }
 
     const params = attempt.params as QuizParams
     if (params.requireAllAnswered) {
@@ -460,36 +496,55 @@ export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<Submit
       if (missing.length) return { ok: false as const, code: 'incomplete' as const, missing }
     }
 
-    const t = await gradeAndFinalize(tx, ctx, attempt, 'submit')
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.submit', entity: 'attempt', entityId: attemptId, after: { status: t.status, score: t.score } })
-    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'attempt_submitted', ref: { entity: 'attempts', id: attemptId } })
-    if (t.status === 'review') {
-      const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
-      const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
-      const mentorIds = await tx.execute(sql`
-        select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id
-        where r.scopes @> array['review.queue']::text[] and ur.user_id <> ${ctx.actorId}::uuid
-          and (ur.scope_type = 'tenant' or (ur.scope_type = 'location' and ur.scope_id in
-            (select location_id from user_placements where user_id = ${ctx.actorId}::uuid and ended_at is null)))
-      `)
-      for (const m of mentorIds as unknown as { user_id: string }[]) {
-        await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: m.user_id, code: 'review_needed', payload: { name: me?.fullName, quiz: quiz?.title }, dedupKey: `review_needed:${attemptId}:${m.user_id}` })
-      }
-    }
-    return { ok: true as const, status: t.status, score: t.score, passed: t.passed, pendingManual: t.pendingManual, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, quizId: attempt.quizId }
+    return submitAttemptTx(tx, ctx, attempt)
   })
+  await afterSubmit(ctx, result)
+  return result
+}
 
+export type SubmittedAttempt = Extract<SubmitResult, { ok: true }> & { enrollmentId: string | null, lessonId: string | null, quizId: string }
+
+/**
+ * Отправка попытки внутри чужой транзакции: оценка по снимку, очередь ручной проверки, журнал.
+ * Её же зовёт завершение ИИ-сессии собеседования (docs/v2/30 §3.1 «ручная проверка, статистика и
+ * очередь работают без изменений»): завершает попытку **кандидат**, а не модель — вывод ИИ ни
+ * статус попытки, ни `is_correct` не трогает (§7.1). После фиксации транзакции — `afterSubmit()`.
+ */
+export async function submitAttemptTx(tx: TenantTx, ctx: Ctx, attempt: typeof attempts.$inferSelect): Promise<SubmittedAttempt> {
+  const attemptId = attempt.id
+  const t = await gradeAndFinalize(tx, ctx, attempt, 'submit')
+  await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.submit', entity: 'attempt', entityId: attemptId, after: { status: t.status, score: t.score } })
+  await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'attempt_submitted', ref: { entity: 'attempts', id: attemptId } })
+  if (t.status === 'review') {
+    const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
+    const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
+    const mentorIds = await tx.execute(sql`
+      select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id
+      where r.scopes @> array['review.queue']::text[] and ur.user_id <> ${ctx.actorId}::uuid
+        and (ur.scope_type = 'tenant' or (ur.scope_type = 'location' and ur.scope_id in
+          (select location_id from user_placements where user_id = ${ctx.actorId}::uuid and ended_at is null)))
+    `)
+    for (const m of mentorIds as unknown as { user_id: string }[]) {
+      await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: m.user_id, code: 'review_needed', payload: { name: me?.fullName, quiz: quiz?.title }, dedupKey: `review_needed:${attemptId}:${m.user_id}` })
+    }
+  }
+  return { ok: true as const, status: t.status, score: t.score, passed: t.passed, pendingManual: t.pendingManual, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, quizId: attempt.quizId }
+}
+
+/** Хвост отправки вне транзакции попытки: зачёт урока и движение по программе и траектории. */
+export async function afterSubmit(ctx: Ctx, result: SubmitResult | SubmittedAttempt): Promise<void> {
+  if (!result.ok) return
+  const r = result as SubmittedAttempt
   // Пересчёт прогресса курса вне транзакции попытки (completeLesson открывает свою)
-  if (result.ok && result.status === 'passed' && result.enrollmentId && result.lessonId) {
-    await completeLesson(ctx, result.enrollmentId, result.lessonId).catch(() => {})
+  if (r.status === 'passed' && r.enrollmentId && r.lessonId) {
+    await completeLesson(ctx, r.enrollmentId, r.lessonId).catch(() => {})
   }
   // Тест как узел программы/траектории (docs/17 §7.4): движение по графу
-  if (result.ok && result.quizId && (result.status === 'passed' || result.status === 'failed')) {
-    const quizId = result.quizId, passed = result.status === 'passed', score = result.score
+  if (r.quizId && (r.status === 'passed' || r.status === 'failed')) {
+    const quizId = r.quizId, passed = r.status === 'passed', score = r.score
     import('./programs').then(p => p.onItemResult(ctx.tenantId, ctx.actorId, 'quiz', quizId, { passed, score })).catch(err => console.error('program quiz hook', err))
     import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, ctx.actorId, 'quiz', quizId, { passed, score })).catch(err => console.error('trajectory quiz hook', err))
   }
-  return result
 }
 
 /** Разбор после завершения по правилу show_answers (docs/12 §5.4). */
@@ -1023,26 +1078,34 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
 
 /** Аннулирование руководителем (docs/12 §7.10): не считается использованной попыткой. */
 export async function annulAttempt(ctx: Ctx, attemptId: string, reason: string) {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [before] = await tx.select({ status: attempts.status, enrollmentId: attempts.enrollmentId, lessonId: attempts.lessonId }).from(attempts).where(eq(attempts.id, attemptId))
-    const [attempt] = await tx.update(attempts).set({
-      status: 'annulled',
-      annulledBy: ctx.actorId,
-      annulReason: reason,
-      updatedAt: new Date(),
-    }).where(and(eq(attempts.id, attemptId), sql`${attempts.status} <> 'annulled'`)).returning({ id: attempts.id })
-    if (!attempt) return null
-    // Аннулированную попытку проверять больше некому и незачем: её ответы уходят из очереди
-    // закрытием, а не удалением строк — иначе терялась бы история проверяющего (В-2).
-    const pendingAnswers = await tx.select({ id: attemptAnswers.id }).from(attemptAnswers).where(eq(attemptAnswers.attemptId, attemptId))
-    await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: pendingAnswers.map(a => a.id) })
-    // D-013: аннулированная зачтённая попытка снимает зачёт урока так же, как пересчёт (docs/12 §7 п. 10, docs/14 §12)
-    const rollback = before?.status === 'passed' && before.enrollmentId && before.lessonId
-      ? await rollbackLessonCompletion(tx, ctx, before.enrollmentId, before.lessonId)
-      : null
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.annul', entity: 'attempt', entityId: attemptId, before: { status: before?.status }, after: { reason, ...(rollback?.lessonReopened ? { rollback } : {}) } })
-    return attempt
-  })
+  return withTenant(ctx.tenantId, ctx.actorId, tx => annulAttemptTx(tx, ctx, attemptId, reason))
+}
+
+/**
+ * Аннулирование внутри чужой транзакции. Кроме руководителя его зовёт отзыв согласия на
+ * ИИ-собеседование (docs/v2/30 §7.6, §13 к. 9): «попытка не считается проваленной» — и не
+ * считается использованной, а её ответы уходят из очереди проверки. Решение принимает сам
+ * кандидат, а не модель.
+ */
+export async function annulAttemptTx(tx: TenantTx, ctx: Ctx, attemptId: string, reason: string) {
+  const [before] = await tx.select({ status: attempts.status, enrollmentId: attempts.enrollmentId, lessonId: attempts.lessonId }).from(attempts).where(eq(attempts.id, attemptId))
+  const [attempt] = await tx.update(attempts).set({
+    status: 'annulled',
+    annulledBy: ctx.actorId,
+    annulReason: reason,
+    updatedAt: new Date(),
+  }).where(and(eq(attempts.id, attemptId), sql`${attempts.status} <> 'annulled'`)).returning({ id: attempts.id })
+  if (!attempt) return null
+  // Аннулированную попытку проверять больше некому и незачем: её ответы уходят из очереди
+  // закрытием, а не удалением строк — иначе терялась бы история проверяющего (В-2).
+  const pendingAnswers = await tx.select({ id: attemptAnswers.id }).from(attemptAnswers).where(eq(attemptAnswers.attemptId, attemptId))
+  await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: pendingAnswers.map(a => a.id) })
+  // D-013: аннулированная зачтённая попытка снимает зачёт урока так же, как пересчёт (docs/12 §7 п. 10, docs/14 §12)
+  const rollback = before?.status === 'passed' && before.enrollmentId && before.lessonId
+    ? await rollbackLessonCompletion(tx, ctx, before.enrollmentId, before.lessonId)
+    : null
+  await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.annul', entity: 'attempt', entityId: attemptId, before: { status: before?.status }, after: { reason, ...(rollback?.lessonReopened ? { rollback } : {}) } })
+  return attempt
 }
 
 /**
@@ -1063,7 +1126,10 @@ export async function annulAttempt(ctx: Ctx, attemptId: string, reason: string) 
 export async function expireStaleAttempts(tenantId: string): Promise<{ closed: number, quiet: number }> {
   return withTenant(tenantId, null, async (tx) => {
     const lastActivity = sql`greatest(${attempts.updatedAt}, (select max(aa.answered_at) from ${attemptAnswers} aa where aa.attempt_id = ${attempts.id}))`
-    const dueAt = sql`least(${attempts.deadlineAt}, ${lastActivity} + ${EXPIRE_AFTER})`
+    // Попытка ИИ-сессии собеседования сутками простоя не сгорает (docs/v2/30 §7.12: «попытка не
+    // сгорает», сессию переводит в `abandoned` `interview.reap`) — для неё действует только дедлайн
+    const interviewSession = sql`exists (select 1 from interview_sessions s where s.attempt_id = ${attempts.id})`
+    const dueAt = sql`case when ${interviewSession} then ${attempts.deadlineAt} else least(${attempts.deadlineAt}, ${lastActivity} + ${EXPIRE_AFTER}) end`
     const stale = await tx.select({ attempt: attempts, late: sql<boolean>`now() - ${dueAt} > ${QUIET_AFTER}` })
       .from(attempts)
       .where(and(eq(attempts.status, 'in_progress'), sql`${dueAt} <= now()`))
@@ -1139,6 +1205,8 @@ export async function quizIntro(ctx: Ctx, quizId: string, enrollmentId?: string)
       id: quiz.id,
       title: quiz.title,
       description: quiz.description,
+      // Тест вида `interview` проходят через экран согласия (docs/v2/30 §5.1): экран теста уводит туда
+      kind: quiz.kind,
       questionCount,
       timeLimitSec: params.timeLimitSec,
       passScore: params.passScore,

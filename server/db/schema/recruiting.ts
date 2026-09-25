@@ -70,11 +70,18 @@ export const candidateScores = pgTable('candidate_scores', {
   sourceId: uuid('source_id'),
   authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
   isCurrent: boolean('is_current').notNull().default(true),
+  /**
+   * Оценку ИИ дал профиль-заглушка (`docs/v2/30` §7.2 г, план `45` PR-28, Р-28.4): явный признак,
+   * а не догадка по имени модели. Заглушка — не модель, и её балл не бывает основанием решения
+   * человека без пометки: карточка и уведомление показывают её рядом с числом. Только у `kind = 'ai'`.
+   */
+  aiStub: boolean('ai_stub').notNull().default(false),
 }, t => [
   index('idx_candidate_scores_tenant').on(t.tenantId, t.candidateId, t.kind),
   uniqueIndex('uq_candidate_scores_current').on(t.tenantId, t.candidateId, t.kind).where(sql`is_current`),
   check('candidate_scores_kind_chk', sql`${t.kind} in ('manual', 'task', 'ai', 'recruiter')`),
   check('candidate_scores_value_chk', sql`${t.valueNum} is not null or ${t.scaleLevelId} is not null`),
+  check('candidate_scores_ai_stub_chk', sql`not ${t.aiStub} or ${t.kind} = 'ai'`),
 ])
 
 /**

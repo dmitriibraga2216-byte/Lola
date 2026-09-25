@@ -126,16 +126,30 @@ export interface ScoreRow {
   sourceId: string | null
   authorId: string | null
   isCurrent: boolean
+  /**
+   * Оценку ИИ дала заглушка, а не модель (`docs/v2/30` §7.2 г, Р-28.4): карточка показывает
+   * пометку рядом с числом — такая оценка не основание для решения человека.
+   */
+  aiStub: boolean
   createdAt: Date
 }
 
+/**
+ * Строка ленты «Історія» (§5.3). `event = 'status'` — смена колонки канбана
+ * (`candidate_status_history`); `interview_declined` / `interview_withdrawn` — нейтральные
+ * строки собеседования (`docs/v2/30` §7.5, §7.6): «обрав альтернативний формат», «відкликав
+ * згоду». Отказ от ИИ не пишется в оценки и не выглядит минусом — это просто событие отбора.
+ */
 export interface HistoryRow {
   id: string
+  event: 'status' | 'interview_declined' | 'interview_withdrawn'
   fromStatusId: string | null
-  toStatusId: string
+  toStatusId: string | null
   toStatusNameUk: string | null
   reasonCode: string | null
   reasonText: string | null
+  /** Альтернатива, выбранная вместо ИИ-собеседования (`interview_declined`). */
+  alternative: string | null
   actorId: string | null
   isAutomatic: boolean
   createdAt: Date
@@ -305,14 +319,17 @@ export async function getCandidate(v: Viewer, id: string): Promise<CandidateCard
       sourceId: candidateScores.sourceId,
       authorId: candidateScores.authorId,
       isCurrent: candidateScores.isCurrent,
+      aiStub: candidateScores.aiStub,
       createdAt: candidateScores.createdAt,
     }).from(candidateScores)
       .where(eq(candidateScores.candidateId, id))
       .orderBy(desc(candidateScores.createdAt)) as unknown as ScoreRow[]
 
-    const history = await historyOf(tx, id)
+    const statusHistory = await historyOf(tx, id)
+    const history = await withInterviewEvents(tx, id, statusHistory)
     const comments = v.reviewOnly ? [] : await commentsOf(tx, id)
-    const last = history[0]
+    // «Днів у статусі» — от последней смены колонки (§7.11), события собеседования его не сбрасывают
+    const last = statusHistory[0]
     // Часы приложения и БД расходятся на доли секунды, и «только что перенесли» легко даёт
     // −1 день. Отрицательного стажа в колонке не бывает — приводим к нулю здесь, а не на экране.
     const daysInStatus = last ? Math.max(0, Math.floor((Date.now() - new Date(last.createdAt).getTime()) / 86_400_000)) : null
@@ -333,6 +350,8 @@ export async function getCandidate(v: Viewer, id: string): Promise<CandidateCard
 async function historyOf(tx: TenantTx, candidateId: string): Promise<HistoryRow[]> {
   return await tx.select({
     id: candidateStatusHistory.id,
+    event: sql<'status'>`'status'`,
+    alternative: sql<string | null>`null`,
     fromStatusId: candidateStatusHistory.fromStatusId,
     toStatusId: candidateStatusHistory.toStatusId,
     toStatusNameUk: candidateStatuses.nameUk,
@@ -345,6 +364,33 @@ async function historyOf(tx: TenantTx, candidateId: string): Promise<HistoryRow[
     .leftJoin(candidateStatuses, eq(candidateStatuses.id, candidateStatusHistory.toStatusId))
     .where(eq(candidateStatusHistory.candidateId, candidateId))
     .orderBy(desc(candidateStatusHistory.createdAt)) as unknown as HistoryRow[]
+}
+
+/**
+ * Лента истории вместе с решениями по согласию на ИИ-собеседование (`docs/v2/30` §7.5, §7.6,
+ * §13 к. 2: «в истории нейтральная строка»). Журнал колонок канбана не получает переходов «в
+ * себя» ради этих строк — они читаются из `interview_consents` и вплетаются по времени.
+ */
+async function withInterviewEvents(tx: TenantTx, candidateId: string, history: HistoryRow[]): Promise<HistoryRow[]> {
+  const rows = await tx.execute(sql`
+    select id, decision, alternative_chosen, coalesce(withdrawn_at, decided_at) as at
+      from interview_consents
+     where user_id = ${candidateId}::uuid and decision in ('declined', 'withdrawn')`) as unknown as { id: string, decision: 'declined' | 'withdrawn', alternative_chosen: string | null, at: Date | string }[]
+  if (!rows.length) return history
+  const events: HistoryRow[] = rows.map(r => ({
+    id: r.id,
+    event: r.decision === 'declined' ? 'interview_declined' : 'interview_withdrawn',
+    fromStatusId: null,
+    toStatusId: null,
+    toStatusNameUk: null,
+    reasonCode: null,
+    reasonText: null,
+    alternative: r.alternative_chosen,
+    actorId: candidateId,
+    isAutomatic: false,
+    createdAt: new Date(r.at),
+  }))
+  return [...history, ...events].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 }
 
 async function commentsOf(tx: TenantTx, candidateId: string): Promise<CommentRow[]> {
@@ -705,7 +751,17 @@ export async function moveStatus(v: Viewer, id: string, input: CandidateStatusMo
 export async function listHistory(v: Viewer, id: string): Promise<HistoryRow[] | null> {
   const row = await getCandidateRow(v, id)
   if (!row) return null
-  return withTenant(v.tenantId, v.actorId, tx => historyOf(tx, id))
+  return withTenant(v.tenantId, v.actorId, async tx => withInterviewEvents(tx, id, await historyOf(tx, id)))
+}
+
+/**
+ * Виден ли кандидат этому зрителю — та же область, что у карточки (§2, §7.10). Для ручек,
+ * которые живут под `/candidates/:id/*` в других модулях (собеседование `docs/v2/30` §10):
+ * невидимый кандидат для них не существует — `404`, не `403` (CLAUDE.md п. 15).
+ */
+export async function candidateVisible(v: Viewer, id: string): Promise<boolean> {
+  if (v.reviewOnly) return false
+  return !!(await getCandidateRow(v, id))
 }
 
 // ── Оценки (§3.4) ─────────────────────────────────────────────────────────────────────────
@@ -756,6 +812,40 @@ export async function addScore(v: Viewer, id: string, input: CandidateScoreInput
     })
     return { ok: true, score: score as unknown as ScoreRow } as ScoreResult
   })
+}
+
+/**
+ * Оценка ИИ в карточку кандидата (`docs/v2/30` §7.1, §4 `scoring → scored`) — **единственный**
+ * канал, которым вывод модели попадает в карточку: одно число `kind = 'ai'` рядом с тремя
+ * человеческими, а не вместо них. Пишет владелец оценок (этот файл), зовёт — оценка
+ * собеседования (`server/services/interview/pipeline.ts`) в транзакции со своими строками.
+ * Прежняя оценка ИИ перестаёт быть действующей, но остаётся в истории (§3.4). Состояние
+ * кандидата, колонка канбана и отказ этим путём не меняются никогда (инвариант 18).
+ */
+export async function writeAiScoreTx(tx: TenantTx, tenantId: string, candidateId: string, input: { value: number, sourceId: string, aiStub: boolean }): Promise<string> {
+  await tx.update(candidateScores)
+    .set({ isCurrent: false, updatedAt: new Date() })
+    .where(and(eq(candidateScores.candidateId, candidateId), eq(candidateScores.kind, 'ai'), eq(candidateScores.isCurrent, true)))
+  const [row] = await tx.insert(candidateScores).values({
+    tenantId,
+    candidateId,
+    kind: 'ai',
+    valueNum: String(input.value),
+    sourceType: 'interview',
+    sourceId: input.sourceId,
+    authorId: null,
+    isCurrent: true,
+    aiStub: input.aiStub,
+  }).returning({ id: candidateScores.id })
+  await recordAudit(tx, {
+    tenantId,
+    actorId: null,
+    action: 'candidate.score',
+    entity: 'candidate_score',
+    entityId: row!.id,
+    after: { candidateId, kind: 'ai', valueNum: input.value, sourceType: 'interview', sourceId: input.sourceId, aiStub: input.aiStub },
+  })
+  return row!.id
 }
 
 /** Оценки кандидата: по умолчанию действующие, `history=true` — все (§10 `GET …/scores`). */

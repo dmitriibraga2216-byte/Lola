@@ -30,6 +30,19 @@ export interface PromptDef<I, O> {
   /** Можно ли отдать сохранённый ответ повторному вызову с тем же ключом (`30` §7.18). */
   cacheable?: boolean
   journal?: (output: O) => unknown
+  /**
+   * Полный вход сохраняется в S3 (`ai_calls.input_ref`, `30` §3.2, §7.7): для разбора задним
+   * числом «что именно видела модель». Вход, где есть ПД кандидата, — только так: в БД остаётся
+   * дайджест, а сам вход живёт 90 дней файлом `origin = 'ai_artifact'` и стирается вместе с ПД.
+   */
+  storeInput?: boolean
+  /**
+   * Вход — уже существующий объект в S3 (аудио реплики для расшифровки): журнал ссылается на
+   * него, а не кладёт копию голоса вторым файлом с другим сроком жизни.
+   */
+  inputRef?: (input: I) => string | null
+  /** Вход — аудио из S3 (роль `transcribe`): сетевой драйвер шлёт файл, а не JSON. */
+  audio?: (input: I) => { key: string, mime: string, lang: string }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -202,3 +215,175 @@ function embedPrompt(key: string): PromptDef<EmbedInput, EmbedOutput> {
 export const LIBRARY_EMBEDDING_PROMPT = embedPrompt('library.embedding')
 /** Статья базы знаний и поисковый запрос поиска по базе (`docs/03` §3.7, `docs/21` §5.2). */
 export const KNOWLEDGE_EMBEDDING_PROMPT = embedPrompt('knowledge.embedding')
+
+// ── Собеседование: расшифровка реплики (`30` §7.10, план `45` PR-28) ───────────────────
+
+export interface TranscribeInput {
+  mediaId: string
+  /** Ключ объекта аудио в S3 — сетевой драйвер читает файл сам (`drivers.ts`). */
+  audioKey: string
+  mime: string
+  /** Язык сценария: расшифровка идёт на нём, ответ на другом языке — флаг, а не отказ. */
+  lang: 'uk' | 'en' | 'ru'
+  durationMs: number | null
+}
+
+export interface TranscribeOutput {
+  text: string
+  language: string | null
+  /** 0–1; `null` — провайдер уверенность не сообщил, расшифровка считается надёжной. */
+  confidence: number | null
+}
+
+const STUB_TRANSCRIPT: Record<TranscribeInput['lang'], (sec: number) => string> = {
+  uk: sec => `Відповідь кандидата записана голосом, тривалість ${sec} с. Це розшифровка заглушки, а не справжній текст.`,
+  en: sec => `The candidate answered by voice for ${sec} s. This is a stub transcript, not the real text.`,
+  ru: sec => `Ответ кандидата записан голосом, длительность ${sec} с. Это расшифровка заглушки, а не настоящий текст.`,
+}
+
+/** Среднее `exp(avg_logprob)` сегментов Whisper-совместимого ответа — уверенность 0–1. */
+function segmentsConfidence(segments: unknown): number | null {
+  if (!Array.isArray(segments) || !segments.length) return null
+  const probs = segments
+    .map(s => (s && typeof s === 'object' && typeof (s as { avg_logprob?: unknown }).avg_logprob === 'number') ? Math.exp((s as { avg_logprob: number }).avg_logprob) : null)
+    .filter((p): p is number => p !== null && Number.isFinite(p))
+  if (!probs.length) return null
+  return Math.round(Math.min(1, Math.max(0, probs.reduce((a, b) => a + b, 0) / probs.length)) * 1000) / 1000
+}
+
+/**
+ * Расшифровка голосового ответа. Вход — аудио реплики в S3: журнал ссылается на этот же
+ * объект (`inputRef`), копии голоса нет. Ответ принимается в двух видах: Whisper-совместимый
+ * `verbose_json` (`text`, `language`, `segments[].avg_logprob`) и простой
+ * `{text, language?, confidence?}` — у `http_custom`.
+ */
+export const INTERVIEW_TRANSCRIBE_PROMPT: PromptDef<TranscribeInput, TranscribeOutput> = {
+  key: 'interview.transcribe',
+  version: 'v1',
+  purpose: 'transcribe',
+  stub: input => ({ text: STUB_TRANSCRIPT[input.lang](Math.max(1, Math.round((input.durationMs ?? 0) / 1000))), language: input.lang, confidence: 0.95 }),
+  parse(raw) {
+    const r = z.object({
+      text: z.string(),
+      language: z.string().nullable().optional(),
+      confidence: z.number().min(0).max(1).nullable().optional(),
+      segments: z.array(z.unknown()).optional(),
+    }).passthrough().parse(raw)
+    const lang = (r.language ?? '').toLowerCase()
+    // Whisper называет язык словом («ukrainian»), остальные — кодом; в реплику кладётся код
+    const code = ({ ukrainian: 'uk', english: 'en', russian: 'ru' } as Record<string, string>)[lang] ?? (lang.slice(0, 2) || null)
+    return { text: r.text.trim(), language: code, confidence: r.confidence ?? segmentsConfidence(r.segments) }
+  },
+  cacheable: true,
+  inputRef: input => input.audioKey,
+  audio: input => ({ key: input.audioKey, mime: input.mime, lang: input.lang }),
+}
+
+// ── Собеседование: оценка сессии по критериям (`30` §7.2, §7.11, план `45` PR-28) ──────
+
+export interface InterviewScoreInput {
+  lang: 'uk' | 'en' | 'ru'
+  /** Повтор с усиленной инструкцией после оценки без цитат (`30` §12 п. 5). */
+  strict: boolean
+  criteria: { id: string, name: string, description: string, scaleMax: number }[]
+  /** Только надёжные реплики: ненадёжная расшифровка не бывает доказательством (`30` §7.10). */
+  turns: { turnId: string, ordinal: number, question: string, answer: string }[]
+}
+
+export interface InterviewScoreOutput {
+  criteria: { criterionId: string, value: number | null, confidence: number | null, rationale: string | null, evidence: { turnId: string | null, quote: string | null }[] }[]
+}
+
+const STUB_RATIONALE: Record<InterviewScoreInput['lang'], (name: string, ordinal: number) => string> = {
+  uk: (name, ordinal) => `Оцінка заглушки: критерій «${name}» зіставлено з відповіддю на питання ${ordinal}. Це не висновок моделі.`,
+  en: (name, ordinal) => `Stub assessment: criterion “${name}” matched against the answer to question ${ordinal}. This is not a model’s conclusion.`,
+  ru: (name, ordinal) => `Оценка заглушки: критерий «${name}» сопоставлен с ответом на вопрос ${ordinal}. Это не вывод модели.`,
+}
+
+/** Короткая цитата — начало ответа до 80 знаков по границе слова. */
+function stubQuote(answer: string): string {
+  const t = answer.trim()
+  if (t.length <= 80) return t
+  const cut = t.slice(0, 80)
+  const sp = cut.lastIndexOf(' ')
+  return (sp > 20 ? cut.slice(0, sp) : cut).trim()
+}
+
+/** Детерминированный «балл» заглушки: хеш входа, а не смысл ответа. */
+function stubValue(seed: string, scaleMax: number): number {
+  let h = 0
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return Math.round((1 + (h % Math.max(1, Math.round(scaleMax * 100 - 100))) / 100) * 100) / 100
+}
+
+const LANGUAGE_WORD: Record<InterviewScoreInput['lang'], string> = { uk: 'Ukrainian', en: 'English', ru: 'Russian' }
+
+/**
+ * Оценка ответов кандидата по критериям сценария. **Модель не решает о людях** (инвариант 18):
+ * промпт просит балл по каждому критерию, обоснование и цитаты из слов кандидата — и прямо
+ * запрещает рекомендацию нанять или отказать. Разбор ответа намеренно мягкий: проверку
+ * «у каждого критерия есть обоснование и дословная цитата» делает сервис-владелец
+ * (`shared/domain/interview.ts#validateScores`), чтобы отличить балл без цитаты (повтор с
+ * усиленной инструкцией, затем человек) от поломки провайдера.
+ */
+export const INTERVIEW_SCORE_PROMPT: PromptDef<InterviewScoreInput, InterviewScoreOutput> = {
+  key: 'interview.score',
+  version: 'v1',
+  purpose: 'interview_score',
+  stub(input) {
+    return {
+      criteria: input.criteria.map((c, i) => {
+        const turn = input.turns.length ? input.turns[i % input.turns.length]! : null
+        return {
+          criterionId: c.id,
+          value: turn ? stubValue(`${c.id}:${turn.answer}`, c.scaleMax) : null,
+          confidence: 0.75,
+          rationale: STUB_RATIONALE[input.lang](c.name, turn?.ordinal ?? 0),
+          evidence: turn && turn.answer.trim() ? [{ turnId: turn.turnId, quote: stubQuote(turn.answer) }] : [],
+        }
+      }),
+    }
+  },
+  chat: input => [
+    {
+      role: 'system',
+      content: [
+        'You assess answers of a job candidate given in an automated interview, criterion by criterion. A human makes every decision; your output is only an input for that human.',
+        'Never recommend hiring or rejecting the person and never judge age, gender, health, family, religion, origin, accent or speech defects.',
+        `For EVERY criterion return: value from 0 to its scaleMax, confidence from 0 to 1, rationale in ${LANGUAGE_WORD[input.lang]} of 20 to 600 characters, and evidence — one to three quotes copied VERBATIM from the candidate answers, each with the turnId it comes from.`,
+        'A score without a verbatim quote is invalid. If the answers give nothing to quote for a criterion, still quote the closest fragment and lower the confidence.',
+        ...(input.strict ? ['Your previous reply had criteria without rationale or without verbatim quotes. Every criterion MUST have both; quotes must be exact substrings of the answers.'] : []),
+        'Return JSON {"criteria": [{"criterionId": "...", "value": 0, "confidence": 0.5, "rationale": "...", "evidence": [{"turnId": "...", "quote": "..."}]}]}.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        criteria: input.criteria.map(c => ({ criterionId: c.id, name: c.name, definition: c.description, scaleMax: c.scaleMax })),
+        answers: input.turns.map(t => ({ turnId: t.turnId, question: t.question, answer: t.answer })),
+      }),
+    },
+  ],
+  parse(raw) {
+    const r = z.object({
+      criteria: z.array(z.object({
+        criterionId: z.string(),
+        value: z.number().nullable().optional(),
+        confidence: z.number().nullable().optional(),
+        rationale: z.string().nullable().optional(),
+        evidence: z.array(z.object({ turnId: z.string().nullable().optional(), quote: z.string().nullable().optional() }).passthrough()).nullable().optional(),
+      }).passthrough()).min(1),
+    }).parse(raw)
+    return {
+      criteria: r.criteria.map(c => ({
+        criterionId: c.criterionId,
+        value: c.value ?? null,
+        confidence: c.confidence ?? null,
+        rationale: c.rationale ?? null,
+        evidence: (c.evidence ?? []).map(e => ({ turnId: e.turnId ?? null, quote: e.quote ?? null })),
+      })),
+    }
+  },
+  cacheable: true,
+  storeInput: true,
+}

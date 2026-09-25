@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ATTEMPT_REQUEST_STATUSES, QUESTION_KINDS, SCORING_METHODS } from '../enums'
+import { ATTEMPT_REQUEST_STATUSES, QUESTION_KINDS, QUIZ_KINDS, SCORING_METHODS } from '../enums'
 import { bodySchema } from './content'
 
 /** Коды типов вопросов — из docs/02 (семь эталона + number, text_short, file). */
@@ -273,7 +273,8 @@ export const quizParamsSchema = z.object({
 export const quizSchema = z.object({
   title: z.string().min(3).max(200),
   description: bodySchema.optional(),
-  kind: z.enum(['quiz', 'certification']).default('quiz'),
+  // `QUIZ_KINDS` (docs/v2/44 В-12): `interview` — тест, который проходят через экран согласия (docs/v2/30 §3.1)
+  kind: z.enum(QUIZ_KINDS).default('quiz'),
   tags: z.array(z.string().max(50)).max(20).default([]),
   selectionMode: z.enum(['fixed', 'random']).default('fixed'),
   randomRules: z.array(z.object({

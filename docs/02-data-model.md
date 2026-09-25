@@ -313,6 +313,7 @@ create table candidate_scores (               -- четыре независим
   source_type text, source_id uuid,           -- чем порождена: попытка, практикум, собеседование
   author_id uuid references users(id) on delete set null,
   is_current boolean not null default true,   -- действующая одна: uq_candidate_scores_current
+  ai_stub boolean not null default false,     -- оценку ИИ дала заглушка (`v2/30` §7.2, PR-28); только у kind = 'ai'
   created_at timestamptz not null default now()
 );
 
@@ -588,6 +589,77 @@ create table ai_calls (                       -- журнал вызовов м�
   try_no int not null default 1,
   request_context jsonb,                      -- журнал (CLAUDE.md п. 14); у фоновых задач null
   created_at timestamptz not null default now(), finished_at timestamptz
+);
+
+-- ИИ-собеседование (`v2/30` §3.3–§3.5; план `v2/45` PR-28, миграция 0095). Собеседование — режим теста:
+-- сценарий поверх quizzes.kind = 'interview' (`v2/44` В-12), сессия — поверх строки attempts, ответ —
+-- строка attempt_answers (input_mode voice|text). Здесь только то, чего в модели попытки нет.
+create table interview_scenarios (            -- сценарий; опубликованный — один на тест, правка — новая версия
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  quiz_id uuid not null references quizzes(id) on delete cascade,
+  name text not null, interviewer_name text not null default 'Лола', intro_text text not null, outro_text text not null,
+  answer_modes text[] not null default '{voice,text}', -- interview_answer_mode
+  min_answer_sec int, max_answer_sec int, think_time_sec int, silence_timeout_sec int, retake_limit int,
+  record_video boolean not null default false, transcribe_lang text not null default 'uk', min_confidence numeric(4,3),
+  alternative_path text,                      -- interview_alternative_path; пусто только у черновика
+  status text not null default 'draft',       -- interview_scenario_status
+  version int not null default 1, created_by uuid, published_at timestamptz,
+  unique (tenant_id, quiz_id, version)
+  -- interview_scenarios_alt_published_chk: status = 'draft' or alternative_path is not null
+);
+create table interview_criteria (             -- критерий: описание 20–500 — определение для модели и человека
+  id uuid primary key, tenant_id uuid not null, scenario_id uuid not null references interview_scenarios(id) on delete cascade,
+  code text not null, name_uk text not null, description text not null, weight numeric(5,2), scale_max numeric(5,2),
+  is_critical boolean not null default false, sort int, source text not null default 'manual' -- interview_criterion_source
+);
+create table interview_consents (             -- согласие на запись: человек × версия сценария, до попытки
+  id uuid primary key, tenant_id uuid not null, user_id uuid not null references users(id) on delete cascade,
+  scenario_id uuid not null references interview_scenarios(id) on delete cascade,
+  decision text not null,                     -- interview_consent_decision
+  scopes jsonb not null, text_version text not null, text_hash text not null, lang text not null,
+  alternative_chosen text,                    -- у отказа обязательна
+  ip inet, user_agent text, request_context jsonb, decided_at timestamptz not null, withdrawn_at timestamptz
+);
+create table interview_sessions (             -- сессия поверх попытки; создаётся на старте вместе с attempts
+  id uuid primary key, tenant_id uuid not null, attempt_id uuid not null references attempts(id) on delete cascade,
+  scenario_id uuid not null references interview_scenarios(id), candidate_id uuid not null references users(id) on delete cascade,
+  consent_id uuid references interview_consents(id) on delete set null,
+  state text not null,                        -- interview_session_state
+  answer_mode text, turns_total int, turns_answered int, disconnects int, resumes int, silence_events int,
+  tab_switches int, device text, ip inet, user_agent text, ip_changes int,
+  ai_score numeric(6,2), ai_confidence numeric(4,3), ai_verdict_text text,
+  ai_stub boolean not null default false,     -- вывод дал профиль-заглушка: не основание решения (Р-28.4)
+  candidate_score_id uuid references candidate_scores(id) on delete set null,
+  degraded_reason text,                       -- interview_degraded_reason
+  needs_human_reason text, flags jsonb not null default '[]', purge_after timestamptz,
+  started_at timestamptz, last_activity_at timestamptz, finished_at timestamptz, redacted_at timestamptz,
+  unique (tenant_id, attempt_id)
+);
+create table interview_turns (                -- реплика: вопрос снимка и ответ; расшифровка живёт здесь
+  id uuid primary key, tenant_id uuid not null, session_id uuid not null references interview_sessions(id) on delete cascade,
+  attempt_answer_id uuid references attempt_answers(id) on delete set null, ordinal int not null,
+  role text not null,                         -- interview_turn_role
+  question_id uuid, question_version int, prompt_text text,
+  answer_mode text,                           -- interview_turn_mode
+  media_id uuid references media_assets(id) on delete set null, -- origin = 'interview_answer'
+  duration_ms int, silence_ms int, retakes int, first_sound_delay_ms int,
+  transcript text, transcript_lang text, transcript_confidence numeric(4,3), transcript_engine text,
+  transcript_version int, transcript_status text, -- interview_transcript_status
+  started_at timestamptz, submitted_at timestamptz,
+  unique (tenant_id, session_id, ordinal)
+);
+create table interview_criterion_scores (     -- оценка ИИ по критерию: без обоснования и цитаты не сохраняется
+  id uuid primary key, tenant_id uuid not null, session_id uuid not null references interview_sessions(id) on delete cascade,
+  criterion_id uuid not null references interview_criteria(id) on delete cascade,
+  value numeric(5,2), confidence numeric(4,3) not null,
+  rationale text,                             -- 20–2000; пусто только у стёртой строки (redacted_at)
+  evidence jsonb not null default '[]',       -- ≥ 1 цитата с непустым quote, кроме стёртой строки
+  ai_call_id bigint references ai_calls(id) on delete set null,
+  human_value numeric(5,2), human_by uuid, human_at timestamptz, human_comment text,
+  agreement text not null default 'pending',  -- interview_score_agreement
+  redacted_at timestamptz,
+  unique (tenant_id, session_id, criterion_id)
+  -- ics_rationale_chk, ics_evidence_chk, ics_evidence_quote_chk, ics_redacted_chk; триггер ics_insert_guard
 );
 
 create table user_placements (                -- где человек работает
@@ -1038,7 +1110,7 @@ create table quizzes (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
   title text not null,
-  kind text not null default 'quiz',          -- quiz | certification
+  kind text not null default 'quiz',          -- quiz_kind: quiz | certification | interview (`v2/44` В-12)
   pass_score numeric(5,2) not null default 80,
   time_limit_sec int,
   attempts_allowed int not null default 3,
@@ -2947,6 +3019,35 @@ ai_call_ref_kind: interview_session | interview_turn | review_hint | summary | v
 user_activity_kind: lesson_completed | attempt_submitted | attempt_graded | enrollment_started
   | enrollment_completed | workshop_submitted | checklist_run_completed | knowledge_read
   | survey_submitted | certificate_issued | review_graded | content_issue_accepted
+
+-- Вид теста (`quizzes.kind`, `v2/44` В-12, PR-28): собеседование — третье значение вида, колонка
+-- `mode` из `v2/30` §3.7 отменена. CHECK `quizzes_kind_chk` (миграция 0095)
+quiz_kind: quiz | certification | interview
+
+-- ИИ-собеседование (`v2/30` §3.3–§3.5, §4; PR-28, миграция 0095)
+-- Статус сценария: опубликованный — один на тест, правка опубликованного — новая версия
+interview_scenario_status: draft | published | archived
+-- Альтернатива ИИ-собеседованию; значения «нет» нет — без альтернативы сценарий не публикуется
+interview_alternative_path: human_interview | text_form
+-- Как можно отвечать (сценарий) и чем отвечает кандидат (сессия)
+interview_answer_mode: voice | text
+-- Чем ответили на реплику: none — молчание после трёх подсказок (`v2/30` §7.12)
+interview_turn_mode: voice | text | none
+interview_turn_role: interviewer | candidate
+-- Решение по согласию на запись; withdrawn — отзыв, записи стираются в той же транзакции
+interview_consent_decision: accepted | declined | withdrawn
+-- Состояние сессии (`v2/30` §4); needs_human — не провал, а состояние системы
+interview_session_state: created | consent_pending | in_progress | paused | submitted
+  | transcribing | scoring | scored | needs_human | abandoned | expired | failed
+-- Почему оценки ИИ нет; unexplained (PR-28) — модель не объяснила балл: без обоснования или без
+-- цитаты из расшифровки такой балл не сохраняется (`v2/30` §3.5, §7.2)
+interview_degraded_reason: provider_down | limit_exhausted | transcribe_failed | low_confidence
+  | consent_withdrawn | timeout | unexplained
+interview_transcript_status: pending | ok | low_confidence | failed | skipped | manual | not_needed
+-- Откуда критерий: предложенный ИИ требует подтверждения человеком (`v2/30` §6.2)
+interview_criterion_source: manual | ai_suggested
+-- Расхождение оценки ИИ с человеком (`v2/30` §7.3): match ≤ 10 % шкалы, minor ≤ 30 %, иначе major
+interview_score_agreement: pending | match | minor | major
 ```
 
 ## Что проверяет тест схемы

@@ -865,3 +865,40 @@ HR и администратор — весь тенант). Кандидат и
 модель, при истёкшей или выключенной ИИ-подписке отвечает `409 ai.unavailable`
 (`details.reason`: `expired` \| `off` \| `readonly` \| `suspended`), при отказе всех профилей —
 `503 ai.provider_failed`; исчерпание ИИ-оси — единый `409 limit_exceeded` с `details.axis`.
+
+### ИИ-собеседование: сценарий, согласие, прохождение (`docs/v2/30-ai-interview.md` §4–§7, §10, PR-28)
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/interviews/entry/:quizId` | вход кандидата в тест вида `interview`: текст согласия на его языке с редакцией и хешем, действующий сценарий и что показать дальше (`consent`, `start`, `resume`, `alternative`, `text_form`, `unavailable`, `withdrawn`, `done`). Попытку не создаёт. Прав не нужно — тест назначен именно ему, иначе `404`; сценарий не опубликован — `409 interview.not_published` |
+| POST | `/interviews/entry/:quizId/consent` | `{decision, textVersion, textHash, alternative?, preferredTime?}`: согласие на запись или отказ с альтернативой сценария (рекрутеру `interview_declined`, сессии нет). Другая редакция текста — `422 interview_consent.invalid`, повторное решение — `409 interview_consent.already_decided` |
+| POST | `/interviews/entry/:quizId/alternative` | `{reason: ai_unavailable \| no_microphone, preferredTime?}` — альтернатива без отказа: ИИ недоступен или нет микрофона у сценария без текста; причина проверяется (`409 interview.ai_available`, `422 interview.text_allowed`) |
+| POST | `/interviews/entry/:quizId/start` | `{answerMode}` — старт сессии: попытка по снимку, реплики, резерв одной операции `ai_interview_ops`. Без согласия — `409 interview_consent.required`; ось исчерпана — `409 limit_exceeded`, ИИ истёк — `409 ai.unavailable`, оба с `details.alternative`; идущая сессия возвращается та же (`resumed: true`) |
+| POST | `/interviews/entry/:quizId/text-form` | письменная форма (`text_form`): та же попытка без ИИ и записи, ручная проверка; идущая попытка формы продолжается |
+| GET | `/interviews/text-form/:attemptId` | вопросы письменной формы без эталона и сохранённые ответы |
+| PUT | `/interviews/text-form/:attemptId/answers/:questionId` | `{text}` — ответ письменной формы, идемпотентно; после отправки — `423 attempt.locked` |
+| POST | `/interviews/text-form/:attemptId/submit` | отправить письменную форму на ручную проверку |
+| GET | `/interviews/:sessionId` | состояние сессии и текущая реплика (вопрос — из снимка, без эталона); чужая сессия — `404`. Ничего не меняет |
+| POST | `/interviews/:sessionId/heartbeat` | биение раз в 5 с (`{tabSwitches?, silenceEvents?}`): возврат после паузы или обрыва — `resumed: true`, `disconnects`/`resumes` считает сервер; факты для человека — смена IP и устройства, переключения вкладки |
+| POST | `/interviews/:sessionId/pause` | уход со страницы (`fetch` с `keepalive`): `paused`, `disconnects + 1`; `204` |
+| POST | `/interviews/:sessionId/turns/:ordinal/upload` | `{mime, bytes}` → `{mediaId, uploadUrl, retakesLeft}`: аудио идёт в S3 напрямую, `origin = 'interview_answer'`, до 25 МБ (`413 media.too_big`); закрытая реплика — `422 turn.closed`, перезапись сверх лимита — `409 retake.limit` |
+| POST | `/interviews/:sessionId/turns/:ordinal/answer` | `{mode: voice, mediaId, durationMs, …}` \| `{mode: text, text}` \| `{mode: none}` → следующая реплика; ответ на последнюю завершает сессию. `422 answer.empty`, `422 interview.voice_not_allowed` \| `text_not_allowed` |
+| POST | `/interviews/:sessionId/finish` | «Завершити»: нужна хотя бы одна отвеченная реплика (`409 no_answers`); попытка уходит обычным путём теста, дальше расшифровка и оценка фоном |
+| POST | `/interviews/:sessionId/withdraw` | отзыв согласия (`{reason?}`, `204`): аудио — в корзину с немедленной очисткой в той же транзакции, расшифровки, обоснования и цитаты стёрты, попытка аннулирована, рекрутеру и HR — уведомление |
+| GET | `/candidates/:id/interview` | вкладка «Співбесіда» (`interview.view`): сессии, оценки ИИ по критериям с обоснованием и цитатами, уверенность словом, техпаспорт, признак заглушки `aiStub`, расшифровка, флаги, метрики; невидимый кандидат — `404` |
+| GET | `/candidates/:id/interview/media/:turnId` | ссылка на прослушивание реплики (`interview.listen`): 15 минут, `inline`, каждое прослушивание — `audit_log` `interview.media.listen`; без права — `403` без строки журнала; удалённое аудио — `410 media.purged` |
+| GET | `/interview-scenarios` | сценарии (`interview.configure`): модуль, версия, критериев, собеседований, доля `needs_human`; фильтры `status`, `quizId`; ключевой курсор (§4.1) |
+| POST | `/interview-scenarios` | новый сценарий-черновик для теста вида `interview` (иначе `422 scenario.quiz_not_interview`); `201` |
+| GET | `/interview-scenarios/:id` | сценарий с критериями; чужой тенант — `404` |
+| PUT | `/interview-scenarios/:id` | правка полей формы и смена `status`. Публикация без альтернативы — `422 scenario.alternative_required` (статус остаётся `draft`), без критериев — `422 criteria.required`, вопросы не только развёрнутые — `422 scenario.questions_invalid`; правка опубликованного — новая версия-черновик (`versionCreated: true`) |
+| GET | `/interview-scenarios/:id/criteria` | критерии сценария |
+| POST | `/interview-scenarios/:id/criteria` | критерий (описание 20–500 знаков); у опубликованной версии — `409 scenario.published`; `201` |
+| PUT | `/interview-scenarios/:id/criteria/:criterionId` | правка критерия черновика |
+| DELETE | `/interview-scenarios/:id/criteria/:criterionId` | удалить критерий черновика; `204` |
+
+ИИ не принимает решений о людях (`v2/30` §7.1): вывод модели ложится в карточку одной строкой
+`candidate_scores.kind = 'ai'` рядом с человеческими, состояние кандидата, колонку канбана, статус
+попытки и `is_correct` он не трогает. Все пути `/interviews*` и `/interview-scenarios*` гасятся вместе с
+рекрутингом (`403 candidates.disabled`). Тест вида `interview` обычным путём
+(`POST /learning/quizzes/:id/attempts`) не стартует — `409 interview_consent.required`; вид теста в/из
+`interview` при существующих попытках не меняется — `409 quiz.kind_locked`.

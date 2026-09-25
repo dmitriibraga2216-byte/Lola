@@ -139,6 +139,15 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | GET | `/ai/quality-reviews/:id` | `ai.audit` | перепроверка |
 | POST | `/ai/quality-reviews` | `ai.audit` | вердикт по выборке |
 
+> [исправлено, PR-28] Вход, согласие и старт собеседования адресуются **тестом**, а не сессией: до
+> согласия сессии нет (`30` §13 к. 1, к. 2). Реализовано: `GET /interviews/entry/:quizId`,
+> `POST /interviews/entry/:quizId/consent`, `…/alternative`, `…/start`, `…/text-form`;
+> `GET /interviews/text-form/:attemptId`, `PUT …/answers/:questionId`, `POST …/submit`; по сессии —
+> `GET /interviews/:sessionId`, `POST …/heartbeat`, `…/pause`, `…/turns/:ordinal/upload`,
+> `…/turns/:ordinal/answer`, `…/finish`, `…/withdraw`. Сценарии — `POST /interview-scenarios` (создание,
+> развёртка свёртки `[/:id]`), критерий — `PUT|DELETE /interview-scenarios/:id/criteria/:criterionId`.
+> Коды — `docs/v2/30` §10 (пометка PR-28).
+
 **31 эндпоинт.**
 
 > [дополнено, PR-27] Реализованы `GET /ai/calls`, `GET /ai/providers`, `GET /ai/providers/:id`,

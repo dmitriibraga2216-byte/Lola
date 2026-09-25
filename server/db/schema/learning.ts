@@ -40,6 +40,10 @@ export const enrollments = pgTable('enrollments', {
   cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
   cancelledBy: uuid('cancelled_by').references(() => users.id),
   cancelReason: text('cancel_reason'),
+  // deadline_shift_reason (docs/02): почему срок не тот, что дало назначение — `absence`, дедлайн
+  // обязательного назначения сдвинут с дней отсутствия (docs/v2/38 §7.14, PR-33). Ручное продление
+  // причину снимает: действующий срок поставил человек, а не правило.
+  deadlineShiftedReason: text('deadline_shifted_reason'),
 }, t => [
   unique().on(t.tenantId, t.userId, t.subjectId, t.versionId, t.assignmentId),
   index().on(t.tenantId, t.userId, t.status),

@@ -746,7 +746,7 @@ export async function personLearning(ctx: Ctx, userId: string) {
     const [enrollmentsRows, attemptsRows, certs, assessments] = await Promise.all([
       tx.execute(sql`
         select e.id, e.subject_type, e.subject_id, e.status, e.progress_pct, e.due_at, e.completed_at, e.score, e.started_at, e.created_at,
-               coalesce(c.title, p.title, q.title) as title
+               e.deadline_shifted_reason, coalesce(c.title, p.title, q.title) as title
         from enrollments e
         left join courses c on e.subject_type = 'course' and c.id = e.subject_id
         left join programs p on e.subject_type = 'training_program' and p.id = e.subject_id

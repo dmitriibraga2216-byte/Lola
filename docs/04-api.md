@@ -742,6 +742,28 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 (PDF, JPG, PNG до 20 МБ); `media.upload` для этого не нужен — свой документ `self_upload`
 загружает и сотрудник. Общий `GET /media/:id` такие файлы не отдаёт — только через документ.
 
+### Отсутствия человека и сдвиг дедлайнов (`docs/v2/38-people-extensions.md` §10, PR-33)
+
+Справочная величина, а не кадровый учёт (`38` §7.12). Свои норму, остаток и записи человек видит
+без скоупа; чужие — `person.absence.manage` в области точки человека (руководитель — своих точек,
+HR и администратор — весь тенант). Кандидат и чужой тенант — `404`. Норму уровней правит
+`PUT /absence-norms` (§4.11 выше): форма «Скоригувати» карточки ходит туда же. Не путать с
+`/review/absences` — отсутствием проверяющего из `docs/v2/37` (`v2/41` §8.3.4).
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/people/:id/absences` | `?year=` (по умолчанию текущий в поясе тенанта) → `{year, person, norms: {vacation, sick}: {value, source: tenant\|location\|user\|system, setAt, setBy, reason}, levels, used, remaining, records, missedDeadlines, can}`; в остаток — только `approved`, период на стыке лет — пересечением; `missedDeadlines` — прошедшие во время отсутствия сроки обязательных назначений (`38` §12) для «Перенести» (`POST /manage/enrollments/:id/extend`); `403 forbidden` |
+| POST | `/people/:id/absences` | `{kind: vacation\|sick\|unpaid\|other, dateFrom, dateTo, status: planned\|approved, comment?}` → `201 {data, meta: {shifted}}`; сроки обязательных назначений, легшие на отсутствие, сдвигаются в той же транзакции (`38` §7.14); `409 absence_overlap` (`details.conflict`), `422 absence_record.range_invalid` (`details.reason`: `order` \| `too_long` — длиннее 366 дней), `409 person_archived`, `403 forbidden`; по Bearer-токену запись получает `source='api'` |
+| PATCH | `/people/:id/absences/:absenceId` | `{kind?, dateFrom?, dateTo?, status?, comment?}`; статус только вперёд `planned → approved → cancelled`, иначе `409 absence_status_invalid`; отменённую не правят — `409 absence_cancelled`; отмена сдвинутые сроки назад не возвращает |
+
+Сдвиг срока (`38` §7.14): только запись на курс **обязательного** назначения, только срок в будущем
+и только если у этапа курса включена возможность `deadline` (`stageCan()`); срок, попавший в
+отсутствие `planned`/`approved`, уходит на первый рабочий день (пн–пт) после возвращения с той же
+местной минутой, у записи — `deadline_shifted_reason='absence'`, в `audit_log` —
+`enrollment.deadline_shifted`, уведомление `absence_deadline_shifted` человеку и руководителю.
+Ручное продление причину снимает. Тот же сдвиг — при раскрытии назначения и ночной задачей
+`absence.deadline_guard` (05:30); напоминания `due.scan` в дни отсутствия человеку не уходят.
+
 **Публичный контур — единственное место в продукте, где запрос приходит без сессии.** Он уже
 работает и обслуживает три сценария базового ТЗ и пакета под общим префиксом
 `server/api/v1/public/` → `/api/v1/public/*` (префикс задаёт дерево каталогов Nitro, а не

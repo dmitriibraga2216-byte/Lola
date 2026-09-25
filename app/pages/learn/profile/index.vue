@@ -149,12 +149,14 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
     </div>
 
     <!-- Своя карточка (docs/v2/38 §5.1, §7.4): счётчик всех заметок и текст только открытых мне;
-         свои документы и загрузка себе типов self_upload. У кандидата этих блоков нет -->
+         свои документы и загрузка себе типов self_upload; своя норма, остаток и записи отсутствий
+         (§2 — «свои», только просмотр). У кандидата этих блоков нет -->
     <template v-if="me?.user.kind === 'employee'">
       <h2 class="section-title">{{ t('profile.myRecords') }}</h2>
       <div class="records">
         <PersonNotes :person-id="me.user.id" />
         <PersonDocuments :person-id="me.user.id" />
+        <PersonAbsences :person-id="me.user.id" />
       </div>
     </template>
 

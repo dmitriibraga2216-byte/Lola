@@ -10,6 +10,7 @@ import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS, paramsFor } from '../../shared/schemas/assignments'
 import { stageParamsFor } from './taskParams'
 import { stageForbidsCandidates } from './lifecycle'
+import { shiftDeadlinesForAbsences } from './absences'
 import { deriveTaskState, overdueSql } from './enrollmentStatus'
 import { findContent } from './taskContent'
 import { employeeOnly } from './repo/people'
@@ -238,6 +239,12 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
       await tx.insert(enrollmentEvents).values(inserted.map(e => ({
         tenantId, enrollmentId: e.id, event: 'created', payload: { source: 'assigned', assignmentId, from: null, to: 'not_started' }, actorId: a.createdBy, requestContext: currentRequestContext(),
       })))
+      // docs/v2/38 §7.14: срок обязательного назначения не ставится на дни отсутствия человека —
+      // сдвиг в той же транзакции, до уведомления, чтобы «призначено до …» уже нёс новую дату.
+      // Условия (обязательность, этап с возможностью `deadline`, только вперёд) — в absences.ts.
+      const shifted = dueAt && a.isMandatory
+        ? new Map((await shiftDeadlinesForAbsences(tx, { tenantId, actorId: null }, { enrollmentIds: inserted.map(e => e.id), trigger: 'assignment' })).map(s => [s.enrollmentId, s.to]))
+        : new Map<string, Date>()
       const reminders = a.reminders as { notifyOnAssign?: boolean }
       if (reminders.notifyOnAssign !== false) {
         for (const e of inserted) {
@@ -245,7 +252,7 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
             tenantId,
             userId: e.userId,
             code: 'assignment_created',
-            payload: { course: course.title, due: dueAt?.toISOString() ?? null, enrollmentId: e.id },
+            payload: { course: course.title, due: (shifted.get(e.id) ?? dueAt)?.toISOString() ?? null, enrollmentId: e.id },
             dedupKey: `assignment_created:${e.id}`,
           })
         }
@@ -399,6 +406,8 @@ export async function extendEnrollment(ctx: Ctx, enrollmentId: string, input: { 
       // автозакрытое по сроку (failed + expired_at) открывается заново
       status: e.status === 'failed' && e.expiredAt ? (e.startedAt ? 'in_progress' : 'not_started') : e.status,
       expiredAt: null,
+      // Срок поставил человек, а не правило отсутствий (docs/v2/38 §7.14): причина сдвига снимается
+      deadlineShiftedReason: null,
       updatedAt: new Date(),
     }).where(eq(enrollments.id, enrollmentId)).returning()
     await tx.insert(enrollmentEvents).values({

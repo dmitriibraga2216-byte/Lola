@@ -7,11 +7,17 @@ import { enqueueNotification } from './notifications'
 import { DEFAULT_REMINDERS } from '../../shared/schemas/assignments'
 import type { Reminders } from '../../shared/schemas/assignments'
 import { managerIdOf } from './orgManager'
+import { peopleAbsentOn } from './absences'
 
 /**
  * due.scan (docs/10 §7.4, §11; docs/15 §3.4): ежедневно — напоминания за N дней,
  * в день срока, просрочка → expired + уведомление руководителю через M дней,
  * scheduled → not_started. Идемпотентно через dedupKey (одно на запись+код+день).
+ *
+ * В дни отсутствия человека (запись `planned`/`approved` на его местную дату, docs/v2/38 §7.14,
+ * §13 к. 10) напоминания **ему** не уходят — ни «залишилось N днів», ни «сьогодні останній день»,
+ * ни «прострочено». Эскалация руководителю идёт: это сигнал руководителю, а не напоминание
+ * отсутствующему. `opts.now` — момент прохода (тест проходит календарь, не трогая часы).
  */
 
 function dayKey(d = new Date()) {
@@ -23,15 +29,15 @@ async function managerOf(tx: TenantTx, userId: string): Promise<string | null> {
   return managerIdOf(tx, userId)
 }
 
-export async function runDueScan(tenantId: string): Promise<{ activated: number, remindered: number, expired: number }> {
-  const stats = { activated: 0, remindered: 0, expired: 0 }
+export async function runDueScan(tenantId: string, opts: { now?: Date } = {}): Promise<{ activated: number, remindered: number, expired: number, muted: number }> {
+  const stats = { activated: 0, remindered: 0, expired: 0, muted: 0 }
   await withTenant(tenantId, null, async (tx) => {
-    const now = new Date()
+    const now = opts.now ?? new Date()
     const today = dayKey(now)
 
     // 1. «Заплановані» — признак starts_at > now(), статус не меняется; открывшиеся сегодня получают уведомление
     const activated = await tx.select({ id: enrollments.id, userId: enrollments.userId, subjectId: enrollments.subjectId, dueAt: enrollments.dueAt }).from(enrollments)
-      .where(and(eq(enrollments.status, 'not_started'), isNull(enrollments.cancelledAt), lte(enrollments.startsAt, now), sql`${enrollments.startsAt} > now() - interval '1 day'`))
+      .where(and(eq(enrollments.status, 'not_started'), isNull(enrollments.cancelledAt), lte(enrollments.startsAt, now), sql`${enrollments.startsAt} > ${now.toISOString()}::timestamptz - interval '1 day'`))
     for (const a of activated) {
       const [c] = await tx.select({ title: courses.title }).from(courses).where(eq(courses.id, a.subjectId))
       if (await enqueueNotification(tx, { tenantId, userId: a.userId, code: 'assignment_created', payload: { course: c?.title ?? '', due: a.dueAt?.toISOString() ?? null, enrollmentId: a.id }, dedupKey: `assignment_created:${a.id}` })) stats.activated++
@@ -56,6 +62,9 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
     const [tenantRow] = await tx.select({ settings: tenants.settings }).from(tenants).where(eq(tenants.id, tenantId))
     // Автозакрытие по сроку (эталон: «автоматично завершені завдання після закінчення терміну»): через N дней просрочки → failed + expired_at
     const autoCloseAfterDays = ((tenantRow?.settings ?? {}) as { learning?: { autoCloseAfterDays?: number } }).learning?.autoCloseAfterDays ?? 14
+    // Кто сегодня в отсутствии (docs/v2/38 §7.14): одним запросом на проход, а не на запись.
+    // Ведёт выборку журнал отсутствий «на сегодня» — он мал, список людей прохода не нужен
+    const absent = await peopleAbsentOn(tx, tenantId, now)
 
     for (const { e, courseTitle, reminders, fullName } of active) {
       // Модель напоминаний Г-15.1: beforeDueDays[], onDueDate, afterDueEveryDays × afterDueMaxCount, escalateToManagerAfterDays
@@ -70,12 +79,18 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
       if (r.enabled === false) continue
 
       const open = e.status === 'not_started' || e.status === 'in_progress'
-      if (daysLeft > 0 && r.beforeDueDays.includes(daysLeft) && open) {
-        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_due_soon', channel, payload, dedupKey: `due_soon:${e.id}:${today}` })) stats.remindered++
+      // Человек в отсутствии — напоминание ему не уходит (docs/v2/38 §13 к. 10); просрочка,
+      // автозакрытие и эскалация руководителю считаются как обычно
+      const quiet = absent.has(e.userId)
+      const remind = async (code: string, dedupKey: string) => {
+        if (quiet) {
+          stats.muted++
+          return
+        }
+        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code, channel, payload, dedupKey })) stats.remindered++
       }
-      if (daysLeft === 0 && r.onDueDate && open) {
-        if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_due_today', channel, payload, dedupKey: `due_today:${e.id}:${today}` })) stats.remindered++
-      }
+      if (daysLeft > 0 && r.beforeDueDays.includes(daysLeft) && open) await remind('enrollment_due_soon', `due_soon:${e.id}:${today}`)
+      if (daysLeft === 0 && r.onDueDate && open) await remind('enrollment_due_today', `due_today:${e.id}:${today}`)
       if (daysLeft < 0) {
         const daysOver = -daysLeft
         if (open && daysOver === 1) {
@@ -95,7 +110,7 @@ export async function runDueScan(tenantId: string): Promise<{ activated: number,
         // После срока — каждые N дней, не больше M раз (после пятого вопрос решает руководитель, а не бот)
         const every = r.afterDueEveryDays
         if (open && every && daysOver % every === 0 && daysOver / every <= r.afterDueMaxCount) {
-          if (await enqueueNotification(tx, { tenantId, userId: e.userId, code: 'enrollment_overdue', channel, payload, dedupKey: `overdue:${e.id}:d${daysOver}` })) stats.remindered++
+          await remind('enrollment_overdue', `overdue:${e.id}:d${daysOver}`)
         }
         // Эскалация руководителю — один раз на запись, когда просрочка достигла порога
         const escalate = r.escalateToManagerAfterDays

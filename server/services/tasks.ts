@@ -429,14 +429,22 @@ export async function applyCsv(ctx: Ctx, id: string, jobId: string): Promise<Csv
   let withDates = 0
   if (res.subjectType === 'course') {
     await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+      const withDue: string[] = []
       for (const row of res.rows) {
         if (!row.dueAt && !row.startsAt) continue
         const upd = await tx.update(enrollments).set({
-          ...(row.dueAt ? { dueAt: new Date(row.dueAt) } : {}),
+          // Срок из файла поставил человек — прежняя причина сдвига к нему не относится
+          ...(row.dueAt ? { dueAt: new Date(row.dueAt), deadlineShiftedReason: null } : {}),
           ...(row.startsAt ? { startsAt: new Date(row.startsAt) } : {}),
           updatedAt: new Date(),
         }).where(and(eq(enrollments.assignmentId, id), eq(enrollments.userId, row.userId!), isNull(enrollments.cancelledAt))).returning({ id: enrollments.id })
         withDates += upd.length
+        if (row.dueAt) withDue.push(...upd.map(u => u.id))
+      }
+      // docs/v2/38 §7.14: срок из файла тоже не ставится на дни отсутствия — та же проверка, что при раскрытии
+      if (withDue.length) {
+        const { shiftDeadlinesForAbsences } = await import('./absences')
+        await shiftDeadlinesForAbsences(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId }, { enrollmentIds: withDue, trigger: 'assignment' })
       }
     })
   }

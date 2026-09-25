@@ -85,6 +85,7 @@
 | POST | `/auth/password/login` | `{email, password}` (если включено политикой `passwords.loginEnabled`, иначе 403 `password_login_disabled`); ответ `{requiresTenantSelect, mustChangePassword}` либо `selectToken` + `tenants`; N неудач → 429 |
 | POST | `/me/password` | `{currentPassword?, password}` — свой пароль; текущий обязателен, если он был (403 `wrong_current`), кроме восстановления (docs/33 D-021): без текущего — после входа по коду (e-mail всегда, телефон при `passwords.allowPhoneRecovery`), при `passwords.disableRecovery` — 403 `recovery_disabled`; `/auth/me` отдаёт `user.canRecoverPassword`; остальные сессии закрываются |
 | POST | `/auth/invite/accept` | `{token}` → активация и сессия; мест сотрудников нет — `409 limit_exceeded` (`v2/35` §7.5), ссылка при этом не сгорает |
+| GET | `/public/invite/:token` | `[дополнено]` Превью сторінки `/invite` перед входом: `{tenantName}`, без сесії і без побічних ефектів; `hitRateLimit` — 30 переглядів за 10 минут с адреса, иначе `429 rate.too_many`; неизвестный, протухший (48 часов) или уже принятый токен — тот же `401 invite_invalid`, что у `POST /auth/invite/accept` |
 | POST | `/auth/logout` | текущая сессия |
 | POST | `/auth/logout-all` | все сессии пользователя |
 | GET | `/auth/me` | профиль, `activeRole`, `roles` (все действующие — для переключателя), `scopes` активной роли, настройки тенанта (с PR-39 — `tenant.contentFooter`, `tenant.logoMediaId` для колонтитула материалов) |

@@ -64,6 +64,11 @@
     "password": "Password",
     "formHidden": "This space allows sign-in only with the corporate Google account."
   },
+  "invite": {
+    "loading": "Checking the invitation…",
+    "toSpace": "You've been invited to the space «{name}»",
+    "invalid": "This invitation has expired. Please contact your administrator"
+  },
   "home": {
     "logout": "Sign out",
     "adminLink": "Manage",

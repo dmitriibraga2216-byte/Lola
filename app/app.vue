@@ -7,7 +7,7 @@ const { t, locale, mergeLocaleMessage, setLocale } = useI18n()
 const { me, stopImpersonation, stopPreview } = useAuth()
 const { api } = useApi()
 const route = useRoute()
-const isPublic = computed(() => route.path.startsWith('/login') || route.path.startsWith('/ops') || route.path.startsWith('/c/') || route.path.startsWith('/m/'))
+const isPublic = computed(() => route.path.startsWith('/login') || route.path.startsWith('/ops') || route.path.startsWith('/c/') || route.path.startsWith('/m/') || route.path.startsWith('/invite'))
 
 const accentVar = computed(() => `var(--color-${me.value?.tenant?.accent ?? 'sun'})`)
 // Текст на акценте: на солнце — чернила, на бирюзе/коралле — их глубокий тон, на чернилах — беж

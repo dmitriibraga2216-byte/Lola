@@ -1,6 +1,8 @@
 /** Гард: без сессии — на /login; с сессией /login не показываем. */
 export default defineNuxtRouteMiddleware(async (to) => {
-  const publicPages = new Set(['/login', '/ops'])
+  // /invite — ссылка-приглашение (docs/01 §1.5 «для первого входу»): людина ще без сесії,
+  // редірект на /login показав би форму входу замість завершення запрошення (PR-16 тут спіткнувся)
+  const publicPages = new Set(['/login', '/ops', '/invite'])
   const { me, loaded, fetchMe } = useAuth()
 
   if (!loaded.value) await fetchMe()
@@ -16,7 +18,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!me.value && !publicPages.has(to.path)) {
     return navigateTo('/login')
   }
-  if (me.value && to.path === '/login') {
+  if (me.value && (to.path === '/login' || to.path === '/invite')) {
     return navigateTo('/')
   }
 })

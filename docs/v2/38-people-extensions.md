@@ -336,7 +336,7 @@ create index idx_person_rating_snapshots_tenant on person_rating_snapshots (tena
 > уникальный `uq_person_rating_current (tenant_id, user_id) where is_current` — «текущий» снимок
 > ровно один схемой, а не кодом; проверки слагаемых по пределам (`person_rating_parts_chk`: основа
 > 0…100, бонусы 0…10) и порядка окна. У «не рассчитан» текущего снимка нет вовсе: `base_pct` и
-> `total_pct` — `not null`, а ноль значил бы «всё провалил» (§7.2). Миграция — `0095_v2_person_rating`.
+> `total_pct` — `not null`, а ноль значил бы «всё провалил» (§7.2). Миграция — `0094_v2_person_rating`.
 Доступ — только через `withTenant`.
 
 ## 4. Состояния и переходы

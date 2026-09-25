@@ -3,21 +3,34 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const { parseImportFile, validateImport, applyImport, getImportJob, buildImportReport, buildImportTemplate }
   = await import('../../server/services/importPeople')
+const { invalidateLimits } = await import('../../server/services/tenantLimits')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 
 let tenantId: string
 let actorId: string
 const PHONE_PREFIX = '+38099' // тестовый диапазон, чистится в afterAll
+/** Переопределение мест «Каппі» до теста: `undefined` — строки `tenant_limits` не было. */
+let seatsBefore: number | null | undefined
 
 beforeAll(async () => {
   const [t] = await admin`select id from tenants where slug = 'kappi'`
   tenantId = t!.id as string
   const [a] = await admin`select id from users where tenant_id = ${tenantId} and phone = '+380661864742'`
   actorId = a!.id as string
+  // Импорт целиком упирается в места сотрудников (docs/v2/35 §12, fix-seat-limit): 460 новых
+  // людей на пробном тарифе «Каппі» (30 мест) — законный отказ. Здесь проверяется конвейер
+  // импорта, а не лимит, поэтому тенанту на время файла даны места с запасом.
+  const [lim] = await admin`select users from tenant_limits where tenant_id = ${tenantId}`
+  seatsBefore = lim ? (lim.users as number | null) : undefined
+  await admin`insert into tenant_limits (tenant_id, users) values (${tenantId}, 100000) on conflict (tenant_id) do update set users = 100000`
+  invalidateLimits(tenantId)
 })
 
 afterAll(async () => {
+  if (seatsBefore === undefined) await admin`delete from tenant_limits where tenant_id = ${tenantId}`
+  else await admin`update tenant_limits set users = ${seatsBefore} where tenant_id = ${tenantId}`
+  invalidateLimits(tenantId)
   await admin`delete from users where tenant_id = ${tenantId} and phone like ${`${PHONE_PREFIX}%`}`
   await admin`delete from import_jobs where tenant_id = ${tenantId}`
   await admin`delete from cities where tenant_id = ${tenantId} and name = 'Тест-Місто'`

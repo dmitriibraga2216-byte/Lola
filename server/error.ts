@@ -6,10 +6,15 @@ import * as Sentry from '@sentry/node'
  * Единый формат ошибок API (docs/04-api.md §4.1): { error: { code, message, details? } }.
  * createError({ data: { code, message } }) из requireScope и т.п. приводится к нему;
  * непредвиденные ошибки — 500 с trace_id, без stack наружу.
+ *
+ * Ожидаемый отказ инфраструктуры с понятным текстом (`data.expose`, например `503
+ * limit.check_failed` — проверку лимита не удалось выполнить, операция не сделана) отдаёт свой код
+ * и текст, иначе человек увидел бы «Щось пішло не так» вместо «спробуйте ще раз за хвилину».
+ * Логируется он так же, как непредвиденный.
  */
 const handler: NitroErrorHandler = (error, event) => {
   const status = error.statusCode || 500
-  const data = (error.data ?? {}) as { code?: string, message?: string, details?: Record<string, unknown> }
+  const data = (error.data ?? {}) as { code?: string, message?: string, details?: Record<string, unknown>, expose?: boolean }
 
   if (!event.path.startsWith('/api/')) {
     event.node.res.statusCode = status
@@ -25,7 +30,9 @@ const handler: NitroErrorHandler = (error, event) => {
     // Структурный лог с trace_id/tenant_id/user_id (docs/06 §6.7)
     console.error(JSON.stringify({ level: 'error', trace_id: traceId, tenant_id: auth?.tenantId ?? null, user_id: auth?.userId ?? null, path: event.path, message: error.message, stack: error.stack?.split('\n').slice(0, 6).join(' | ') }))
     if (process.env.SENTRY_DSN) Sentry.captureException(error, { tags: { trace_id: traceId, tenant_id: auth?.tenantId ?? 'none' }, user: auth?.userId ? { id: auth.userId } : undefined })
-    body = { error: { code: 'internal', message: 'Щось пішло не так', details: { traceId } } }
+    body = data.expose && data.code && data.message
+      ? { error: { code: data.code, message: data.message, details: { ...data.details, traceId } } }
+      : { error: { code: 'internal', message: 'Щось пішло не так', details: { traceId } } }
   }
   else {
     body = {

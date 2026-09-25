@@ -574,7 +574,7 @@ withdrawn ──reopen─────→ active
 | GET | `/candidates/:id/scores` | `?kind=&history=true` | список | `404` |
 | POST | `/candidates/:id/assign` | `{course_ids[], params{}}` | созданные назначения | `404`, `409 assignment.exists` |
 | POST | `/candidates/:id/invite` | `{channels[]}` | `{sent_at}` | `429 invite.too_often`, `422 contact.missing` |
-| POST | `/candidates/:id/hire` | `{location_id, position_id, start_date, org_unit_id?, mentor_id?, onboarding_course_ids[]}` | сотрудник | `409 limit.users_exceeded`, `409 candidate.not_active`, `422` |
+| POST | `/candidates/:id/hire` | `{location_id, position_id, start_date, org_unit_id?, mentor_id?, onboarding_course_ids[]}` | сотрудник | `409 limit_exceeded` с `details.axis=users_active` (было `limit.users_exceeded` — отменён `44` В-16, приведено fix-seat-limit), `409 candidate.not_active`, `422` |
 | POST | `/candidates/:id/reject` | `{reason_code, reason_text?, notify}` | кандидат | `409 candidate.not_active`, `422 reason.required` |
 | POST | `/candidates/:id/archive` | `{reason_text?}` | кандидат | `409` |
 | POST | `/candidates/:id/reopen` | `{reason_text}` | кандидат | `403`, `409 consent.expired` |

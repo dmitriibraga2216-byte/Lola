@@ -20,7 +20,8 @@ import { applyPositionRoles } from './positionRoleMap'
 import { levelLabel } from './development'
 import type { CompetencyLevel } from './development'
 import { studyHistory } from './reportsExtra'
-import { EMPLOYEES_ONLY, employeeOnly, employees } from './repo/people'
+import { EMPLOYEES_ONLY, employeeOnly, employees, holdsSeat } from './repo/people'
+import { LimitCheckFailedError, LimitExceededError, assertSeatsWithinLimit } from './tenantLimits'
 import { STAGE_ON_HIRE } from '../../shared/enums'
 import type { z } from 'zod'
 import type { PersonCreateInput, PersonUpdateInput, peopleFilterSchema, personListQuerySchema } from '../../shared/schemas/people'
@@ -317,6 +318,10 @@ export async function isLastAdmin(tx: TenantTx, userId: string): Promise<boolean
 
 export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    // Новый сотрудник заводится приглашённым и займёт место первым входом, но при исчерпанном
+    // лимите приглашение отклоняется уже здесь (docs/v2/35 §7.4) — в этой же транзакции, до
+    // вставки: сбой проверки — отказ, человек не создаётся. Заблокированному место не нужно.
+    await assertSeatsWithinLimit(tx, ctx.tenantId, input.isBlocked ? 0 : 1)
     const parts = splitName(input)
     // Метки человека — область `user` (docs/16 §14.2): неизвестные заводятся в справочнике
     const personTags = await ensureTags(tx, ctx.tenantId, 'user', input.tags)
@@ -372,6 +377,10 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
       if (await isLastAdmin(tx, id)) return { lastAdmin: true as const }
       if (await isLastOwner(tx, id)) return { lastOwner: true as const }
     }
+    // Восстановление из архива (`status: 'active'`) и снятие блокировки правкой карточки —
+    // активация: место проверяется здесь же, до записи (docs/v2/35 §7.5)
+    const afterSeat = { kind: before.kind, status: input.status ?? before.status, isBlocked: input.isBlocked ?? before.isBlocked }
+    if (holdsSeat(afterSeat) && !holdsSeat(before)) await assertSeatsWithinLimit(tx, ctx.tenantId, 1)
     const nameParts = (input.lastName !== undefined || input.firstName !== undefined || input.middleName !== undefined || input.fullName !== undefined)
       ? splitName({ fullName: input.fullName, lastName: input.lastName ?? before.lastName ?? undefined, firstName: input.firstName ?? before.firstName ?? undefined, middleName: input.middleName === undefined ? before.middleName : input.middleName })
       : null
@@ -437,8 +446,12 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
 /** Приглашение: одноразовый токен 48 часов; отдаём ссылку (доставка каналами — этап 4). */
 export async function createInvitation(ctx: Ctx, userId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [person] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId))
+    const [person] = await tx.select({ id: users.id, kind: users.kind, status: users.status, isBlocked: users.isBlocked }).from(users).where(eq(users.id, userId))
     if (!person) return null
+    // Принятое приглашение активирует человека (docs/01 §1.6) — в том числе приглашённого из
+    // архива. При исчерпанном лимите приглашение не отправляется (docs/v2/35 §7.4); тем, кто уже
+    // на месте, и заблокированным (войти не смогут) место не нужно.
+    if (!holdsSeat(person) && holdsSeat({ ...person, status: 'active' })) await assertSeatsWithinLimit(tx, ctx.tenantId, 1)
 
     const token = randomBytes(24).toString('base64url')
     await tx.insert(invitations).values({
@@ -591,13 +604,18 @@ export async function assignRole(ctx: Ctx, userId: string, input: {
 
 export type BlockResult = { ok: true } | { ok: false, code: 'not_found' | 'last_admin' | 'last_owner' }
 
-/** Блокировка запрещает вход, обучение не снимает (docs/16 §7.4). */
+/**
+ * Блокировка запрещает вход, обучение не снимает (docs/16 §7.4). Блокировка освобождает место
+ * немедленно; разблокировка ставит `status = 'active'` (в том числе архивному) и потому снова
+ * проверяет место — в этой же транзакции, до записи (docs/v2/35 §7.5, §13 к. 1).
+ */
 export async function setBlocked(ctx: Ctx, userId: string, blocked: boolean): Promise<BlockResult> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const [u] = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.id, userId))
+    const [u] = await tx.select({ id: users.id, fullName: users.fullName, kind: users.kind, status: users.status, isBlocked: users.isBlocked }).from(users).where(eq(users.id, userId))
     if (!u) return { ok: false as const, code: 'not_found' as const }
     if (blocked && await isLastAdmin(tx, userId)) return { ok: false as const, code: 'last_admin' as const }
     if (blocked && await isLastOwner(tx, userId)) return { ok: false as const, code: 'last_owner' as const }
+    if (!blocked && !holdsSeat(u) && holdsSeat({ ...u, status: 'active', isBlocked: false })) await assertSeatsWithinLimit(tx, ctx.tenantId, 1)
     await tx.update(users).set({ isBlocked: blocked, status: blocked ? 'suspended' : 'active', updatedAt: new Date() }).where(eq(users.id, userId))
     if (blocked) await tx.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: blocked ? 'people.block' : 'people.unblock', entity: 'user', entityId: userId })
@@ -956,7 +974,9 @@ export async function bulkPeople(ctx: Ctx, input: BulkInput, opts: { ratingArea?
       }
     }
     catch (err) {
-      errors.push({ id, code: String((err as Error).message ?? err).slice(0, 80) })
+      // Отказ по местам (приглашение при исчерпанном лимите) — стабильным кодом, а не текстом
+      const code = err instanceof LimitExceededError || err instanceof LimitCheckFailedError ? err.code : String((err as Error).message ?? err).slice(0, 80)
+      errors.push({ id, code })
     }
   }
   return { ok: true, done, errors }

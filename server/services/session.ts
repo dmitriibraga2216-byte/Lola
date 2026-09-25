@@ -11,6 +11,8 @@ import { CANDIDATE_ACCESS_EXPIRED_REDIRECT, CandidateAccessExpiredError, assertC
 import type { CallbackResult } from './oauth'
 import { logSecurity } from './securityLog'
 import { TenantClosedError, tenantById } from './tenantResolve'
+import { holdsSeat } from './repo/people'
+import { assertSeatsWithinLimit, seatText } from './tenantLimits'
 
 /**
  * Сессии (docs/01-roles.md §1.5): токен — 32 байта, в БД только sha256-хеш,
@@ -55,8 +57,20 @@ export interface CreatedSession {
   twoFactor: TwoFactorStep | null
 }
 
-/** Первый вход активирует приглашённого (жизненный цикл, docs/01-roles.md §1.6) — только полноценный вход. */
-async function markSignedIn(tx: TenantTx, userId: string): Promise<void> {
+/**
+ * Первый вход активирует приглашённого (жизненный цикл, docs/01-roles.md §1.6) — только
+ * полноценный вход. Активация и есть момент, когда сотрудник занимает место по тарифу
+ * (docs/25 §10: проверка лимита — «при активации»; docs/v2/35 §13 к. 1): приглашение обещает
+ * место, вход его занимает. Поэтому здесь та же проверка мест, что у разблокировки и найма, в
+ * транзакции самого входа — иначе приглашённые по одному, пока свободно одно место, заходили бы
+ * все. Мест нет — сессия не создаётся, человеку — «зверніться до адміністратора», админам —
+ * `limit_exceeded`. Уже активного вход не касается: «вхід не блокується» (§7.4) — про него.
+ */
+async function markSignedIn(tx: TenantTx, tenantId: string, userId: string): Promise<void> {
+  const [u] = await tx.select({ kind: users.kind, status: users.status, isBlocked: users.isBlocked }).from(users).where(eq(users.id, userId))
+  if (u && !holdsSeat(u) && holdsSeat({ ...u, status: 'active' })) {
+    await assertSeatsWithinLimit(tx, tenantId, 1, { message: c => seatText('loginBlocked', { used: c.used, limit: c.limit ?? '∞' }) })
+  }
   await tx.update(users)
     .set({ status: 'active', lastSeenAt: new Date() })
     .where(eq(users.id, userId))
@@ -104,7 +118,7 @@ export async function createSession(input: {
       expiresAt,
     }).returning({ id: sessions.id })
 
-    if (!twoFactor) await markSignedIn(tx, input.userId)
+    if (!twoFactor) await markSignedIn(tx, input.tenantId, input.userId)
     return row!.id
   })
 
@@ -126,7 +140,7 @@ export async function completeTwoFactor(auth: AuthContext): Promise<{ token: str
       .where(and(eq(sessions.id, auth.sessionId), eq(sessions.twoFactorPending, true), isNull(sessions.revokedAt), sql`${sessions.expiresAt} > now()`))
       .returning({ id: sessions.id })
     if (!rows.length) return null
-    await markSignedIn(tx, auth.userId)
+    await markSignedIn(tx, auth.tenantId, auth.userId)
     return { token, expiresAt }
   })
 }

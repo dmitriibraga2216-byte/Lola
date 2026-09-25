@@ -84,7 +84,7 @@
 | POST | `/auth/tenant/select` | `{tenantId}` → сессия в выбранном тенанте; `twoFactor` — как у `/auth/otp/verify` |
 | POST | `/auth/password/login` | `{email, password}` (если включено политикой `passwords.loginEnabled`, иначе 403 `password_login_disabled`); ответ `{requiresTenantSelect, mustChangePassword}` либо `selectToken` + `tenants`; N неудач → 429 |
 | POST | `/me/password` | `{currentPassword?, password}` — свой пароль; текущий обязателен, если он был (403 `wrong_current`), кроме восстановления (docs/33 D-021): без текущего — после входа по коду (e-mail всегда, телефон при `passwords.allowPhoneRecovery`), при `passwords.disableRecovery` — 403 `recovery_disabled`; `/auth/me` отдаёт `user.canRecoverPassword`; остальные сессии закрываются |
-| POST | `/auth/invite/accept` | `{token}` → активация и сессия |
+| POST | `/auth/invite/accept` | `{token}` → активация и сессия; мест сотрудников нет — `409 limit_exceeded` (`v2/35` §7.5), ссылка при этом не сгорает |
 | POST | `/auth/logout` | текущая сессия |
 | POST | `/auth/logout-all` | все сессии пользователя |
 | GET | `/auth/me` | профиль, `activeRole`, `roles` (все действующие — для переключателя), `scopes` активной роли, настройки тенанта (с PR-39 — `tenant.contentFooter`, `tenant.logoMediaId` для колонтитула материалов) |
@@ -298,11 +298,23 @@
 | GET/PUT | `/absence-norms` | нормы отпуска и больничного (`v2/38` §3.6, §10; блок настроек компании `v2/39` П-24.1, PR-39): `GET ?year=` → норма компании и переопределения точек области права; `PUT {scopeType: tenant\|location\|user, scopeId, year, vacationDays?, sickDays?, reason?}` — опущенное поле не трогается, `null` — наследовать, оба `null` снимают переопределение; скоуп `person.absence.manage`: компания — только на весь тенант, точка и человек — в области точки (`403 forbidden`); `422 reason_required` для человека; чужая точка или человек — 404; `409 absence_norm.self_edit` — свою собственную индивидуальную норму править нельзя даже с правом (тот же принцип, что и `409 bonus.self_grant` у бонусов, `21` §14.9) |
 | POST | `/people/import` | CSV → `importJobId`, файл проверяется целиком |
 | GET | `/people/import/:id` | протокол: создать N, обновить M, ошибок K с номерами строк |
-| POST | `/people/import/:id/apply` | применить (всё или ничего) |
+| POST | `/people/import/:id/apply` | применить (всё или ничего); новых людей больше, чем свободных мест, — `409 limit_exceeded`, не применяется ни одна строка (`v2/35` §12) |
 | CRUD | `/org-units`, `/locations`, `/positions`, `/position-levels`, `/cities`, `/user-groups` | справочники; у первых пяти нет отдельного `GET /:id` (старый путь для GET/POST/PATCH/DELETE первых пяти — общий `/refs/:kind`, до конца R1); `/user-groups` уже свой |
 | CRUD | `/tags` | `GET ?scope=` (people.view, со счётчиком использований), `POST {name, scope, description?, color?}` / `PATCH /:id` / `DELETE /:id` (settings.tenant); 409 `duplicate` \| `in_use`; `/refs/tags?scope=user` — для форм людей |
 | GET | `/org-conflicts` | `?state=open\|resolved\|all&kind=&from&to&userId` — протокол конфликтов оргструктуры (people.edit) |
 | POST | `/org-conflicts/:id/resolve` | `{action: acknowledge\|close_placement, placementId?, comment?}`; 409 `already_resolved`; `GET /org-conflicts/:id/placements` — открытые размещения человека |
+
+**Места сотрудников** (`v2/35` §7.4, §7.5, §10, §12; fix-seat-limit). Ось `users_active` проверяет каждая
+ручка, которая добавляет активного сотрудника или обещает ему место: `POST /people`; `PATCH /people/:id` —
+восстановление из архива (`status: active`) и снятие блокировки (`isBlocked: false`); `POST /people/:id/unblock`;
+`POST /people/:id/invite` и `POST /people/bulk` с `action: invite` (в `errors[].code` — `limit_exceeded`);
+`POST /people/hire`; импорт — `POST /people/import/:id/apply`, `POST /sync/people`,
+`POST /integrations/google/import-people` (целиком: не хватает мест — не применяется ни одна строка);
+`POST /candidates/:id/hire`; первый вход приглашённого — `POST /auth/otp/verify`, `/auth/tenant/select`,
+`/auth/password/login`, `/auth/invite/accept`, `/auth/two-factor/verify`. Мест нет — `409 limit_exceeded` с
+`details: {axis: 'users_active', used, limit}`; проверку не удалось выполнить (сбой базы, у тенанта нет строки
+тарифа) — `503 limit.check_failed` с понятным текстом, операция не выполнена, повтор имеет смысл. Вход того,
+кто место уже занимает, лимитом не проверяется.
 
 ## 4.12 Развитие и оценка
 
@@ -709,7 +721,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | GET/POST | `/candidate-statuses` | справочник колонок канбана со счётчиком кандидатов; создание — `candidate.status.manage`, `409 code.exists` |
 | PATCH/DELETE | `/candidate-statuses/:id` | правка и удаление; `403 status.system`, `409 candidate_status.in_use` со списком кандидатов внутри |
 | GET | `/candidates/board` | канбан: активные колонки, в каждой страница по 50 карточек, общее число и курсор; с `statusId` и `cursor` — следующая страница **одной** колонки (`candidate.view`); чужая колонка — `404` |
-| POST | `/candidates/:id/hire` | найм одной транзакцией: `kind='employee'`, размещение, наставник, этап онбординга, курсы (`candidate.hire`); `409 candidate.not_active`, `409 limit.users_exceeded` (в деталях — продлённое на 14 дней право входа, `28` §12.5) |
+| POST | `/candidates/:id/hire` | найм одной транзакцией: `kind='employee'`, размещение, наставник, этап онбординга, курсы (`candidate.hire`); `409 candidate.not_active`, `409 limit_exceeded` с `details.axis=users_active` (в деталях — ещё продлённое на 14 дней право входа `accessUntil`, `28` §12.5; прежний `limit.users_exceeded` отменён `v2/44` В-16), `503 limit.check_failed` |
 | POST | `/candidates/:id/reject` | отказ с причиной из перечня (`candidate.decide`); `422 reason.required`, `409 candidate.not_active` |
 | POST | `/candidates/:id/archive` | архивация вручную; `?withdraw=true` — самоотвод кандидата (`candidate.decide`) |
 | POST | `/candidates/:id/reopen` | возврат в воронку с причиной (`candidate.delete` — решение администратора); `409 consent.expired`, из `hired` — `404`: сотрудник уже не кандидат |

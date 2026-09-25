@@ -5148,6 +5148,13 @@
   "billing": {
     "limitExceeded": "Limit reached: {axis} — {used} of {limit}.",
     "limitWarning": "Limit is close: {axis} — {used} of {limit}.",
+    "limitCheckFailed": "Could not verify the plan limit, so the change was not saved. Try again in a minute; if the error repeats, contact Lola support.",
+    "seats": {
+      "loginBlocked": "You can't sign in yet: your company has used up the active employee limit of its plan ({used} of {limit}). Contact your administrator — they can free up a seat or change the plan.",
+      "importBlocked": "Active employee limit: {free} free of {limit}, while the file has {rows} new people. The import was not applied: free up seats or change the plan and run it again.",
+      "hireBlocked": "Active employee limit reached ({used} of {limit}): the hire was not made and the person remains a candidate. Free up a seat or change the plan and repeat the hire.",
+      "hireAccessExtended": "The candidate's access has been extended by {days} days."
+    },
     "axis": {
       "users_active": "Employees",
       "candidates_active": "Candidates",

@@ -14,6 +14,7 @@ import type {
 import { candidateOnly, candidates as candidatesQuery } from './repo/people'
 import { COLUMNS, canMove, maskRow, scopeCond } from './candidates'
 import type { CandidateRow, Viewer } from './candidates'
+import { closeCandidateSessionsTx } from './candidateAccess'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { emitWebhook } from './webhooks'
@@ -103,6 +104,9 @@ export async function changeState(
       ...(target ? { candidateStatusId: target.id } : {}),
       updatedAt: new Date(),
     }).where(and(eq(users.id, id), candidateOnly()))
+    // Отказ, архив, самоотвод закрывают доступ (§4.2, §7.7): действующие сессии гаснут той же
+    // транзакцией, а не «когда-нибудь» — иначе вход закрыт, а человек всё ещё внутри
+    if (to !== 'active') await closeCandidateSessionsTx(tx, v.tenantId, [id], { by: v.actorId, state: to })
 
     if (target && target.id !== row.statusId) {
       await tx.insert(candidateStatusHistory).values({
@@ -391,6 +395,8 @@ export async function anonymizeCandidate(tx: TenantTx, tenantId: string, id: str
     updatedAt: new Date(),
   }).where(and(eq(users.id, id), candidateOnly(), isNull(users.anonymizedAt))).returning({ id: users.id })
   if (!row) return false
+  // Стёртый — архивный (§7.9, §12.7 «доступ закрывается»): его сессии гаснут вместе с данными
+  await closeCandidateSessionsTx(tx, tenantId, [id], { by: actorId, state: 'archived' })
   await tx.delete(candidateComments).where(eq(candidateComments.candidateId, id))
   // Записи ИИ-собеседования стираются тем же проходом и в той же транзакции (`docs/v2/30` §7.9):
   // аудио, расшифровки, обоснования и цитаты, вход и выход модели — второго механизма сроков ПД нет

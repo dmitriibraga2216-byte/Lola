@@ -35,6 +35,7 @@
     "chooseSpace": "Choose a space",
     "google": "Sign in with Google",
     "errors": {
+      "candidate_access_expired": "Your access period has ended. Please contact your recruiter.",
       "google_no_user": "This Google account is not linked to any employee",
       "oauth": "Google sign-in failed. Try again or use your phone"
     },

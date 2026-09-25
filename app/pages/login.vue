@@ -71,6 +71,13 @@ const channel = ref<'telegram' | 'sms' | 'email'>('sms')
 const maskedEmail = ref('')
 const error = ref('')
 const busy = ref(false)
+/**
+ * Текст отказа входа. Закрытый доступ кандидата (docs/v2/28 §7.7) — из словаря, на языке экрана:
+ * сервер отвечает по-украински, а кандидат мог выбрать другой язык. Остальное — как пришло.
+ */
+function loginErrorText(e: { code: string, message: string }): string {
+  return e.code === 'candidate.access_expired' ? t('login.errors.candidate_access_expired') : e.message
+}
 // Вход через Google (docs/09 §9.1): ссылку даёт сервер; тенант — из ?tenant= или единственный на этом хосте
 const route = useRoute()
 const googleAvailable = ref(false)
@@ -84,7 +91,8 @@ onMounted(async () => {
   }
   catch { /* промежуточной сессии нет */ }
   const err = route.query.error as string | undefined
-  if (err) error.value = err === 'google_no_user' ? t('login.errors.google_no_user') : t('login.errors.oauth')
+  // Браузерные входы (Google, кнопка бота) возвращаются сюда с кодом отказа в адресе
+  if (err) error.value = err === 'google_no_user' ? t('login.errors.google_no_user') : err === 'candidate_access_expired' ? t('login.errors.candidate_access_expired') : t('login.errors.oauth')
   try { await rawFetch<unknown>(`/api/v1/auth/google/url?tenant=${encodeURIComponent(tenantSlug.value)}`); googleAvailable.value = true } catch { googleAvailable.value = false }
 })
 async function loginGoogle() {
@@ -143,7 +151,7 @@ async function requestCode(explicitChannel?: 'email') {
     startResendTimer()
   }
   catch (err) {
-    error.value = apiErrorOf(err).message
+    error.value = loginErrorText(apiErrorOf(err))
   }
   finally {
     busy.value = false
@@ -178,7 +186,7 @@ async function verifyCode() {
     const left = (e.details as { attemptsLeft?: number } | undefined)?.attemptsLeft
     error.value = left !== undefined
       ? t('login.codeInvalidLeft', { n: left })
-      : e.message
+      : loginErrorText(e)
     code.value = ''
     nextTick(focusCode)
   }
@@ -205,7 +213,7 @@ async function loginPassword() {
     await fetchMe()
     await navigateTo(res.data.mustChangePassword ? '/learn/profile?password=1' : '/')
   }
-  catch (err) { error.value = apiErrorOf(err).message }
+  catch (err) { error.value = loginErrorText(apiErrorOf(err)) }
   finally { busy.value = false }
 }
 
@@ -222,7 +230,7 @@ async function selectTenant(tenantId: string) {
     await navigateTo('/')
   }
   catch (err) {
-    error.value = apiErrorOf(err).message
+    error.value = loginErrorText(apiErrorOf(err))
   }
   finally {
     busy.value = false

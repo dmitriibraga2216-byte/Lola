@@ -14,7 +14,12 @@ import { CANDIDATE_REJECT_REASONS, CANDIDATE_SCORE_KINDS } from '#shared/enums'
 import type { CandidateScoreKind, CandidateState } from '#shared/enums'
 const { formatDate } = useFormat()
 
-definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'candidate.view' })
+/**
+ * Відкривають ті самі, кого пускає `GET /candidates/:id`: `candidate.view` — рекрутер, HR, керівник
+ * точки; `review.queue` — наставник у межах призначеної йому перевірки (§2, критерій §13 к. 10).
+ * Наставнику сервер віддає картку без контактів, резюме й коментарів: телефон і пошта — «—».
+ */
+definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredAnyScope: ['candidate.view', 'review.queue'] })
 
 const { t } = useI18n()
 const { api } = useApi()
@@ -79,7 +84,10 @@ const TABS = computed<Tab[]>(() => [
   'overview', 'scores',
   ...(hasScope('interview.view') ? ['interview' as const] : []),
   ...(hasScope('summary.view') ? ['summary' as const] : []),
-  'comments', 'history',
+  // Коментарі рекрутерів — лише з `candidate.view` (§3.5): наставнику сервер їх не віддає, і
+  // порожня вкладка казала б «коментарів немає» там, де вони є
+  ...(hasScope('candidate.view') ? ['comments' as const] : []),
+  'history',
 ])
 const tab = ref<Tab>('overview')
 

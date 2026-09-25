@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { inviteAcceptSchema } from '../../../../../shared/schemas/auth'
 import { invitationByTokenHash } from '../../../../services/authLookup'
+import { assertCandidateMayEnter } from '../../../../services/candidateAccess'
 import { createSession, hashToken } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
 import { invitations } from '../../../../db/schema'
@@ -17,6 +18,10 @@ export default defineEventHandler(async (event) => {
   if (!invite || invite.accepted_at || new Date(invite.expires_at) < new Date()) {
     return apiError(event, 401, 'invite_invalid', 'Запрошення недійсне або протухло')
   }
+  // docs/v2/28 §7.7: закрытый вход кандидата отвечает до того, как ссылка потрачена, — иначе
+  // повторный клик показал бы «запрошення протухло» вместо настоящей причины. Сессию то же
+  // правило не выпустит и само (`createSession`), здесь — только порядок.
+  await assertCandidateMayEnter(invite.tenant_id, invite.user_id)
 
   await withTenant(invite.tenant_id, invite.user_id, async (tx) => {
     await tx.update(invitations)

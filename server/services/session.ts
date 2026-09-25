@@ -7,6 +7,7 @@ import { TWO_FACTOR_PENDING_MINUTES, type TwoFactorStep } from '../../shared/dom
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import { sessionByTokenHash } from './authLookup'
 import { defaultRoleOf, effectiveRoles } from './activeRole'
+import { CANDIDATE_ACCESS_EXPIRED_REDIRECT, CandidateAccessExpiredError, assertCandidateMayEnter } from './candidateAccess'
 import type { CallbackResult } from './oauth'
 import { logSecurity } from './securityLog'
 import { TenantClosedError, tenantById } from './tenantResolve'
@@ -72,6 +73,9 @@ export async function createSession(input: {
   // docs/25 §8, §14 п. 10: в приостановленный или удаляемый тенант не входит никто — ни по коду, ни по паролю, ни «от имени»
   const tenant = await tenantById(input.tenantId)
   if (tenant && tenant.status !== 'active') throw new TenantClosedError()
+  // docs/v2/28 §7.7, §13 к. 7: кандидат вне `active` или с истёкшим `access_until` не входит ни одним
+  // путём — все они приходят сюда (services/candidateAccess.ts); 403 `candidate.access_expired`
+  await assertCandidateMayEnter(input.tenantId, input.userId)
   // docs/33 D-021: при скрытой форме входа код и пароль не пускают — только Google, приглашение и «от имени»
   if (input.loginMethod && (OTP_LOGIN_METHODS.includes(input.loginMethod) || input.loginMethod === 'password') && await loginFormHidden(input.tenantId, input.userId)) throw new LoginFormHiddenError()
   // Второй фактор (docs/24 §3.4, PR-39): решается здесь, в единственной точке создания сессии,
@@ -157,7 +161,17 @@ export async function completeSignin(event: H3Event, r: CallbackResult): Promise
   const { clientIp, setSessionCookies } = await import('../utils/authCookies')
   const userAgent = getHeader(event, 'user-agent')
   const ip = clientIp(event)
-  const { token, twoFactor } = await createSession({ tenantId: r.tenantId, userId, userAgent, ip, loginMethod: 'google' })
+  let created: CreatedSession
+  try {
+    created = await createSession({ tenantId: r.tenantId, userId, userAgent, ip, loginMethod: 'google' })
+  }
+  catch (err) {
+    // Браузер пришёл редиректом от провайдера — отказ тоже редиректом, текст покажет экран входа
+    // на языке человека (docs/v2/28 §7.7), а не JSON ошибки вместо страницы
+    if (err instanceof CandidateAccessExpiredError) return { ok: false, userId, redirectTo: CANDIDATE_ACCESS_EXPIRED_REDIRECT }
+    throw err
+  }
+  const { token, twoFactor } = created
   setSessionCookies(event, token)
   // Второй фактор (docs/24 §3.4): вход ещё не завершён — `login.success` пишет подтверждение кода,
   // а человек возвращается на экран входа, к шагу кода

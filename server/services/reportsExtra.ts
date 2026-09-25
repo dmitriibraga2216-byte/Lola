@@ -40,13 +40,15 @@ export type Subject = 'course' | 'program' | 'quiz' | 'workshop' | 'meetup' | 's
 export async function progress(ctx: Ctx, f: Period & { subject?: Subject, subjectId?: string, status?: string, mandatoryOnly?: boolean }) {
   const subject = f.subject ?? 'course'
   const { from, to } = defaultPeriod(f)
+  // Отчёт по штату (П-16.1): кандидат проходит курс и тест вакансии теми же записями, что и
+  // сотрудник (`29` §7.20), — без вида его строки попадали бы и в таблицу, и в воронку.
   const people = (subjectSql: ReturnType<typeof sql>) => sql`
     select r.*, u.full_name, l.name as location, p.name as position
     from (${subjectSql}) r
     join users u on u.id = r.user_id
     left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
     left join locations l on l.id = up.location_id left join positions p on p.id = up.position_id
-    where u.status <> 'archived' ${inScope(f.scope)} ${f.status ? sql`and r.status = ${f.status}` : sql``}
+    where u.status <> 'archived' ${EMPLOYEES_ONLY()} ${inScope(f.scope)} ${f.status ? sql`and r.status = ${f.status}` : sql``}
     order by r.created_at desc limit 1000`
   let rows: Row[] = []
   if (subject === 'course' || subject === 'program') {

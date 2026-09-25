@@ -44,6 +44,16 @@ export function frameJoins(): SQL {
     left join cities ci on ci.id = coalesce(pl.city_id, l.city_id, u.city_id)`
 }
 
+/**
+ * Вид человека строки (`u`): `and u.kind = '…'` — тот самый предикат, который `frameWhere()`
+ * ставит каждому отчёту и журналу (П-16.1, В-8). Отдельным именем он нужен тому, кто берёт из
+ * каркаса не всё, — конструктору отчётов (`reportBuilder.ts`): область видимости и фильтры у него
+ * свои, а вид людей обязан быть тем же. Умолчания нет намеренно: вид называется всегда явно.
+ */
+export function frameKind(kind: UserKind): SQL {
+  return kind === 'candidate' ? CANDIDATES_ONLY('u') : EMPLOYEES_ONLY('u')
+}
+
 type FrameFilter = Partial<Pick<ReportFilter, 'positionIds' | 'orgUnitId' | 'tags' | 'includeArchived' | 'q'>> & { scope?: string[] | null, kind?: UserKind }
 
 /**
@@ -63,7 +73,7 @@ type FrameFilter = Partial<Pick<ReportFilter, 'positionIds' | 'orgUnitId' | 'tag
 export function frameWhere(f: FrameFilter = {}): SQL {
   const kind = f.kind ?? 'employee'
   return sql`
-    ${kind === 'candidate' ? CANDIDATES_ONLY('u') : EMPLOYEES_ONLY('u')}
+    ${frameKind(kind)}
     ${scopeSql(f.scope ?? null, sql`pl.location_id`)}
     ${f.includeArchived || kind === 'candidate' ? sql`` : sql`and u.status <> 'archived'`}
     ${f.positionIds?.length ? sql`and pl.position_id in ${f.positionIds}` : sql``}

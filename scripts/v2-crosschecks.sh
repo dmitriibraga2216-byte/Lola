@@ -149,6 +149,11 @@ check1_stage_codes() {
 # но самый важный инвариант П-16.1: **там, где `users` — ведущая таблица выборки, вид людей
 # назван явно**. Соединения оставлены тесту намеренно, чтобы два механизма не разошлись в
 # трактовке; поимённый allowlist не дублируется, а читается из самого теста.
+#
+# Чего не видит ни скрипт, ни тест: запрос, собранный из фрагментов, у которых `from` и `where`
+# живут в разных местах, — конструктор отчётов (`reportBuilder.ts`, `ENTITIES`). Его держит
+# tests/unit/report-builder-kind.spec.ts: проверка идёт по итоговому SQL каждой сущности, и
+# на коде до исправления она красная (три сущности без вида с PR #91).
 check2_users_kind_filter() {
   local repo_file="server/services/repo/people.ts"
   if [ ! -f "$repo_file" ]; then
@@ -165,9 +170,10 @@ SPEC = pathlib.Path('tests/integration/users-kind-filter.spec.ts')
 
 # users как ведущая таблица выборки: Drizzle .from(users) и сырое `from users`.
 HIT = re.compile(r'\.from\((?:\w+\.)?users\)|\bfrom\s+users\b', re.I)
-# Вид назван явно: имена репозитория, `frameWhere()` (он подставляет EMPLOYEES_ONLY сам) или сам kind.
+# Вид назван явно: имена репозитория, `frameWhere()`/`frameKind()` (подставляют EMPLOYEES_ONLY
+# сами) или сам kind. Список держится в одном виде с FILTERED из users-kind-filter.spec.ts.
 FILTERED = re.compile(r"EMPLOYEES_ONLY|CANDIDATES_ONLY|IS_EMPLOYEE|IS_CANDIDATE|employeeOnly|candidateOnly"
-                      r"|\bemployees\(|\bcandidates\(|frameWhere\(|users\.kind|\b[a-z_]+\.kind\s*=|\bkind\s*=\s*'(?:employee|candidate)'")
+                      r"|\bemployees\(|\bcandidates\(|frameWhere\(|frameKind\(|users\.kind|\b[a-z_]+\.kind\s*=|\bkind\s*=\s*'(?:employee|candidate)'")
 # Выборка одного человека по первичному ключу — фильтровать её по виду бессмысленно (В-8).
 BY_ID = re.compile(r"eq\(users\.id,|inArray\(users\.id,|\$\{users\.id\}\s+in|\b[\w.]*\bid\s*(?:=|in)\s*\(?\$\{", re.I)
 

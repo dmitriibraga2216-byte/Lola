@@ -116,6 +116,7 @@ export async function overdue(ctx: Ctx, f: Filter = {}) {
     left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
     left join locations l on l.id = up.location_id
     where e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now()
+      ${EMPLOYEES_ONLY()}
       ${scopeSql(f.scope ?? null, sql`up.location_id`)}
       ${f.courseId ? sql`and e.subject_id = ${f.courseId}` : sql``}
     order by e.due_at
@@ -143,7 +144,7 @@ export async function attemptsReport(ctx: Ctx, f: Filter = {}) {
     left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
     left join locations l on l.id = up.location_id
     left join positions p on p.id = up.position_id
-    where a.status <> 'in_progress'
+    where a.status <> 'in_progress' ${EMPLOYEES_ONLY()}
       ${f.from ? sql`and a.started_at >= ${f.from}` : sql``}
       ${f.to ? sql`and a.started_at < ${f.to}::date + 1` : sql``}
       ${scopeSql(f.scope ?? null, sql`up.location_id`)}
@@ -186,6 +187,22 @@ export async function personal(ctx: Ctx, userId: string) {
     from certificates ce left join courses c on c.id = ce.course_id where ce.user_id = ${userId} order by ce.issued_at desc
   `)
   return { enrollments, certificates }
+}
+
+/**
+ * Звіт з програм (docs/17 §9): человек, программа, текущий шаг, прогресс, срок, статус.
+ * Жил SQL-ом прямо в ручке `/reports/programs` и без вида людей; переехал сюда, чтобы ручка
+ * стала тонкой (CLAUDE.md правило 6) и отчёт проверялся канарейкой, как соседние.
+ */
+export async function programsReport(ctx: Ctx, scope: string[] | null = null) {
+  return q(ctx, sql`
+    select e.id, u.full_name, p.title, p.id as program_id, e.status, e.progress_pct, e.due_at, e.completed_at,
+           (select n.sort from program_nodes n where n.id = e.current_node_id) as current_step,
+           (select count(*)::int from program_nodes n where n.program_id = p.id and n.node_type = 'item' and n.is_required) as total_steps
+    from program_enrollments e join users u on u.id = e.user_id join programs p on p.id = e.program_id
+    left join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null
+    where e.status <> 'cancelled' ${EMPLOYEES_ONLY()} ${scopeSql(scope, sql`up.location_id`)} order by p.title, u.full_name limit 1000
+  `)
 }
 
 /** По наставникам: сколько проверок, средний срок ответа, доля зачётов. */

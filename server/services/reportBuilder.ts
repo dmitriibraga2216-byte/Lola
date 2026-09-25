@@ -1,12 +1,36 @@
 import { desc, eq, sql } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 import { savedReports, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import type { UserKind } from '../../shared/enums'
 import { scopeSql } from './access'
 import { enqueueNotification } from './notifications'
-import { frameJoins } from './reportFrame'
+import { frameJoins, frameKind } from './reportFrame'
 import { toXlsx } from './reports'
+import { EMPLOYEE } from './repo/people'
 
 interface Ctx { tenantId: string, actorId: string }
+
+/**
+ * Описание сущности конструктора. `kind` — обязательное поле (инвариант 17, П-16.1): вид людей
+ * в строках называется в описании сущности, а предикат — `frameKind()`, тот же, что `frameWhere()`
+ * ставит всем отчётам и журналам, — подставляет `runReport()` в каждый её запрос: в таблицу,
+ * группировку, xlsx и отчёт по расписанию. Сущность без `kind` не проходит typecheck.
+ *   - `'employee'` — отчёт по штату;
+ *   - `'candidate'` — только рекрутинговая сущность: кандидаты видны явно и только там;
+ *   - `null` — строки сущности не люди, и `users` в ней не источник строк (разве что
+ *     `left join` по первичному ключу ради имени).
+ * Итоговый SQL каждой сущности проверяет `tests/unit/report-builder-kind.spec.ts`: `from` живёт
+ * в описании, `where` — в `runReport()`, и сканер исходников (`users-kind-filter.spec.ts`) связи
+ * между ними не видит. Человек строки — `u` (соглашение каркаса `reportFrame.ts`).
+ */
+interface EntityDef {
+  kind: UserKind | null
+  from: SQL
+  fields: Record<string, SQL>
+  filters: Record<string, SQL>
+  tenantCol: SQL
+}
 
 /**
  * Конструктор сводных отчётов (docs/03 §3.26): сущность → поля → фильтры → группировка,
@@ -22,6 +46,7 @@ interface Ctx { tenantId: string, actorId: string }
  */
 export const ENTITIES = {
   people: {
+    kind: EMPLOYEE,
     from: sql`users u ${frameJoins()}`,
     fields: {
       full_name: sql`u.full_name`, phone: sql`u.phone`, status: sql`u.status`, hired_at: sql`u.hired_at`, location: sql`l.name`, position: sql`p.name`,
@@ -32,6 +57,7 @@ export const ENTITIES = {
     tenantCol: sql`u.tenant_id`,
   },
   enrollments: {
+    kind: EMPLOYEE,
     from: sql`enrollments e join users u on u.id = e.user_id join courses c on c.id = e.subject_id ${frameJoins()}`,
     // Пять статусов + признаки: overdue (due_at < now при незавершённом), cancelled_at (снято)
     fields: { full_name: sql`u.full_name`, course: sql`c.title`, status: sql`e.status`, overdue: sql`(e.cancelled_at is null and e.status in ('not_started','in_progress') and e.due_at < now())`, cancelled_at: sql`e.cancelled_at`, progress_pct: sql`e.progress_pct`, due_at: sql`e.due_at`, completed_at: sql`e.completed_at`, location: sql`l.name`, source: sql`e.source` },
@@ -39,12 +65,15 @@ export const ENTITIES = {
     tenantCol: sql`e.tenant_id`,
   },
   attempts: {
+    kind: EMPLOYEE,
     from: sql`attempts a join users u on u.id = a.user_id join quizzes q on q.id = a.quiz_id ${frameJoins()}`,
-    fields: { full_name: sql`u.full_name`, quiz: sql`q.title`, attempt_no: sql`a.attempt_no`, status: sql`a.status`, score: sql`a.score`, passed: sql`a.passed`, started_at: sql`a.started_at`, finished_at: sql`a.finished_at`, location: sql`l.name` },
+    // «Кінець» спроби — `submitted_at`: колонки `attempts.finished_at` нет и не было, поле падало
+    // ошибкой SQL. Ключ поля прежний — его называют сохранённые отчёты.
+    fields: { full_name: sql`u.full_name`, quiz: sql`q.title`, attempt_no: sql`a.attempt_no`, status: sql`a.status`, score: sql`a.score`, passed: sql`a.passed`, started_at: sql`a.started_at`, finished_at: sql`a.submitted_at`, location: sql`l.name` },
     filters: { location_id: sql`pl.location_id`, quiz_id: sql`a.quiz_id`, status: sql`a.status`, from: sql`a.started_at`, to: sql`a.started_at` },
     tenantCol: sql`a.tenant_id`,
   },
-} as const
+} as const satisfies Record<string, EntityDef>
 
 export type Entity = keyof typeof ENTITIES
 
@@ -61,6 +90,9 @@ export async function runReport(ctx: Ctx, spec: ReportSpec, limit = 2000, scope:
   const fields = spec.fields.filter(f => f in ent.fields)
   if (!fields.length) return []
   const where: ReturnType<typeof sql>[] = []
+  // Вид людей (инвариант 17) — первым условием и из описания сущности, а не из запроса: ни забыть
+  // его в новой сущности, ни снять фильтром нельзя.
+  if (ent.kind) where.push(sql`true ${frameKind(ent.kind)}`)
   for (const [k, v] of Object.entries(spec.filters ?? {})) {
     if (v === undefined || v === null || v === '' || !(k in ent.filters)) continue
     const col = (ent.filters as Record<string, ReturnType<typeof sql>>)[k]!

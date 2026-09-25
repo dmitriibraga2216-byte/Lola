@@ -124,6 +124,18 @@ export default defineNitroPlugin(async () => {
       const s = await usageRecalc(tenantId)
       if (s.detached || s.staleFixed || s.countsFixed) console.log(`[library.usage_recalc] ${tenantId}:`, s)
     }))
+    // docs/v2/31 §7.4, §11 (PR-26): «Критичне виправлення» — места с hotfix_auto без людей в
+    // процессе переключаются на хотфикс, авторам — library_hotfix_applied / library_hotfix_blocked
+    await perTenant<{ tenantId: string, moduleId: string, versionId: string }>('library.hotfix_propagate', async (data) => {
+      const { propagateHotfix } = await import('../services/libraryUsages')
+      const s = await propagateHotfix(data.tenantId, data.moduleId, data.versionId)
+      if (s.applied || s.blocked) console.log(`[library.hotfix_propagate] ${data.tenantId}:`, s)
+    })
+    await work('library.stale_digest', () => runPerTenant('library.stale_digest', async (tenantId) => {
+      const { staleDigest } = await import('../services/libraryUsages')
+      const s = await staleDigest(tenantId)
+      if (s.authors) console.log(`[library.stale_digest] ${tenantId}:`, s)
+    }))
     // docs/v2/38 §11: карточка человека — архив заметок по сроку хранения (§7.6) и сроки
     // документов с уведомлениями человеку, руководителю точки и HR (§4, §8)
     await work('notes.archive_scan', () => runPerTenant('notes.archive_scan', async (tenantId) => {

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { CONTENT_TYPES } from '#shared/enums'
+import type { LibraryTypeIcon } from '#shared/domain/library'
+import type { PaletteModule } from '~/components/LibraryPalette.vue'
 const { formatShortDate } = useFormat()
 
 /**
@@ -16,7 +18,13 @@ const route = useRoute()
 const id = route.params.id as string
 
 type Kind = 'start' | 'finish' | 'task' | 'and' | 'or' | 'delay' | 'stop_delay' | 'branch' | 'mentor'
-interface Node { id: string, kind: Kind, title: string | null, contentType: string | null, contentId: string | null, contentTitle: string | null, days: number | null, mentorId: string | null, params: Record<string, unknown>, x: number, y: number }
+/**
+ * Ссылка узла-задания на модуль библиотеки (docs/v2/31 §5.4, П-17). Узел показывает **закреплённую**
+ * версию: `version` — её номер, `latestVersion` — только для баннера «Доступна нова версія».
+ * `pending` — модуль выбран в палитре, но полотно ещё не сохранено (версия закрепится при сохранении).
+ */
+interface NodeLibrary { usageId: string | null, moduleId: string, moduleTitle: string, moduleStatus: string, versionId: string | null, version: number, versionTitle: string, latestVersion: number | null, isStale: boolean, typeIcon: LibraryTypeIcon, estimatedMinutes: number | null, pending?: boolean }
+interface Node { id: string, kind: Kind, title: string | null, contentType: string | null, contentId: string | null, contentTitle: string | null, days: number | null, mentorId: string | null, params: Record<string, unknown>, x: number, y: number, library: NodeLibrary | null }
 interface Cond { op: 'passed' | 'failed' | 'score_gte' | 'else', value?: number }
 interface Edge { id?: string, fromNodeId: string, toNodeId: string, condition: Cond | null, sort: number }
 interface Problem { code: string, nodeId?: string, edgeId?: string, message: string }
@@ -40,6 +48,12 @@ const contentType = ref<string>('course')
 const assignOpen = ref(false)
 const pickedUsers = ref<string[]>([])
 const canvasRef = ref<HTMLElement | null>(null)
+/** Палитра «Бібліотека модулів ▸»: новый блок из библиотеки или замена контента выбранного задания (§5.4). */
+const palette = ref<null | 'new' | 'replace'>(null)
+const updateUsageId = ref<string | null>(null)
+const bodyPreview = ref<{ title: string, version: number, body: unknown[] } | null>(null)
+const previewClose = ref<HTMLButtonElement | null>(null)
+const canUseLibrary = computed(() => hasScope('library.use'))
 
 const NODE_W: Record<Kind, number> = { start: 104, finish: 168, task: 160, and: 104, or: 104, delay: 168, stop_delay: 168, branch: 160, mentor: 160 }
 const NODE_H = 56
@@ -57,7 +71,7 @@ const bounds = computed(() => ({ w: Math.max(760, ...nodes.value.map(n => n.x + 
 async function load() {
   try {
     traj.value = await api<Traj>(`/trajectories/${id}`)
-    nodes.value = traj.value.nodes.map(n => ({ ...n, params: n.params ?? {} }))
+    nodes.value = traj.value.nodes.map(n => ({ ...n, params: n.params ?? {}, library: n.library ?? null }))
     edges.value = traj.value.edges
     dirty.value = false
     if (hasScope('program.link_rule')) rules.value = await api('/automation-rules')
@@ -68,7 +82,7 @@ onMounted(load)
 watch(contentType, async (ct) => { try { contents.value = await api('/tasks/content', { query: { type: ct } }) } catch { contents.value = [] } }, { immediate: true })
 
 function nodeLabel(n: Node) {
-  if (n.kind === 'task') return n.title || n.contentTitle || t('traj.kind.task')
+  if (n.kind === 'task') return n.title || n.contentTitle || n.library?.moduleTitle || t('traj.kind.task')
   if (n.kind === 'start') return 'Start'
   if (n.kind === 'finish') return 'Finish'
   return n.title || t(`traj.kind.${n.kind}`)
@@ -77,7 +91,7 @@ function nodeSub(n: Node) {
   switch (n.kind) {
     case 'start': return t('traj.startSub')
     case 'finish': return t('traj.finishSub')
-    case 'task': return n.contentType ? t(`contentType.${n.contentType}`) : t('traj.pickContent')
+    case 'task': return n.library ? t('library.node.caption', { v: n.library.version }) : n.contentType ? t(`contentType.${n.contentType}`) : t('traj.pickContent')
     case 'and': return t('traj.andSub')
     case 'or': return t('traj.orSub')
     case 'delay': return t('traj.delaySub', { n: n.days ?? '?' })
@@ -89,8 +103,77 @@ function nodeSub(n: Node) {
 function addNode(kind: Kind) {
   if (published.value) return
   const y = 40 + (nodes.value.length % 5) * 90, x = 200 + Math.floor(nodes.value.length / 5) * 220
-  const n: Node = { id: `tmp:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`, kind, title: kind === 'task' ? null : t(`traj.kind.${kind}`), contentType: kind === 'task' ? contentType.value : null, contentId: null, contentTitle: null, days: kind === 'delay' || kind === 'stop_delay' ? 3 : null, mentorId: null, params: {}, x, y }
+  const n: Node = { id: `tmp:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`, kind, title: kind === 'task' ? null : t(`traj.kind.${kind}`), contentType: kind === 'task' ? contentType.value : null, contentId: null, contentTitle: null, days: kind === 'delay' || kind === 'stop_delay' ? 3 : null, mentorId: null, params: {}, x, y, library: null }
   nodes.value.push(n); selected.value = n.id; dirty.value = true
+  return n
+}
+
+/**
+ * Модуль выбран в палитре (docs/v2/31 §5.4). Новый блок или замена контента выбранного задания —
+ * локальная правка полотна, как и любая другая: версия закрепится при «Зберегти» (сервер вставляет
+ * модуль той же транзакцией, что и граф, и откатывает всё, если вставить нельзя).
+ */
+function onPick(m: PaletteModule) {
+  const mode = palette.value
+  palette.value = null
+  if (published.value || !m.currentVersion) return
+  const library: NodeLibrary = {
+    usageId: null, moduleId: m.id, moduleTitle: m.title, moduleStatus: m.status, versionId: m.currentVersion.id, version: m.currentVersion.version,
+    versionTitle: m.title, latestVersion: m.currentVersion.version, isStale: false, typeIcon: m.typeIcon, estimatedMinutes: m.estimatedMinutes, pending: true,
+  }
+  // Правка — через реактивный узел из списка, а не через созданный объект: иначе полотно не перерисуется
+  let target: Node | undefined
+  if (mode === 'replace' && selNode.value?.kind === 'task') target = selNode.value
+  else {
+    const created = addNode('task')
+    target = nodes.value.find(x => x.id === created?.id)
+  }
+  if (!target) return
+  target.library = library
+  target.contentType = 'resource'
+  target.contentId = null
+  target.contentTitle = m.title
+  selected.value = target.id
+  dirty.value = true
+}
+
+/** Действия со ссылкой меняют сервер сразу — несохранённые правки полотна сперва сохраняются. */
+async function beforeLibraryAction(): Promise<boolean> {
+  if (dirty.value && !published.value) return save()
+  return true
+}
+async function openUpdate(n: Node) {
+  const usageId = n.library?.usageId
+  if (!usageId || !await beforeLibraryAction()) return
+  updateUsageId.value = usageId
+}
+async function onUpdated(version: number) {
+  updateUsageId.value = null
+  await load()
+  notice.value = t('library.node.updated', { v: version })
+}
+async function previewBody(n: Node) {
+  if (!n.library) return
+  error.value = ''
+  try {
+    const v = await api<{ title: string, version: number, body: unknown[] }>(`/library/modules/${n.library.moduleId}/versions/${n.library.version}`)
+    bodyPreview.value = { title: v.title, version: v.version, body: v.body }
+    nextTick(() => previewClose.value?.focus())
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+}
+async function detachLibrary(n: Node) {
+  const usageId = n.library?.usageId
+  if (!usageId || published.value) return
+  if (!window.confirm(t('library.node.detachConfirm', { v: n.library!.version }))) return
+  if (!await beforeLibraryAction()) return
+  error.value = ''
+  try {
+    await api(`/library/usages/${usageId}/detach`, { method: 'POST', body: { makeCopy: true } })
+    await load()
+    notice.value = t('library.node.detached')
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
 }
 function removeNode(n: Node) {
   if (published.value || n.kind === 'start' || n.kind === 'finish') return
@@ -195,6 +278,8 @@ function graphBody() {
   return {
     nodes: nodes.value.map((n) => {
       const base = { id: n.id.startsWith('tmp:') ? undefined : n.id, tmpId: n.id.startsWith('tmp:') ? n.id : undefined, kind: n.kind, x: Math.round(n.x), y: Math.round(n.y) }
+      // Узел-ссылка: контент и версию ведёт сервер, полотно передаёт только модуль (docs/v2/31 §5.4)
+      if (n.kind === 'task' && n.library) return { ...base, title: n.title || null, libraryModuleId: n.library.moduleId, params: n.params }
       if (n.kind === 'task') return { ...base, title: n.title || null, contentType: n.contentType, contentId: n.contentId, params: n.params }
       if (n.kind === 'delay' || n.kind === 'stop_delay') return { ...base, title: n.title ?? '', days: n.days ?? 0 }
       if (n.kind === 'mentor') return { ...base, title: n.title ?? '', mentorId: n.mentorId }
@@ -210,7 +295,7 @@ async function save(): Promise<boolean> {
     const r = await api<{ nodes: Node[], edges: Edge[], problems: Problem[], ids: Record<string, string> }>(`/trajectories/${id}/graph`, { method: 'PUT', body: graphBody() })
     const titles = new Map(nodes.value.map(n => [n.id, n.contentTitle]))
     if (selected.value && r.ids[selected.value]) selected.value = r.ids[selected.value]!
-    nodes.value = r.nodes.map(n => ({ ...n, params: n.params ?? {}, contentTitle: (traj.value?.nodes.find(x => x.id === n.id)?.contentTitle) ?? titles.get(n.id) ?? contents.value.find(c => c.id === n.contentId)?.title ?? null }))
+    nodes.value = r.nodes.map(n => ({ ...n, params: n.params ?? {}, library: n.library ?? null, contentTitle: n.contentTitle ?? titles.get(n.id) ?? contents.value.find(c => c.id === n.contentId)?.title ?? null }))
     edges.value = r.edges
     problems.value = r.problems; checked.value = true
     dirty.value = false
@@ -283,6 +368,7 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
       <section class="editor">
         <div class="chips palette" role="toolbar" :aria-label="t('traj.palette')">
           <button v-for="p in PALETTE" :key="p.kind" class="chip outline" type="button" :disabled="published" @click="addNode(p.kind)">+ {{ t(`traj.kind.${p.kind}`) }}</button>
+          <button v-if="canUseLibrary" class="chip outline" type="button" :disabled="published" aria-haspopup="dialog" data-testid="traj-library" @click="palette = 'new'">+ {{ t('library.palette.open') }}</button>
           <button class="chip" type="button" @click="autoLayout">{{ t('traj.autoLayout') }}</button>
         </div>
 
@@ -297,12 +383,18 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
             </svg>
             <div
               v-for="n in nodes" :key="n.id"
-              :class="['node', n.kind, { sel: selected === n.id, bad: problemNodes.has(n.id), link: linkFrom === n.id, dragging: drag?.id === n.id && drag?.moved }]"
+              :class="['node', n.kind, { sel: selected === n.id, bad: problemNodes.has(n.id), link: linkFrom === n.id, dragging: drag?.id === n.id && drag?.moved, library: !!n.library }]"
               :style="{ left: `${n.x}px`, top: `${n.y}px`, width: `${NODE_W[n.kind]}px` }"
-              role="button" tabindex="0" :aria-pressed="selected === n.id" :aria-label="`${nodeLabel(n)} — ${nodeSub(n)}`" :data-testid="`traj-node-${n.kind}`"
+              role="button" tabindex="0" :aria-pressed="selected === n.id" :aria-label="`${nodeLabel(n)} — ${nodeSub(n)}${n.library?.isStale ? ` · ${t('library.node.newVersion', { v: n.library.latestVersion })}` : ''}`" :data-testid="n.library ? 'traj-node-library' : `traj-node-${n.kind}`"
               @click="selectNode(n)" @keydown="onNodeKey($event, n)"
               @pointerdown="onNodePointerDown($event, n)" @pointermove="onNodePointerMove($event, n)" @pointerup="onNodePointerUp($event, n)" @pointercancel="drag = null"
             >
+              <!-- Маркер узла-ссылки на модуль библиотеки: сетка ромбиков в круге (docs/v2/31 §5.4, эталон §5.5) -->
+              <svg v-if="n.library" class="lib-marker" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="M9 5.5l2.5 2.5L9 10.5 6.5 8zM15 5.5l2.5 2.5-2.5 2.5L12.5 8zM9 13.5l2.5 2.5L9 18.5 6.5 16zM15 13.5l2.5 2.5-2.5 2.5-2.5-2.5z" fill="currentColor" />
+              </svg>
+              <span v-if="n.library?.isStale" class="stale-dot" aria-hidden="true" />
               <div class="node-title">{{ nodeLabel(n) }}</div>
               <div class="node-sub">{{ nodeSub(n) }}</div>
             </div>
@@ -324,7 +416,39 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
       <aside class="side">
         <div v-if="selNode" class="card">
           <h2 class="panel-title">{{ t(`traj.kind.${selNode.kind}`) }}</h2>
-          <template v-if="selNode.kind === 'task'">
+          <template v-if="selNode.kind === 'task' && selNode.library">
+            <!-- Узел-ссылка (docs/v2/31 §5.4): тело в графе не редактируется -->
+            <div class="lib-card" data-testid="traj-library-card">
+              <p class="lib-link">{{ t('library.node.isLink') }}</p>
+              <div class="lib-head">
+                <LibraryTypeIcon :icon="selNode.library.typeIcon" />
+                <strong>{{ selNode.library.versionTitle }}</strong>
+              </div>
+              <p class="lib-meta">
+                <span>{{ t('library.node.caption', { v: selNode.library.version }) }}</span>
+                <span v-if="selNode.library.estimatedMinutes"> · {{ t('library.palette.minutes', { n: selNode.library.estimatedMinutes }) }}</span>
+              </p>
+              <span v-if="selNode.library.moduleStatus === 'archived'" class="badge muted">{{ t('library.node.archived') }}</span>
+              <p v-if="selNode.library.pending" class="help">{{ t('library.node.pending', { v: selNode.library.version }) }}</p>
+              <template v-else>
+                <div v-if="selNode.library.isStale" class="note sun" role="status">
+                  {{ t('library.node.newVersion', { v: selNode.library.latestVersion }) }}
+                  <button class="btn primary small upd" type="button" data-testid="traj-library-update" @click="openUpdate(selNode)">{{ t('library.node.update') }}</button>
+                </div>
+                <div class="row">
+                  <button class="btn ghost small" type="button" @click="previewBody(selNode)">{{ t('library.node.preview', { v: selNode.library.version }) }}</button>
+                  <button v-if="!published" class="btn ghost small" type="button" @click="detachLibrary(selNode)">{{ t('library.node.detach') }}</button>
+                </div>
+              </template>
+              <p class="help">{{ t('library.node.bodyLocked') }}</p>
+            </div>
+            <label class="label">{{ t('traj.titleOverride') }}</label>
+            <input v-model="selNode.title" class="field" :disabled="published" @input="dirty = true">
+            <label class="label">{{ t('traj.dueDays') }}</label>
+            <input :value="selNode.params.dueDays ?? ''" type="number" min="1" max="365" class="field" :disabled="published" @input="selNode.params = { ...selNode.params, dueDays: ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : undefined }; dirty = true">
+          </template>
+          <template v-else-if="selNode.kind === 'task'">
+            <button v-if="canUseLibrary && !published" class="btn ghost small lib-replace" type="button" aria-haspopup="dialog" @click="palette = 'replace'">{{ t('library.node.replace') }}</button>
             <label class="label">{{ t('traj.contentType') }}</label>
             <select v-model="contentType" class="field" :disabled="published" @change="selNode.contentType = contentType; selNode.contentId = null; dirty = true">
               <option v-for="ct in CONTENT_TYPES" :key="ct" :value="ct">{{ t(`contentType.${ct}`) }}</option>
@@ -402,6 +526,18 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
       </aside>
     </div>
 
+    <LibraryPalette v-if="palette" @pick="onPick" @close="palette = null" />
+    <LibraryUpdateDialog v-if="updateUsageId" :usage-id="updateUsageId" @done="onUpdated" @close="updateUsageId = null" />
+    <div v-if="bodyPreview" class="modal-back" @click.self="bodyPreview = null" @keydown.esc="bodyPreview = null">
+      <div class="modal card preview" role="dialog" aria-modal="true" aria-labelledby="lib-preview-title">
+        <h2 id="lib-preview-title" class="panel-title">{{ t('library.node.previewTitle', { title: bodyPreview.title, v: bodyPreview.version }) }}</h2>
+        <LessonBlocks :blocks="bodyPreview.body as never" :blocks-state="{}" readonly />
+        <div class="row">
+          <button ref="previewClose" class="btn ghost" type="button" @click="bodyPreview = null">{{ t('common.close') }}</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="assignOpen" class="modal-back" @click.self="assignOpen = false">
       <div class="modal card" role="dialog" aria-modal="true" :aria-label="t('traj.assign')">
         <h2 class="panel-title">{{ t('traj.assign') }}</h2>
@@ -440,6 +576,18 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
 .node.bad { border-color: var(--color-coral); box-shadow: inset 0 0 0 2px var(--color-coral); }
 .node.link { border-style: dashed; }
 .node.dragging { cursor: grabbing; box-shadow: 0 6px 16px rgb(12 15 20 / 0.18); z-index: 2; }
+.node.library { padding-right: calc(var(--space-3) + 18px); }
+.lib-marker { position: absolute; top: var(--space-2); right: var(--space-2); width: 16px; height: 16px; color: var(--color-teal-ink); }
+.stale-dot { position: absolute; bottom: var(--space-2); right: var(--space-2); width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--color-coral); }
+.lib-card { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-teal); border-radius: var(--radius-s); background: var(--color-teal-soft); margin-top: var(--space-2); }
+.lib-link { margin: 0; font-size: var(--font-size-body-s); font-weight: 800; color: var(--color-teal-ink); }
+.lib-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.lib-head strong { overflow-wrap: anywhere; }
+.lib-meta { margin: 0; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.lib-card .row { margin-top: 0; }
+.upd { display: block; margin-top: var(--space-2); }
+.lib-replace { margin-top: var(--space-2); }
+.preview { width: min(720px, 100%); max-height: calc(100vh - var(--space-6)); overflow: auto; }
 .node-title { font-size: 13px; font-weight: 900; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node-sub { font-size: 11px; font-weight: 700; opacity: 0.8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .check-row { display: flex; gap: var(--space-3); align-items: center; margin-top: var(--space-3); flex-wrap: wrap; }

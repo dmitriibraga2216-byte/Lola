@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
-  assignments, automationRules, enrollments, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
+  assignments, automationRules, enrollments, libraryModuleVersions, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
   trajectoryNodeStates, trajectoryNodes, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -17,6 +17,7 @@ import type {
 } from '../../shared/schemas/trajectories'
 import type { ContentType } from '../../shared/enums'
 import { managerIdOf } from './orgManager'
+import type { AttachFailCode, NodeLibraryRef } from './libraryUsages'
 
 /**
  * Траектории (docs/17 §14.1–14.3, §15; docs/32 Б.8): маршрут из узлов, где условия
@@ -126,7 +127,13 @@ export function validateGraph(g: Graph, contentOk: Map<string, boolean> = new Ma
 
 async function contentStatuses(tx: TenantTx, nodes: Node[]): Promise<Map<string, boolean>> {
   const m = new Map<string, boolean>()
-  for (const n of nodes) if (n.kind === 'task' && n.contentType && n.contentId) m.set(n.id, !!await findContent(tx, n.contentType as ContentType, n.contentId))
+  for (const n of nodes) {
+    if (n.kind !== 'task' || !n.contentType || !n.contentId) continue
+    // Узел-ссылка на модуль библиотеки (docs/v2/31 §3.1) выдаёт неизменяемый снимок своей версии:
+    // материал-тело не «опубликован» как ресурс (libraryBody.ts), но выдать есть что, и архив
+    // модуля узел не ломает (§7.6)
+    m.set(n.id, n.libraryVersionId ? true : !!await findContent(tx, n.contentType as ContentType, n.contentId))
+  }
   return m
 }
 
@@ -165,13 +172,36 @@ export async function createTrajectory(ctx: Ctx, input: z.infer<typeof trajector
   })
 }
 
-async function nodeTitles(tx: TenantTx, nodes: Node[]): Promise<Map<string, string>> {
+async function nodeTitles(tx: TenantTx, nodes: Node[], library: Map<string, NodeLibraryRef> = new Map()): Promise<Map<string, string>> {
   const m = new Map<string, string>()
   for (const n of nodes) {
+    // Узел-ссылка называется так, как названа его закреплённая версия, а не последняя (П-17)
+    const ref = library.get(n.id)
+    if (ref) { m.set(n.id, ref.versionTitle); continue }
     if (n.kind === 'task' && n.contentType && n.contentId) m.set(n.id, (await findContent(tx, n.contentType as ContentType, n.contentId))?.title ?? '')
     if (n.kind === 'mentor' && n.mentorId) { const [u] = await tx.select({ n: users.fullName }).from(users).where(eq(users.id, n.mentorId)); m.set(n.id, u?.n ?? '') }
   }
   return m
+}
+
+async function libraryRefsOf(tx: TenantTx, nodes: Node[]): Promise<Map<string, NodeLibraryRef>> {
+  const ids = nodes.filter(n => n.libraryVersionId).map(n => n.id)
+  if (!ids.length) return new Map()
+  const { nodeLibraryRefs } = await import('./libraryUsages')
+  return nodeLibraryRefs(tx, ids)
+}
+
+export type EditorNode = Node & { contentTitle: string | null, library: NodeLibraryRef | null }
+
+/**
+ * Узлы для полотна: название контента и, у узла-ссылки, ссылка на модуль библиотеки —
+ * «Бібліотека · v2» и баннер «Доступна нова версія v4» (docs/v2/31 §5.4, §5.5). Узел показывает
+ * **закреплённую** версию: название, тип и длительность — из неё, последняя — только номером.
+ */
+async function editorNodes(tx: TenantTx, nodes: Node[]): Promise<EditorNode[]> {
+  const library = await libraryRefsOf(tx, nodes)
+  const titles = await nodeTitles(tx, nodes, library)
+  return nodes.map(n => ({ ...n, contentTitle: titles.get(n.id) ?? null, library: library.get(n.id) ?? null }))
 }
 
 export async function getTrajectory(ctx: Ctx, id: string) {
@@ -179,7 +209,7 @@ export async function getTrajectory(ctx: Ctx, id: string) {
     const [t] = await tx.select().from(trajectories).where(eq(trajectories.id, id))
     if (!t) return null
     const g = await loadGraph(tx, id)
-    const titles = await nodeTitles(tx, g.nodes)
+    const nodes = await editorNodes(tx, g.nodes)
     const [rule] = t.automationRuleId ? await tx.select({ id: automationRules.id, name: automationRules.name }).from(automationRules).where(eq(automationRules.id, t.automationRuleId)) : []
     const [stats] = await tx.select({
       people: sql<number>`count(*) filter (where cancelled_at is null)::int`, done: sql<number>`count(*) filter (where status = 'done')::int`,
@@ -188,7 +218,7 @@ export async function getTrajectory(ctx: Ctx, id: string) {
     const [author] = t.updatedBy ? await tx.select({ n: users.fullName }).from(users).where(eq(users.id, t.updatedBy)) : []
     return {
       ...t, rule: rule ?? null, updatedByName: author?.n ?? null, stats,
-      nodes: g.nodes.map(n => ({ ...n, contentTitle: titles.get(n.id) ?? null })),
+      nodes,
       edges: g.edges,
     }
   })
@@ -211,14 +241,30 @@ export async function updateTrajectory(ctx: Ctx, id: string, input: z.infer<type
   })
 }
 
-export type GraphPutResult = { ok: true, nodes: Node[], edges: Edge[], problems: GraphProblem[], ids: Record<string, string> } | { ok: false, code: 'not_found' | 'published' | 'bad_edge', message?: string }
+export type GraphPutResult
+  = | { ok: true, nodes: EditorNode[], edges: Edge[], problems: GraphProblem[], ids: Record<string, string> }
+    | { ok: false, code: 'not_found' | 'published' | 'bad_edge', message?: string }
+    /** Модуль библиотеки из палитры не вставился (docs/v2/31 §5.4, §10): код — из таблицы отказов библиотеки. */
+    | { ok: false, code: 'library', libraryCode: AttachFailCode | 'forbidden', nodeRef: string }
+
+/** Отказ посреди сохранения полотна: транзакция откатывается целиком, частично сохранённого графа не бывает. */
+class GraphReject extends Error {
+  constructor(readonly result: GraphPutResult) { super('trajectory graph rejected') }
+}
 
 /**
  * PUT /trajectories/:id/graph — полотно целиком. У опубликованной траектории меняются только
  * координаты (состояния людей ссылаются на узлы); состав — через дубликат (docs/17 §7.6).
+ *
+ * Узел-ссылка на модуль библиотеки (docs/v2/31 §5.4, П-17): `libraryModuleId` у задания —
+ * вставка с закреплением текущей версии (новый узел или узел без ссылки) либо «оставить как
+ * есть» (тот же модуль). Контент и версию такого узла полотно не правит — их меняют только
+ * «Оновити до останньої», хотфикс и «Відʼєднати» (`libraryUsages.ts`); не переданный
+ * `libraryModuleId` ссылку тоже сохраняет: полотно не отвязывает модуль молча. Вставка требует
+ * `library.use` (`rights.libraryUse`) — у эндпоинта есть только `program.manage`.
  */
-export async function putGraph(ctx: Ctx, id: string, input: TrajectoryGraphInput): Promise<GraphPutResult> {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+export async function putGraph(ctx: Ctx, id: string, input: TrajectoryGraphInput, rights: { libraryUse?: boolean } = {}): Promise<GraphPutResult> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<GraphPutResult> => {
     const [t] = await tx.select().from(trajectories).where(eq(trajectories.id, id))
     if (!t) return { ok: false as const, code: 'not_found' as const }
     const existing = await loadGraph(tx, id)
@@ -229,46 +275,92 @@ export async function putGraph(ctx: Ctx, id: string, input: TrajectoryGraphInput
       if (!same) return { ok: false as const, code: 'published' as const }
       for (const n of input.nodes) await tx.update(trajectoryNodes).set({ x: n.x, y: n.y, updatedAt: new Date() }).where(eq(trajectoryNodes.id, n.id!))
       const g = await loadGraph(tx, id)
-      return { ok: true as const, nodes: g.nodes, edges: g.edges, problems: validateGraph(g, await contentStatuses(tx, g.nodes)), ids: {} }
+      return { ok: true as const, nodes: await editorNodes(tx, g.nodes), edges: g.edges, problems: validateGraph(g, await contentStatuses(tx, g.nodes)), ids: {} }
+    }
+
+    // Какой модуль держит каждый узел-ссылка сейчас — чтобы отличить «оставить» от «заменить»
+    const linked = existing.nodes.filter(n => n.libraryVersionId)
+    const moduleOfNode = new Map<string, string>()
+    if (linked.length) {
+      const rows = await tx.select({ id: libraryModuleVersions.id, moduleId: libraryModuleVersions.libraryModuleId }).from(libraryModuleVersions)
+        .where(inArray(libraryModuleVersions.id, linked.map(n => n.libraryVersionId!)))
+      const moduleOfVersion = new Map(rows.map(r => [r.id, r.moduleId]))
+      for (const n of linked) moduleOfNode.set(n.id, moduleOfVersion.get(n.libraryVersionId!)!)
     }
 
     // Узлы: обновить существующие, создать новые (tmpId → id), удалить пропавшие
     const idMap = new Map<string, string>()
     const keep = new Set<string>()
+    const toAttach: { nodeId: string, moduleId: string, ref: string }[] = []
+    const replaced: string[] = []
     for (const n of input.nodes) {
-      const base = { kind: n.kind, x: n.x, y: n.y, title: 'title' in n ? (n.title ?? null) : null, days: 'days' in n ? n.days : null, contentType: n.kind === 'task' ? n.contentType : null, contentId: n.kind === 'task' ? n.contentId : null, mentorId: n.kind === 'mentor' ? (n.mentorId ?? null) : null, params: n.kind === 'task' ? n.params : {} }
-      if (n.id && existing.byId.has(n.id)) {
-        await tx.update(trajectoryNodes).set({ ...base, updatedAt: new Date() }).where(eq(trajectoryNodes.id, n.id))
-        keep.add(n.id); idMap.set(n.id, n.id)
+      const prev = n.id ? existing.byId.get(n.id) : undefined
+      const isTask = n.kind === 'task'
+      const wantModule = isTask ? (n.libraryModuleId ?? null) : null
+      const prevModule = prev ? moduleOfNode.get(prev.id) ?? null : null
+      // Ссылка остаётся как есть: задание, модуль тот же или не назван
+      const keepLibrary = isTask && !!prevModule && (!wantModule || wantModule === prevModule)
+      const content = keepLibrary
+        ? {}
+        : {
+            contentType: isTask && !wantModule ? (n.contentType ?? null) : null,
+            contentId: isTask && !wantModule ? (n.contentId ?? null) : null,
+            libraryVersionId: null,
+          }
+      const base = { kind: n.kind, x: n.x, y: n.y, title: 'title' in n ? (n.title ?? null) : null, days: 'days' in n ? n.days : null, mentorId: n.kind === 'mentor' ? (n.mentorId ?? null) : null, params: n.kind === 'task' ? n.params : {}, ...content }
+      let nodeId: string
+      if (prev) {
+        // Модуль заменён другим: прежнее место закрывается до вставки нового (одна активная ссылка на держателя, §7.15)
+        if (prevModule && isTask && wantModule && wantModule !== prevModule) replaced.push(prev.id)
+        await tx.update(trajectoryNodes).set({ ...base, updatedAt: new Date() }).where(eq(trajectoryNodes.id, prev.id))
+        nodeId = prev.id
+        keep.add(nodeId); idMap.set(nodeId, nodeId)
       }
       else {
-        const [row] = await tx.insert(trajectoryNodes).values({ tenantId: ctx.tenantId, trajectoryId: id, ...base }).returning({ id: trajectoryNodes.id })
-        keep.add(row!.id); if (n.tmpId) idMap.set(n.tmpId, row!.id); if (n.id) idMap.set(n.id, row!.id)
+        const [row] = await tx.insert(trajectoryNodes).values({ tenantId: ctx.tenantId, trajectoryId: id, contentType: null, contentId: null, ...base }).returning({ id: trajectoryNodes.id })
+        nodeId = row!.id
+        keep.add(nodeId); if (n.tmpId) idMap.set(n.tmpId, nodeId); if (n.id) idMap.set(n.id, nodeId)
       }
+      if (wantModule && !keepLibrary) toAttach.push({ nodeId, moduleId: wantModule, ref: n.id ?? n.tmpId ?? nodeId })
     }
     const gone = existing.nodes.filter(n => !keep.has(n.id)).map(n => n.id)
-    // docs/v2/31 §12: узел удалён с полотна (или перестал быть заданием) — его место
-    // использования модуля библиотеки закрывается, usage_count модуля уменьшается
+    // docs/v2/31 §12: узел удалён с полотна (или перестал быть заданием, или получил другой
+    // модуль) — его место использования закрывается, usage_count модуля уменьшается
     const notTask = input.nodes.filter(n => n.kind !== 'task' && n.id && existing.byId.get(n.id)?.kind === 'task').map(n => n.id!)
-    if (gone.length || notTask.length) {
+    if (gone.length || notTask.length || replaced.length) {
       const { detachHolders } = await import('./libraryUsages')
-      await detachHolders(tx, ctx, 'trajectory_node', [...gone, ...notTask])
+      await detachHolders(tx, ctx, 'trajectory_node', [...gone, ...notTask, ...replaced])
     }
     if (gone.length) await tx.delete(trajectoryNodes).where(inArray(trajectoryNodes.id, gone))
+
+    // Модули из палитры (§5.4): вставка в ту же транзакцию, что и полотно
+    if (toAttach.length) {
+      const first = toAttach[0]!
+      if (!rights.libraryUse) throw new GraphReject({ ok: false, code: 'library', libraryCode: 'forbidden', nodeRef: first.ref })
+      const { attachTx } = await import('./libraryUsages')
+      const actor = { tenantId: ctx.tenantId, actorId: ctx.actorId, manage: false, publish: false, use: true, courseEdit: false, programManage: true }
+      for (const a of toAttach) {
+        const r = await attachTx(tx, actor, { libraryModuleId: a.moduleId, holderType: 'trajectory_node', holderId: a.nodeId, containerType: 'trajectory', containerId: id, pinMode: 'hotfix_auto' })
+        if (!r.ok) throw new GraphReject({ ok: false, code: 'library', libraryCode: r.code, nodeRef: a.ref })
+      }
+    }
 
     await tx.delete(trajectoryEdges).where(eq(trajectoryEdges.trajectoryId, id))
     const rows = []
     for (const [i, e] of input.edges.entries()) {
       const from = idMap.get(e.fromNodeId), to = idMap.get(e.toNodeId)
-      if (!from || !to) return { ok: false as const, code: 'bad_edge' as const, message: 'Звʼязок посилається на блок, якого немає на полотні' }
-      if (from === to) return { ok: false as const, code: 'bad_edge' as const, message: 'Блок не може бути зʼєднаний сам із собою' }
+      if (!from || !to) throw new GraphReject({ ok: false, code: 'bad_edge', message: 'Звʼязок посилається на блок, якого немає на полотні' })
+      if (from === to) throw new GraphReject({ ok: false, code: 'bad_edge', message: 'Блок не може бути зʼєднаний сам із собою' })
       rows.push({ tenantId: ctx.tenantId, trajectoryId: id, fromNodeId: from, toNodeId: to, condition: e.condition ?? null, sort: e.sort ?? i })
     }
     if (rows.length) await tx.insert(trajectoryEdges).values(rows).onConflictDoNothing()
     await tx.update(trajectories).set({ updatedAt: new Date(), updatedBy: ctx.actorId }).where(eq(trajectories.id, id))
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'trajectory.graph', entity: 'trajectory', entityId: id, after: { nodes: input.nodes.length, edges: rows.length, removed: gone.length } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'trajectory.graph', entity: 'trajectory', entityId: id, after: { nodes: input.nodes.length, edges: rows.length, removed: gone.length, libraryAttached: toAttach.length } })
     const g = await loadGraph(tx, id)
-    return { ok: true as const, nodes: g.nodes, edges: g.edges, problems: validateGraph(g, await contentStatuses(tx, g.nodes)), ids: Object.fromEntries(idMap) }
+    return { ok: true as const, nodes: await editorNodes(tx, g.nodes), edges: g.edges, problems: validateGraph(g, await contentStatuses(tx, g.nodes)), ids: Object.fromEntries(idMap) }
+  }).catch((err: unknown): GraphPutResult => {
+    if (err instanceof GraphReject) return err.result
+    throw err
   })
 }
 
@@ -299,7 +391,15 @@ export async function duplicateTrajectory(ctx: Ctx, id: string) {
       map.set(nid, row!.id)
     }
     if (g.edges.length) await tx.insert(trajectoryEdges).values(g.edges.map(e => ({ tenantId: ctx.tenantId, trajectoryId: copy!.id, fromNodeId: map.get(e.fromNodeId)!, toNodeId: map.get(e.toNodeId)!, condition: e.condition, sort: e.sort })))
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'trajectory.duplicate', entity: 'trajectory', entityId: copy!.id, after: { from: id } })
+    // docs/v2/31 §3.4: узел-копия держит ту же закреплённую версию — у него своё место в реестре,
+    // иначе копия жила бы мимо «Де використовується», запрета удаления и обновлений
+    const linked = g.nodes.filter(n => n.libraryVersionId)
+    let libraryUsages = 0
+    if (linked.length) {
+      const { copyTrajectoryNodeUsages } = await import('./libraryUsages')
+      libraryUsages = await copyTrajectoryNodeUsages(tx, ctx, linked.map(n => ({ from: n.id, to: map.get(n.id)!, versionId: n.libraryVersionId!, title: n.title })), { id: copy!.id, title: copy!.title })
+    }
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'trajectory.duplicate', entity: 'trajectory', entityId: copy!.id, after: { from: id, libraryUsages } })
     return copy!
   })
 }
@@ -617,8 +717,18 @@ async function resolveBranch(run: Run, node: Node): Promise<void> {
   if (chosen) { const next = run.g.byId.get(chosen.toNodeId); if (next && run.states.get(next.id)!.status === 'locked') await activate(run, next) }
 }
 
-/** Узел «Завдання» создаёт назначение той же транзакцией: правила — из узла, источник — траектория (kind=trajectory). */
+/**
+ * Узел «Завдання» создаёт назначение той же транзакцией: правила — из узла, источник — траектория (kind=trajectory).
+ * Узел-ссылка на модуль библиотеки (docs/v2/31 §3.1, П-17) выдаёт снимок **своей** версии, а не
+ * последней: назначение закрепляется за ним (`subject_version_id`), и публикация новой версии
+ * модуля человека, уже получившего задание, не трогает (Р-31.2).
+ */
 async function createNodeAssignment(run: Run, node: Node): Promise<string | null> {
+  let pinned: { id: string, title: string } | undefined
+  if (node.libraryVersionId) {
+    const { pinnedNodeSnapshot } = await import('./libraryUsages')
+    pinned = (await pinnedNodeSnapshot(run.tx, node.libraryVersionId)) ?? undefined
+  }
   const params = (node.params ?? {}) as Record<string, unknown>
   const dueDays = typeof params.dueDays === 'number' ? params.dueDays : undefined
   const input = assignmentCreateSchema.parse({
@@ -629,7 +739,7 @@ async function createNodeAssignment(run: Run, node: Node): Promise<string | null
     method: { automationRuleId: run.enr.ruleId ?? null },
     reminders: { notifyOnAssign: true },
   })
-  const r = await createAssignmentTx(run.tx, { tenantId: run.tenantId, actorId: run.actorId }, input, { kind: 'trajectory', trajectoryId: run.t.id, nodeId: node.id, enrollmentId: run.enr.id })
+  const r = await createAssignmentTx(run.tx, { tenantId: run.tenantId, actorId: run.actorId }, input, { kind: 'trajectory', trajectoryId: run.t.id, nodeId: node.id, enrollmentId: run.enr.id, pinnedResourceVersion: pinned })
   if (!r.ok) {
     // Контент пропал (архив) — узел недоступен, человек идёт дальше не может; это видно в ленте
     await setState(run, node.id, { status: 'failed', reason: `content_${r.code}`, finishedAt: new Date() })
@@ -863,7 +973,7 @@ export async function myTrajectory(ctx: Ctx, enrollmentId: string, opts: { any?:
     const [t] = await tx.select().from(trajectories).where(eq(trajectories.id, enr.trajectoryId))
     const g = await loadGraph(tx, enr.trajectoryId)
     const states = new Map((await tx.select().from(trajectoryNodeStates).where(eq(trajectoryNodeStates.enrollmentId, enr.id))).map(s => [s.nodeId, s]))
-    const titles = await nodeTitles(tx, g.nodes)
+    const titles = await nodeTitles(tx, g.nodes, await libraryRefsOf(tx, g.nodes))
     // Порядок ленты — топологический от Start; показываем узлы, которых человек достиг или которые впереди по выбранному пути
     const order: string[] = []; const seen = new Set<string>()
     const start = g.nodes.find(n => n.kind === 'start')

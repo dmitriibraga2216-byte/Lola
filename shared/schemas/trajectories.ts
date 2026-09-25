@@ -24,8 +24,18 @@ export const trajectoryNodeSchema = z.discriminatedUnion('kind', [
     ...nodeBase,
     kind: z.literal('task'),
     title: z.string().max(200).nullable().optional(), // своё название; пусто — название контента
-    contentType: z.enum(CONTENT_TYPES),
-    contentId: z.string().uuid(),
+    // Контент задания — либо выбранный вручную (тип + id), либо модуль библиотеки (`libraryModuleId`,
+    // docs/v2/31 §5.4): тогда контент — материал-тело модуля, и его выставляет сервер. Одно из двух
+    // обязательно — проверка на уровне полотна (`trajectoryGraphSchema`), union её не выражает.
+    contentType: z.enum(CONTENT_TYPES).nullable().optional(),
+    contentId: z.string().uuid().nullable().optional(),
+    /**
+     * Модуль библиотеки в этом узле (docs/v2/31 §5.4, П-17). Новый узел или узел без ссылки —
+     * вставка с закреплением текущей версии; узел с тем же модулем — ссылка сохраняется как
+     * есть (контент и версию меняют только «Оновити», хотфикс и «Відʼєднати»); не передан —
+     * существующая ссылка тоже сохраняется: полотно не отвязывает модуль молча.
+     */
+    libraryModuleId: z.string().uuid().nullable().optional(),
     params: assignmentParamsSchema.default({}), // правила назначения, которое создаст узел (docs/15 §14.3)
   }),
   z.object({ ...nodeBase, kind: z.literal('and'), title: titled }),
@@ -60,6 +70,12 @@ export type TrajectoryEdgeInput = z.infer<typeof trajectoryEdgeSchema>
 export const trajectoryGraphSchema = z.object({
   nodes: z.array(trajectoryNodeSchema.and(z.object({ tmpId: z.string().max(40).optional() }))).max(200),
   edges: z.array(trajectoryEdgeSchema.extend({ fromNodeId: z.string().min(1), toNodeId: z.string().min(1) })).max(400),
+}).superRefine((g, ctx) => {
+  g.nodes.forEach((n, i) => {
+    if (n.kind === 'task' && !n.libraryModuleId && !(n.contentType && n.contentId)) {
+      ctx.addIssue({ code: 'custom', path: ['nodes', i, 'contentId'], message: 'Оберіть контент для блоку «Завдання» або модуль бібліотеки' })
+    }
+  })
 })
 export type TrajectoryGraphInput = z.infer<typeof trajectoryGraphSchema>
 

@@ -94,8 +94,12 @@ export async function createAssignment(ctx: Ctx, input: z.infer<typeof assignmen
  * назначение той же транзакцией, что и состояние узла; раскрытие — после фиксации.
  * `source.kind` — task_type (docs/02): manual | trajectory; `source.trajectoryId/nodeId` кладутся в audience.
  */
-export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory' | 'catalog', trajectoryId?: string, nodeId?: string, enrollmentId?: string } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' | 'not_for_candidate' }> {
-  const title = await subjectTitle(tx, input.subjectType, input.subjectId)
+export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, actorId: string | null }, input: z.infer<typeof assignmentCreateSchema>, source: { kind?: 'manual' | 'trajectory' | 'catalog', trajectoryId?: string, nodeId?: string, enrollmentId?: string, pinnedResourceVersion?: { id: string, title: string } } = {}): Promise<{ ok: true, assignmentId: string } | { ok: false, code: 'subject_not_found' | 'empty_audience' | 'not_for_candidate' }> {
+  // Узел-ссылка на модуль библиотеки (docs/v2/31 §3.1, П-17) выдаёт снимок закреплённой версии
+  // материала-тела: сам материал не «опубликован» как ресурс (libraryBody.ts), поэтому название
+  // и версия приходят от узла, а не из `findContent` по рабочей редакции
+  const pinned = input.subjectType === 'resource' ? source.pinnedResourceVersion : undefined
+  const title = pinned ? pinned.title : await subjectTitle(tx, input.subjectType, input.subjectId)
   if (!title) return { ok: false as const, code: 'subject_not_found' as const }
 
   // docs/v2/33 §7.9: кандидату — только курсы этапов с `applies_to_candidate`. Проверка идёт
@@ -115,9 +119,13 @@ export async function createAssignmentTx(tx: TenantTx, ctx: { tenantId: string, 
   }
   else if (input.subjectType === 'resource') {
     // D-007 (docs/28 Spec 11 «Версии»): назначение ресурса закрепляется за опубликованной версией на момент
-    // выдачи — как урок курса (`lessons.resource_version_id`); ученик читает этот снимок, а не текущую редакцию
-    const [r] = await tx.select({ v: resources.publishedVersionId }).from(resources).where(eq(resources.id, input.subjectId))
-    versionId = r?.v ?? null
+    // выдачи — как урок курса (`lessons.resource_version_id`); ученик читает этот снимок, а не текущую редакцию.
+    // У узла-ссылки на библиотеку — снимок его версии, а не последней (узел трека показывает закреплённую версию)
+    if (pinned) versionId = pinned.id
+    else {
+      const [r] = await tx.select({ v: resources.publishedVersionId }).from(resources).where(eq(resources.id, input.subjectId))
+      versionId = r?.v ?? null
+    }
   }
 
   const audience = source.trajectoryId ? { ...input.audience, trajectoryId: source.trajectoryId, nodeId: source.nodeId, trajectoryEnrollmentId: source.enrollmentId } : input.audience

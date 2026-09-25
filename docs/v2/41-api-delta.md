@@ -165,8 +165,18 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | POST | `/library/proposals` | `library.use` | подать предложение |
 | POST | `/library/proposals/:id/accept` | `library.publish` | принять, создаёт карточку модуля |
 | POST | `/library/proposals/:id/reject` | `library.publish` | отклонить с обязательным комментарием |
+| GET | `/library/modules/:id/versions/:version` | `library.view` | тело закреплённой версии (PR-25) |
+| POST | `/library/proposals/:id/withdraw` | `library.use` | отозвать своё предложение (PR-25) |
+| GET | `/library/modules/recent` | `library.view` | палитра вставки: до 8 последних использованных модулей (PR-26) |
+| GET | `/library/usages/:id/update-preview` | `library.view` | данные диалога «Оновити до останньої версії» (PR-26) |
 
-**20 эндпоинтов.**
+> [исправлено, PR-25 и PR-26: четыре ручки сверх перечня — тело закреплённой версии и отзыв
+> предложения (`31` §10, PR-25: ими читает себя место на v2 и выходит из `pending` автор), палитра
+> «до 8 последних использованных» (`31` §5.4) и предпросмотр диалога обновления (`31` §5.5:
+> changelog пропущенных версий, поблочный diff и «N людей уже почали» считает сервер, CLAUDE.md
+> п. 3)] Ранее: «**20 эндпоинтов.**»
+
+**24 эндпоинта.**
 
 ### 2.5 Оргструктура — документ `32`
 

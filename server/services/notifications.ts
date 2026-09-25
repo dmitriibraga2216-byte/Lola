@@ -254,8 +254,6 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   content_issue_rescored: 'Питання «{{title}}» виправили, твій результат перераховано: {{scoreOld}} → {{scoreNew}}',
   content_reporter_muted: 'Надсилання повідомлень про помилки контенту призупинено до {{until}}',
   // docs/v2/31 §8 (PR-25): библиотека модулей. Коды — `snake_case`, как у воронки кандидатов.
-  // Хотфикс и еженедельный дайджест устаревших ссылок (`library_hotfix_*`, `library_stale_digest`)
-  // приходят с PR-26 вместе с обновлением мест использования.
   library_module_updated: 'Модуль «{{title}}» оновлено до v{{version}}. {{changelog}}',
   library_module_archived: 'Модуль «{{title}}» заархівовано. Причина: {{reason}}',
   library_proposal_created: '{{user}} пропонує додати «{{title}}» до бібліотеки',
@@ -263,6 +261,13 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // docs/v2/37 §8 (PR-22): флаг отклонения времени при выборке ≥ 20 — автору материала, только
   // колокольчик. `fact` и `plan` — минуты, отформатированные локалью адресата (`timeNorms.ts`)
   content_time_deviation: 'Матеріал «{{title}}»: люди витрачають {{fact}} хв замість {{plan}} хв',
+  // docs/v2/31 §8 (PR-26): хотфикс и еженедельный дайджест — только колокольчик (in-app).
+  // «У треку» из §8 снято: место бывает и уроком курса. Причина блокировки хотфикса — одна из
+  // двух: люди уже проходят (текст §8 дословно) или урок в опубликованной версии курса, которую
+  // не меняют (`31` §7.4 в редакции PR-26)
+  library_hotfix_applied: 'У «{{container}}» модуль «{{title}}» оновлено автоматично: критичне виправлення',
+  library_hotfix_blocked: 'Критичне виправлення «{{title}}» не застосовано у «{{container}}»: {{#inProgress}}люди вже проходять{{/inProgress}}{{#published}}опубліковану версію курсу не змінюють{{/published}}. Оновіть вручну',
+  library_stale_digest: 'У ваших треках {{n}} посилань на застарілі версії модулів',
 }
 
 /**

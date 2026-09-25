@@ -63,6 +63,8 @@ async function cleanup() {
   await admin`delete from library_module_proposals where tenant_id in ${admin(tenants)}`
   await admin`update library_modules set current_version_id = null, draft_lesson_id = null where tenant_id in ${admin(tenants)}`
   await admin`update lessons set library_version_id = null where tenant_id in ${admin(tenants)} and library_version_id is not null`
+  // PR-26: узел-ссылка держит версию (restrict) — снять ссылку до удаления версий
+  await admin`update trajectory_nodes set library_version_id = null where tenant_id in ${admin(tenants)} and library_version_id is not null`
   await admin`delete from library_module_versions where tenant_id in ${admin(tenants)}`
   await admin`delete from lessons where tenant_id in ${admin(tenants)} and library_module_id is not null`
   await admin`delete from library_modules where tenant_id in ${admin(tenants)}`
@@ -542,7 +544,7 @@ describe('урок курса как место использования (§3.
   it('отвязка делает копию тела закреплённой версии: урок получает свой материал', async () => {
     const [u] = (await usages.listUsages(asAuthor(), moduleId))!.active
     const r = await usages.detachUsage(asAuthor(), u!.id)
-    expect(r).toEqual({ ok: true, lessonId })
+    expect(r).toEqual({ ok: true, lessonId, resourceId: null })
     const [l] = await admin`select l.library_version_id, l.resource_version_id, r.body, r.status from lessons l join resources r on r.id = l.item_id where l.id = ${lessonId}`
     expect(l).toMatchObject({ library_version_id: null, resource_version_id: null, status: 'draft' })
     expect(l!.body).toEqual([text('b1', '<p>Текст v1</p>')])

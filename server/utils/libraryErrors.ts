@@ -36,6 +36,12 @@ const LIBRARY_ERRORS = {
   media_not_ready: [422, 'media_not_ready', 'Дочекайтеся обробки файлів і опублікуйте ще раз'],
   holder_not_content: [422, 'holder_not_content', 'Модуль вставляється у вузол-завдання, а не в логіку графа'],
   not_content: [422, 'not_content', 'У бібліотеку пропонують лише матеріал: тести перевикористовуються банком питань'],
+  // PR-26: обновление места и сравнение версий (docs/v2/31 §5.5, §7.3, §10)
+  version_not_found: [404, 'not_found', 'Версію не знайдено'],
+  already_latest: [409, 'already_latest', 'Тут уже закріплено цю версію — оновлювати нічого'],
+  version_downgrade: [422, 'version_downgrade', 'Відкату версій немає: опублікуйте нову версію з потрібним вмістом'],
+  version_retired: [422, 'version_retired', 'Версію виведено з обігу — оберіть останню опубліковану'],
+  same_version: [422, 'same_version', 'Оберіть дві різні версії, щоб порівняти'],
 } as const satisfies Record<string, readonly [number, string, string]>
 
 export type LibraryErrorKey = keyof typeof LIBRARY_ERRORS

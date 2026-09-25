@@ -542,15 +542,18 @@ check12_contours_pr39() {
 # тест (`tests/integration/v2-time-norms.spec.ts`, «бал жодної людини не змінився»); здесь —
 # статический сторож того же правила: таблицу норм, флаг отклонения и модуль норм знают только
 # сам модуль (`server/services/timeNorms.ts`, схема, миграция, его ручки и планировщик) и
-# ровно три входа снаружи, каждый — одним именем: писатели очереди проверки берут снимок нормы
+# ровно пять входов снаружи, каждый — одним именем: писатели очереди проверки берут снимок нормы
 # (`plannedSecondsFor`, `37` §7.14: «попадает в очередь снимком на момент сдачи»), сохранение
 # материала отдаёт в норму его «Орієнтовний час» (`syncMaterialEstimate`, `37` §3.5), блок
 # «Призначені треки» карточки показывает «Плановий час» трека (`versionPlannedSeconds`,
 # `docs/v2/38` §5.1, PR-35) — только показ рядом с «Часом проходження». Индекс залученості
 # (`server/services/engagementIndex.ts`) нормы не читает: порог `38` §7.3 «Плановий час × 0.5»
-# отклонён именно этим правилом (Р-35.2). Любое другое упоминание в server/ и shared/ — это
-# правило балла, зачёта или рейтинга, которое начало смотреть на время. Комментарии нарушением
-# не считаются.
+# отклонён именно этим правилом (Р-35.2). Конструктор выгрузок (`server/services/
+# reportBuilder.ts`, PR-38, П-22) регистрирует уже готовый отчёт «План і факт часу» второй
+# точкой входа — вызывает `timePlanFactReport()`/`planFactExportRows()` теми же аргументами,
+# что и его собственная ручка, не читая норму или флаг напрямую и не вводя нового расчёта.
+# Любое другое упоминание в server/ и shared/ — это правило балла, зачёта или рейтинга, которое
+# начало смотреть на время. Комментарии нарушением не считаются.
 check13_time_norms_not_in_score() {
   local hits
   hits="$(grep -rnE "content_time_norms|contentTimeNorms|\bdeviation_flag\b|\bdeviationFlag\b|/timeNorms'" \
@@ -559,7 +562,9 @@ check13_time_norms_not_in_score() {
     | grep -vE '^(server/services/timeNorms\.ts|server/db/schema/timeNorms\.ts|server/db/schema/index\.ts|server/db/migrations/0085_v2_time_norms\.sql|server/api/v1/content/time-norms/[^:]+|server/api/v1/reports/time-plan-fact\.get\.ts|server/plugins/worker\.ts|shared/domain/timeNorms\.ts|shared/schemas/timeNorms\.ts):' \
     | grep -vE "^server/services/(attempts|workshops)\.ts:[0-9]+:import \{ plannedSecondsFor \} from '\./timeNorms'$" \
     | grep -vE "^server/services/resources\.ts:[0-9]+:import \{ syncMaterialEstimate \} from '\./timeNorms'$" \
-    | grep -vE "^server/services/personTracks\.ts:[0-9]+:import \{ versionPlannedSeconds \} from '\./timeNorms'$" || true)"
+    | grep -vE "^server/services/personTracks\.ts:[0-9]+:import \{ versionPlannedSeconds \} from '\./timeNorms'$" \
+    | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ planFactExportRows, timePlanFactReport \} from '\./timeNorms'$" \
+    | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ timePlanFactQuerySchema \} from '\.\./\.\./shared/schemas/timeNorms'$" || true)"
   report "13. норма времени и флаг отклонения не входят в балл (docs/v2/37 §7.14 б, критерий 11)" "$hits"
 }
 

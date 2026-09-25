@@ -9,6 +9,8 @@ import type { Access } from './access'
 import { areaCovers, areaOf, can } from './access'
 import { cardSubject } from './personCard'
 import type { CardSubject } from './personCard'
+import { frameJoins, frameSelect, frameWhere, periodSql } from './reportFrame'
+import type { ReportFilter } from '../../shared/schemas/reports'
 
 /**
  * Лента и карта активности человека (docs/v2/38-people-extensions.md §3.3, §5.1, §7.9–§7.11, §11;
@@ -291,5 +293,45 @@ export async function aggregateActivitySeconds(tenantId: string, opts: { windowM
         where d.seconds_spent is distinct from excluded.seconds_spent
       returning d.id`) as unknown as unknown[]
     return { days: rows.length }
+  })
+}
+
+export interface Ctx { tenantId: string, actorId: string }
+
+/**
+ * «Навчальна активність» (`38` §9 п. 4, PR-38, П-22, `⟵` PR-34). Строка — людина, період
+ * довільний (без фільтру — журнал не чіпаємо, беремо весь `user_activity_daily`, як і в звіті
+ * норм часу). «Найдовша серія» — послідовні дні з подіями (класичний трюк gaps-and-islands:
+ * дата мінус номер рядка за порядком дат — константа всередині одного безрозривного відрізку).
+ * Область людей — той самий каркас (`frameWhere`), тільки співробітники, без архівованих
+ * за замовчуванням.
+ */
+export async function learningActivityReport(ctx: Ctx & { scope?: string[] | null }, f: ReportFilter): Promise<Record<string, unknown>[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const period = periodSql(sql`uad.local_date`, f)
+    const rows = await tx.execute(sql`
+      select ${frameSelect()},
+             count(uad.local_date) filter (where uad.events_count > 0)::int as days_active,
+             coalesce(sum(uad.events_count), 0)::int as total_events,
+             round(coalesce(sum(uad.seconds_spent), 0) / 3600.0, 1) as hours,
+             coalesce((
+               select max(streak) from (
+                 select count(*) as streak
+                   from (
+                     select uad2.local_date, uad2.local_date - (row_number() over (order by uad2.local_date))::int * interval '1 day' as grp
+                       from user_activity_daily uad2
+                      where uad2.user_id = u.id and uad2.events_count > 0 ${periodSql(sql`uad2.local_date`, f)}
+                   ) islands
+                  group by grp
+               ) streaks
+             ), 0)::int as longest_streak
+        from users u
+        ${frameJoins()}
+        left join user_activity_daily uad on uad.user_id = u.id ${period}
+       where true
+             ${frameWhere({ positionIds: f.positionIds, orgUnitId: f.orgUnitId, tags: f.tags, includeArchived: f.includeArchived, q: f.q, scope: ctx.scope ?? null })}
+       group by u.id, full_name, user_status, position, city, unit, location, tags
+       order by days_active desc`) as unknown as Record<string, unknown>[]
+    return rows
   })
 }

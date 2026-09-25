@@ -5,6 +5,8 @@ import type { TenantTx } from '../utils/withTenant'
 import { LIFECYCLE_STAGE_FLOW } from '../../shared/enums'
 import type { LifecycleStageCode } from '../../shared/enums'
 import { recordAudit } from './audit'
+import { frameJoins, frameWhere, periodSql } from './reportFrame'
+import type { ReportFilter } from '../../shared/schemas/reports'
 
 /**
  * Состояние человека в жизненном цикле (docs/v2/33-lifecycle.md §3.5, §4.1, §7.6).
@@ -240,4 +242,47 @@ export async function peopleCounts(tx: TenantTx): Promise<Map<string, number>> {
     .where(and(eq(employeeLifecycleState.isCurrent, true), isNull(employeeLifecycleState.leftAt)))
     .groupBy(employeeLifecycleState.stageId)
   return new Map(rows.map(r => [r.stageId, Number(r.n)]))
+}
+
+export interface StageSpeedRow {
+  stageId: string
+  stage: string
+  code: string
+  expectedDays: number | null
+  n: number
+  medianDays: number | null
+  p90Days: number | null
+  exceededSharePct: number
+}
+
+/**
+ * «Швидкість проходження етапів» (`33` §9 п. 2, PR-38, П-22). Строка — этап, метрика — только по
+ * **завершённым** пребываниям (`left_at is not null`): отчёт о скорости прохождения, а не о том,
+ * кто застрял сейчас (для этого — карточка и дайджест руководителя, `33` §7.11). Область людей —
+ * тем же каркасом (`frameWhere`), фильтр точки/підрозділу/посади — по текущему розміщенню.
+ */
+export async function stageSpeedReport(ctx: Ctx & { scope?: string[] | null }, f: ReportFilter & { stageCode?: string }): Promise<StageSpeedRow[]> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const stageFilter = f.stageCode ? sql`and ls.code = ${f.stageCode}` : sql``
+    const rows = await tx.execute(sql`
+      select ls.id as stage_id, ls.name_uk as stage, ls.code, ls.expected_days, ls.sort,
+             count(*)::int as n,
+             round((percentile_cont(0.5) within group (order by extract(epoch from (els.left_at - els.entered_at)) / 86400))::numeric, 1) as median_days,
+             round((percentile_cont(0.9) within group (order by extract(epoch from (els.left_at - els.entered_at)) / 86400))::numeric, 1) as p90_days,
+             count(*) filter (where ls.expected_days is not null and extract(epoch from (els.left_at - els.entered_at)) / 86400 > ls.expected_days)::int as exceeded
+        from employee_lifecycle_state els
+        join users u on u.id = els.user_id
+        join lifecycle_stages ls on ls.id = els.stage_id
+        ${frameJoins()}
+       where els.left_at is not null
+             ${frameWhere({ positionIds: f.positionIds, orgUnitId: f.orgUnitId, tags: f.tags, includeArchived: f.includeArchived, scope: ctx.scope ?? null })}
+             ${periodSql(sql`els.left_at`, f)} ${stageFilter}
+       group by ls.id, ls.name_uk, ls.code, ls.expected_days, ls.sort
+       order by ls.sort`) as unknown as { stage_id: string, stage: string, code: string, expected_days: number | null, n: number, median_days: string | null, p90_days: string | null, exceeded: number }[]
+    return rows.map(r => ({
+      stageId: r.stage_id, stage: r.stage, code: r.code, expectedDays: r.expected_days,
+      n: Number(r.n), medianDays: r.median_days == null ? null : Number(r.median_days), p90Days: r.p90_days == null ? null : Number(r.p90_days),
+      exceededSharePct: r.n ? Math.round((Number(r.exceeded) / Number(r.n)) * 1000) / 10 : 0,
+    }))
+  })
 }

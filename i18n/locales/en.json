@@ -2553,6 +2553,8 @@
     "period": "Period under review",
     "subjectsPositions": "Positions",
     "subjectsLocations": "Locations (all if none picked)",
+    "subjectFromTrajectory": "Who is assessed: {name}",
+    "subjectRemove": "Remove from the list",
     "peersCount": "How many peers",
     "selfFirst": "Self first",
     "anonymous": "Subject cannot see who rated how",
@@ -2694,6 +2696,7 @@
     "week": "week",
     "new": "New checklist",
     "titleHint": "Title: “Shift opening”, “Kitchen cleanliness”",
+    "aboutPerson": "About: {name}",
     "scoring": {
       "percent": "Percent",
       "points": "Points",
@@ -3514,6 +3517,8 @@
       "trajectory_access_closed": "Step access closed",
       "trajectory_mentor_confirm": "Mentee awaits your confirmation",
       "trajectory_request": "Trajectory request",
+      "trajectory_checklist_waiting": "Someone awaits your checklist",
+      "trajectory_assessment_waiting": "Someone awaits an assessment",
       "notice_assigned": "New notice",
       "notice_not_acknowledged": "Notice reminder",
       "birthday_upcoming": "Colleague birthday soon",
@@ -4104,7 +4109,17 @@
       "stopDelay": "time limit",
       "confirmed": "confirmed by mentor",
       "waitingMentor": "waiting for mentor",
+      "waitingManager": "Waiting for the manager’s evaluation",
+      "waitingAssessment": "Waiting for the assessment to finish",
       "waiting": "waiting"
+    },
+    "review": {
+      "checklist": "The manager fills in the checklist — {name}. Nothing to press here: the step is credited automatically once the checklist is sent.",
+      "checklistAdmin": "The learning administrator fills in the checklist. Nothing to press here: the step is credited automatically once the checklist is sent.",
+      "checklistRetry": "The last checklist was not passed ({score}%). The manager will check again — the step is credited once the checklist is passed.",
+      "assessmentRunning": "The assessment runs until {date}. Nothing to press here: the step is credited automatically once the assessment is finished.",
+      "assessmentLaunch": "The assessment has not been started yet — the manager ({name}) starts it. The step is credited automatically once the assessment is finished.",
+      "assessmentAdmin": "The assessment has not been started yet — the learning administrator starts it. The step is credited automatically once the assessment is finished."
     },
     "short": "Trajectories"
   },

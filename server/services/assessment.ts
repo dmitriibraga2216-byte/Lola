@@ -424,6 +424,13 @@ export async function startCycle(ctx: Ctx, cycleId: string): Promise<{ ok: true,
       }
     }
     await tx.update(assessmentCycles).set({ status: 'active', updatedAt: new Date() }).where(eq(assessmentCycles.id, cycleId))
+    // Кто из оцениваемых уже ждёт на шаге траектории «оценивание» этой анкеты (решение 25.09.2026,
+    // docs/28 §28.21) — его оценщикам «людина чекає» со ссылкой на анкету. Точкой сохранения:
+    // сбой уведомления не должен сорвать запуск цикла
+    if (tasks.length) {
+      const { notifyWaitingReviewers } = await import('./trajectories')
+      await tx.transaction(sp => notifyWaitingReviewers(sp, ctx.tenantId, 'assessment', c.formId, subjects)).catch(err => console.error('trajectory review notify', err))
+    }
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.cycle.start', entity: 'assessment_cycle', entityId: cycleId, after: { tasks: tasks.length, subjects: subjects.length, byProfile: [...subjectItems.values()].filter(Boolean).length } })
     return { ok: true as const, tasks: tasks.length, subjects: subjects.length }
   })
@@ -689,9 +696,20 @@ export async function calibrateAnswer(ctx: Ctx, taskId: string, criterionId: str
   })
 }
 
+/**
+ * Итог оценивания в процентах шкалы — (итог − min)/(max − min), та же нормировка, что у доли пункта
+ * чек-листа (`scoreRun`) и уровня компетенции (`finishCycle`). Для шага траектории (docs/28 §28.21):
+ * у шагов балл — процент, на нём стоит условие «бал ≥ N» у «Розгалуження».
+ */
+export function scalePercent(value: number | null, scale: { min: number, max: number }): number | null {
+  if (value == null || scale.max <= scale.min) return null
+  return Math.round(Math.min(100, Math.max(0, ((value - scale.min) / (scale.max - scale.min)) * 100)) * 100) / 100
+}
+
 /** Завершение цикла: критерии с компетенцией → оценка компетенции source=assessment (docs/20 §7.6, §13.6). */
 export async function finishCycle(ctx: Ctx | { tenantId: string, actorId: null }, cycleId: string): Promise<{ ok: true, subjects: number, competencyAssessments: number } | { ok: false, code: 'not_found' | 'bad_status' }> {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  const credits: { userId: string, formId: string, score: number | null }[] = []
+  const res = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [c] = await tx.select().from(assessmentCycles).where(eq(assessmentCycles.id, cycleId))
     if (!c) return { ok: false as const, code: 'not_found' as const }
     if (!['active', 'calibration'].includes(c.status)) return { ok: false as const, code: 'bad_status' as const }
@@ -729,12 +747,26 @@ export async function finishCycle(ctx: Ctx | { tenantId: string, actorId: null }
       // docs/33 D-020/D-034: завершення анкети для оцінюваного — через єдиний хук (журнал + компетенції призначення)
       const { onTaskCompleted } = await import('./taskCompletion')
       await onTaskCompleted(tx, ctx.tenantId, s, { contentType: 'assessment', contentId: c.formId, status: 'done', result: r.overall.weighted ?? null, sourceKind: 'assessment_cycle', sourceId: cycleId, actorId: ctx.actorId })
+      credits.push({ userId: s, formId: c.formId, score: scalePercent(r.overall.weighted ?? null, r.structure.scale) })
     }
     await tx.update(assessmentCycles).set({ status: 'finished', finishedAt: new Date(), updatedAt: new Date() }).where(eq(assessmentCycles.id, cycleId))
     if (c.createdBy) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: c.createdBy, code: 'assessment_cycle_finished', payload: { title: c.title, subjects: subjects.length }, dedupKey: `at_finished:${cycleId}` })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'assessment.cycle.finish', entity: 'assessment_cycle', entityId: cycleId, after: { subjects: subjects.length, competencyAssessments: n } })
     return { ok: true as const, subjects: subjects.length, competencyAssessments: n }
   })
+  // Оценивание человека завершено (решение владельца 25.09.2026, docs/28 §28.21) — результат для шага
+  // траектории и элемента программы тем же хуком, что у остальных видов, после фиксации, «выстрелил и
+  // забыл». По очереди, а не веером: цикл бывает на сотню человек, а пул соединений общий
+  if (res.ok && credits.length) {
+    void (async () => {
+      const [{ onTaskResult }, { onItemResult }] = await Promise.all([import('./trajectories'), import('./programs')])
+      for (const cr of credits) {
+        await onTaskResult(ctx.tenantId, cr.userId, 'assessment', cr.formId, { passed: true, score: cr.score }).catch(err => console.error('trajectory assessment hook', err))
+        await onItemResult(ctx.tenantId, cr.userId, 'assessment', cr.formId, { passed: true, score: cr.score }).catch(err => console.error('program assessment hook', err))
+      }
+    })().catch(err => console.error('assessment result hooks', err))
+  }
+  return res
 }
 
 export async function toCalibration(ctx: Ctx, cycleId: string) {

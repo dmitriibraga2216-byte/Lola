@@ -104,6 +104,12 @@ export async function startRun(ctx: Ctx, checklistId: string, input: { locationI
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [c] = await tx.select().from(checklists).where(and(eq(checklists.id, checklistId), eq(checklists.isActive, true)))
     if (!c) return null
+    // Прогон о человеке засчитывает его шаг траектории (docs/28 §28.21): проверяемый — только свой
+    // человек тенанта. Внешний ключ RLS не видит, поэтому проверка здесь; чужой — «не найдено» (п. 15)
+    if (input.subjectUserId) {
+      const [subject] = await tx.select({ id: users.id }).from(users).where(eq(users.id, input.subjectUserId))
+      if (!subject) return null
+    }
     const [r] = await tx.insert(checklistRuns).values({
       tenantId: ctx.tenantId, checklistId, subjectKind: c.subjectKind, locationId: input.locationId ?? null, subjectUserId: input.subjectUserId ?? null, observerId: ctx.actorId,
       startedAt: input.startedAt ? new Date(input.startedAt) : new Date(), device: input.device ?? null, geo: input.geo ?? null,
@@ -168,9 +174,19 @@ export function scoreRun(c: ScoringRules, answers: RunAnswer[], scale: ScaleInfo
 
 export type FinishResult = { ok: true, score: RunScore } | { ok: false, code: 'not_found' | 'incomplete' | 'photo_required' | 'comment_required' | 'action_plan_required' | 'signature_required', itemIds?: string[] }
 
+/**
+ * Результат прогона о человеке для его шага траектории (docs/28 §28.21): доля набранного от суммы
+ * весов в процентах — тот же «%», что показывают прогон и список, — и ноль при критическом провале,
+ * как у самого чек-листа. Всегда 0–100, независимо от способа подсчёта (у «балів» сумма бывает больше).
+ */
+export function runPercent(score: RunScore, criticalFailRule: string): number {
+  return criticalFailRule === 'any_critical_fails_all' && score.criticalFailed.length ? 0 : score.percent
+}
+
 /** Завершение: все пункты отвечены, фото где требуется, при провале — план действий с ответственным и сроком (docs/20 §7.5). */
 export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunAnswer[], actionPlan?: ActionItem[], finishedAt?: string, startedAt?: string, signatureMediaId?: string }): Promise<FinishResult> {
-  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+  const credits: { userId: string, checklistId: string, passed: boolean, score: number }[] = []
+  const res = await withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<FinishResult> => {
     const [r] = await tx.select().from(checklistRuns).where(and(eq(checklistRuns.id, runId), eq(checklistRuns.observerId, ctx.actorId), eq(checklistRuns.status, 'draft')))
     if (!r) return { ok: false as const, code: 'not_found' as const }
     const [c] = await tx.select().from(checklists).where(eq(checklists.id, r.checklistId))
@@ -210,15 +226,29 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
     for (const p of plan) {
       if (p.responsibleId !== ctx.actorId) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: p.responsibleId, code: 'action_item_due', payload: { text: p.text, due: p.dueAt, title: c!.title }, dedupKey: `ai_new:${runId}:${p.id}` })
     }
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.run.finish', entity: 'checklist_run', entityId: runId, after: { score: score.score, passed: score.passed } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'checklist.run.finish', entity: 'checklist_run', entityId: runId, after: { score: score.score, passed: score.passed, subjectUserId: r.subjectUserId } })
     // docs/33 D-020: чек-лист заповнено — завдання спостерігача виконане (результат — відсоток прогону; провал точки — не провал завдання)
     const { onTaskCompleted } = await import('./taskCompletion')
     await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'check_list', contentId: r.checklistId, status: 'done', result: score.score, sourceKind: 'checklist_run', sourceId: runId })
+    // Чек-лист о человеке (решение владельца 25.09.2026, docs/28 §28.21) — завершение и его задания:
+    // пройдено или нет — по правилу самого чек-листа, как в отчёте по типу (D-047). Себя человек себе
+    // не засчитывает: шаг выполняет другой человек о нём
+    if (r.subjectUserId && r.subjectUserId !== ctx.actorId) {
+      await onTaskCompleted(tx, ctx.tenantId, r.subjectUserId, { contentType: 'check_list', contentId: r.checklistId, status: score.passed ? 'done' : 'failed', result: score.score, sourceKind: 'checklist_run', sourceId: runId, actorId: ctx.actorId })
+      credits.push({ userId: r.subjectUserId, checklistId: r.checklistId, passed: score.passed, score: runPercent(score, c!.criticalFailRule) })
+    }
     // Лента того, кто заполнил чек-лист (docs/v2/38 §7.9), — днём заполнения: прогон, досланный
     // из офлайна, несёт своё `finishedAt` (Р-34.3)
     await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'checklist_run_completed', ref: { entity: 'checklist_runs', id: runId }, occurredAt: finishedAt })
     return { ok: true as const, score }
   })
+  // Результат для шага траектории и элемента программы — тем же хуком, что у остальных видов, после
+  // фиксации, «выстрелил и забыл» (как у теста и практикума); своего пути засчитывания здесь нет
+  for (const cr of credits) {
+    import('./trajectories').then(t => t.onTaskResult(ctx.tenantId, cr.userId, 'check_list', cr.checklistId, { passed: cr.passed, score: cr.score })).catch(err => console.error('trajectory checklist hook', err))
+    import('./programs').then(p => p.onItemResult(ctx.tenantId, cr.userId, 'check_list', cr.checklistId, { passed: cr.passed, score: cr.score })).catch(err => console.error('program checklist hook', err))
+  }
+  return res
 }
 
 export async function getRun(ctx: Ctx, runId: string, opts: { canSeeUnpublished?: boolean } = {}) {

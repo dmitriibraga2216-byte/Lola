@@ -158,7 +158,13 @@ export async function workshopForLearner(ctx: Ctx, workshopId: string, enrollmen
       .where(and(eq(workshopSubmissions.workshopId, workshopId), eq(workshopSubmissions.userId, ctx.actorId),
         ...(enrollmentId ? [eq(workshopSubmissions.enrollmentId, enrollmentId)] : [])))
       .orderBy(desc(workshopSubmissions.attemptNo))
-    const current = history[0] ?? null
+    const currentRow = history[0] ?? null
+    // Срок проверки (`workshop.reviewBy`) ученику нужен, пока сдача ждёт наставника — источник
+    // теперь только review_queue_items (В-2, PR-20 сняла зеркало workshop_submissions.sla_due_at).
+    const current = currentRow && ['submitted', 'in_review'].includes(currentRow.status)
+      ? { ...currentRow, slaDueAt: (await tx.select({ slaDueAt: reviewQueueItems.slaDueAt }).from(reviewQueueItems)
+          .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, currentRow.id))))[0]?.slaDueAt ?? null }
+      : currentRow ? { ...currentRow, slaDueAt: null } : null
     const comments = current
       ? await tx.select({ id: workshopComments.id, authorId: workshopComments.authorId, authorName: users.fullName, body: workshopComments.body, createdAt: workshopComments.createdAt })
           .from(workshopComments).innerJoin(users, eq(users.id, workshopComments.authorId))
@@ -242,10 +248,11 @@ async function rewritePendingFile(
 
   // Последний недосланный файл пришёл (или потерян) — работа уходит к ментору (§7.5 п. 3).
   // Срок проверки считается от этого момента: пока файла не было, взять работу было нельзя,
-  // и SLA ментора не должен был тикать. Строка очереди открывается заново (та же строка).
+  // и SLA ментора не должен был тикать. Строка очереди открывается заново (та же строка) —
+  // enqueueReview() сам ставит review_queue_items.sla_due_at = этот момент + slaHours;
+  // отдельной записи в workshop_submissions не нужно, зеркало снято PR-20 (В-2).
   if (['submitted', 'in_review'].includes(row.s.status) && !next.some(isPendingFile)) {
     const now = new Date()
-    await tx.update(workshopSubmissions).set({ slaDueAt: new Date(now.getTime() + row.w.slaHours * 3_600_000) }).where(eq(workshopSubmissions.id, row.s.id))
     const [enr] = row.s.enrollmentId
       ? await tx.select({ courseId: enrollments.subjectId }).from(enrollments).where(and(eq(enrollments.id, row.s.enrollmentId), eq(enrollments.subjectType, 'course')))
       : []
@@ -295,8 +302,7 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
     const draft = await saveDraft(ctx, workshopId, { text, files, enrollmentId: input.enrollmentId, lessonId: input.lessonId })
     const now = new Date()
     const [s] = await tx.update(workshopSubmissions).set({
-      status: 'submitted', submittedAt: now, claimedAt: null, reviewerId: null,
-      slaDueAt: new Date(now.getTime() + w.slaHours * 3_600_000), device: input.device ?? null, updatedAt: now,
+      status: 'submitted', submittedAt: now, device: input.device ?? null, updatedAt: now,
     }).where(eq(workshopSubmissions.id, draft!.id)).returning({ id: workshopSubmissions.id })
 
     // Единая очередь проверки (docs/v2/44 В-2): строка ставится в той же транзакции, что и
@@ -361,15 +367,21 @@ async function reviewersFor(tx: TenantTx, tenantId: string, w: typeof workshops.
 
 // ── Проверяющий ────────────────────────────────────────────────────────
 
-/** Очередь (docs/13 §5.2): свои сдачи не видны; захваченные другими — скрыты, кроме протухших. */
+/**
+ * Очередь (docs/13 §5.2): свои сдачи не видны; захваченные другими — скрыты, кроме протухших.
+ * Захват и срок проверки читаются из review_queue_items — единственного источника истины
+ * (В-2, PR-20 сняла зеркало `workshop_submissions.reviewer_id` / `claimed_at` / `sla_due_at`).
+ * Инвариант очереди (её писатель — только `enqueueReview()`, никогда не удаляет строку)
+ * гарантирует ровно одну строку `review_queue_items` на каждую сдачу в статусе submitted/in_review.
+ */
 export async function reviewQueue(ctx: Ctx, filter: { mine?: boolean, overdue?: boolean } = {}) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const stale = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
     const rows = await tx.select({
       id: workshopSubmissions.id, workshopId: workshopSubmissions.workshopId, workshopTitle: workshops.title,
       userId: workshopSubmissions.userId, fullName: users.fullName, attemptNo: workshopSubmissions.attemptNo,
-      status: workshopSubmissions.status, submittedAt: workshopSubmissions.submittedAt, slaDueAt: workshopSubmissions.slaDueAt,
-      reviewerId: workshopSubmissions.reviewerId, claimedAt: workshopSubmissions.claimedAt, reworkCount: workshopSubmissions.reworkCount,
+      status: workshopSubmissions.status, submittedAt: workshopSubmissions.submittedAt, slaDueAt: reviewQueueItems.slaDueAt,
+      reviewerId: reviewQueueItems.claimedBy, claimedAt: reviewQueueItems.claimedAt, reworkCount: workshopSubmissions.reworkCount,
       locationName: locations.name,
       // «Очікує вивантаження» (docs/v2/34 §7.5 п. 2): работа видна, взять её нельзя
       pendingUpload: sql<boolean>`${PENDING_FILES_SQL}`,
@@ -377,20 +389,21 @@ export async function reviewQueue(ctx: Ctx, filter: { mine?: boolean, overdue?: 
       .from(workshopSubmissions)
       .innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
       .innerJoin(users, eq(users.id, workshopSubmissions.userId))
+      .innerJoin(reviewQueueItems, and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, workshopSubmissions.id)))
       .leftJoin(userPlacements, and(eq(userPlacements.userId, users.id), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
       .leftJoin(locations, eq(locations.id, userPlacements.locationId))
       .where(and(
         inArray(workshopSubmissions.status, ['submitted', 'in_review']),
         sql`${workshopSubmissions.userId} <> ${ctx.actorId}::uuid`,
         filter.mine
-          ? eq(workshopSubmissions.reviewerId, ctx.actorId)
-          : sql`(${workshopSubmissions.reviewerId} is null or ${workshopSubmissions.reviewerId} = ${ctx.actorId}::uuid or ${workshopSubmissions.claimedAt} < ${stale}::timestamptz)`,
+          ? eq(reviewQueueItems.claimedBy, ctx.actorId)
+          : sql`(${reviewQueueItems.claimedBy} is null or ${reviewQueueItems.claimedBy} = ${ctx.actorId}::uuid or ${reviewQueueItems.claimedAt} < ${stale}::timestamptz)`,
         // Назначенная или делегированная другому работа ушла из «Мої» (docs/v2/37 §13 к. 1) —
         // узкий фильтр не должен возвращать её обратно: состояние берётся из очереди (В-2).
         sql`not ${heldByOtherSql(ctx.actorId, 'workshop', sql`${workshopSubmissions.id}`)}`,
-        ...(filter.overdue ? [sql`${workshopSubmissions.slaDueAt} < now()`] : []),
+        ...(filter.overdue ? [sql`${reviewQueueItems.slaDueAt} < now()`] : []),
       ))
-      .orderBy(asc(workshopSubmissions.slaDueAt))
+      .orderBy(asc(reviewQueueItems.slaDueAt))
       .limit(200)
     return rows.map(r => ({ ...r, hoursLeft: r.slaDueAt ? Math.round((r.slaDueAt.getTime() - Date.now()) / 3_600_000) : null }))
   })
@@ -412,9 +425,8 @@ export async function claim(ctx: Ctx, submissionId: string): Promise<ClaimResult
     if ((s.files as unknown[] ?? []).some(isPendingFile)) return { ok: false as const, code: 'pending_upload' as const }
     const guard = await claimReview(tx, { taskType: 'workshop', sourceId: submissionId, reviewerId: ctx.actorId })
     if (!guard.ok) return { ok: false as const, code: guard.code }
-    // `workshop_submissions.reviewer_id` и `claimed_at` — зеркало для совместимости (В-2):
-    // источник истины о захвате — review_queue_items.claimed_by / claimed_at.
-    await tx.update(workshopSubmissions).set({ status: 'in_review', reviewerId: ctx.actorId, claimedAt: new Date(), updatedAt: new Date() }).where(eq(workshopSubmissions.id, submissionId))
+    // Захват живёт только в review_queue_items.claimed_by / claimed_at (В-2, PR-20 сняла зеркало).
+    await tx.update(workshopSubmissions).set({ status: 'in_review', updatedAt: new Date() }).where(eq(workshopSubmissions.id, submissionId))
     return { ok: true as const }
   })
 }
@@ -425,7 +437,7 @@ export async function release(ctx: Ctx, submissionId: string) {
     const [q] = await tx.select({ claimedBy: reviewQueueItems.claimedBy }).from(reviewQueueItems)
       .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, submissionId)))
     if (q && q.claimedBy !== ctx.actorId) return false
-    await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null, updatedAt: new Date() })
+    await tx.update(workshopSubmissions).set({ status: 'submitted', updatedAt: new Date() })
       .where(and(eq(workshopSubmissions.id, submissionId), eq(workshopSubmissions.status, 'in_review')))
     await releaseReview(tx, { taskType: 'workshop', sourceIds: [submissionId] })
     return true
@@ -459,10 +471,11 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
   const result = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [s] = await tx.select().from(workshopSubmissions).where(eq(workshopSubmissions.id, submissionId))
     if (!s || s.status !== 'in_review') return { ok: false as const, code: 'not_found' as const }
-    // Решает тот, у кого карточка в руках, — по очереди, а не по зеркалу (В-2).
+    // Решает тот, у кого карточка в руках — по очереди, единственному источнику истины (В-2,
+    // PR-20 сняла зеркало): нет строки очереди — работа никем не захвачена.
     const [q] = await tx.select({ claimedBy: reviewQueueItems.claimedBy }).from(reviewQueueItems)
       .where(and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, submissionId)))
-    if ((q ? q.claimedBy : s.reviewerId) !== ctx.actorId) return { ok: false as const, code: 'not_claimed' as const }
+    if (q?.claimedBy !== ctx.actorId) return { ok: false as const, code: 'not_claimed' as const }
     const [w] = await tx.select().from(workshops).where(eq(workshops.id, s.workshopId))
     if (!w) return { ok: false as const, code: 'not_found' as const }
 
@@ -493,8 +506,10 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
       score: String(score),
       passed: input.decision === 'accepted',
       reviewComment: comment || null,
+      // Момент решения: и «когда наставник ответил», и опора для дедлайна доработки ниже
+      // (workshopSlaScan) — без отдельной колонки под срок пересдачи (зеркало снято PR-20).
       reviewedAt: now,
-      ...(input.decision === 'rework' ? { reworkCount: s.reworkCount + 1, slaDueAt: new Date(now.getTime() + w.slaHours * 3_600_000) } : {}),
+      ...(input.decision === 'rework' ? { reworkCount: s.reworkCount + 1 } : {}),
       updatedAt: now,
     }).where(eq(workshopSubmissions.id, submissionId))
 
@@ -571,17 +586,20 @@ export async function addComment(ctx: Ctx, submissionId: string, body: string, i
 /** Фоновые (docs/13 §11): SLA-просрочки руководителю, освобождение протухших захватов, expire доработок. */
 export async function workshopSlaScan(tenantId: string): Promise<{ released: number, breached: number, expired: number }> {
   return withTenant(tenantId, null, async (tx) => {
-    // Протухшие захваты — по очереди (источник истины, В-2), зеркало следует за ней.
+    // Протухшие захваты и срок проверки — по очереди, единственному источнику истины (В-2,
+    // PR-20 сняла зеркало workshop_submissions.reviewer_id / claimed_at / sla_due_at).
     const staleIds = await staleClaims(tx, 'workshop')
     const released = staleIds.length
-      ? await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null })
+      ? await tx.update(workshopSubmissions).set({ status: 'submitted' })
         .where(and(eq(workshopSubmissions.status, 'in_review'), inArray(workshopSubmissions.id, staleIds))).returning({ id: workshopSubmissions.id })
       : []
     await releaseReview(tx, { taskType: 'workshop', sourceIds: staleIds })
 
     let breached = 0
-    const overdue = await tx.select({ s: workshopSubmissions, w: workshops }).from(workshopSubmissions).innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
-      .where(and(inArray(workshopSubmissions.status, ['submitted', 'in_review']), sql`${workshopSubmissions.slaDueAt} < now() - (${workshops.slaHours} || ' hours')::interval`))
+    const overdue = await tx.select({ s: workshopSubmissions, w: workshops }).from(workshopSubmissions)
+      .innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
+      .innerJoin(reviewQueueItems, and(eq(reviewQueueItems.taskType, 'workshop'), eq(reviewQueueItems.sourceId, workshopSubmissions.id)))
+      .where(and(inArray(workshopSubmissions.status, ['submitted', 'in_review']), sql`${reviewQueueItems.slaDueAt} < now() - (${workshops.slaHours} || ' hours')::interval`))
     const slaManagers = await managerIdsOf(tx, overdue.map(o => o.s.userId)) // П-16.4
     for (const { s, w } of overdue) {
       const mgr = slaManagers.get(s.userId)
@@ -591,8 +609,16 @@ export async function workshopSlaScan(tenantId: string): Promise<{ released: num
       }
     }
 
-    const expired = await tx.update(workshopSubmissions).set({ status: 'expired', updatedAt: new Date() })
-      .where(and(eq(workshopSubmissions.status, 'rework'), sql`${workshopSubmissions.slaDueAt} < now()`)).returning({ id: workshopSubmissions.id })
+    // Просрочка доработки: до PR-20 срок жил в зеркальном sla_due_at, пересчитанным при решении
+    // «на доопрацювання» (grade()); теперь тот же момент — reviewedAt (когда принято решение) +
+    // slaHours практикума, без отдельной колонки под срок пересдачи.
+    const expiredRework = await tx.select({ id: workshopSubmissions.id }).from(workshopSubmissions)
+      .innerJoin(workshops, eq(workshops.id, workshopSubmissions.workshopId))
+      .where(and(eq(workshopSubmissions.status, 'rework'), sql`${workshopSubmissions.reviewedAt} + (${workshops.slaHours} || ' hours')::interval < now()`))
+    const expired = expiredRework.length
+      ? await tx.update(workshopSubmissions).set({ status: 'expired', updatedAt: new Date() })
+        .where(inArray(workshopSubmissions.id, expiredRework.map(r => r.id))).returning({ id: workshopSubmissions.id })
+      : []
     // Истёкшая доработка уже никем не проверяется — элемент очереди закрывается, а не удаляется.
     await closeReview(tx, { taskType: 'workshop', sourceIds: expired.map(r => r.id) })
     return { released: released.length, breached, expired: expired.length }

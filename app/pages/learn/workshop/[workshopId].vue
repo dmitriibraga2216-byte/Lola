@@ -18,7 +18,7 @@ interface Criterion { id: string, text: string, isCritical: boolean }
  * `lifecycle`/`deletedAt` — файл удалён администратором: сдача остаётся, превью — нет (§13 к. 3).
  */
 interface SubFile { mediaId?: string, pendingId?: string, name: string, kind: string, bytes: number, lost?: boolean, lifecycle?: string, deletedAt?: string | null }
-interface Sub { id: string, status: string, attemptNo: number, mentorRating: number | null, reviewerId: string | null, body: { text?: string }, files: SubFile[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null, pendingUpload?: boolean }
+interface Sub { id: string, status: string, attemptNo: number, mentorRating: number | null, reviewedAt: string | null, body: { text?: string }, files: SubFile[], reviewComment: string | null, criteriaResults: { criterionId: string, passed: boolean, comment?: string }[] | null, reworkCount: number, slaDueAt: string | null, score: string | null, pendingUpload?: boolean }
 interface W {
   id: string, title: string, description: ContentBlock[], submissionKinds: string[], minTextLength: number | null, maxFiles: number, maxFileMb: number, allowCameraOnly: boolean,
   criteria: Criterion[], slaHours: number, current: Sub | null, history: { attemptNo: number, status: string, submittedAt: string | null, reviewComment: string | null }[], comments: { id: string, authorName: string, body: string, createdAt: string }[]
@@ -199,7 +199,7 @@ function fileState(f: SubFile): string | null {
         <b>{{ t('workshop.accepted') }}</b>
         <span v-if="w.current.score">{{ w.current.score }}%</span>
         <p v-if="w.current.reviewComment">{{ w.current.reviewComment }}</p>
-        <div v-if="w.current.reviewerId" class="rate">
+        <div v-if="w.current.reviewedAt" class="rate">
           <span>{{ w.current.mentorRating ? t('workshop.ratedMentor', { n: w.current.mentorRating }) : t('workshop.rateMentor') }}</span>
           <div v-if="!w.current.mentorRating" class="stars"><button v-for="n in 5" :key="n" class="star" :aria-label="String(n)" @click="rateMentor(n)">★</button></div>
         </div>

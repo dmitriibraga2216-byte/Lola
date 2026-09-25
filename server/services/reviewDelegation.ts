@@ -55,10 +55,15 @@ export async function activeChain(tx: TenantTx, itemId: string): Promise<Delegat
     .orderBy(asc(reviewDelegations.depth))
 }
 
-/** Сбросить зеркальный захват практикума (В-2): пока зеркало живо, оно не должно врать. */
-async function releaseWorkshopMirror(tx: TenantTx, item: Item): Promise<void> {
+/**
+ * Сдача практикума не должна остаться «в перевірці», если её захват в очереди сняли
+ * делегированием, отзывом или переназначением у неё из-под рук: `claim()` — единственный
+ * писатель, который переводит статус в `in_review`, и снятый захват обязан вернуть его
+ * обратно (зеркала `reviewer_id` / `claimed_at` больше нет — PR-20, В-2).
+ */
+async function resetWorkshopStatusIfClaimed(tx: TenantTx, item: Item): Promise<void> {
   if (item.taskType !== 'workshop' || !item.claimedBy) return
-  await tx.update(workshopSubmissions).set({ status: 'submitted', reviewerId: null, claimedAt: null, updatedAt: new Date() })
+  await tx.update(workshopSubmissions).set({ status: 'submitted', updatedAt: new Date() })
     .where(and(eq(workshopSubmissions.id, item.sourceId), eq(workshopSubmissions.status, 'in_review')))
 }
 
@@ -159,7 +164,7 @@ async function delegateInTx(tx: TenantTx, actor: ReviewActor, itemId: string, in
     requestContext: currentRequestContext(),
   }).returning()
 
-  await releaseWorkshopMirror(tx, item)
+  await resetWorkshopStatusIfClaimed(tx, item)
   const [updated] = await tx.update(reviewQueueItems).set({
     assignedReviewerId: input.toUserId,
     assignedAt: now,
@@ -237,7 +242,7 @@ async function unwindTo(tx: TenantTx, item: Item, link: Delegation, state: Revie
     .where(and(eq(reviewDelegations.queueItemId, item.id), eq(reviewDelegations.state, 'active'), gte(reviewDelegations.depth, link.depth)))
   const [parent] = await tx.select().from(reviewDelegations)
     .where(and(eq(reviewDelegations.queueItemId, item.id), eq(reviewDelegations.state, 'active'), eq(reviewDelegations.depth, link.depth - 1)))
-  await releaseWorkshopMirror(tx, item)
+  await resetWorkshopStatusIfClaimed(tx, item)
   const [updated] = await tx.update(reviewQueueItems).set({
     assignedReviewerId: link.fromUserId,
     assignedAt: now,
@@ -319,7 +324,7 @@ export async function reassignItem(actor: ReviewActor, itemId: string, input: { 
 
     await tx.update(reviewDelegations).set({ state: 'revoked_by_manager', resolvedAt: now, revokedBy: actor.actorId, revokeReason: input.reason, updatedAt: now })
       .where(and(eq(reviewDelegations.queueItemId, item.id), eq(reviewDelegations.state, 'active')))
-    await releaseWorkshopMirror(tx, item)
+    await resetWorkshopStatusIfClaimed(tx, item)
     const [updated] = await tx.update(reviewQueueItems).set({
       assignedReviewerId: input.toUserId,
       assignedAt: now,

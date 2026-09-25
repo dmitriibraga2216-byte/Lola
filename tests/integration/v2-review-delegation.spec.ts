@@ -347,10 +347,10 @@ describe('37 §13 критерий 4: отзыв, когда делегат уж
     expect(q.claimed_by).toBeNull()
     expect(q.delegation_depth).toBe(0)
     expect((q.sla_due_at as Date).getTime()).toBe((q0!.sla_due_at as Date).getTime())
-    // Зеркало практикума не держит захват делегата (В-2).
-    const [ws] = await admin`select status, reviewer_id from workshop_submissions where id = ${sub.submissionId}`
+    // Захват делегата снят в очереди (проверено выше); зеркала на workshop_submissions больше
+    // нет (PR-20) — остаётся только статус самой сдачи.
+    const [ws] = await admin`select status from workshop_submissions where id = ${sub.submissionId}`
     expect(ws!.status).toBe('submitted')
-    expect(ws!.reviewer_id).toBeNull()
 
     const [log] = await admin`select after from audit_log where action = 'review.delegation_revoke' and entity_id = ${d.delegationId} and actor_id = ${people.m!}`
     expect(log, 'отзыв руководителем не записан в audit_log').toBeDefined()

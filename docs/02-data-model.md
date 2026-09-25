@@ -1665,9 +1665,16 @@ reviewer_stats_daily(reviewer_id → users (cascade), day date,
   unique (tenant_id, reviewer_id, day); index (tenant_id, day desc)
 ```
 
-`workshop_submissions.reviewer_id`, `claimed_at`, `sla_due_at` на переходный период остаются и
-заполняются той же транзакцией — **зеркало для совместимости**. Новому коду читать их нельзя;
-удаляются отдельной миграцией через один PR после перевода читателей (В-2).
+> [исправлено, PR-20 (`docs/v2/44-decisions.md` В-2): переходный период истёк, зеркало снято
+> миграцией `0087_v2_review_mirror_drop`] Ранее: «`workshop_submissions.reviewer_id`,
+> `claimed_at`, `sla_due_at` на переходный период остаются и заполняются той же транзакцией —
+> зеркало для совместимости. Новому коду читать их нельзя; удаляются отдельной миграцией через
+> один PR после перевода читателей (В-2)».
+
+`review_queue_items` — единственный источник истины о состоянии проверки практикумов.
+В `workshop_submissions` остаются только `rework_count` и `status` — состояние самой сдачи
+(`draft | submitted | in_review | rework | accepted | rejected | expired | annulled`), а не
+проверки.
 
 ## Учёт времени обучения
 

@@ -290,9 +290,11 @@ describe('практикум: сдача → захват → доработка
     expect(ok.ok).toBe(true)
     if (!ok.ok) return
     submissionId = ok.submissionId
-    const [s] = await admin`select status, sla_due_at from workshop_submissions where id = ${submissionId}`
+    const [s] = await admin`select status from workshop_submissions where id = ${submissionId}`
     expect(s!.status).toBe('submitted')
-    expect(Math.round((new Date(s!.sla_due_at as string).getTime() - Date.now()) / 3_600_000)).toBe(48)
+    // Срок проверки — только в review_queue_items, единственном источнике истины (В-2, PR-20).
+    const [q] = await admin`select sla_due_at from review_queue_items where task_type = 'workshop' and source_id = ${submissionId}`
+    expect(Math.round((new Date(q!.sla_due_at as string).getTime() - Date.now()) / 3_600_000)).toBe(48)
 
     const dup = await submitWorkshop(learner(), workshopId, { text: 'Ще раз відправляю, бо здається не дійшло', enrollmentId, lessonId })
     expect(dup.ok).toBe(false)
@@ -361,18 +363,20 @@ describe('практикум: сдача → захват → доработка
     const sub = await submitWorkshop(learner(), w.id, { text: 'Достатньо довгий текст для здачі практикуму' })
     if (!sub.ok) throw new Error(sub.code)
     await claim(mentor(), sub.submissionId)
-    await admin`update workshop_submissions set claimed_at = now() - interval '31 minutes', sla_due_at = now() - interval '3 hours', submitted_at = now() - interval '4 hours' where id = ${sub.submissionId}`
-    // Захват живёт в очереди (источник истины с PR-19, docs/v2/44 В-2): протухшим его делает она.
-    await admin`update review_queue_items set claimed_at = now() - interval '31 minutes' where task_type = 'workshop' and source_id = ${sub.submissionId}`
+    await admin`update workshop_submissions set submitted_at = now() - interval '4 hours' where id = ${sub.submissionId}`
+    // Захват и срок проверки живут в очереди — источнике истины (PR-19/20, docs/v2/44 В-2):
+    // зеркала `workshop_submissions.claimed_at` / `sla_due_at` больше нет.
+    await admin`update review_queue_items set claimed_at = now() - interval '31 minutes', sla_due_at = now() - interval '3 hours' where task_type = 'workshop' and source_id = ${sub.submissionId}`
     const [loc] = await admin`select l.id from locations l join user_placements up on up.location_id = l.id where up.user_id = ${learnerId} and up.ended_at is null limit 1`
     await admin`update locations set manager_id = ${adminId} where id = ${loc!.id}`
 
     const s = await workshopSlaScan(tenantId)
     expect(s.released).toBeGreaterThanOrEqual(1)
     expect(s.breached).toBeGreaterThanOrEqual(1)
-    const [row] = await admin`select status, reviewer_id from workshop_submissions where id = ${sub.submissionId}`
+    const [row] = await admin`select status from workshop_submissions where id = ${sub.submissionId}`
     expect(row!.status).toBe('submitted')
-    expect(row!.reviewer_id).toBeNull()
+    const [q] = await admin`select claimed_by from review_queue_items where task_type = 'workshop' and source_id = ${sub.submissionId}`
+    expect(q!.claimed_by).toBeNull()
     await admin`update locations set manager_id = null where id = ${loc!.id}`
   })
 

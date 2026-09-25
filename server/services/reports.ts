@@ -196,7 +196,12 @@ export async function mentors(ctx: Ctx, f: Filter = {}) {
            round(avg(extract(epoch from (aa.reviewed_at - a.submitted_at)) / 3600), 1) as avg_hours,
            round(100.0 * count(*) filter (where aa.is_correct) / nullif(count(*), 0))::int as accept_pct,
            count(*) filter (where aa.reviewed_at - a.submitted_at > interval '48 hours')::int as sla_breaches,
-           (select round(avg(ws.mentor_rating), 1) from workshop_submissions ws where ws.reviewer_id = r.id and ws.mentor_rating is not null) as learner_rating
+           -- Кто решил по практикуму — теперь только review_queue_items.assigned_reviewer_id
+           -- (В-2, PR-20 сняла зеркало workshop_submissions.reviewer_id): closeReview() пишет
+           -- его туда же, кто принял решение.
+           (select round(avg(ws.mentor_rating), 1) from workshop_submissions ws
+              join review_queue_items q on q.task_type = 'workshop' and q.source_id = ws.id
+             where q.assigned_reviewer_id = r.id and ws.mentor_rating is not null) as learner_rating
     from attempt_answers aa
     join attempts a on a.id = aa.attempt_id
     join users r on r.id = aa.reviewed_by

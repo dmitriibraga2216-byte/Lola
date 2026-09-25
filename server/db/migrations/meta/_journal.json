@@ -631,6 +631,13 @@
       "when": 1790234580000,
       "tag": "0091_v2_ai_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1790234640000,
+      "tag": "0092_fix_resource_node",
+      "breakpoints": true
     }
   ]
 }

@@ -526,14 +526,22 @@ async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promi
   }
 }
 
+/**
+ * Уведомления траектории, адресованные самому учащемуся: ведут в его ленту (docs/17 §5.2), где
+ * открытый шаг открывается своим экраном. Наставнику (`trajectory_mentor_confirm`) и керівнику
+ * (`trajectory_request`) чужая лента `/learn/trajectories/:id` не откроется — им ссылки нет.
+ */
+const LEARNER_TRAJECTORY_CODES = new Set(['trajectory_assigned', 'trajectory_next_unlocked', 'trajectory_finished', 'trajectory_access_closed'])
+
 /** Ссылка на предмет уведомления для кнопки «Пройти» и колокольчика. */
-export function refUrl(n: { refType: string | null, refId: string | null, payload: unknown }): string | null {
+export function refUrl(n: { refType: string | null, refId: string | null, payload: unknown, code?: string }): string | null {
   const p = n.payload as Record<string, unknown>
   if (n.refType === 'enrollment' || p.enrollmentId) return `/learn/${n.refId ?? p.enrollmentId}`
   if (n.refType === 'program' || p.programId) return `/learn/programs/${n.refId ?? p.programId}`
   if (n.refType === 'goal' || p.goalId) return `/learn/development/goals/${n.refId ?? p.goalId}`
   if (n.refType === 'meetup' || p.meetupId) return `/learn/meetups/${n.refId ?? p.meetupId}`
   if (n.refType === 'article' || p.articleId) return `/learn/knowledge/${n.refId ?? p.articleId}`
+  if (n.refType === 'trajectory_enrollment' && n.refId && n.code && LEARNER_TRAJECTORY_CODES.has(n.code)) return `/learn/trajectories/${n.refId}`
   if (typeof p.url === 'string' && p.url.startsWith('/')) return p.url
   return null
 }

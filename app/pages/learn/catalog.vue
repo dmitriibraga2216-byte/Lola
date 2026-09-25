@@ -88,8 +88,9 @@ const requestComment = ref('')
 
 async function enrollTask(card: TaskCard) {
   previewCard.value = null
-  // Ресурс бази знань відкривається напряму — самозапису/заявки для ресурсу не заведено (docs/33 D-060)
-  if (card.type === 'resource') { await navigateTo(`/learn/knowledge/${card.id}`); return }
+  // Ресурс бази знань відкривається напряму — самозапису/заявки для ресурсу не заведено (docs/33 D-060).
+  // Екран читання ресурсу — `knowledge/lesson/:id`; `knowledge/:id` — стаття бази знань, ресурс там «не знайдено»
+  if (card.type === 'resource') { await navigateTo(`/learn/knowledge/lesson/${card.id}`); return }
   if (card.assignMode === 'catalog_request') { requestModal.value = card; requestComment.value = ''; return }
   busyId.value = card.id
   error.value = ''

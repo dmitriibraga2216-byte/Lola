@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  attempts, automationRules, courses, enrollments, meetupRegistrations, programEdges, programEnrollments, programNodes, programs, quizzes, users, workshops, workshopSubmissions,
+  attempts, automationRules, courses, enrollments, meetupRegistrations, programEdges, programEnrollments, programNodes, programs, quizzes, resourceProgress, resources, users, workshops, workshopSubmissions,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -83,6 +83,8 @@ async function itemTitles(tx: TenantTx, nodes: { itemType: string | null, itemId
   const q = by('quiz'); if (q.length) for (const r of await tx.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(inArray(quizzes.id, q))) out.set(`quiz:${r.id}`, r.title)
   const w = by('workshop'); if (w.length) for (const r of await tx.select({ id: workshops.id, title: workshops.title }).from(workshops).where(inArray(workshops.id, w))) out.set(`workshop:${r.id}`, r.title)
   const m = [...by('meetup'), ...by('webinar')]; if (m.length) for (const r of await tx.execute(sql`select id, title, kind from meetups where id in (${sql.join(m.map(x => sql`${x}::uuid`), sql`, `)})`) as unknown as { id: string, title: string, kind: string }[]) { out.set(`meetup:${r.id}`, r.title); out.set(`webinar:${r.id}`, r.title) }
+  // Ресурс — элемент программы по docs/17 §3.2; без названия публикация отвергала его как «?» (fix-resource-node)
+  const rs = by('resource'); if (rs.length) for (const r of await tx.select({ id: resources.id, title: resources.title }).from(resources).where(inArray(resources.id, rs))) out.set(`resource:${r.id}`, r.title)
   return out
 }
 
@@ -167,6 +169,7 @@ export async function validateProgram(tx: TenantTx, programId: string): Promise<
     if (n.itemType === 'course') ok = !!(await tx.select({ id: courses.id }).from(courses).where(and(eq(courses.id, n.itemId!), eq(courses.status, 'published'))))[0]
     else if (n.itemType === 'quiz') ok = !!(await tx.select({ id: quizzes.id }).from(quizzes).where(and(eq(quizzes.id, n.itemId!), eq(quizzes.status, 'published'))))[0]
     else if (n.itemType === 'workshop') ok = !!(await tx.select({ id: workshops.id }).from(workshops).where(and(eq(workshops.id, n.itemId!), isNull(workshops.deletedAt))))[0]
+    else if (n.itemType === 'resource') ok = !!(await tx.select({ id: resources.id }).from(resources).where(and(eq(resources.id, n.itemId!), eq(resources.status, 'published'), isNull(resources.deletedAt))))[0]
     else if (!titles.has(`${n.itemType}:${n.itemId}`)) ok = false
     if (!ok) problems.push({ code: 'unpublished_item', nodeId: n.id, message: `Елемент «${titles.get(`${n.itemType}:${n.itemId}`) ?? n.titleOverride ?? '?'}» не опубліковано` })
   }
@@ -234,6 +237,11 @@ async function priorResult(tx: TenantTx, userId: string, itemType: string, itemI
   if (itemType === 'meetup' || itemType === 'webinar') {
     const [m] = await tx.select({ id: meetupRegistrations.id }).from(meetupRegistrations).where(and(eq(meetupRegistrations.userId, userId), eq(meetupRegistrations.meetupId, itemId), eq(meetupRegistrations.status, 'attended'))).limit(1)
     if (m) return { done: true, score: null, enrollmentId: null }
+  }
+  if (itemType === 'resource') {
+    // Ресурс, уже пройденный по правилу типа (Г-11.5) в любом контексте — узел, траектория, прямое назначение
+    const [r] = await tx.select({ id: resourceProgress.id }).from(resourceProgress).where(and(eq(resourceProgress.userId, userId), eq(resourceProgress.resourceId, itemId), eq(resourceProgress.status, 'completed'))).limit(1)
+    if (r) return { done: true, score: null, enrollmentId: null }
   }
   return { done: false, score: null, enrollmentId: null }
 }
@@ -361,6 +369,7 @@ async function persistState(tx: TenantTx, tenantId: string, enr: typeof programE
 
 /** Событие по элементу (курс завершён, тест сдан/провален, практикум принят, занятие посещено) → движение по всем активным программам. */
 export async function onItemResult(tenantId: string, userId: string, itemType: string, itemId: string, result: { passed: boolean, score?: number | null, enrollmentId?: string | null }) {
+  const completedPrograms: string[] = []
   await withTenant(tenantId, null, async (tx) => {
     const rows = await tx.execute(sql`
       select e.id as enrollment_id, n.id as node_id from program_enrollments e
@@ -378,8 +387,15 @@ export async function onItemResult(tenantId: string, userId: string, itemType: s
       const edges = effectiveEdges(p!.mode, nodes, await tx.select().from(programEdges).where(eq(programEdges.programId, p!.id)))
       const rec = await recompute(tx, tenantId, { ...enr!, nodesState: state, status: 'in_progress' }, p!, nodes, edges)
       await persistState(tx, tenantId, { ...enr!, status: 'in_progress' }, p!, nodes, rec)
+      if (rec.completed) completedPrograms.push(p!.id)
     }
   })
+  // Программа сама бывает узлом траектории «Завдання» (training_program): её завершение — результат
+  // для траектории тем же хуком, после фиксации (раньше писался только журнал, узел не засчитывался)
+  for (const programId of completedPrograms) {
+    await import('./trajectories').then(t => t.onTaskResult(tenantId, userId, 'training_program', programId, { passed: true }))
+      .catch(err => console.error('trajectory program hook', err))
+  }
 }
 
 /** Открыть узел: для курса — запись (если нет), возвращает куда идти. */
@@ -411,7 +427,9 @@ export async function openNode(ctx: Ctx, enrollmentId: string, nodeId: string): 
     else if (n.itemType === 'quiz') { to = `/learn/quiz/${n.itemId}`; state[nodeId] = { ...s, status: s.status === 'available' ? 'in_progress' : s.status } }
     else if (n.itemType === 'workshop') { to = `/learn/workshop/${n.itemId}`; state[nodeId] = { ...s, status: s.status === 'available' ? 'in_progress' : s.status } }
     else if (n.itemType === 'meetup' || n.itemType === 'webinar') to = `/learn/meetups/${n.itemId}`
-    else if (n.itemType === 'resource') to = `/learn/knowledge/lesson/${n.itemId}`
+    // Ресурс проходится по правилу типа (docs/11 Г-11.5), а не читается справкой базы знаний:
+    // зачёт вернётся сюда хуком onItemResult (resourcePass.ts)
+    else if (n.itemType === 'resource') to = `/learn/resources/${n.itemId}?program=${enrollmentId}`
     await tx.update(programEnrollments).set({ nodesState: state, status: enr.status === 'not_started' ? 'in_progress' : enr.status, startedAt: enr.startedAt ?? new Date(), lastActivityAt: new Date(), currentNodeId: nodeId, updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
     if (enr.status === 'not_started') await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: enr.programId, enrollmentId, userId: enr.userId, event: 'started', payload: { from: 'not_started', to: 'in_progress', result: Number(enr.progressPct) }, actorId: ctx.actorId })
     return { ok: true as const, to }

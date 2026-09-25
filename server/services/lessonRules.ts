@@ -41,6 +41,31 @@ export interface Evaluation {
   requiredSeconds: number | null
 }
 
+/**
+ * Причины незачёта: текст для ученика (uk, как его отдаёт `evaluateLesson`) и код — для экранов,
+ * которые переводят подпись на язык интерфейса (прохождение ресурса вне курса, `resourcePass.ts`).
+ * Время («Ще N секунд») — отдельный код `time`: число секунд экран берёт из `requiredSeconds`.
+ */
+export const REASONS = {
+  read_to_end: 'Прочитай сторінку до кінця',
+  watch_video: 'Подивись відео до кінця',
+  scroll_doc: 'Перегорни документ до кінця або завантаж його',
+  ack_link: 'Підтверди: «Я ознайомився»',
+  check_all: 'Познач усі пункти',
+} as const
+export type ReasonCode = keyof typeof REASONS | 'time'
+
+const CODE_BY_TEXT = new Map<string, ReasonCode>(Object.entries(REASONS).map(([code, text]): [string, ReasonCode] => [text, code as ReasonCode]))
+
+/** Коды причин в том же порядке; время — `time`. Неизвестный текст не теряется молча — он просто без кода. */
+export function reasonCodes(reasons: string[]): ReasonCode[] {
+  return reasons.flatMap((r) => {
+    if (/^Ще \d+ секунд$/.test(r)) return ['time' as const]
+    const code = CODE_BY_TEXT.get(r)
+    return code ? [code] : []
+  })
+}
+
 export function wordCount(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0
 }
@@ -64,20 +89,20 @@ export function evaluateLesson(lesson: LessonFacts, p: ProgressFacts): Evaluatio
   switch (lesson.kind) {
     case 'article': {
       requiredSeconds = Math.max(requiredSeconds ?? 0, readingSeconds(lesson.plainText))
-      if (p.scrollPct < COMPLETION_RULES.article.scrollPct) reasons.push('Прочитай сторінку до кінця')
+      if (p.scrollPct < COMPLETION_RULES.article.scrollPct) reasons.push(REASONS.read_to_end)
       break
     }
     case 'video': {
-      if (p.videoPct < Math.max(lesson.videoThresholdPct, COMPLETION_RULES.video.minPct)) reasons.push('Подивись відео до кінця')
+      if (p.videoPct < Math.max(lesson.videoThresholdPct, COMPLETION_RULES.video.minPct)) reasons.push(REASONS.watch_video)
       break
     }
     case 'file': {
       requiredSeconds = Math.max(requiredSeconds ?? 0, documentSeconds(lesson.pages))
-      if (p.scrollPct < COMPLETION_RULES.file.scrollPct && !p.downloaded) reasons.push('Перегорни документ до кінця або завантаж його')
+      if (p.scrollPct < COMPLETION_RULES.file.scrollPct && !p.downloaded) reasons.push(REASONS.scroll_doc)
       break
     }
     case 'link': {
-      if (!p.acknowledged) reasons.push('Підтверди: «Я ознайомився»')
+      if (!p.acknowledged) reasons.push(REASONS.ack_link)
       break
     }
   }
@@ -88,10 +113,10 @@ export function evaluateLesson(lesson: LessonFacts, p: ProgressFacts): Evaluatio
 
   // Блоки страницы (docs/11 §3.3, §7.3): видео внутри и обязательные чек-листы
   for (const block of lesson.body) {
-    if (block.type === 'video' && p.videoPct < lesson.videoThresholdPct) reasons.push('Подивись відео до кінця')
+    if (block.type === 'video' && p.videoPct < lesson.videoThresholdPct) reasons.push(REASONS.watch_video)
     if (block.type === 'checklist' && block.requireAll) {
       const checked = (p.blocksState[block.id] as number[] | undefined) ?? []
-      if (checked.length < block.items.length) reasons.push('Познач усі пункти')
+      if (checked.length < block.items.length) reasons.push(REASONS.check_all)
     }
   }
 

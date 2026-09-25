@@ -3913,6 +3913,15 @@
     "download": "Download file",
     "videoNotReady": "Video is still processing"
   },
+  "resourcePass": {
+    "toTrajectory": "Back to the trajectory",
+    "toProgram": "Back to the program",
+    "remaining": "{n} more seconds until it counts",
+    "complete": "Complete",
+    "completed": "Material completed",
+    "notYet": "Not everything is done yet — see the hint at the bottom of the screen",
+    "empty": "This material has no content yet"
+  },
   "traj": {
     "title": "Learning trajectories",
     "create": "Create trajectory",

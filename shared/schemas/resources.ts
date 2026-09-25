@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { bodySchema } from './content'
+import { bodySchema, tickSchema } from './content'
 import { COURSE_CATALOG_MODES } from './catalog'
 
 /**
@@ -105,3 +105,20 @@ export const COMPLETION_RULES = {
   file: { secondsPerPage: 15, maxSeconds: 600, scrollPct: 100 },
   link: { acknowledge: true },
 } as const
+
+/**
+ * Прохождение ресурса **как задания** — вне курса (docs/11 Г-11.5, `server/services/resourcePass.ts`):
+ * узел траектории, прямое назначение, элемент программы. Контекст — назначение, по которому человек
+ * проходит материал; без него — элемент программы (читается текущая опубликованная версия).
+ * Тело — только факты; решение о зачёте принимает сервер (CLAUDE.md п. 3).
+ */
+export const resourcePassRefSchema = z.object({
+  assignmentId: z.string().uuid().optional(),
+})
+export const resourcePassOpenSchema = resourcePassRefSchema.extend({
+  device: z.enum(['mobile', 'desktop']).optional(),
+})
+export const resourcePassTickSchema = tickSchema.extend({
+  assignmentId: z.string().uuid().optional(),
+})
+export type ResourcePassRef = z.infer<typeof resourcePassRefSchema>

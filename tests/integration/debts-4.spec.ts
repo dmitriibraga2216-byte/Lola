@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const as = await import('../../server/services/assessment')
 const dev = await import('../../server/services/development')
 const { createResource, publishResource, viewResource } = await import('../../server/services/resources')
+const { openResourcePass, tickResourcePass, completeResourcePass } = await import('../../server/services/resourcePass')
 const { completeTask, lastTaskStatus } = await import('../../server/services/taskCompletion')
 const { passwordRecoveryAllowed, changeOwnPassword, hashPassword } = await import('../../server/services/password')
 const { loginFormHidden } = await import('../../server/services/session')
@@ -118,7 +119,7 @@ afterAll(async () => {
 })
 
 describe('D-020 / D-034: единый хук «завдання завершено» и подтверждение компетенций для всех типов', () => {
-  it('ресурс: просмотр по назначению пишет task_status_log и подтверждает компетенцию назначения (source=task)', async () => {
+  it('ресурс: прохождение по назначению пишет task_status_log и подтверждает компетенцию назначения (source=task)', async () => {
     const person = await makePerson('Читач ресурсу')
     await dev.upsertPositionProfile(ctx(), { positionId: posId, competencyRequirements: [{ competencyId: compA, requiredLevel: 3 }] })
     const r = await createResource(ctx(), { kind: 'article', title: `Стандарт d4-${stamp}`, language: 'uk', tags: [], categoryIds: [], allowPrint: true, body: [{ id: 'b1', type: 'text', html: '<p>v1</p>' }] } as never)
@@ -129,14 +130,23 @@ describe('D-020 / D-034: единый хук «завдання завершен
     assignmentIds.push(assignmentId)
     await admin`insert into assignment_competencies (tenant_id, assignment_id, competency_id) values (${tenantId}, ${assignmentId}, ${compA})`
 
+    // Просмотр — чтение, не зачёт (docs/11 Г-11.5 «открытия мало», docs/28 fix-resource-node): журнал пуст
     expect(await viewResource(ctx(person), r.id, { assignmentId })).not.toBeNull()
+    expect(await admin`select count(*)::int as n from task_status_log where user_id = ${person} and content_type = 'resource'`).toMatchObject([{ n: 0 }])
+
+    // Прохождение по правилу типа: дочитал (прокрутка + время чтения) → «Завершити»
+    expect((await openResourcePass(ctx(person), r.id, { assignmentId })).ok).toBe(true)
+    await admin`update resource_progress set first_opened_at = now() - interval '10 minutes', last_tick_at = null where user_id = ${person} and resource_id = ${r.id}`
+    expect(await tickResourcePass(ctx(person), r.id, { assignmentId, seconds: 20, scrollPct: 100 })).toMatchObject({ ready: true })
+    expect(await completeResourcePass(ctx(person), r.id, { assignmentId })).toEqual({ ok: true, completedNow: true })
     const rows = await admin`select status, assignment_id, source_kind, request_context from task_status_log where user_id = ${person} and content_type = 'resource' and content_id = ${r.id}`
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ status: 'done', assignment_id: assignmentId, source_kind: 'resource_view' })
     const [ca] = await admin`select level, source from competency_assessments where user_id = ${person} and competency_id = ${compA} order by assessed_at desc limit 1`
     expect(ca).toMatchObject({ level: 1, source: 'task' })
 
-    // Повторный просмотр — журнал изменений статуса, не обращений: второй done не дублируется, компетенция не растёт
+    // Повторное завершение — журнал изменений статуса, не обращений: второй done не дублируется, компетенция не растёт
+    expect(await completeResourcePass(ctx(person), r.id, { assignmentId })).toEqual({ ok: true, completedNow: false })
     await viewResource(ctx(person), r.id, { assignmentId })
     expect(await admin`select count(*)::int as n from task_status_log where user_id = ${person} and content_type = 'resource'`).toMatchObject([{ n: 1 }])
     expect(await admin`select count(*)::int as n from competency_assessments where user_id = ${person} and competency_id = ${compA}`).toMatchObject([{ n: 1 }])

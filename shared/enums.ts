@@ -1101,6 +1101,20 @@ export type AiCallRefKind = typeof AI_CALL_REF_KINDS[number]
 export const AI_USAGE_AXES = ['ai_interview_ops', 'ai_review_ops', 'ai_generate_ops'] as const satisfies readonly LimitAxis[]
 export type AiUsageAxis = typeof AI_USAGE_AXES[number]
 
+/**
+ * Вид события ленты активности (`user_activity_events.kind`, docs/v2/38 §3.3, §7.9; PR-34).
+ * Закрытый список из двенадцати: карта отвечает на «людина вчилася?», поэтому вход в систему,
+ * открытие урока без завершения, просмотр списка или карточки, уведомление и сообщение событиями
+ * не являются. `review_graded` и `content_issue_accepted` — учебная работа наставника и автора
+ * замечаний. Кто и где порождает каждый вид — `ACTIVITY_SOURCES` в `shared/domain/activity.ts`.
+ */
+export const USER_ACTIVITY_KINDS = [
+  'lesson_completed', 'attempt_submitted', 'attempt_graded', 'enrollment_started', 'enrollment_completed',
+  'workshop_submitted', 'checklist_run_completed', 'knowledge_read', 'survey_submitted', 'certificate_issued',
+  'review_graded', 'content_issue_accepted',
+] as const
+export type UserActivityKind = typeof USER_ACTIVITY_KINDS[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -1212,4 +1226,5 @@ export const ENUMS: Record<string, readonly string[]> = {
   ai_data_region: AI_DATA_REGIONS,
   ai_call_status: AI_CALL_STATUSES,
   ai_call_ref_kind: AI_CALL_REF_KINDS,
+  user_activity_kind: USER_ACTIVITY_KINDS,
 }

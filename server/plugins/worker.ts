@@ -157,6 +157,18 @@ export default defineNitroPlugin(async () => {
       const n = await absenceDeadlineGuard(tenantId)
       if (n) console.log(`[absence.deadline_guard] ${tenantId}: перенесено строків ${n}`)
     }))
+    // docs/v2/38 §11 (PR-34): лента активности. Круг — по всем работающим тенантам
+    // (`activeTenantIds`, таблица tenants без RLS), каждый тенант — внутри withTenant()
+    await work('activity.purge', () => runPerTenant('activity.purge', async (tenantId) => {
+      const { purgeActivity } = await import('../services/activity')
+      const n = await purgeActivity(tenantId)
+      if (n) console.log(`[activity.purge] ${tenantId}: удалено ${n}`)
+    }))
+    await work<{ windowMinutes?: number }>('activity.aggregate', jobs => runPerTenant('activity.aggregate', async (tenantId) => {
+      const { aggregateActivitySeconds } = await import('../services/activity')
+      const s = await aggregateActivitySeconds(tenantId, { windowMinutes: jobs[0]?.data?.windowMinutes })
+      if (s.days) console.log(`[activity.aggregate] ${tenantId}: дней ${s.days}`)
+    }))
     // docs/v2/29 §11 (PR-17): публикация и генерация текста. Ретрай — по событию на строку
     // публикации (`enqueuePublishRetry`), здоровье аккаунтов и всплеск — сканы по тенантам.
     await perTenant<{ tenantId: string, publicationId: string }>('vacancy.publish_retry', data => attemptPublish(data.tenantId, data.publicationId))

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  attemptAnswers, attemptRequests, attemptResults, attempts, enrollments, lessonProgress, lessons, locations, mediaAssets,
+  attemptAnswers, attemptRequests, attemptResults, attempts, enrollments, lessons, locations, mediaAssets,
   pointsLedger, positions, questions, quizQuestions, quizzes, userPlacements, users,
 } from '../db/schema'
 import type { z } from 'zod'
@@ -18,7 +18,8 @@ import {
 } from '../../shared/domain/grading'
 import { rescoreVerdict } from '../../shared/domain/contentIssues'
 import type { AnswerInputMode, ScoringMethod } from '../../shared/enums'
-import { completeLesson, rollbackLessonCompletion, type RollbackResult } from './learning'
+import { completeLesson, markLessonCompleted, rollbackLessonCompletion, type RollbackResult } from './learning'
+import { recordActivity } from './activity'
 import { logTaskAccess } from './journals'
 import { enqueueNotification } from './notifications'
 import { closeReview, enqueueReview, heldByOtherSql, reviewGuard } from './reviewQueue'
@@ -390,8 +391,13 @@ async function gradeAndFinalize(tx: TenantTx, ctx: Ctx, attempt: typeof attempts
     }
   }
 
-  if (status === 'passed') await onAttemptPassed(tx, ctx, attempt)
+  if (status === 'passed') await onAttemptPassed(tx, ctx, attempt, { activity: reason === 'submit' })
   if (status !== 'review') await logAttemptCompletion(tx, ctx.tenantId, attempt, status, totals)
+  // Лента активности (docs/v2/38 §7.9): оценка сданной попытки. Закрытие по сроку — действие
+  // системы, а не человека (он попытку не отправлял), и в ленту не идёт ни сдачей, ни оценкой.
+  if (status !== 'review' && reason === 'submit') {
+    await recordActivity(tx, ctx.tenantId, { userId: attempt.userId, kind: 'attempt_graded', ref: { entity: 'attempts', id: attempt.id } })
+  }
   if (status !== 'review') {
     const { emitWebhook } = await import('./webhooks')
     await emitWebhook(tx, ctx.tenantId, status === 'passed' ? 'attempt.passed' : 'attempt.failed', { attemptId: attempt.id, userId: attempt.userId, quizId: attempt.quizId, score: totals.score })
@@ -424,19 +430,14 @@ async function writeResult(tx: TenantTx, ctx: Ctx, attemptId: string, reason: 's
   })
 }
 
-/** Зачёт теста как урока курса → завершение урока и прогресс (docs/10 §7.3). */
-async function onAttemptPassed(tx: TenantTx, ctx: Ctx, attempt: typeof attempts.$inferSelect) {
+/**
+ * Зачёт теста как урока курса → завершение урока и прогресс (docs/10 §7.3). `activity: false` —
+ * зачёт появился не действием человека (пересчёт администратором, закрытие по сроку): урок
+ * засчитывается, но в ленту активности (docs/v2/38 §7.9) не идёт.
+ */
+async function onAttemptPassed(tx: TenantTx, ctx: Ctx, attempt: typeof attempts.$inferSelect, opts: { activity?: boolean } = {}) {
   if (!attempt.enrollmentId || !attempt.lessonId) return
-  await tx.insert(lessonProgress).values({
-    tenantId: ctx.tenantId,
-    enrollmentId: attempt.enrollmentId,
-    lessonId: attempt.lessonId,
-    status: 'completed',
-    completedAt: new Date(),
-  }).onConflictDoUpdate({
-    target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId],
-    set: { status: 'completed', completedAt: new Date() },
-  })
+  await markLessonCompleted(tx, ctx.tenantId, { userId: attempt.userId, enrollmentId: attempt.enrollmentId, lessonId: attempt.lessonId, activity: opts.activity })
 }
 
 export type SubmitResult
@@ -461,6 +462,7 @@ export async function submitAttempt(ctx: Ctx, attemptId: string): Promise<Submit
 
     const t = await gradeAndFinalize(tx, ctx, attempt, 'submit')
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.submit', entity: 'attempt', entityId: attemptId, after: { status: t.status, score: t.score } })
+    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'attempt_submitted', ref: { entity: 'attempts', id: attemptId } })
     if (t.status === 'review') {
       const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, attempt.quizId))
       const [me] = await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, ctx.actorId))
@@ -775,7 +777,7 @@ export async function recalculateAttempt(ctx: Ctx, attemptId: string, comment?: 
     })
     const newlyPassed = after.status === 'passed' && before.status !== 'passed'
     if (newlyPassed) {
-      await onAttemptPassed(tx, ctx, attempt)
+      await onAttemptPassed(tx, ctx, attempt, { activity: false })
       // Самостоятельный тест: «завдання завершено» — та же единая точка, что и при сдаче (D-020)
       await logAttemptCompletion(tx, ctx.tenantId, attempt, 'passed', { score: after.score, maxScore: plan.after.maxScore }, ctx.actorId)
     }
@@ -975,6 +977,8 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
     await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: [answerId], reviewerId: ctx.actorId, decision: input.isCorrect ? 'зараховано' : 'не зараховано' })
 
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.grade', entity: 'attempt_answer', entityId: answerId, after: { isCorrect: input.isCorrect, score } })
+    // Лента проверяющего (docs/v2/38 §7.9): проверенный ответ — его учебная работа в системе
+    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'review_graded', ref: { entity: 'attempt_answers', id: answerId } })
 
     // Все ручные проверены? → пересчёт
     const rows = await tx.select().from(attemptAnswers).where(eq(attemptAnswers.attemptId, row.att.id))
@@ -999,6 +1003,9 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
     await writeResult(tx, ctx, row.att.id, 'review', { status, score: totals.score, maxScore: totals.maxScore, passed: totals.passed }, null, ctx.actorId)
     if (status === 'passed') await onAttemptPassed(tx, ctx, row.att)
     await logAttemptCompletion(tx, ctx.tenantId, row.att, status, totals, ctx.actorId)
+    // Оценка попытки ложится в ленту ученика днём **сдачи** (Р-34.3): учился он тогда, а день
+    // проверки — работа проверяющего, она уже записана ему `review_graded`
+    await recordActivity(tx, ctx.tenantId, { userId: row.att.userId, kind: 'attempt_graded', ref: { entity: 'attempts', id: row.att.id }, occurredAt: row.att.submittedAt })
     const [quiz] = await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, row.att.quizId))
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: row.att.userId, code: 'review_done', payload: { quiz: quiz?.title, status: status === 'passed' ? 'зараховано' : 'не зараховано' }, dedupKey: `review_done:${row.att.id}` })
 

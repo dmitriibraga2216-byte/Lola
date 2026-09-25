@@ -253,6 +253,7 @@ export async function createPerson(ctx: Ctx, input: PersonCreateInput) {
       hiredAt: input.hiredAt ?? null,
       externalId: input.externalId ?? null,
       locale: input.locale ?? null,
+      timezone: input.timezone ?? null,
     }).returning()
 
     // docs/v2/33 §4.1: ручное заведение человека — тот же вход в цикл, что и найм из воронки,
@@ -305,6 +306,7 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
       ...(input.hiredAt !== undefined ? { hiredAt: input.hiredAt } : {}),
       ...(input.externalId !== undefined ? { externalId: input.externalId } : {}),
       ...(input.locale !== undefined ? { locale: input.locale } : {}),
+      ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
       ...(input.status !== undefined
         ? {
             status: input.status,
@@ -770,8 +772,12 @@ export async function personLearning(ctx: Ctx, userId: string) {
   })
 }
 
-/** Журнал действий самого человека — из audit_log по actor_id (docs/16 §5.2 «Активність»). */
-export async function personActivity(ctx: Ctx, userId: string) {
+/**
+ * Журнал действий самого человека — из audit_log по actor_id (docs/16 §5.2 «Активність»),
+ * путь `GET /people/:id/action-log`. Карта обучающей активности за год — не здесь, а
+ * `personActivityYear()` (`server/services/activity.ts`, docs/v2/38 §10, PR-34).
+ */
+export async function personActionLog(ctx: Ctx, userId: string) {
   return withTenant(ctx.tenantId, ctx.actorId, tx => tx.execute(sql`
     select id, action, entity, entity_id, created_at, ip from audit_log where actor_id = ${userId}::uuid order by created_at desc limit 100
   `) as unknown as Promise<Record<string, unknown>[]>)

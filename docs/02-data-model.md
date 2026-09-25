@@ -229,6 +229,10 @@ create table users (
   birthday_consent boolean not null default true, -- согласие показывать в «Дні народження» (`21` §7.8; `29` Б.16 — opt-out)
   avatar_key text,
   locale text,                                -- null → берём локаль тенанта
+  timezone text,                              -- IANA-пояс удалённого (`v2/38` §3.1, PR-34); null — пояс точки.
+                                              -- Первое звено цепочки пояса человека (`personTimezone()`):
+                                              -- день ленты активности и тихие часы. CHECK users_timezone_chk —
+                                              -- неизвестное Postgres имя не сохраняется
   status text not null default 'invited',     -- invited | active | suspended | archived
   hired_at date,
   position_since date,                        -- «Дата призначення поточної посади»:
@@ -716,6 +720,40 @@ create table person_documents (
 create index idx_person_documents_tenant on person_documents (tenant_id, user_id, status);
 create index idx_person_documents_tenant_expiry on person_documents (tenant_id, expires_at)
   where status in ('valid', 'expiring');
+```
+
+Лента и карта активности человека (`docs/v2/38` §3.3, §7.9–§7.11, PR-34, миграция `v2_user_activity`).
+Событие пишется в транзакции действия (`server/services/activity.ts` — единственный писатель) и
+получает снимок пояса и локальный день, которые не пересчитываются; агрегат по дням хранится
+бессрочно, события — 400 дней (`activity.purge`). Лента — производная проекция уже
+зажурналированных действий, а не журнал доказательства: `request_context` в ней нет (Р-34.4).
+
+```sql
+create table user_activity_events (
+  id bigserial primary key,
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  kind text not null,                                  -- user_activity_kind, закрытый список из 12
+  ref_entity text, ref_id uuid,                        -- мягкая ссылка на источник (`v2/44` В-11)
+  location_id uuid references locations(id) on delete set null, -- точка на дату события
+  tz text not null, local_date date not null,          -- снимок пояса и локальный день, один раз
+  occurred_at timestamptz not null default now(),      -- момент действия самого человека (Р-34.3)
+  created_at timestamptz not null default now()        -- момент записи
+);
+create index idx_user_activity_events_tenant on user_activity_events (tenant_id, user_id, local_date desc);
+create index idx_user_activity_events_purge on user_activity_events (tenant_id, occurred_at);
+create table user_activity_daily (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  local_date date not null,
+  events_count int not null default 0,                 -- счётчик, разбивка и уровень — в транзакции события
+  seconds_spent int not null default 0,                -- из learning_time_sessions, задача activity.aggregate
+  kinds jsonb not null default '{}',                   -- {"lesson_completed": 3, "attempt_graded": 1}
+  level smallint not null default 0,                   -- 0…4 по числу событий: 0 | 1–2 | 3–5 | 6–10 | >10
+  recalced_at timestamptz not null default now(),
+  constraint uq_user_activity_daily_day unique (tenant_id, user_id, local_date) -- и tenant-first индекс
+);
 ```
 
 ## 2.4 Контент: курсы, модули, уроки
@@ -2862,6 +2900,14 @@ ai_call_status: queued | running | ok | failed | timeout | refused | degraded
 -- О чём вызов (`ai_calls.ref_kind`, мягкая ссылка `v2/44` В-11). Четыре — из `v2/30` §3.2;
 -- vacancy_generation, library_module, knowledge_article, search_query добавлены PR-27
 ai_call_ref_kind: interview_session | interview_turn | review_hint | summary | vacancy_generation | library_module | knowledge_article | search_query
+
+-- Вид события ленты активности (`user_activity_events.kind`, `v2/38` §3.3, §7.9, PR-34). Закрытый
+-- список: вход в систему, открытие без завершения, просмотр списка или карточки, уведомление и
+-- сообщение событиями не являются. Кто порождает каждый вид — `ACTIVITY_SOURCES`
+-- (`shared/domain/activity.ts`)
+user_activity_kind: lesson_completed | attempt_submitted | attempt_graded | enrollment_started
+  | enrollment_completed | workshop_submitted | checklist_run_completed | knowledge_read
+  | survey_submitted | certificate_issued | review_graded | content_issue_accepted
 ```
 
 ## Что проверяет тест схемы

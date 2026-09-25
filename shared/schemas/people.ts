@@ -3,6 +3,7 @@ import { ORG_CONFLICT_KINDS, TAG_SCOPES } from '../enums'
 import { phoneSchema } from './auth'
 import { KEYSETS } from '../domain/keyset'
 import { keysetCursorSchema } from './keyset'
+import { personTimezoneSchema } from './activity'
 
 /** Метка (docs/16 §14.2): ≤ 40 знаков, без угловых скобок. */
 export const tagNameSchema = z.string().trim().min(1, 'Вкажіть мітку').max(40, 'Не більше 40 знаків').regex(/^[^<>]+$/, 'Без кутових дужок')
@@ -38,6 +39,8 @@ export const personCreateSchema = z.object({
   isBlocked: z.boolean().optional(),
   isHidden: z.boolean().optional(),
   locale: z.enum(['uk', 'en', 'ru']).nullable().optional(),
+  /** Пояс удалённого человека (docs/v2/38 §3.1); `null` — по точке размещения. */
+  timezone: personTimezoneSchema.optional(),
   placement: z.object({
     locationId: z.string().uuid(),
     positionId: z.string().uuid(),

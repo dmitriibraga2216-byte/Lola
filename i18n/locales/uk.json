@@ -388,7 +388,8 @@
       "hiredFuture": "Не пізніше сьогодні",
       "positionSince": "Не може бути раніше дати прийняття",
       "required": "Обовʼязкове поле",
-      "locationUnit": "Точка не належить обраному підрозділу"
+      "locationUnit": "Точка не належить обраному підрозділу",
+      "timezone": "Оберіть часовий пояс зі списку, наприклад Europe/Kyiv"
     },
     "tagsHint": "через кому",
     "locale": "Мова",
@@ -414,7 +415,9 @@
     "repeatPassword": "Повторіть пароль",
     "passwordsDiffer": "Паролі не збігаються",
     "mustChangeAfterLogin": "Змінити пароль після першого входу",
-    "deadlineShifted": "перенесено: відсутність"
+    "deadlineShifted": "перенесено: відсутність",
+    "timezone": "Часовий пояс",
+    "timezoneHint": "Лише для віддалених. Порожньо — за часовим поясом точки розміщення"
   },
   "import": {
     "willDo": "Що буде зроблено",
@@ -6663,6 +6666,47 @@
       "code_exists": "Тип з таким кодом уже є",
       "forbidden": "Довідник типів документів змінює HR",
       "remind": "Дні нагадувань — цілі числа від 0 до 365 через кому"
+    }
+  },
+  "personActivity": {
+    "title": "Активність за {year}",
+    "year": "Рік",
+    "loadFailed": "Не вдалося завантажити активність",
+    "retry": "Повторити",
+    "forbidden": "Активність цієї людини вам недоступна",
+    "empty": "Ще немає навчальної активності за {year}",
+    "tip": "{date}: {events}, {time} у навчанні",
+    "events": {
+      "one": "{n} подія",
+      "few": "{n} події",
+      "many": "{n} подій",
+      "other": "{n} події"
+    },
+    "outOfWindow": "{date}: поза доступним періодом",
+    "reviewerWindow": "Показано останні {days} днів: людина має роботу у вашій черзі перевірки",
+    "totals": "Днів з активністю: {days} · {events} · {time} у навчанні",
+    "legend": "Легенда",
+    "level": {
+      "none": "Немає",
+      "low": "Невелика",
+      "medium": "Середня",
+      "high": "Висока",
+      "veryHigh": "Дуже висока"
+    },
+    "timezone": "Дні — за часом людини ({tz})",
+    "kind": {
+      "lesson_completed": "Пройдено уроків",
+      "attempt_submitted": "Здано спроб",
+      "attempt_graded": "Оцінено спроб",
+      "enrollment_started": "Розпочато курсів",
+      "enrollment_completed": "Завершено курсів",
+      "workshop_submitted": "Здано практикумів",
+      "checklist_run_completed": "Заповнено чек-листів",
+      "knowledge_read": "Прочитано статей",
+      "survey_submitted": "Пройдено опитувань",
+      "certificate_issued": "Отримано сертифікатів",
+      "review_graded": "Перевірено робіт",
+      "content_issue_accepted": "Прийнято зауважень"
     }
   },
   "storage": {

@@ -83,7 +83,8 @@ async function loadRefs() {
 async function loadTab(v: Tab) {
   try {
     if (v === 'learning' || v === 'assessment') learning.value ??= await api(`/people/${id}/learning`)
-    if (v === 'activity') activity.value = await api(`/people/${id}/activity`)
+    // Журнал дій (docs/16 §5.2) — `/action-log`; карту активності за рік вкладка вантажить сама (PersonActivityMap)
+    if (v === 'activity') activity.value = await api(`/people/${id}/action-log`)
     if (v === 'profile') { chiefs.value = await api('/functional-chiefs', { query: { userId: id } }); learning.value ??= await api<NonNullable<typeof learning.value>>(`/people/${id}/learning`).catch(() => null) }
     if (v === 'security' && hasScope('audit.view')) securityEvents.value = (await api<{ rows: Record<string, unknown>[] }>('/logs/security', { query: { userId: id, limit: 20 } })).rows
   }
@@ -386,8 +387,10 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       </div>
     </section>
 
-    <!-- Журнал (мокап PersonCard: «Журнал»; сессии — на вкладке «Безпека») -->
+    <!-- Активність: карта навчальної активності за рік (docs/v2/38 §5.1, PR-34; блоком під шапкою — PR-35)
+         і журнал дій (мокап PersonCard: «Журнал»; сессии — на вкладке «Безпека») -->
     <section v-else-if="tab === 'activity'" class="panel">
+      <PersonActivityMap :person-id="id" />
       <div class="card">
         <h2>{{ t('person.log') }}</h2>
         <ul v-if="activity.length" class="list">

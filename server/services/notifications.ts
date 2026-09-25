@@ -16,6 +16,7 @@ import { EMPLOYEES_ONLY } from './repo/people'
 import { formatDate } from '../../shared/domain/dateFormat'
 import { recipientLocale } from '../utils/formatLocale'
 import { managerIdOf, managerIdsOf } from './orgManager'
+import { personTimezone } from './activity'
 
 /**
  * Уведомления (docs/03 §3.10, docs/06 §6.4): ни одна задача не шлёт напрямую —
@@ -421,27 +422,16 @@ export const DAILY_LIMIT = 10
  */
 export const CANDIDATE_QUIET_HOURS = { from: 9, to: 20 }
 
-/**
- * Часовий пояс кандидата [решение] (докс/v2/39 П-23): у `users` для кандидата такої колонки
- * немає, і заводити її окремою міграцією заради одного поля не пропорційно — кандидат не
- * заповнює розширений профіль, як співробітник (докс/v2/28 §3.2 таких полів не додає).
- * Джерело — часовий пояс **точки вакансії**, на яку кандидат відгукнувся:
- * `users.vacancy_id → vacancies.location_id → locations.timezone` — ланцюжок уже існуючих
- * зовнішніх ключів, без нової колонки. Це не фізичне місце кандидата, а обґрунтоване
- * наближення: тихі часи існують, щоб не розбудити людину вночі, а більшість кандидатів
- * фізично перебувають біля міста, куди відгукнулись. Без вакансії (кандидат заведений вручну
- * рекрутером) повертає `null` — далі береться таймзона тенанта, той самий порядок відмови,
- * що і в співробітника нижче.
+/*
+ * Часовий пояс одержувача — єдиний ланцюжок людини `personTimezone()` (`server/services/activity.ts`,
+ * докс/v2/38 §7.10, PR-34): `users.timezone` (пояс віддаленого, заданий у картці) → пояс точки
+ * розміщення → для кандидата пояс **точки вакансії**, на яку він відгукнувся (рішення PR-37,
+ * докс/v2/39 П-23: розміщень у кандидата немає, а тихі часи існують, щоб не розбудити людину
+ * вночі — більшість кандидатів біля міста, куди відгукнулись) → пояс тенанта. До PR-34 колонки
+ * пояса в `users` не було, і кандидат брав точку вакансії безумовно; тепер пояс, записаний
+ * людині явно, точніший за наближення точкою — і той самий, за яким рахується її день на карті
+ * активності, тож «його ніч» у сповіщеннях і «його день» на карті не розходяться.
  */
-async function candidateTimezone(tx: TenantTx, userId: string): Promise<string | null> {
-  const [row] = await tx.execute(sql`
-    select l.timezone from users u
-    join vacancies v on v.id = u.vacancy_id
-    join locations l on l.id = v.location_id
-    where u.id = ${userId}::uuid
-  `) as unknown as { timezone: string | null }[]
-  return row?.timezone ?? null
-}
 
 /**
  * Кладёт уведомление в очередь; при совпадении dedupKey — молча пропускает (в журнал duplicate не пишется: ключ уникален).
@@ -449,24 +439,23 @@ async function candidateTimezone(tx: TenantTx, userId: string): Promise<string |
  */
 export async function enqueueNotification(tx: TenantTx, input: EnqueueInput): Promise<boolean> {
   if (newsSuppressed()) return false
-  const [tenant] = await db.select({ timezone: tenants.timezone, settings: tenants.settings }).from(tenants).where(eq(tenants.id, input.tenantId))
   const settings = await readSettings(tx, input.tenantId)
   const [recipient] = await tx.select({ kind: users.kind }).from(users).where(eq(users.id, input.userId))
   const now = new Date()
   let scheduledFor: Date
+  // Пояс одержувача — ланцюжок людини (див. коментар вище), для кандидата і співробітника однаково
+  const zone = await personTimezone(tx, input.userId)
 
   if (recipient?.kind === 'candidate') {
     // П-23: кандидат — поза тихими часами тенанта (він не працівник цієї мережі), але в межах
     // 09:00–20:00 свого часу. Без урахування urgent/ignoreQuietHours і тумблера тенанта — див.
     // коментар CANDIDATE_QUIET_HOURS.
-    const timezone = (await candidateTimezone(tx, input.userId)) ?? tenant?.timezone ?? 'Europe/Kyiv'
-    scheduledFor = scheduleWithQuietHours(now, timezone, CANDIDATE_QUIET_HOURS)
+    scheduledFor = scheduleWithQuietHours(now, zone.tz, CANDIDATE_QUIET_HOURS)
   }
   else {
-    // Тихие часы по таймзоне точки человека (docs/23 §3.3), иначе — тенанта
-    const [loc] = await tx.execute(sql`select l.timezone from user_placements up join locations l on l.id = up.location_id where up.user_id = ${input.userId}::uuid and up.is_primary and up.ended_at is null limit 1`) as unknown as { timezone: string | null }[]
+    // Тихие часы по поясу человека (docs/23 §3.3): его собственный → точки → тенанта
     const [tpl] = await tx.select({ ignoreQuietHours: notificationTemplates.ignoreQuietHours }).from(notificationTemplates).where(and(eq(notificationTemplates.code, input.code), eq(notificationTemplates.channel, input.channel ?? 'telegram')))
-    const timezone = loc?.timezone ?? tenant?.timezone ?? 'Europe/Kyiv'
+    const timezone = zone.tz
     const cls = eventClassOf(input.code)
     if (input.urgent || tpl?.ignoreQuietHours) scheduledFor = now
     else if (cls) scheduledFor = nextOccurrence(now, timezone, settings.notificationSchedule[cls].hour, settings.notificationSchedule[cls].minute) // §13.2.1: свій час класу — понад тихі часи

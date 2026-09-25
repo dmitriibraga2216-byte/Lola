@@ -1,14 +1,14 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import {
-  lessonProgress, locations, meetupRegistrations, meetupSessions, meetups, users, webinarParticipations, webinars,
+  locations, meetupRegistrations, meetupSessions, meetups, users, webinarParticipations, webinars,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { scopeSql } from './access'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import { completeLesson } from './learning'
+import { completeLesson, markLessonCompleted } from './learning'
 import { managerIdsOf } from './orgManager'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -339,8 +339,7 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, m: typeof meetups.$inferSe
   // completeLesson дальше только пересчитывает прогресс курса.
   if (status === 'attended' && r.enrollmentId && r.lessonId) {
     const enrollmentId = r.enrollmentId, lessonId = r.lessonId
-    await tx.insert(lessonProgress).values({ tenantId: ctx.tenantId, enrollmentId, lessonId, status: 'completed', completedAt: now })
-      .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: now } })
+    await markLessonCompleted(tx, ctx.tenantId, { userId: r.userId, enrollmentId, lessonId, at: now })
     setImmediate(() => completeLesson({ tenantId: ctx.tenantId, actorId: r.userId }, enrollmentId, lessonId).catch(() => {}))
   }
   // docs/33 D-020: відмітка відвідування самостійного заняття/вебінару — єдиний хук (attended → done, missed → failed); у складі курсу фіксує курс

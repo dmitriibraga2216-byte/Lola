@@ -18,6 +18,7 @@ import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
 import { accessibleCatalogIds, canAccessCatalogItem } from './catalogAccess'
 import { closeOpenSegments } from './learningTime'
+import { recordActivity } from './activity'
 import type { assignmentCreateSchema } from '../../shared/schemas/assignments'
 import type { z } from 'zod'
 import { managerIdOf } from './orgManager'
@@ -440,6 +441,8 @@ export async function openLesson(ctx: Ctx, enrollmentId: string, lessonId: strin
         lastActivityAt: now,
       }).where(eq(enrollments.id, enrollmentId))
       await logEvent(tx, ctx.tenantId, enrollmentId, 'started', statusChange('not_started', 'in_progress'), ctx.actorId)
+      // Лента активности (docs/v2/38 §7.9): начало записи на курс — событие; само открытие урока — нет
+      await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'enrollment_started', ref: { entity: 'enrollments', id: enrollmentId } })
     }
     else {
       await tx.update(enrollments).set({ lastActivityAt: now }).where(eq(enrollments.id, enrollmentId))
@@ -681,6 +684,26 @@ async function requiredProgress(tx: TenantTx, enrollmentId: string, versionId: s
   return { requiredTotal, requiredDone, progressPct }
 }
 
+/**
+ * Зачёт урока не кнопкой, а результатом (тест сдан, практикум принят, занятие посещено; docs/10
+ * §7.3, docs/29 Б.3): строка прогресса → `completed` в транзакции вызывающего. Одна точка на
+ * четыре пути — ради события ленты `lesson_completed` (docs/v2/38 §7.9): оно пишется только при
+ * переходе, повторная отметка того же урока его не дублирует. `activity: false` — зачёт по
+ * исправлению (пересчёт попытки администратором), а не по действию человека: в ленту не идёт.
+ */
+export async function markLessonCompleted(tx: TenantTx, tenantId: string, input: { userId: string, enrollmentId: string, lessonId: string, at?: Date, activity?: boolean }): Promise<boolean> {
+  const at = input.at ?? new Date()
+  const [prev] = await tx.select({ status: lessonProgress.status }).from(lessonProgress)
+    .where(and(eq(lessonProgress.enrollmentId, input.enrollmentId), eq(lessonProgress.lessonId, input.lessonId)))
+  await tx.insert(lessonProgress).values({ tenantId, enrollmentId: input.enrollmentId, lessonId: input.lessonId, status: 'completed', completedAt: at })
+    .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: at } })
+  const changed = prev?.status !== 'completed'
+  if (changed && input.activity !== false) {
+    await recordActivity(tx, tenantId, { userId: input.userId, kind: 'lesson_completed', ref: { entity: 'lessons', id: input.lessonId } })
+  }
+  return changed
+}
+
 export type RollbackResult = { lessonReopened: boolean, courseReopened: boolean, certificateIds: string[] }
 
 /**
@@ -769,6 +792,7 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       }).where(eq(lessonProgress.id, progress.id))
       // Урок зачтён — открытый сегмент измерения закрывается `completed` (docs/v2/37 §3.6)
       await closeOpenSegments(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, subjectType: 'lesson', subjectId: lessonId })
+      await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'lesson_completed', ref: { entity: 'lessons', id: lessonId } })
     }
 
     // Пересчёт прогресса (docs/10 §7.2–7.3)
@@ -797,6 +821,7 @@ export async function completeLesson(ctx: Ctx, enrollmentId: string, lessonId: s
       // docs/33 D-020: єдина точка «завдання завершено» — журнал + компетенції призначення (D-034), у тій самій транзакції
       const { onTaskCompleted } = await import('./taskCompletion')
       await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'course', contentId: enrollment.subjectId, status: 'done', result: score ?? progressPct, assignmentId: enrollment.assignmentId, enrollmentId, sourceKind: 'enrollment', sourceId: enrollmentId })
+      await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'enrollment_completed', ref: { entity: 'enrollments', id: enrollmentId } })
     }
 
     await logEvent(tx, ctx.tenantId, enrollmentId, courseCompleted ? 'completed' : 'progress', {

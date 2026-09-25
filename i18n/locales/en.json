@@ -388,7 +388,8 @@
       "hiredFuture": "Not later than today",
       "positionSince": "Cannot be earlier than hire date",
       "required": "Required",
-      "locationUnit": "Location does not belong to the selected unit"
+      "locationUnit": "Location does not belong to the selected unit",
+      "timezone": "Pick a time zone from the list, e.g. Europe/Kyiv"
     },
     "tagsHint": "comma-separated",
     "locale": "Language",
@@ -414,7 +415,9 @@
     "repeatPassword": "Repeat password",
     "passwordsDiffer": "Passwords do not match",
     "mustChangeAfterLogin": "Change password after first sign-in",
-    "deadlineShifted": "moved: absence"
+    "deadlineShifted": "moved: absence",
+    "timezone": "Time zone",
+    "timezoneHint": "Only for remote staff. Empty — the location's time zone"
   },
   "import": {
     "willDo": "What will happen",
@@ -6663,6 +6666,47 @@
       "code_exists": "A type with this code already exists",
       "forbidden": "The document type list is managed by HR",
       "remind": "Reminder days are whole numbers from 0 to 365, comma-separated"
+    }
+  },
+  "personActivity": {
+    "title": "Activity in {year}",
+    "year": "Year",
+    "loadFailed": "Couldn't load activity",
+    "retry": "Retry",
+    "forbidden": "You don't have access to this person's activity",
+    "empty": "No learning activity in {year} yet",
+    "tip": "{date}: {events}, {time} learning",
+    "events": {
+      "one": "{n} event",
+      "few": "{n} events",
+      "many": "{n} events",
+      "other": "{n} events"
+    },
+    "outOfWindow": "{date}: outside the available period",
+    "reviewerWindow": "Showing the last {days} days: this person has work in your review queue",
+    "totals": "Active days: {days} · {events} · {time} learning",
+    "legend": "Legend",
+    "level": {
+      "none": "None",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "veryHigh": "Very high"
+    },
+    "timezone": "Days follow the person's local time ({tz})",
+    "kind": {
+      "lesson_completed": "Lessons completed",
+      "attempt_submitted": "Attempts submitted",
+      "attempt_graded": "Attempts graded",
+      "enrollment_started": "Courses started",
+      "enrollment_completed": "Courses completed",
+      "workshop_submitted": "Workshops submitted",
+      "checklist_run_completed": "Checklists completed",
+      "knowledge_read": "Articles read",
+      "survey_submitted": "Surveys submitted",
+      "certificate_issued": "Certificates issued",
+      "review_graded": "Works reviewed",
+      "content_issue_accepted": "Reports accepted"
     }
   },
   "storage": {

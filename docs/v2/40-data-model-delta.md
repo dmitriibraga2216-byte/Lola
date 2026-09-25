@@ -158,6 +158,12 @@ SQL: итоговый констрейнт `media_assets.origin` (§4), блок
 | `absence_records` | Факты отсутствий с диапазоном дат и числом дней | Т |
 | `person_rating_snapshots` | Снимок расчёта рейтинга с разложением формулы; источник истины для `users.rating_pct` | Т |
 
+> [уточнено, PR-34, миграция `v2_user_activity`] `user_activity_events` и `user_activity_daily` заведены с
+> отступлениями от DDL `38` §3.3, перечисленными там же: у события нет `seconds_spent` (время — из учёта времени PR-21,
+> в агрегат его сводит `activity.aggregate`), есть `created_at` и индекс уборки `(tenant_id, occurred_at)`; второй
+> индекс агрегата не заводится — tenant-first индекс даёт уникальный ключ `(tenant_id, user_id, local_date)`. Вместе с
+> ними — `users.timezone` (строка 16 таблицы §3) с `users_timezone_chk`: неизвестное Postgres имя пояса не сохраняется.
+
 ### 2.12 Итог
 
 | Подсистема | Таблиц | Тенантных | Платформенных |

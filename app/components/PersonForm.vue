@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isIanaTimezone } from '#shared/domain/activity'
+
 /** Форма человека (docs/16 §6.1): создание — с размещением, редактирование — только профиль. */
 const props = defineProps<{ initial?: Record<string, unknown> | null, mode: 'create' | 'edit', busy?: boolean }>()
 const emit = defineEmits<{ submit: [payload: Record<string, unknown>], cancel: [] }>()
@@ -20,7 +22,13 @@ const form = reactive({
   cityId: String(i.cityId ?? ''), orgUnitId: '', locationId: '', positionId: '', positionLevelId: '',
   externalId: String(i.externalId ?? ''), hiredAt: String(i.hiredAt ?? ''), positionSince: String(i.positionSince ?? ''),
   comment: String(i.comment ?? ''), isBlocked: Boolean(i.isBlocked), isHidden: Boolean(i.isHidden), locale: String(i.locale ?? ''),
+  timezone: String(i.timezone ?? ''),
 })
+/**
+ * Часовий пояс віддаленого (docs/v2/38 §3.1, PR-34): порожньо — пояс точки. Підказки — пояси,
+ * які знає браузер; сервер і Postgres перевіряють ще раз.
+ */
+const timezones = computed(() => typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [])
 const errors = ref<Record<string, string>>({})
 
 onMounted(async () => {
@@ -63,6 +71,7 @@ function validate(): boolean {
     const loc = refs.locations.find(l => l.id === form.locationId)
     if (loc && form.orgUnitId && loc.orgUnitId !== form.orgUnitId) e.locationId = t('person.err.locationUnit')
   }
+  if (form.timezone.trim() && !isIanaTimezone(form.timezone.trim())) e.timezone = t('person.err.timezone')
   errors.value = e
   return Object.keys(e).length === 0
 }
@@ -77,6 +86,7 @@ function submit() {
     birthDate: form.birthDate || null, gender: form.gender || null, tags, cityId: form.cityId || null,
     externalId: form.externalId.trim() || null, hiredAt: form.hiredAt || null, positionSince: form.positionSince || null,
     comment: form.comment.trim() || null, isBlocked: form.isBlocked, isHidden: form.isHidden, locale: form.locale || null,
+    timezone: form.timezone.trim() || null,
   }
   if (props.mode === 'create') payload.placement = { locationId: form.locationId, positionId: form.positionId, positionLevelId: form.positionLevelId || null, orgUnitId: form.orgUnitId || null }
   emit('submit', payload)
@@ -101,6 +111,8 @@ function submit() {
       <label>{{ t('person.tags') }}<input v-model="form.tags" list="pf-tags" :placeholder="t('person.tagsHint')"></label>
       <datalist id="pf-tags"><option v-for="r in refs.tags" :key="r.id" :value="r.name" /></datalist>
       <label>{{ t('person.locale') }}<select v-model="form.locale"><option value="">—</option><option value="uk">Українська</option><option value="en">English</option><option value="ru">Русский</option></select></label>
+      <label>{{ t('person.timezone') }}<input v-model="form.timezone" list="pf-timezones" maxlength="64" autocomplete="off" :aria-invalid="!!errors.timezone" aria-describedby="pf-timezone-hint"><small id="pf-timezone-hint" class="sub">{{ t('person.timezoneHint') }}</small><small v-if="errors.timezone" class="err">{{ errors.timezone }}</small></label>
+      <datalist id="pf-timezones"><option v-for="z in timezones" :key="z" :value="z" /></datalist>
     </fieldset>
 
     <fieldset>

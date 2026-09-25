@@ -140,6 +140,9 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
       </div>
     </div>
 
+    <!-- Своя лента за год (docs/v2/38 §2 «свою — все роли», §5.1): та же карта, что в карточке человека -->
+    <PersonActivityMap v-if="me?.user.kind === 'employee'" :person-id="me.user.id" class="year-map" />
+
     <div v-if="bonuses" class="bonus-card">
       <span class="bonus-text">
         <b>{{ bonusText(bonuses.balance) }}</b>
@@ -219,6 +222,7 @@ a.tile { color: inherit; text-decoration: none; }
 .cert b { display: block; font-weight: 900; }
 .cert small { color: var(--color-sun-ink); font-weight: 700; }
 .week { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-2); padding: var(--space-4) var(--space-3) var(--space-3); }
+.year-map { margin-top: var(--space-3); }
 .day { display: grid; justify-items: center; gap: var(--space-1); flex: 1; }
 .day .bar { width: 100%; border-radius: 8px 8px 4px 4px; background: var(--color-bg-line-soft); }
 .day .bar.on { background: var(--color-teal); }

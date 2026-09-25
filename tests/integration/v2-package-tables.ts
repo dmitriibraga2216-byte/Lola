@@ -139,6 +139,11 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // под RLS, а не платформенный справочник с `tenant_id is null`.
   'ai_providers',
   'ai_calls',
+  // 38. Лента и карта активности (PR-34, миграция v2_user_activity): события со снимком пояса и
+  // локальным днём (400 дней) и суточный агрегат (бессрочно). Tenant-first индекс агрегата — его
+  // уникальный ключ `(tenant_id, user_id, local_date)`, второй такой же не заводится.
+  'user_activity_events',
+  'user_activity_daily',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

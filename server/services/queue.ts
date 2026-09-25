@@ -64,6 +64,10 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('documents.expiry_scan', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/38 §11 (PR-33): сдвиг сроков обязательных назначений с дней отсутствия
       await b.createQueue('absence.deadline_guard', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/38 §11 (PR-34): лента активности — уборка событий старше 400 дней и секунды дня
+      // из сегментов учёта времени в суточный агрегат
+      await b.createQueue('activity.purge', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('activity.aggregate', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/34 §11 (PR-36): корзина хранилища и отложенные загрузки
       await b.createQueue('storage.purge', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
@@ -132,6 +136,13 @@ export async function getBoss(): Promise<PgBoss> {
       // Сроки и отсутствия (docs/v2/38 §11): в 05:30 — раньше напоминаний due.scan (08:00), чтобы
       // сдвинутый срок успел лечь до них
       await b.schedule('absence.deadline_guard', '30 5 * * *', {}, { singletonKey: 'absence.deadline_guard', tz: 'Europe/Kyiv' })
+      // Лента активности (docs/v2/38 §11): события старше 400 дней — в 03:00, агрегат при этом
+      // не трогается (критерий 12). Секунды дня — ежечасно по окну в 2 часа и раз в сутки по окну
+      // в 48 часов: второй проход и есть «финальный пересчёт дня» §7.10 — догоняет поздно
+      // закрытые сегменты и то, что частые прогоны пропустили (тот же приём, что у time.rollup)
+      await b.schedule('activity.purge', '0 3 * * *', {}, { singletonKey: 'activity.purge', tz: 'Europe/Kyiv' })
+      await b.schedule('activity.aggregate', '25 * * * *', { windowMinutes: 120 }, { singletonKey: 'activity.aggregate', key: 'hourly' })
+      await b.schedule('activity.aggregate', '50 4 * * *', { windowMinutes: 2880 }, { singletonKey: 'activity.aggregate.daily', key: 'daily', tz: 'Europe/Kyiv' })
       // Хранилище (docs/v2/34 §11): корзина с истёкшим сроком — в purged в 04:00 (объект в S3
       // остаётся до решения владельца продукта, docs/v2/44 §8); отложенные загрузки — каждые 15 минут
       await b.schedule('storage.purge', '0 4 * * *', {}, { singletonKey: 'storage.purge', tz: 'Europe/Kyiv' })

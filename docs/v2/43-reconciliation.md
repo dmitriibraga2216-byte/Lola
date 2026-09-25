@@ -334,7 +334,7 @@
 | `GET /platform/tenants/:id/limits` | `server/api/v1/platform/tenants/[id]/limits.get.ts` | — |
 | `PUT /platform/tenants/:id/limits` | `platform/tenants/[id]/limits.put.ts` | Оси уже есть (`shared/schemas/platform.ts:11–18`), но требования `35` «причина обязательна» в схеме нет |
 | `GET /review/queue` | `review/queue.get.ts` | Одна очередь; четырёх табов и фильтров по филиалу/треку/`subject_kind` нет |
-| `GET /people/:id/activity` | `people/[id]/activity.get.ts` | **Контракт другой:** `personActivity()` (`server/services/people.ts:727`) отдаёт последние 100 записей `audit_log`, а не «дни · события · уровни за год». Скоуп `people.view`, а не `person.activity.view_others` |
+| `GET /people/:id/activity` | `people/[id]/activity.get.ts` | **Контракт другой:** `personActivity()` (`server/services/people.ts:727`) отдаёт последние 100 записей `audit_log`, а не «дни · события · уровни за год». Скоуп `people.view`, а не `person.activity.view_others`. **[решено, PR-34]** путь отдаёт карту года (`personActivityYear()`, `server/services/activity.ts`), журнал действий переехал на `GET /people/:id/action-log` |
 | `GET /people/:id/notes` | `people/[id]/notes.get.ts` | Скоуп `people.edit`; записи в `audit_log` при чтении (`38` §5.1) нет |
 | `POST /people/:id/notes` | `people/[id]/notes.post.ts` | Без `visibility`/`category` (см. §1.2) |
 | `GET /reports/activity` | `reports/[name].get.ts`, ветка `case 'activity'` | Это DAU/сессии (`services/reports.ts:139`), а не «Навчальна активність» человека — совпало имя, не смысл |

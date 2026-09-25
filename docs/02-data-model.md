@@ -1356,9 +1356,11 @@ create table storage_pending_uploads (         -- работа сотрудни�
 create table import_jobs (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
-  kind text not null,                          -- users | courses
+  kind text not null,                          -- users | courses | task_audience | org_structure (импорт оргструктуры, `v2/32` §7 п. 7, PR-31)
   file_key text not null,
-  status text not null default 'queued',       -- queued | validating | ready | applied | failed
+  status text not null default 'queued',       -- queued | validating | ready | applying | applied | failed
+  -- PR-31 (0089): uq_import_jobs_org_structure_active — не больше одного импорта оргструктуры
+  -- в `queued`/`applying` на тенант; зависший дольше 30 минут сервис закрывает `failed`
   stats jsonb not null default '{}',           -- {rows, created, updated, errors}
   report_key text,                             -- xlsx с построчными ошибками
   created_by uuid references users(id)
@@ -2118,7 +2120,7 @@ org_conflicts(
   severity text not null default 'warning',  -- org_conflict_severity (PR-30)
   node_id uuid,                   -- узел дерева, на котором конфликт найден; null — конфликт про человека (PR-30)
   source text not null default 'manual',  -- manual | import
-  import_job_id uuid, details jsonb, actor_id uuid,
+  import_job_id uuid, details jsonb, actor_id uuid,   -- импорт оргструктуры (PR-31) пишет сюда петли, висячие узлы и 13-й уровень: details {line, externalKey, parentExternalKey, reason}; индекс idx_org_conflicts_import_job
   request_context jsonb, resolved_at timestamptz, resolved_by uuid, created_at   -- разрешение: details.resolution {action acknowledge|close_placement, placementId, comment, by, at}
 )
 -- Открытый конфликт — `resolved_at is null`. Колонок `status` и `detected_at` из `v2/32` §3.3
@@ -2159,7 +2161,7 @@ org_manager_map(                  -- проекция resolveManager(); пише
   computed_at timestamptz not null default now(),
   primary key (tenant_id, user_id)
 )
-org_structure_snapshots(          -- снимок дерева; импорт и откат — PR-31
+org_structure_snapshots(          -- снимок дерева: узлы (включая архивные) и активные держатели; откат к нему — PR-31
   id, tenant_id, label text not null,
   kind text not null default 'manual',   -- org_snapshot_kind
   tree jsonb not null, node_count int not null default 0, created_by uuid, created_at, updated_at
@@ -2396,7 +2398,9 @@ org_assignment_end_reason: moved | dismissed | node_archived | manual
 -- Строгий приоритет: дерево → точка → роль в области → никого
 org_manager_source: org_tree | location | functional | role_scope | none
 
--- Вид снимка дерева (`v2/32` §3.3); откат по снимку — PR-31
+-- Вид снимка дерева (`v2/32` §3.3, §7 п. 7). PR-31: pre_import — перед применением импорта CSV;
+-- pre_bulk_move — перед переносом ветки больше 20 узлов и перед откатом («до отката», нового вида
+-- не заводится); auto_daily — ежедневный снимок, задачи org.daily_snapshot пока нет
 org_snapshot_kind: manual | auto_daily | pre_import | pre_bulk_move
 
 -- Коды событий журнала безопасности (`16` §15 Г-16.2); Spec 16.

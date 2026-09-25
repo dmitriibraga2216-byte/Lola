@@ -195,8 +195,11 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | GET | `/org-structure/subordinates/:userId` | `org.structure.view` | подчинённые, опционально вся ветка |
 | GET | `/org-structure/snapshots` | `org.structure.import` | снимки структуры |
 | POST | `/org-structure/snapshots` | `org.structure.import` | снять именованный снимок |
-| POST | `/org-structure/snapshots/:id/rollback` | `org.structure.import` | откат к снимку, отдаёт `job_id` |
-| POST | `/org-structure/import` | `org.structure.import` | CSV с маппингом колонок |
+| POST | `/org-structure/snapshots/:id/rollback` | `org.structure.import` | откат к снимку в запросе, отдаёт итог (PR-31; было «отдаёт `job_id`», см. `32` §10) |
+| POST | `/org-structure/import` | `org.structure.import` | CSV → предпросмотр с сопоставлением колонок по заголовкам |
+| GET | `/org-structure/import/:id` | `org.structure.import` | предпросмотр и ход применения (PR-31) |
+| POST | `/org-structure/import/:id/mapping` | `org.structure.import` | сопоставление колонок и опции, повторная проверка (PR-31) |
+| POST | `/org-structure/import/:id/apply` | `org.structure.import` | запуск `org.import_apply`, отдаёт `{jobId}` (PR-31) |
 | GET | `/org-structure/export` | `org.structure.import` | выгрузка CSV в формате импорта |
 | GET | `/org-structure/conflicts` | `org.structure.view` | протокол конфликтов структуры |
 | POST | `/org-structure/conflicts/:id/resolve` | `org.structure.edit` | закрыть конфликт |

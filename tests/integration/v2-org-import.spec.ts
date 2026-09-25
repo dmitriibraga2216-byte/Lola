@@ -310,8 +310,10 @@ describe('импорт по ключу: обновление, перенос в�
     const [old] = await admin`select ended_reason from org_node_assignments a join org_nodes n on n.id = a.node_id where n.external_key = 'BR1-1' and a.user_id = ${people.w1} order by a.created_at desc limit 1`
     expect(old!.ended_reason).toBe('moved')
     expect(await treeViolations()).toBe(0)
-    const [mv] = await admin`select count(*)::int as n from audit_log where tenant_id = ${tenantId} and action = 'org_node.move' and after->>'importJobId' = ${r.view.jobId}`
-    expect(mv!.n).toBe(1)
+    // Журнал переноса: одна строка на перенесённый узел и число задетых потомков (`32` §7 п. 3).
+    const moves = await admin`select after from audit_log where tenant_id = ${tenantId} and action = 'org_node.move' and after->>'importJobId' = ${r.view.jobId}`
+    expect(moves.length).toBe(1)
+    expect(moves[0]!.after).toMatchObject({ affected: 1, changed: ['parent', 'title'] })
   })
 
   it('«Архівувати вузли, яких немає у файлі»: отсутствующие листья — в архив, держатели сняты node_archived', async () => {

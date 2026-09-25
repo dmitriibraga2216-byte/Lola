@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ORG_CONFLICT_KINDS } from '#shared/enums'
+import type { OrgConflictKind } from '#shared/enums'
+
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'people.edit' })
 
 /**
@@ -11,11 +14,12 @@ const { formatShortDate } = useFormat()
 const { api } = useApi()
 const route = useRoute()
 
-type Kind = 'double_unit' | 'placement_replaced' | 'manager_self' | 'manager_cycle' | 'unit_missing'
+type Kind = OrgConflictKind
 type State = 'open' | 'resolved' | 'all'
 interface Row { id: string, created_at: string, user_id: string | null, full_name: string | null, position: string | null, location: string | null, unit: string | null, kind: Kind, source: 'manual' | 'import', details: Record<string, unknown>, resolved_at: string | null, actor: string | null }
 interface Placement { id: string, is_primary: boolean, started_at: string, location: string, position: string, unit: string | null }
-const KINDS: Kind[] = ['double_unit', 'placement_replaced', 'manager_self', 'manager_cycle', 'unit_missing']
+// Один список из десяти (`docs/v2/44` В-7): петли и висячие узлы импорта оргструктуры (PR-31) — тоже здесь
+const KINDS: readonly Kind[] = ORG_CONFLICT_KINDS
 
 const state = ref<State>((['open', 'resolved', 'all'] as string[]).includes(String(route.query.state)) ? route.query.state as State : 'open')
 const kind = ref<Kind | ''>('')
@@ -59,6 +63,14 @@ const dateOf = (v: string | null) => v ? formatShortDate(parseDate(v)) : '—'
 /** Деталі — коротко по виду конфликта (мокап: «Б9 Лазарева, Б12 Меркурій», «Б14 (немає)») */
 function detailsOf(r: Row): string {
   const d = r.details
+  // Строка импорта оргструктуры (PR-31): узел и родитель — ключами файла, петля — её звеньями.
+  if (typeof d.externalKey === 'string') {
+    const parts = [t('conflicts.orgNode', { key: d.externalKey })]
+    if (d.parentExternalKey) parts.push(t('conflicts.orgParent', { key: String(d.parentExternalKey) }))
+    if (d.keys) parts.push(String(d.keys))
+    if (d.line) parts.push(t('conflicts.line', { n: Number(d.line) }))
+    return parts.join(' · ')
+  }
   if (r.kind === 'unit_missing') return `${d.orgUnit ?? '—'} (${t('conflicts.missing')})${d.line ? ` · ${t('conflicts.line', { n: d.line })}` : ''}`
   if (r.kind === 'placement_replaced') return `${(d.from as Record<string, string> | undefined)?.locationId ? t('conflicts.replacedFrom') : ''} → ${r.location ?? ''}`.trim()
   if (r.kind === 'double_unit') return [r.unit, d.otherOrgUnitId ? t('conflicts.otherUnit') : null].filter(Boolean).join(', ')

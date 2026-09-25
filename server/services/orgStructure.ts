@@ -437,6 +437,17 @@ export async function endAssignment(ctx: Ctx, assignmentId: string, endedReason:
 }
 
 /**
+ * Узел назначения — чтобы проверить «свою ветку» до снятия человека (`32` §2): руководитель
+ * снимает людей только в поддереве, где он держатель, как и привязывает.
+ */
+export async function assignmentNodeOf(ctx: Ctx, assignmentId: string): Promise<string | null> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [a] = await tx.select({ nodeId: orgNodeAssignments.nodeId }).from(orgNodeAssignments).where(eq(orgNodeAssignments.id, assignmentId))
+    return a?.nodeId ?? null
+  })
+}
+
+/**
  * Состояние узла — производная от активных держателей (`32` §4): `occupied`, пока есть хоть
  * один; `vacant`, когда закрылся последний. Узел при этом остаётся в дереве, и подчинённые
  * ветки не двигаются — это и есть разница между «вакансией в структуре» и архивацией.

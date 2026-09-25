@@ -431,7 +431,8 @@ async function applyInTx(tx: TenantTx, ctx: Ctx, job: typeof importJobs.$inferSe
       entity: 'org_node',
       entityId: n.id,
       before: before ? { title: before.title, parentId: before.parentId, type: before.type, isManagerPoint: before.isManagerPoint, headcountPlanned: before.headcountPlanned, state: before.state } : undefined,
-      after: { importJobId: job.id, title: n.title, parentId: n.parentId, type: n.type, isManagerPoint: n.isManagerPoint, headcountPlanned: n.headcountPlanned, changed: n.changed },
+      // «Зачеплено нащадків» журнала (`32` §7 п. 3, §9): сколько узлов под перенесённым сменили путь.
+      after: { importJobId: job.id, title: n.title, parentId: n.parentId, type: n.type, isManagerPoint: n.isManagerPoint, headcountPlanned: n.headcountPlanned, changed: n.changed, ...(action === 'org_node.move' ? { affected: [...plan.relaid, ...plan.nodes.filter(m => !m.isNew)].filter(r => r.path.startsWith(`${n.path}.`)).length } : {}) },
     })
   }
   for (const id of plan.archive) {

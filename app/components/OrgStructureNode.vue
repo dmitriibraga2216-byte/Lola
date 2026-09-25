@@ -8,17 +8,22 @@
  * ветки: у сотрудника и у чужой ветки их нет вовсе (критерий приёмки 8).
  *
  * Всё интерактивное — кнопки, значит доступно с клавиатуры; свёртка ветки объявлена
- * `aria-expanded`, перетаскивание дублируется кнопками формы (клавиатурный путь).
+ * `aria-expanded`, перетаскивание дублируется полем «Батьківський вузол» формы узла
+ * (клавиатурный путь, PR-31).
  */
-interface Holder { userId: string, fullName: string, email: string | null, roleInNode: string, isPrimary: boolean }
+interface Holder { assignmentId?: string, userId: string, fullName: string, email: string | null, roleInNode: string, isPrimary: boolean }
 interface Node {
   id: string
   parentId: string | null
   depth: number
   type: 'position' | 'employee'
   title: string
+  note?: string | null
+  positionId: string | null
   positionName: string | null
+  locationId: string | null
   locationName: string | null
+  orgUnitId: string | null
   orgUnitName: string | null
   headcountPlanned: number
   headcountActual: number
@@ -39,6 +44,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   toggle: [id: string]
+  assign: [node: Node]
   add: [parentId: string]
   edit: [node: Node]
   archive: [id: string]
@@ -73,13 +79,14 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
         <span v-if="node.type === 'employee' && node.holders[0]?.email" class="sub">{{ node.holders[0].email }}</span>
         <span v-if="node.locationName" class="badge">{{ node.locationName }}</span>
         <span v-if="node.isManagerPoint" class="badge lead">{{ t('orgStructure.managerPoint') }}</span>
-        <span v-if="node.type === 'position'" class="sub">{{ t('orgStructure.counter', { n: node.headcountActual, m: node.headcountPlanned }) }}</span>
+        <span v-if="node.type === 'position'" :class="['sub', { over: node.headcountActual > node.headcountPlanned }]">{{ t('orgStructure.counter', { n: node.headcountActual, m: node.headcountPlanned }) }}</span>
         <span v-if="node.state === 'vacant'" class="sub">{{ t('orgStructure.vacancy') }}</span>
         <span v-if="isMine" class="badge me">{{ t('orgStructure.myNode') }}</span>
       </span>
 
       <!-- Четыре иконки эталона — только у своей ветки в режиме конструктора -->
       <span v-if="editable" class="icons">
+        <button class="ico" :title="t('orgStructure.assign')" :aria-label="t('orgStructure.assign')" @click="emit('assign', node)">👤</button>
         <button class="ico" :title="t('orgStructure.addChild')" :aria-label="t('orgStructure.addChild')" @click="emit('add', node.id)">＋</button>
         <button class="ico" :title="t('orgStructure.edit')" :aria-label="t('orgStructure.edit')" @click="emit('edit', node)">✎</button>
         <button class="ico danger" :title="t('orgStructure.archive')" :aria-label="t('orgStructure.archive')" @click="emit('archive', node.id)">🗑</button>
@@ -98,6 +105,7 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
         :drop-target="dropTarget"
         :my-id="myId"
         @toggle="emit('toggle', $event)"
+        @assign="emit('assign', $event)"
         @add="emit('add', $event)"
         @edit="emit('edit', $event)"
         @archive="emit('archive', $event)"
@@ -128,6 +136,8 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 .ico.danger { color: var(--color-coral-ink); }
 .kids { list-style: none; margin: 0 0 0 var(--space-4); padding: 0 0 0 var(--space-3); border-left: 2px solid var(--color-bg-line); }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
+/* «5 з 3» — перебір коралловым (`32` §12 п. 1): привязка не блокируется, но видно сразу */
+.sub.over { color: var(--color-coral-ink); font-weight: 700; }
 @media (max-width: 480px) {
   .kids { margin-left: var(--space-2); padding-left: var(--space-2); }
   .icons { margin-left: 0; }

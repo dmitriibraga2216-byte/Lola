@@ -110,12 +110,22 @@ export async function normTargetLocation(ctx: Ctx, input: Pick<AbsenceNormPut, '
 
 export interface NormRow { scopeType: AbsenceNormScope, scopeId: string | null, year: number, vacationDays: number | null, sickDays: number | null }
 
+export type AbsenceNormError = 'self'
+
 /**
  * `PUT /absence-norms` (`38` §10): правка перезаписывает строку года целиком (`38` §4 — у нормы
  * нет состояний), прежнее значение — в `audit_log`. Опущенное поле сохраняет прежнее значение;
  * оба `null` снимают переопределение уровня (строка удаляется — уровень снова наследует).
+ *
+ * `[решение]` Свою собственную индивидуальную норму отсутствий нельзя скорректировать самому
+ * себе, даже имея `person.absence.manage` — тот же принцип, что уже принят для бонусов
+ * (`server/services/bonuses.ts`, `adjustBonuses`: «Себе начислить нельзя, даже администратору:
+ * деньги в своих руках — конфликт интересов; начисление себе делает коллега»). Человек,
+ * определяющий себе кадровое условие, — конфликт интересов, правит коллега. Норм компании и
+ * точки это не касается — там нет уровня «свой».
  */
-export async function putAbsenceNorm(ctx: Ctx, input: AbsenceNormPut): Promise<NormRow> {
+export async function putAbsenceNorm(ctx: Ctx, input: AbsenceNormPut): Promise<{ ok: true, row: NormRow } | { ok: false, code: AbsenceNormError }> {
+  if (input.scopeType === 'user' && input.scopeId === ctx.actorId) return { ok: false, code: 'self' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const scopeCond = input.scopeId === null ? isNull(absenceNorms.scopeId) : eq(absenceNorms.scopeId, input.scopeId)
     const [cur] = await tx.select().from(absenceNorms).where(and(eq(absenceNorms.scopeType, input.scopeType), scopeCond, eq(absenceNorms.year, input.year)))
@@ -140,6 +150,6 @@ export async function putAbsenceNorm(ctx: Ctx, input: AbsenceNormPut): Promise<N
       before: before ? { scopeType: input.scopeType, year: input.year, ...before } : null,
       after: { scopeType: input.scopeType, year: input.year, vacationDays, sickDays, reason: input.reason ?? null },
     })
-    return { scopeType: input.scopeType, scopeId: input.scopeId, year: input.year, vacationDays, sickDays }
+    return { ok: true as const, row: { scopeType: input.scopeType, scopeId: input.scopeId, year: input.year, vacationDays, sickDays } }
   })
 }

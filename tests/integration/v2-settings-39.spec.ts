@@ -46,7 +46,7 @@ async function cleanup() {
   await admin`delete from automation_rules where tenant_id = ${tenantId} and (position_id is not null or position_group_id is not null)`
   await admin`update positions set group_id = null where tenant_id = ${tenantId}`
   await admin`delete from position_groups where name like ${`${MARK}%`}`
-  await admin`delete from absence_norms where year in (2031, 2032)`
+  await admin`delete from absence_norms where year in (2031, 2032, 2033)`
   await admin`delete from media_assets where original_name like ${`${MARK}%`}`
   const ids = (await admin`select id from users where phone in ${admin(PHONES)}`).map(r => r.id as string)
   if (ids.length) {
@@ -297,6 +297,18 @@ describe('нормы отсутствий: компания → точка → �
     expect(narrow.locations.map(l => l.locationId)).toEqual([locationIds[1]!])
     const none = await AN.absenceNormsOverview(ctx, 2031, [])
     expect(none.locations).toEqual([])
+  })
+
+  it('[fix-night-debts §1] право на норму человека не даёт правити свою власну: підлеглому — ок, собі — 409 self', async () => {
+    const forSubordinate = await AN.putAbsenceNorm(ctx, { scopeType: 'user', scopeId: placedUserId, year: 2033, vacationDays: 20, reason: 'Тестова корекція підлеглому' })
+    expect(forSubordinate).toEqual({ ok: true, row: { scopeType: 'user', scopeId: placedUserId, year: 2033, vacationDays: 20, sickDays: null } })
+
+    const forSelf = await AN.putAbsenceNorm(ctx, { scopeType: 'user', scopeId: adminId, year: 2033, vacationDays: 20, reason: 'Спроба скоригувати собі' })
+    expect(forSelf).toEqual({ ok: false, code: 'self' })
+
+    // Відмова стається до запису — рядка норми адміністратора в БД немає
+    const [row] = await admin`select 1 from absence_norms where scope_type = 'user' and scope_id = ${adminId} and year = 2033`
+    expect(row).toBeUndefined()
   })
 
   it('чужая точка и чужой человек — не найдены (404), кандидат норм отпуска не имеет', async () => {

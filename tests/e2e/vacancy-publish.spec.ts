@@ -43,7 +43,8 @@ test('17. ІІ-текст блокує публікацію до перевір�
   await page.getByLabel('Рекрутинговий курс').selectOption({ index: 1 })
   await page.getByLabel('Точка').selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Зберегти', exact: true }).click()
-  await expect(page.getByText(/Зміни вплинуть лише на нові відгуки/)).toBeVisible()
+  // На мобільній розкладці текст є і в тості, і в підказці під формою — беремо перший видимий.
+  await expect(page.getByText(/Зміни вплинуть лише на нові відгуки/).first()).toBeVisible()
 
   // §7.10, §7.11: «Створити з AI» на першому блоці («Про вакансію») заповнює textarea.
   await page.getByRole('button', { name: 'Створити з AI' }).first().click()
@@ -52,7 +53,9 @@ test('17. ІІ-текст блокує публікацію до перевір�
   // Критерій §13 к. 9: неперевірений блок блокує публікацію.
   await expect(page.getByText('Перевірте згенерований текст перед публікацією')).toBeVisible()
   await page.getByRole('button', { name: 'Опублікувати' }).click()
-  await expect(page.getByText(/Перевірте згенерований текст перед публікацією/)).toBeVisible()
+  // Після «Опублікувати» те саме повідомлення з'являється вдруге (помилка публікації) —
+  // перевіряємо найновіше; саме блокування доводить рядок нижче: статус лишився «Чернетка».
+  await expect(page.getByText(/Перевірте згенерований текст перед публікацією/).last()).toBeVisible()
   await expect(page.getByText('Чернетка')).toBeVisible()
 
   // «Текст перевірено» знімає блокування без правки тексту.

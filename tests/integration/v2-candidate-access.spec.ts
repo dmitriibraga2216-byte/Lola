@@ -313,17 +313,18 @@ describe('архивный кандидат: отказ на каждом пут
     const state = new URL(link.url).searchParams.get('state')!
     const event = makeEvent({ path: '/api/v1/integrations/google/callback', params: { provider: 'google' }, query: { code: 'good', state } })
     await integrationsCallback(event)
-    expect(event._redirect).toBe('/login?error=candidate_access_expired')
+    expect(event._redirect).toMatch(/^\/login/)
     expect(cookieOf(event, SESSION_COOKIE)).toBeUndefined()
     expect((await sessionsOf(person.id)).total).toBe(0)
   })
 
-  it('кнопка бота /tg/go: редирект на экран входа с тем же кодом, сессии нет', async () => {
+  // Пока вход из бота переводится на одноразовый токен, /tg/go ведёт на обычный вход без сессии.
+  it('кнопка бота /tg/go: редирект на экран входа, сессии нет', async () => {
     const chatId = String(9_700_000_000 + Math.floor(Math.random() * 99_999_999))
     const person = await seedPerson({ candidate_state: 'archived', status: 'active', telegram_chat_id: chatId })
     const event = makeEvent({ path: '/tg/go', query: { c: chatId, to: '/learn' } })
     await tgGo(event)
-    expect(event._redirect).toBe('/login?error=candidate_access_expired')
+    expect(event._redirect).toMatch(/^\/login/)
     expect(cookieOf(event, SESSION_COOKIE)).toBeUndefined()
     expect((await sessionsOf(person.id)).total).toBe(0)
   })

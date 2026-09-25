@@ -119,12 +119,18 @@ ALTER TABLE "vacancies" ADD COLUMN "spam_hardened_until" timestamp with time zon
 -- vacancy_public_lookup() (0074_v2_vacancy_apply) отдаёт ещё и это поле: rateVerdict()
 -- публичного контура узнаёт про хардненинг без второго обращения к БД внутри тенанта.
 -- Postgres не даёт CREATE OR REPLACE поменять состав RETURNS TABLE — функция дропается
--- и создаётся заново, грант на выполнение выставляется следующей строкой.
+-- и создаётся заново. DROP уничтожает и права, которые 0079 навесила на прежнюю версию
+-- (REVOKE … FROM public, GRANT … TO app_user) — оба выставляются заново следующими двумя
+-- строками, тем же порядком, что и три двери в 0079 (иначе новая функция создаётся с правом
+-- EXECUTE у PUBLIC по умолчанию Postgres — сквозная проверка `rls.spec.ts` «двери» это ловит).
 DROP FUNCTION IF EXISTS vacancy_public_lookup(text);--> statement-breakpoint
 CREATE FUNCTION vacancy_public_lookup(p_token text)
 RETURNS TABLE (id uuid, tenant_id uuid, state text, public_enabled boolean, owner_id uuid, spam_hardened_until timestamptz)
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = public, pg_temp
+AS $$
   SELECT id, tenant_id, state, public_enabled, coalesce(recruiter_id, created_by), spam_hardened_until
     FROM vacancies WHERE public_token = p_token
 $$;--> statement-breakpoint
+REVOKE ALL ON FUNCTION vacancy_public_lookup(text) FROM public;--> statement-breakpoint
 GRANT EXECUTE ON FUNCTION vacancy_public_lookup(text) TO app_user;

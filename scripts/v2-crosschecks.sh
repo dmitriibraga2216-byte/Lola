@@ -564,7 +564,8 @@ check13_time_norms_not_in_score() {
     | grep -vE "^server/services/resources\.ts:[0-9]+:import \{ syncMaterialEstimate \} from '\./timeNorms'$" \
     | grep -vE "^server/services/personTracks\.ts:[0-9]+:import \{ versionPlannedSeconds \} from '\./timeNorms'$" \
     | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ planFactExportRows, timePlanFactReport \} from '\./timeNorms'$" \
-    | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ timePlanFactQuerySchema \} from '\.\./\.\./shared/schemas/timeNorms'$" || true)"
+    | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ timePlanFactQuerySchema \} from '\.\./\.\./shared/schemas/timeNorms'$" \
+    | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import type \{ TimePlanFactQuery \} from '\.\./\.\./shared/schemas/timeNorms'$" || true)"
   report "13. норма времени и флаг отклонения не входят в балл (docs/v2/37 §7.14 б, критерий 11)" "$hits"
 }
 

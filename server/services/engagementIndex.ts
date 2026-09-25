@@ -15,6 +15,7 @@ import { stageCan } from './lifecycle'
 import { cardSubject } from './personCard'
 import type { CardSubject } from './personCard'
 import { employees } from './repo/people'
+import { frameJoins, frameWhere } from './reportFrame'
 
 /**
  * Індекс навчальної залученості (docs/v2/38-people-extensions.md §3.1, §3.7, §5.2–§5.3, §7.1–§7.3,
@@ -292,5 +293,49 @@ export async function recalcEngagementFor(ctx: Ctx, userIds: string[]): Promise<
       out.set(id, r)
     }
     return out
+  })
+}
+
+export interface EngagementReportRow {
+  fullName: string
+  location: string | null
+  basePct: number
+  bonusEarly: number
+  bonusStreak: number
+  bonusHelp: number
+  totalPct: number
+}
+
+/**
+ * «Індекс залученості» (`38` §9 п. 5, PR-38, П-22, `⟵` PR-35). Рядок — поточний снімок людини
+ * (`person_rating_snapshots.is_current`); людина відбирається тим самим каркасом (`frameWhere`,
+ * тільки співробітники, без архівованих). «Показник довідковий, не призначений для кадрових
+ * рішень» (`38` §7.3) — і сам звіт, і його реєстрація в конструкторі мають нести це попередження
+ * рядком, а не одним разом на екрані.
+ *
+ * **«Виgrужується тільки з явною галкою» (`38` §9 п. 5)** — у загальному конструкторі
+ * (`server/services/reportBuilder.ts`) чекбокса на рівні поля немає, тому підтвердження — це
+ * `confirmed`: без нього функція навмисно повертає `[]`, а не дані. Викликати без підтвердження
+ * і чекати даних — помилка викликаючого коду, не цього сервісу.
+ */
+export async function engagementIndexReport(ctx: Ctx, confirmed: boolean): Promise<EngagementReportRow[]> {
+  if (!confirmed) return []
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.execute(sql`
+      select u.full_name, l.name as location,
+             prs.base_pct::float as base_pct, prs.bonus_early::float as bonus_early,
+             prs.bonus_streak::float as bonus_streak, prs.bonus_help::float as bonus_help,
+             prs.total_pct::float as total_pct
+        from person_rating_snapshots prs
+        join users u on u.id = prs.user_id
+        ${frameJoins()}
+       where prs.is_current ${frameWhere({})}
+       order by prs.total_pct desc`) as unknown as {
+      full_name: string, location: string | null, base_pct: number, bonus_early: number, bonus_streak: number, bonus_help: number, total_pct: number
+    }[]
+    return rows.map(r => ({
+      fullName: r.full_name, location: r.location, basePct: r.base_pct, bonusEarly: r.bonus_early,
+      bonusStreak: r.bonus_streak, bonusHelp: r.bonus_help, totalPct: r.total_pct,
+    }))
   })
 }

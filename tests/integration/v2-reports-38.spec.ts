@@ -9,8 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * (`server/services/reportBuilder.ts`).
  *
  * Умови виходу PR-38, які тут перевіряються:
- * - жоден звіт не вигружає `rating_pct` за замовчуванням (PR-35 ще не в `main` — правило
- *   перевіряється на самому білому списку полів, а не на колонці, якої ще нема);
+ * - жоден звіт, окрім навмисно виключеного «Індексу залученості» (`38` §9 п. 5, PR-35, з
+ *   явним підтвердженням), не вигружає `rating_pct`/розклад індексу за замовчуванням; колонка
+ *   `users.rating_pct` тепер реальна (PR-35, #137) — правило перевірено на реальному стовпці,
+ *   не гіпотетично;
  * - усі персональні колонки — з єдиного каркаса `docs/22` §13 (`reportFrame.ts`), а не
  *   самодільні;
  * - `37` §13 к. 11 («План і факт часу» без жодного імені) не ламається реєстрацією.
@@ -47,12 +49,23 @@ describe('PR-38: описание сутностей конструктора', 
       'stages', 'reviewers', 'orgNodes', 'storage', 'absences',
       'recruiting-funnel', 'recruiter-efficiency', 'candidate-sources', 'time-to-hire', 'rejection-reasons',
       'stage-speed', 'offboarding-reasons', 'learning-activity', 'content-quality', 'time-plan-fact',
+      'engagement-index',
     ]) expect(keys, k).toContain(k)
   })
 
-  it('жоден білий список полів не містить rating_pct (умова виходу PR-38)', () => {
+  it('жоден білий список полів не містить rating_pct (умова виходу PR-38, реальна колонка з PR-35)', () => {
     const all = describeEntities()
     const offenders = Object.entries(all).filter(([, v]) => v.fields.includes('rating_pct')).map(([k]) => k)
+    expect(offenders).toEqual([])
+  })
+
+  it('розклад індексу (base_pct/bonus_*/total_pct) є тільки в «Індексі залученості» — жоден інший звіт його не показує', () => {
+    const all = describeEntities()
+    const ratingFields = ['base_pct', 'bonus_early', 'bonus_streak', 'bonus_help', 'total_pct']
+    const offenders = Object.entries(all)
+      .filter(([k]) => k !== 'engagement-index')
+      .filter(([, v]) => ratingFields.some(f => v.fields.includes(f)))
+      .map(([k]) => k)
     expect(offenders).toEqual([])
   })
 
@@ -147,5 +160,14 @@ describe('PR-38: готові звіти (funnel/content-quality/time-plan-fact 
     const rows = await runReport(ctx(), { entity: 'learning-activity', fields: ['full_name', 'days_active', 'hours'], filters: {}, groupBy: null }, 50, null)
     expect(rows).toEqual(expect.any(Array))
     for (const r of rows) expect(Object.keys(r)).not.toContain('rating_pct')
+  })
+
+  it('«Індекс залученості» — без підтвердження порожній, з підтвердженням перший рядок — попередження', async () => {
+    const unconfirmed = await runReport(ctx(), { entity: 'engagement-index', fields: ['full_name', 'total_pct'], filters: {}, groupBy: null }, 50, null)
+    expect(unconfirmed).toEqual([])
+    const confirmed = await runReport(ctx(), { entity: 'engagement-index', fields: ['full_name', 'total_pct'], filters: { confirmed: true }, groupBy: null }, 50, null) as { full_name: string, total_pct: unknown }[]
+    expect(confirmed.length).toBeGreaterThan(0)
+    expect(confirmed[0]!.full_name).toContain('довідковий')
+    expect(confirmed[0]!.total_pct).toBe('')
   })
 })

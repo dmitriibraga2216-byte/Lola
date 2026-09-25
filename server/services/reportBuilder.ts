@@ -22,6 +22,7 @@ import type { TimePlanFactQuery } from '../../shared/schemas/timeNorms'
 import { stageSpeedReport } from './lifecycleState'
 import { offboardingReasonsReport } from './offboarding'
 import { learningActivityReport } from './activity'
+import { engagementIndexReport } from './engagementIndex'
 import { reportFilterSchema } from '../../shared/schemas/reports'
 import type { ReportFilter } from '../../shared/schemas/reports'
 
@@ -359,6 +360,30 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
       const f = parseOr<TimePlanFactQuery>(timePlanFactQuerySchema, filters, { format: 'json' })
       const r = await timePlanFactReport({ tenantId: ctx.tenantId, actorId: ctx.actorId, scope }, f)
       return planFactExportRows(r)
+    },
+  },
+  /**
+   * «Індекс залученості» (`38` §9 п. 5, PR-38, П-22, `⟵` PR-35, зареєстрований у main пізніше
+   * планового «дванадцять» — див. `docs/v2/46-progress.md`, запис PR-35). Показник довідковий
+   * (`38` §7.3): без `filters.confirmed === true` — навмисно порожній список, а не дані
+   * («явна галка» доку — у конструкторі це параметр, не чекбокс на екрані); з підтвердженням —
+   * попереджувальний рядок доку йде першим елементом масиву, тож потрапляє першою строкою й у
+   * xlsx/csv. Це той самий `rating_pct`, тільки у розкладеному вигляді (`базова` + три бонуси) —
+   * єдиний звіт пакету, де це навмисно, за прямим запитом джерела; жоден **інший** звіт його не
+   * показує (умова виходу PR-38, перевірено тестом).
+   */
+  'engagement-index': {
+    fields: ['full_name', 'location', 'base_pct', 'bonus_early', 'bonus_streak', 'bonus_help', 'total_pct'],
+    filters: ['confirmed'],
+    run: async (ctx, filters) => {
+      const confirmed = filters.confirmed === true || filters.confirmed === 'true'
+      const rows = await engagementIndexReport(ctx, confirmed)
+      if (!confirmed) return []
+      const disclaimer = { full_name: 'Показник довідковий, не призначений для кадрових рішень', location: '', base_pct: '', bonus_early: '', bonus_streak: '', bonus_help: '', total_pct: '' }
+      return [disclaimer, ...rows.map(r => ({
+        full_name: r.fullName, location: r.location, base_pct: r.basePct, bonus_early: r.bonusEarly,
+        bonus_streak: r.bonusStreak, bonus_help: r.bonusHelp, total_pct: r.totalPct,
+      }))]
     },
   },
 }

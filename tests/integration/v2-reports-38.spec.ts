@@ -91,7 +91,7 @@ describe('PR-38: конструктор виконує нові сутності
     // дає той самий результат. Порівнюємо з тим, що реально повернула база (а не з `[]`
     // напряму) — інакше перевірка залежить від того, чи є в спільному тенанті CI дані
     // «Динаміки сховища» за сьогодні від паралельних спек, а не від самого правила scopeCol.
-    const spec = { entity: 'storage', fields: ['day', 'origin', 'bytes'], filters: {}, groupBy: null } as const
+    const spec = { entity: 'storage', fields: ['day', 'origin', 'bytes'], filters: {}, groupBy: null }
     const withScope = await runReport(ctx(), spec, 50, [lazarevaId])
     expect(withScope).toEqual(expect.any(Array))
     await expect(runReport(ctx(), spec, 50, [])).resolves.toEqual(withScope)

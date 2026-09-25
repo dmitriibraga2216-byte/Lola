@@ -1,9 +1,10 @@
 import { and, eq, isNull, or, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { planAddons, plans, tenantAddons, tenantLimits, tenants } from '../db/schema'
-import { withTenant } from '../utils/withTenant'
+import { withTenant, type TenantTx } from '../utils/withTenant'
 import { LIMIT_AXES, type LimitAxis } from '../../shared/enums'
 import { defaultDictionary } from './translations'
+import { ACTIVE_EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Действующие лимиты тенанта — **одна функция эффективного лимита** на всю систему
@@ -94,6 +95,12 @@ export interface EffectiveLimits {
   addons: Partial<Record<LimitAxis, number>>
   /** Колонки, где действует переопределение оператора, а не тариф. */
   overridden: LimitColumn[]
+  /**
+   * Нашлась ли строка тарифа тенанта. `tenants.plan` не ссылается на `plans` внешним ключом, и
+   * без строки тарифа все его оси читаются как «без обмежень» — для проверки мест это отказ
+   * проверки, а не разрешение (`assertSeatsWithinLimit`, fail-closed).
+   */
+  planFound: boolean
   subscription: SubscriptionState
 }
 
@@ -172,6 +179,7 @@ export async function effectiveLimits(tenantId: string): Promise<EffectiveLimits
     axes,
     addons,
     overridden,
+    planFound: p != null,
     subscription: {
       billingPeriod: (o?.billingPeriod ?? 'month') as SubscriptionState['billingPeriod'],
       status: (o?.status ?? 'trial') as SubscriptionState['status'],
@@ -247,10 +255,41 @@ export class LimitExceededError extends Error {
   readonly statusCode = 409
   readonly code = 'limit_exceeded'
   readonly details: { axis: LimitAxis, used: number, limit: number | null }
-  constructor(check: LimitCheck, locale: 'uk' | 'en' | 'ru' = 'uk') {
-    super(limitMessage(check, locale))
+  /** `message` — текст для конкретного места отказа (вход, импорт); по умолчанию — `limitMessage()`. */
+  constructor(check: LimitCheck, locale: 'uk' | 'en' | 'ru' = 'uk', message?: string) {
+    super(message ?? limitMessage(check, locale))
     this.name = 'LimitExceededError'
     this.details = { axis: check.axis, used: check.used, limit: check.limit }
+  }
+
+  /**
+   * Тело ответа для обработчика ошибок Nitro (`server/error.ts`), как у `TenantClosedError`:
+   * ошибка, выброшенная из сервиса и не перехваченная ручкой, всё равно уходит клиенту единым
+   * `409 limit_exceeded` с осью, фактом и лимитом, а не безымянным `500`.
+   */
+  get data() {
+    return { code: this.code, message: this.message, details: this.details }
+  }
+}
+
+/**
+ * Проверка лимита не состоялась: не прочитался тариф, упал подсчёт, не взялась блокировка.
+ * Это **отказ**, а не пропуск (fail-closed): операция, которую нечем проверить, не выполняется,
+ * иначе сбой базы или битая ссылка на тариф молча снимали бы лимит. `503` — повтор имеет смысл;
+ * текст из словаря объясняет, что делать, и уходит клиенту как есть (`expose`, `server/error.ts`).
+ */
+export class LimitCheckFailedError extends Error {
+  readonly statusCode = 503
+  readonly code = 'limit.check_failed'
+  readonly details: { axis: LimitAxis }
+  constructor(axis: LimitAxis, cause?: unknown, locale: 'uk' | 'en' | 'ru' = 'uk') {
+    super(defaultDictionary(locale)['billing.limitCheckFailed'] ?? 'limit check failed', { cause })
+    this.name = 'LimitCheckFailedError'
+    this.details = { axis }
+  }
+
+  get data() {
+    return { code: this.code, message: this.message, details: this.details, expose: true }
   }
 }
 
@@ -270,4 +309,63 @@ export function limitMessage(check: LimitCheck, locale: 'uk' | 'en' | 'ru' = 'uk
 export async function assertWithinLimit(tenantId: string, axis: LimitAxis, used: number, delta = 1): Promise<void> {
   const check = await checkLimit(tenantId, axis, used, delta)
   if (!check.ok) throw new LimitExceededError(check)
+}
+
+// ── Места сотрудников (`users_active`) ────────────────────────────────────────────────────
+
+/**
+ * Транзакционная advisory-блокировка мест тенанта: одна на тенант, одинаковая во всех процессах
+ * приложения. Снимается сама на `commit`/`rollback` — забыть её отпустить нельзя.
+ */
+const seatLock = (tenantId: string) => sql`select pg_advisory_xact_lock(hashtextextended(${`seats:users_active:${tenantId}`}, 0))`
+
+/** Текст отказа по местам из словаря (`billing.seats.*`) с подстановкой `{…}`. */
+export function seatText(key: 'loginBlocked' | 'importBlocked' | 'hireBlocked' | 'hireAccessExtended', vars: Record<string, string | number>, locale: 'uk' | 'en' | 'ru' = 'uk'): string {
+  const template = defaultDictionary(locale)[`billing.seats.${key}`] ?? key
+  return Object.entries(vars).reduce((s, [k, v]) => s.replaceAll(`{${k}}`, String(v)), template)
+}
+
+/**
+ * Места сотрудников — **единственная** проверка для каждого пути, который добавляет активного
+ * сотрудника (ось `users_active`, `35` §7.1, §7.4, §7.5, критерий §13 к. 1): создание и
+ * приглашение, импорт, разблокировка, восстановление из архива, найм и повторный найм, первый
+ * вход приглашённого. Решение «пройдёт или нет» принимает `checkLimit()` — та же формула, что у
+ * баннера и счёта; сырого сравнения «использовано против лимита» у путей нет ни одного.
+ *
+ * Вызывается **внутри транзакции самой операции**, до её записей: берёт блокировку мест тенанта,
+ * считает занятые места в той же транзакции и только потом решает. Две параллельные операции
+ * на последнее место выстраиваются в очередь на блокировке, и вторая считает места уже после
+ * фиксации первой — последнее место достаётся ровно одной. Отказ бросается исключением, поэтому
+ * транзакция откатывается целиком: человек остаётся заблокированным, кандидатом, в архиве.
+ *
+ * Fail-closed: сбой подсчёта, блокировки или чтения тарифа — `LimitCheckFailedError` (`503`), а не
+ * пропуск. Тариф, строки которого нет (`tenants.plan` без внешнего ключа), — тоже сбой: без него
+ * `effectiveLimits()` читает ось как «без обмежень», и проверка молча открывала бы любое место.
+ *
+ * `delta = 0` — ничего не проверяет и блокировку не берёт (человек уже на месте или заблокирован).
+ */
+export async function assertSeatsWithinLimit(tx: TenantTx, tenantId: string, delta: number, opts: { message?: (check: LimitCheck) => string } = {}): Promise<LimitCheck | null> {
+  if (delta <= 0) return null
+  let check: LimitCheck
+  try {
+    await tx.execute(seatLock(tenantId))
+    const limits = await effectiveLimits(tenantId)
+    if (!limits.planFound && !limits.overridden.includes('users')) throw new Error(`тариф тенанта ${tenantId} не найден — лимит мест не определён`)
+    const [row] = await tx.execute(sql`select count(*)::int as n from users where tenant_id = ${tenantId}::uuid ${ACTIVE_EMPLOYEES_ONLY('')}`) as unknown as { n: number | string }[]
+    check = await checkLimit(tenantId, 'users_active', Number(row?.n ?? 0), delta)
+  }
+  catch (err) {
+    // Причина — в журнал сервера (строкой, как `server/error.ts`), клиенту — только понятный текст
+    console.error(JSON.stringify({ level: 'error', msg: 'seat limit check failed', tenant_id: tenantId, error: String((err as Error)?.message ?? err) }))
+    throw new LimitCheckFailedError('users_active', err)
+  }
+  if (!check.ok) {
+    // Отказ поднимает `exceeded` и `limit_exceeded` админам (`35` §7.9 п. 4, §8), как у любой
+    // исчерпанной жёсткой оси. Отдельной транзакцией: откат операции его не отменяет, а сбой
+    // уведомления — не повод не отказать, поэтому он глотается.
+    const { syncCounter } = await import('./usageCounters')
+    await syncCounter(tenantId, 'users_active', check.used).catch(() => null)
+    throw new LimitExceededError(check, 'uk', opts.message?.(check))
+  }
+  return check
 }

@@ -4,6 +4,7 @@ import { invitationByTokenHash } from '../../../../services/authLookup'
 import { assertCandidateMayEnter } from '../../../../services/candidateAccess'
 import { createSession, hashToken } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
+import { LimitCheckFailedError, LimitExceededError } from '../../../../services/tenantLimits'
 import { invitations } from '../../../../db/schema'
 import { withTenant } from '../../../../utils/withTenant'
 import { apiData, apiError } from '../../../../utils/apiResponse'
@@ -23,19 +24,30 @@ export default defineEventHandler(async (event) => {
   // правило не выпустит и само (`createSession`), здесь — только порядок.
   await assertCandidateMayEnter(invite.tenant_id, invite.user_id)
 
-  await withTenant(invite.tenant_id, invite.user_id, async (tx) => {
+  const markAccepted = (at: Date | null) => withTenant(invite.tenant_id, invite.user_id, async (tx) => {
     await tx.update(invitations)
-      .set({ acceptedAt: new Date() })
+      .set({ acceptedAt: at })
       .where(eq(invitations.id, invite.invitation_id))
   })
+  await markAccepted(new Date())
 
-  const { token, twoFactor } = await createSession({
-    tenantId: invite.tenant_id,
-    userId: invite.user_id,
-    userAgent: getHeader(event, 'user-agent'),
-    ip: clientIp(event),
-    loginMethod: 'invite',
-  })
+  let session: Awaited<ReturnType<typeof createSession>>
+  try {
+    session = await createSession({
+      tenantId: invite.tenant_id,
+      userId: invite.user_id,
+      userAgent: getHeader(event, 'user-agent'),
+      ip: clientIp(event),
+      loginMethod: 'invite',
+    })
+  }
+  catch (err) {
+    // Мест нет или их не удалось проверить (docs/v2/35 §7.5): вход не состоялся, и ссылка не
+    // должна сгореть — когда администратор освободит место, человек войдёт по ней же.
+    if (err instanceof LimitExceededError || err instanceof LimitCheckFailedError) await markAccepted(null)
+    throw err
+  }
+  const { token, twoFactor } = session
   setSessionCookies(event, token)
 
   // Второй фактор (docs/24 §3.4): приглашённому администратору его подключают на экране входа

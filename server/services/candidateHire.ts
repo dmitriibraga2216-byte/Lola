@@ -22,6 +22,7 @@ import { readSettings } from './settings'
 import { enterStageByCodeTx } from './lifecycleState'
 import { applyPositionRoles } from './positionRoleMap'
 import { redactInterviewData } from './interview/redaction'
+import { LimitExceededError, assertSeatsWithinLimit, seatText } from './tenantLimits'
 
 /**
  * Решения по кандидату: найм, отказ, архивация, самоотвод, повторное открытие
@@ -59,7 +60,8 @@ export type HireResult =
   | { ok: false, code: 'not_active' }
   | { ok: false, code: 'location_not_found' }
   | { ok: false, code: 'position_not_found' }
-  | { ok: false, code: 'limit_exceeded', limit: number | null, current: number, accessUntil: string | null }
+  /** Мест нет (`docs/v2/35` §12): найм не проведён, человек остаётся кандидатом с продлённым входом. */
+  | { ok: false, code: 'limit_exceeded', used: number, limit: number | null, accessUntil: string | null, message: string }
 
 export type DecisionResult =
   | { ok: true, candidate: CandidateRow }
@@ -183,14 +185,19 @@ export async function reopenCandidate(v: Viewer, id: string, input: CandidateReo
 
 // ── Найм (§5.5, §7.6, §12.5) ───────────────────────────────────────────────────────────────
 
+/** На сколько дней продлевается вход кандидата, которого не наняли из-за лимита (§12.5). */
+const ACCESS_ON_LIMIT_DAYS = 14
+
 /**
  * Перевод кандидата в штат одной транзакцией (§7.6).
  *
- * Порядок важен: лимит сотрудников проверяется **до** транзакции — при исчерпании найм не
- * начинается вовсе, а кандидату автоматически продлевается право входа на 14 дней, чтобы не
- * потерять человека из-за биллинга (§12.5). Внутри транзакции — смена вида, размещение,
- * наставник, этап жизненного цикла, роли по должности и `audit_log`; при ошибке на любом шаге
- * откатывается всё, и кандидат остаётся кандидатом.
+ * Место сотрудника проверяется **внутри этой транзакции**, до смены вида (`assertSeatsWithinLimit`,
+ * `docs/v2/35` §7.5, §12): проверка «до транзакции» пропускала два параллельных найма на последнее
+ * место, а сбой самой проверки ронял найм без объяснения. Мест нет — транзакция откатывается
+ * целиком, кандидат остаётся кандидатом, рекрутер получает понятный отказ, а кандидату
+ * продлевается право входа на 14 дней, чтобы не потерять человека из-за биллинга (§12.5).
+ * Внутри транзакции — смена вида, размещение, наставник, этап жизненного цикла, роли по
+ * должности и `audit_log`; при ошибке на любом шаге откатывается всё.
  *
  * Курсы онбординга выдаются **после** фиксации: назначение — обычный `assignments` со своей
  * транзакцией и раскрытием аудитории (инвариант 1, §1 «Границы ответственности»). Провал
@@ -198,14 +205,36 @@ export async function reopenCandidate(v: Viewer, id: string, input: CandidateReo
  * выдаётся повторно, тогда как откат найма оставил бы сотрудника кандидатом с размещением.
  */
 export async function hireCandidate(v: Viewer, id: string, input: CandidateHireInput): Promise<HireResult> {
-  const { checkPlanLimit } = await import('./platform')
-  const limit = await checkPlanLimit(v.tenantId, 'users')
-  if (!limit.ok) {
-    const accessUntil = await extendAccess(v, id, 14)
-    return { ok: false, code: 'limit_exceeded', limit: limit.limit, current: limit.current, accessUntil }
+  let hired: HireResult
+  try {
+    hired = await hireTx(v, id, input)
   }
+  catch (err) {
+    if (!(err instanceof LimitExceededError)) throw err // сбой проверки мест — `503`, не найм
+    const accessUntil = await extendAccess(v, id, ACCESS_ON_LIMIT_DAYS)
+    const { used, limit } = err.details
+    const message = [
+      seatText('hireBlocked', { used, limit: limit ?? '∞' }),
+      ...(accessUntil ? [seatText('hireAccessExtended', { days: ACCESS_ON_LIMIT_DAYS })] : []),
+    ].join(' ')
+    return { ok: false, code: 'limit_exceeded', used, limit, accessUntil, message }
+  }
+  if (!hired.ok) return hired
 
-  const hired = await withTenant(v.tenantId, v.actorId, async (tx): Promise<HireResult> => {
+  const assigned = await assignOnboarding(v, id, input)
+  const { measureLive, syncCounter } = await import('./usageCounters')
+  const usersActive = await measureLive(v.tenantId, 'users_active')
+  const candidatesActive = await measureLive(v.tenantId, 'candidates_active')
+  await syncCounter(v.tenantId, 'users_active', usersActive).catch(() => null)
+  await syncCounter(v.tenantId, 'candidates_active', candidatesActive).catch(() => null)
+  await notifyHired(v, id, input).catch(err => console.error('candidate_hired notify', err))
+
+  return { ok: true, outcome: { userId: id, assigned, usersActive, candidatesActive } }
+}
+
+/** Транзакция найма: проверки, место сотрудника, смена вида и всё, что едет с ней (§7.6). */
+async function hireTx(v: Viewer, id: string, input: CandidateHireInput): Promise<HireResult> {
+  return withTenant(v.tenantId, v.actorId, async (tx): Promise<HireResult> => {
     const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)) as unknown as CandidateRow[]
     if (!row) return { ok: false, code: 'not_found' }
     if (row.state !== 'active') return { ok: false, code: 'not_active' }
@@ -215,6 +244,10 @@ export async function hireCandidate(v: Viewer, id: string, input: CandidateHireI
     if (!loc) return { ok: false, code: 'location_not_found' }
     const [pos] = await tx.select({ id: positions.id }).from(positions).where(eq(positions.id, input.positionId))
     if (!pos) return { ok: false, code: 'position_not_found' }
+
+    // Кандидат места сотрудника не занимает — после смены вида займёт. Проверка здесь, в этой же
+    // транзакции и до записи: отказ бросается исключением и откатывает найм целиком.
+    await assertSeatsWithinLimit(tx, v.tenantId, 1)
 
     await tx.update(users).set({
       kind: 'employee',
@@ -283,24 +316,17 @@ export async function hireCandidate(v: Viewer, id: string, input: CandidateHireI
     await emitWebhook(tx, v.tenantId, 'candidate.hired', { userId: id, vacancyId: row.vacancyId, hiredAt: input.startDate })
     return { ok: true, outcome: { userId: id, assigned: 0, usersActive: 0, candidatesActive: 0 } }
   })
-  if (!hired.ok) return hired
-
-  const assigned = await assignOnboarding(v, id, input)
-  const { measureLive, syncCounter } = await import('./usageCounters')
-  const usersActive = await measureLive(v.tenantId, 'users_active')
-  const candidatesActive = await measureLive(v.tenantId, 'candidates_active')
-  await syncCounter(v.tenantId, 'users_active', usersActive).catch(() => null)
-  await syncCounter(v.tenantId, 'candidates_active', candidatesActive).catch(() => null)
-  await notifyHired(v, id, input).catch(err => console.error('candidate_hired notify', err))
-
-  return { ok: true, outcome: { userId: id, assigned, usersActive, candidatesActive } }
 }
 
-/** Продление права входа на N дней — §12.5: кандидат не должен теряться из-за исчерпанного тарифа. */
+/**
+ * Продление права входа на N дней — §12.5: кандидат не должен теряться из-за исчерпанного тарифа.
+ * `::int` обязателен: `date + <параметр без типа>` Postgres не разрешает («operator is not
+ * unique»), и без приведения продление молча не происходило никогда (ошибку глотает `catch`).
+ */
 async function extendAccess(v: Viewer, id: string, days: number): Promise<string | null> {
   return withTenant(v.tenantId, v.actorId, async (tx) => {
     const [row] = await tx.update(users)
-      .set({ accessUntil: sql`greatest(coalesce(${users.accessUntil}, current_date), current_date) + ${days}`, updatedAt: new Date() })
+      .set({ accessUntil: sql`greatest(coalesce(${users.accessUntil}, current_date), current_date) + ${days}::int`, updatedAt: new Date() })
       .where(and(eq(users.id, id), candidateOnly()))
       .returning({ accessUntil: users.accessUntil })
     return row?.accessUntil ?? null

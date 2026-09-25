@@ -102,6 +102,15 @@ export function ACTIVE_EMPLOYEES_ONLY(alias = 'u'): SQL {
 }
 
 /**
+ * То же условие для одной строки, уже прочитанной в память: занимает ли человек место
+ * сотрудника (`users_active`). Пути, меняющие вид, статус или блокировку, сравнивают им «до» и
+ * «после» — и зовут проверку мест (`assertSeatsWithinLimit`) ровно тогда, когда место появляется.
+ */
+export function holdsSeat(u: { kind: string, status: string, isBlocked: boolean }): boolean {
+  return u.kind === EMPLOYEE && u.status === 'active' && !u.isBlocked
+}
+
+/**
  * Фрагмент сырого SQL «сотрудники, кроме уволенных»: `and (u.kind = 'employee' and
  * u.status <> 'archived')`. Уволенный — ровно та отметка, что ставит офбординг PR-07
  * (`status = 'archived'`); приглашённый, ещё не входивший, уволенным не считается.

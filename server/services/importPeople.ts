@@ -12,6 +12,7 @@ import { applyPositionRoles } from './positionRoleMap'
 import { logOrgConflict } from './journals'
 import { enqueueNotification } from './notifications'
 import { splitName } from './people'
+import { assertSeatsWithinLimit, seatText } from './tenantLimits'
 import { phoneSchema } from '../../shared/schemas/auth'
 
 /**
@@ -363,7 +364,16 @@ export async function getImportJob(ctx: Ctx, jobId: string) {
   })
 }
 
-/** Применение батчами по 200: корректные строки применяются, ошибочные — в отчёт. */
+/**
+ * Применение батчами по 200: корректные строки применяются, ошибочные — в отчёт.
+ *
+ * Места сотрудников (docs/v2/35 §7.4, §12): импорт — **целиком или никак**. Новые люди приходят
+ * приглашёнными и займут места первым входом; если их больше, чем свободных мест, не применяется
+ * ни одна строка — «Ліміт активних співробітників: 40 вільних із 50, …», задача остаётся `ready`.
+ * Проверка — та же `assertSeatsWithinLimit()` до первого батча; последнее место при этом не
+ * «проскакивает» и у двух параллельных импортов: приглашённый места не держит, а его вход
+ * проверяется снова, в транзакции входа.
+ */
 export async function applyImport(ctx: Ctx, jobId: string) {
   const job = await getImportJob(ctx, jobId)
   if (!job || job.status !== 'ready') return null
@@ -371,6 +381,10 @@ export async function applyImport(ctx: Ctx, jobId: string) {
   const baseStats = job.stats as Record<string, unknown>
   const rows = job.rows as ImportRow[]
   const applicable = rows.filter(r => r.action !== 'skip')
+  const newPeople = applicable.filter(r => r.action === 'create').length
+  await withTenant(ctx.tenantId, ctx.actorId, tx => assertSeatsWithinLimit(tx, ctx.tenantId, newPeople, {
+    message: c => seatText('importBlocked', { free: Math.max(0, (c.limit ?? 0) - c.used), limit: c.limit ?? '∞', rows: newPeople }),
+  }))
   let created = 0
   let updated = 0
   const touched: string[] = []

@@ -20,7 +20,8 @@ import { EMPLOYEES_ONLY, CANDIDATES_ONLY } from './repo/people'
  * **Счётчики пополняются в тех же точках, где уже есть проверка лимита** (условие плана):
  * `media.createUploadUrl` (ось `storage_bytes`), `channels.sendSms` (`sms_out`),
  * `webhooks.createEndpoint` / `deleteEndpoint` (`integrations_active`),
- * `platform.checkPlanLimit` (`users_active`, `candidates_active`), `reportExports.runExport`
+ * `platform.checkPlanLimit` (`candidates_active`), `tenantLimits.assertSeatsWithinLimit` при отказе
+ * и `candidateHire.hireCandidate` после найма (`users_active`), `reportExports.runExport`
  * (`export_rows`). Дублирующей логики проверки не заводится: точки зовут `meterOrDegrade()`
  * и `recordUsage()`, а решение «пройдёт или нет» принимает `checkLimit()` из PR-08.
  */

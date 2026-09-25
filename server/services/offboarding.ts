@@ -12,6 +12,8 @@ import { logSecurity } from './securityLog'
 import { createAssignmentTx, expandAssignment } from './assignments'
 import { enterStageByCodeTx, enterStageTx, stageByCode } from './lifecycleState'
 import { isLastAdmin, isLastOwner, splitName } from './people'
+import { holdsSeat } from './repo/people'
+import { assertSeatsWithinLimit } from './tenantLimits'
 import { emitWebhook } from './webhooks'
 import { periodSql } from './reportFrame'
 import type { ReportFilter } from '../../shared/schemas/reports'
@@ -428,6 +430,10 @@ export interface HireResult {
  * а его история — одна, иначе сертификаты, попытки и стаж рвутся пополам.
  *
  * Поиск идёт по тем же ключам, которыми человек заводится: `users.id`, телефон, `external_id`.
+ *
+ * Место сотрудника (`docs/v2/35` §7.4, §7.5) проверяется в этой же транзакции до записи: найденный
+ * (из архива, заблокированный, кандидат) становится активным сразу, новый — приглашённым, и оба
+ * случая при исчерпанном лимите отклоняются `409 limit_exceeded`; откат — целиком.
  */
 export async function hire(ctx: Ctx, input: HireInput): Promise<HireResult | HireError> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -444,7 +450,7 @@ export async function hire(ctx: Ctx, input: HireInput): Promise<HireResult | Hir
     ].filter(Boolean)
     const found = keys.length
       ? (await tx
-          .select({ id: users.id, kind: users.kind, fullName: users.fullName, status: users.status })
+          .select({ id: users.id, kind: users.kind, fullName: users.fullName, status: users.status, isBlocked: users.isBlocked })
           .from(users)
           .where(or(...keys))
           .limit(1))[0]
@@ -468,6 +474,7 @@ export async function hire(ctx: Ctx, input: HireInput): Promise<HireResult | Hir
         .where(and(eq(offboardingCases.userId, found.id), eq(offboardingCases.state, 'done')))
       previousPeriods = Number(done?.n ?? 0)
 
+      if (!holdsSeat(found)) await assertSeatsWithinLimit(tx, ctx.tenantId, 1)
       await tx
         .update(users)
         .set({ kind: 'employee', status: 'active', isBlocked: false, archivedAt: null, hiredAt, updatedAt: new Date() })
@@ -487,6 +494,7 @@ export async function hire(ctx: Ctx, input: HireInput): Promise<HireResult | Hir
     }
     else {
       if (!input.fullName) return 'needs_name'
+      await assertSeatsWithinLimit(tx, ctx.tenantId, 1)
       const parts = splitName({ fullName: input.fullName })
       const [person] = await tx
         .insert(users)

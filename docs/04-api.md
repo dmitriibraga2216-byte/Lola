@@ -539,6 +539,102 @@
 > одиннадцати модулей пакета — `docs/v2/41-api-delta.md`; здесь — только то, что касается
 > основного контракта API.
 
+### Сводка по факту (PR-40)
+
+> [дополнено, PR-40, по факту кода] Строки `docs/v2/41-api-delta.md` §2 и §3.1 в редакции фазы 0
+> (234 + 5 = 239) сверены с деревом `server/api/v1/**` на 25.09 (`main` после PR-29 и правки
+> пакета #143). Ручка пакета — файл-обработчик, добавленный коммитом `v2-NN` (267 файлов), и 9
+> базовых ручек `docs/v2/43` §3.2, которые пакет переиспользовал вместо своей: `GET /review/queue`,
+> `GET /people/:id/activity`, `GET /org-conflicts`, `POST /org-conflicts/:id/resolve`,
+> `POST /media/upload-url`, `POST /media/:id/complete`, `GET /media/:id` и пара
+> `GET`/`PUT /platform/tenants/:id/limits`. В `server/routes/**` ручек пакета нет. Столбцы
+> «тем же путём», «другим путём» и «не реализовано» делят строки `41` (в сумме — столбец `41`);
+> «по факту» и «сверх 41» считают файлы-обработчики.
+
+| Документ | 41 §2.12 | по факту (ручек пакета) | тем же путём | другим путём | сверх 41 | не реализовано |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `28` кандидаты | 22 | 24 | 19 | 1 | 5 | 2 |
+| `29` вакансии, закрытый контур | 33 | 32 | 31 | 2 | 0 | 0 |
+| `30` ИИ-собеседование и Підсумок | 31 | 45 | 26 | 3 | 16 | 2 |
+| `31` библиотека модулей | 20 | 24 | 20 | 0 | 4 | 0 |
+| `32` оргструктура | 18 | 20 | 15 | 2 | 3 | 1 |
+| `33` жизненный цикл и офбординг | 12 | 14 | 8 | 4 | 4 | 0 |
+| `34` хранилище | 18 | 15 | 11 | 5 | 0 | 2 |
+| `35` тариф, лимиты, платежи | 20 | 11 | 10 | 2 | 2 | 8 |
+| `36` обратная связь по контенту | 16 | 16 | 16 | 0 | 0 | 0 |
+| `37` проверка, делегирование, время | 21 | 22 | 19 | 1 | 3 | 1 |
+| `38` карточка человека | 23 | 25 | 19 | 3 | 6 | 1 |
+| Публичный контур `29` (`/public/j/*`; ссылка на Підсумок — в строке `30`) | 5 | 4 | 4 | 0 | 0 | 1 |
+| Патчи `39` (PR-39: второй фактор, объявления платформы, группы должностей) | — | 24 (из них 4 алиаса) | — | — | 24 | — |
+| **Итого** | **239** | **276** | **198** | **23** | **67** | **18** |
+
+- **Меньше, чем в `41`.** 18 строк не реализовано (список ниже). 23 — другим путём, из них
+  восемь базовыми ручками вне счёта пакета: семь отчётов `/reports/*` строит конструктор
+  выгрузок `POST /reports/builder/run` (реестр PR-38), назначение кандидату — обычный
+  `POST /tasks`; и две — ручками пакета из соседних строк: `DELETE /storage/files` (`35`) — это
+  `POST /storage/deletions` (`34`), `POST /platform/tenants/:id/ai` — это `extend` с `aiUntil`
+  и `payments` с `addonCode: ai_ops_pack` (раздел «Тариф и оплата» ниже).
+- **Свёрнуто и перенесено.** `auth-url` и `callback` площадок — одна `POST /job-board-accounts`
+  (заглушка без сети); `GET /storage/files/:id` и `…/download` — одна `GET /media/:id`
+  (`?redirect=1`); строка `GET /storage/files` стоит и в `34`, и в `35` (коллизия `41` §8.3),
+  поэтому 198 строк «тем же путём» — это 197 ручек. Без свёртки другим путём: вход в собеседование
+  адресуется тестом (`/interviews/entry/:quizId/*`), а не сессией; этапы —
+  `/settings/lifecycle-stages`; конфликты структуры — базовые `/org-conflicts`; загрузка и файл
+  хранилища — `/media/*` (единственный вход, `v2/44` В-17); вердикт перепроверки —
+  `POST /ai/quality-reviews/:id`.
+- **Больше, чем в `41`.** 43 ручки сверх перечня в модулях `28`–`38` — шаги, которых документ не
+  выделил: 16 в `30` (вход по тесту с альтернативой, письменная форма, биение и пауза, создание
+  сценария, правка и удаление критерия, новый профиль провайдера, карточка и отмена авто-отправки
+  Підсумка, `/settings/ai`), 6 в `38`, 5 в `28`, по 4 в `31` и `33`, по 3 в `32` и `37`, 2 в `35`.
+  Плюс 24 ручки PR-39 по патчам `39`, которых в перечне `41` §2 нет (§7 называет их только
+  изменениями базовых разделов); четыре из них — алиасы `aliasHandler()` над `/refs/:kind`
+  (`GET`/`POST /position-groups`, `PATCH`/`DELETE /position-groups/:id`), без алиасов ручек
+  пакета 272.
+- **218** в плане `docs/v2/45` PR-40 — не число ручек, а «отсутствовало на 23.09» (`43` §3.5:
+  239 − 21). Из этих 218 реализована 201 строка, не реализовано 17; восемнадцатая нереализованная —
+  `GET /platform/plans/:id`: `43` засчитала её базовым списком `GET /platform/plans`, а PR-10
+  оставил каталог тарифов вне объёма. Из 21 существовавшей ручки пакет заменил своими по
+  заявленному пути 10 (дерево и узлы оргструктуры, `/storage/summary`, `/billing/usage`,
+  `/content-issues/reports`, `/learning/time/beat`, заметки человека), 9 переиспользовал; ветка
+  `activity` базового `GET /reports/:name` — DAU, а не «Навчальна активність» `38`: отчёт пакета
+  живёт в конструкторе.
+
+**Не реализовано (18) — где отложено** (`docs/v2/46-progress.md`, «заголовок записи» → раздел):
+
+- `28`: `POST /candidates/:id/invite`, `DELETE /candidates/:id` — «2026-09-23 · Фаза 3, PR-14 —
+  воронка: канбан, найм, автоматика, отчёт, флаг тенанта» → «Что осталось».
+- `30`: `POST /interview-scenarios/:id/criteria/generate` — «2026-09-25 · Фаза 3, PR-28 —
+  сценарий, согласие, прохождение собеседования…» → «Что осталось» (предложение критериев ИИ,
+  `30` §6.2); `POST /candidates/:id/interview/rescore` — «2026-09-25 · Фаза 3, PR-29 — Підсумок,
+  подсказки ментору, качество…» → «Что осталось».
+- `32`: `GET /org-structure/nodes/:id` — в `46` не упомянута; узел с держателями (`holders`)
+  отдаёт `GET /org-structure/tree`.
+- `34`: `GET`/`POST /storage/addons` — «2026-09-24 · Фаза 3, PR-36 — квота, корзина, сроки
+  хранения» → «Что осталось» (ждут платёжного провайдера, `v2/44` §8).
+- `35`: `GET /billing/plans`, `POST /billing/plan-change/preflight`, `POST /billing/plan-change`,
+  `DELETE /billing/plan-change/:id`, `GET`/`POST /billing/addons`, `GET`/`PUT /platform/plans/:id` —
+  «2026-09-24 · Фаза 3, PR-10 — оплата, смена тарифа, экраны (П-24.4)» → «Что не входит
+  (решение, не недосмотр)».
+- `37`: `GET /reports/delegations` — «2026-09-25 · Фаза 3, PR-38 — двенадцать (де-факто
+  пятнадцать) отчётов пакета…» → «Що не входить» (журнал делегирований — не отчёт конструктора).
+- `38`: `GET /reports/documents` — «2026-09-25 · Фаза 3, PR-32 — заметки и документы человека» →
+  «Что не входит…» (отчёты `38` §9 п. 1–2).
+- Публичный контур: `POST /public/j/:token/subscribe` — «2026-09-25 · Фаза 3, PR-17 — публикация
+  и генерация текста…» → «Что осталось».
+
+### Этапы жизненного цикла (`docs/v2/33-lifecycle.md` §5.2, §6.1, §10, PR-05)
+
+> [дополнено, PR-40, по факту кода] Справочник этапов — настройка тенанта, поэтому он живёт под
+> `/settings/lifecycle-stages`, а не под `/lifecycle/stages` из `33` §10 и `41` §2.6. Набор
+> возможностей этапа (`capabilities`, `33` §2) тенант не правит — только оператор платформы.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/settings/lifecycle-stages` | справочник этапов тенанта по `sort` (`lifecycle.view`): `{id, code, nameUk, nameEn, icon, color, sort, isEnabled, expectedDays, capabilities, appliesToCandidate, coursesCount, peopleCount}` |
+| PATCH | `/settings/lifecycle-stages/:id` | правка этапа (`lifecycle.manage`): `{nameUk?, nameEn?, icon?, color?: ink\|sun\|teal\|coral, sort?, isEnabled?, expectedDays?: 1–365}`. Неизвестный ключ и `code` — `422 validation_failed` (`v2/44` В-3), `capabilities` в теле — `403 capabilities.readonly`, выключение этапа, в котором есть курсы или люди, — `409 lifecycle_stage.in_use`; нет этапа — `404` |
+| PATCH | `/courses/:id/stage` | этап курса (`lifecycle.manage`): `{lifecycleStageId: uuid\|null, confirm?}` → `{id, lifecycleStageId, stageLocked, completedCount}`; курс с завершёнными прохождениями без `confirm` — `409 course.stage_locked`, выключенный этап — `422 lifecycle.disabled`, нет курса или этапа — `404` |
+| PATCH | `/platform/tenants/:id/lifecycle-stages/:stageId` | набор возможностей этапа тенанта `{capabilities}` — только оператор платформы; неизвестный ключ — `422 validation_failed`, нет этапа — `404` |
+
 ### Жизненный цикл и офбординг (`docs/v2/33-lifecycle.md` §10, PR-07)
 
 | Метод | Путь | Описание |
@@ -684,6 +780,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | GET/POST | `/settings/content-issue-routing-rules` | правила адресации (`content_issue.triage` — чтение, `content_issue.assign` — создание); непустой набор без запасного правила — `400 content_issue.fallback_rule_required` |
 | PATCH/DELETE | `/settings/content-issue-routing-rules/:id` | правка и удаление правила (`content_issue.assign`); запасное правило выключить или удалить раньше остальных нельзя |
 | POST | `/content-reporters/:userId/mute` \| `/unmute` | приостановить и вернуть приём жалоб (`content_issue.mute`): `{until, reason}`; снятие обнуляет серию `spam` |
+| POST | `/content-reporters/:userId/unmute` | `[дополнено, PR-40, по факту кода]` вернуть приём жалоб (`content_issue.mute`), тела нет → `{ok: true}`; не-uuid и чужой человек — `404`. Отдельной строкой, потому что ячейку `…/mute` \| `/unmute` выше разбор путей `routes-parity` читает как один `…/mute` |
 | GET | `/reports/content-quality` | «Якість контенту» (`content_issue.view`): `groupBy=element\|course`, фильтры §9, `drillKey` — заявители строки единым каркасом, `format=xlsx` (`report.export`) |
 
 Контекст жалобы собирает **сервер** (`36` §7.1): клиент присылает только то, чего сервер знать
@@ -921,8 +1018,45 @@ HR и администратор — весь тенант). Кандидат и
 | POST | `/ai/quality-reviews/:id` | `{verdict, notes}` — вердикт о модели, а не о человеке |
 | GET | `/settings/ai` | переключатели функций ИИ тенанта (`ai.audit`): `{reviewHints}` |
 | PATCH | `/settings/ai` | включить или выключить функцию ИИ (`ai.audit`); включение подсказки — и в журнал безопасности |
+| GET | `/public/candidate-summaries/:token` | `[дополнено, PR-40, по факту кода]` Підсумок по ссылке из письма, без сессии (`/api/v1/public/*`, `docs/27` §27.8.1): тенант — из токена функцией `SECURITY DEFINER`, дальше `withTenant()`; `hitRateLimit` — 30 просмотров за 10 минут с адреса, иначе `429 rate.too_many` с `Retry-After: 600`; неизвестный токен — `404 summary.not_found` с выровненным временем, истёкшая ссылка — `410 summary.share_expired`, отозванная — `410 summary.revoked` |
 
 Публичная ссылка кандидата — `GET /api/v1/public/candidate-summaries/:token` (раздел о публичном
 контуре ниже): документ без ПД третьих лиц и всегда со строкой «Документ сформовано автоматично»;
 истёкшая — `410 summary.share_expired`, отозванная — `410 summary.revoked`. Все пути
 `/candidate-summaries*` гасятся вместе с рекрутингом.
+
+### Тариф и оплата (`docs/v2/35-billing-limits.md` §5.1, §5.3, §5.6, §7.8, §7.10, §10, PR-10)
+
+> [дополнено, PR-40, по факту кода] Тенанту — сводка и история платежей; оператору платформы
+> (префикс `/platform`, §4.17) — приём платежа вручную, прямая смена тарифа и сдвиг дат подписки:
+> платёжного провайдера нет (`v2/44` §8), у каждого действия оператора — комментарий 10–500
+> знаков и строка в `platform_audit`. Потребление и баннеры (`GET /billing/usage`,
+> `GET /billing/notices`, `POST /billing/notices/:id/dismiss`, PR-09) описаны в §4.16.
+> `GET`/`PUT /platform/tenants/:id/limits` (§4.17) с PR-08 несёт одиннадцать полей — прежние
+> шесть плюс `candidates`, `aiGenerateOps`, `aiReviewOps`, `aiInterviewOps`, `exportRows`;
+> причины, которой требует `41` §2.8, контракт не просит. Самообслуживания владельца
+> (`/billing/plans`, `/billing/plan-change*`, `/billing/addons`) и каталога тарифов
+> `/platform/plans/:id` нет — см. «Сводка по факту (PR-40)».
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET | `/billing/summary` | «Тариф і оплата» (`billing.view`): `{plan: {code, name, titleUk, tier}, priceMinor, currency, subscription, ai: {status, until, termDays, included}, addons}`; цена — только с `billing.payments.view` (владелец), иначе `priceMinor: null` |
+| GET | `/billing/payments` | «Історія платежів» (`billing.payments.view` — только владелец, иначе `403`): `?from&to&kind=subscription\|addon\|adjustment&status&cursor&limit` (≤ 100, по умолчанию 30), ключевой курсор (§4.1) → `{items, nextCursor}`; неверный фильтр — `400 validation_failed` |
+| GET | `/platform/tenants/:id/payments` | история платежей тенанта в панели оператора: новые сверху, без пагинации |
+| POST | `/platform/tenants/:id/payments` | «Записати платіж»: `{kind: subscription\|addon\|adjustment, planCode?, addonCode?, qty?, billingPeriod?, amountMinor, currency?, method?, invoiceNumber?, status?, comment}`. `subscription` продлевает `paid_until` от прежней даты, а не от даты платежа (`35` §7.8 п. 6); `addon` создаёт доплату `tenant_addons` со ссылкой на платёж, в том числе `ai_ops_pack` — пакет ИИ-операций; `adjustment` — только запись. `422 validation_failed`, `422 addon_unknown`, `404` |
+| POST | `/platform/tenants/:id/plan-change` | прямая смена тарифа оператором, без preflight: `{toPlanCode, billingPeriod: month\|year, comment}` → `{id}` — строка `plan_change_requests` сразу `applied`; `422 plan_unknown`, `404` |
+| POST | `/platform/tenants/:id/extend` | «Продовжити доступ», «Продовжити ШІ»: `{paidUntil?, graceUntil?, aiUntil?, comment}` — меняются только переданные даты, `null` снимает дату; `422 validation_failed`, `404` |
+
+### Курсы по умолчанию группы должностей (`docs/v2/39-patches.md` П-24.3, П-24.5, PR-39)
+
+> [дополнено, PR-40, по факту кода] Остальные ручки PR-39 описаны в базовых разделах: второй
+> фактор — `/auth/two-factor*` (§4.2), `DELETE /people/:id/two-factor` (§4.11),
+> `GET /settings/two-factor` (§4.16), `POST /platform/tenants/:id/users/:userId/two-factor-reset`
+> (§4.17); объявления платформы — `/platform-announcements*` (§4.13) и `/platform/announcements*`
+> (§4.17); группы должностей — `/position-groups` (алиасы `aliasHandler()` над `/refs/:kind`),
+> `/positions/:id/default-courses` и `/absence-norms` (§4.11). Курсы группы были названы только в
+> описании строки `/position-groups` — отдельной строкой они здесь.
+
+| Метод | Путь | Описание |
+| --- | --- | --- |
+| GET/PUT | `/position-groups/:id/default-courses` | курсы по умолчанию группы должностей («кухня», «зал»): `GET` (`people.view` \| `assignment.create` \| `candidate.hire`) → `{ruleId, items, group: null, effective}`; `PUT {items: [{courseId, dueDays: 1–365, по умолчанию 14}]}` (`settings.tenant`, до 10, без повторов) — носитель правило автоматизации с измерением `position` = текущий состав группы; пустой список или группа без должностей — правило выключено; правка — `position.default_courses` в `audit_log`. `400 validation_failed`, `422 course_not_found` (`details.courseIds` — курса нет или он в архиве), нет группы — `404` |

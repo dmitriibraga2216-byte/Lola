@@ -233,6 +233,12 @@ create table users (
                                               -- Первое звено цепочки пояса человека (`personTimezone()`):
                                               -- день ленты активности и тихие часы. CHECK users_timezone_chk —
                                               -- неизвестное Postgres имя не сохраняется
+  rating_pct numeric(5,1),                    -- ІНДЕКС НАВЧАЛЬНОЇ ЗАЛУЧЕНОСТІ 0…130 % (`v2/38` §3.1, §7.1, PR-35):
+                                              -- копия текущего снимка person_rating_snapshots для колонки «%»
+                                              -- списка. НЕ баллы рейтинга (points_ledger, «Поточний рейтинг»,
+                                              -- `33` D-069). null — не рассчитан (нет назначений в окне, кандидат).
+                                              -- CHECK users_rating_pct_chk 0…130; выше 100 не обрезается
+  rating_updated_at timestamptz,              -- момент пересчёта; старше 48 ч — цифра серая
   status text not null default 'invited',     -- invited | active | suspended | archived
   hired_at date,
   position_since date,                        -- «Дата призначення поточної посади»:
@@ -754,6 +760,39 @@ create table user_activity_daily (
   recalced_at timestamptz not null default now(),
   constraint uq_user_activity_daily_day unique (tenant_id, user_id, local_date) -- и tenant-first индекс
 );
+```
+
+Індекс навчальної залученості (`docs/v2/38` §3.1, §3.7, §7.1–§7.3, PR-35, миграция `v2_person_rating`).
+**Не путать с баллами рейтинга** (`points_ledger`, «Поточний рейтинг», `33` D-069): баллы — валюта
+геймификации, копятся и тратятся; индекс — справочная величина 0…130 %, раз в сутки
+пересчитывается целиком (`rating.recalc`) из записей на курс окна (365 дней) и суточного агрегата
+ленты. Баллы в формулу не входят. Пишет только `server/services/engagementIndex.ts`; снимок —
+источник истины для `users.rating_pct` и экрана расшифровки (`breakdown` — числа формулы).
+
+```sql
+create index idx_users_tenant_rating on users (tenant_id, rating_pct desc nulls last)
+  where kind = 'employee';                             -- колонка «%» и её сортировка; без условия статуса (Р-35.1)
+create table person_rating_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  calc_date date not null,                             -- день расчёта в календаре тенанта
+  base_pct numeric(5,1) not null,                      -- B, 0…100
+  bonus_early numeric(4,1) not null default 0,         -- E, 0…10
+  bonus_streak numeric(4,1) not null default 0,        -- S, 0…10
+  bonus_help numeric(4,1) not null default 0,          -- H, 0…10
+  total_pct numeric(5,1) not null,                     -- min(130, B + E + S + H)
+  breakdown jsonb not null default '{}',               -- formula_version и числа формулы для §5.3
+  window_from date not null, window_to date not null,
+  is_current boolean not null default true,            -- ровно один текущий: uq_person_rating_current
+  created_at timestamptz not null default now(),
+  constraint uq_person_rating_day unique (tenant_id, user_id, calc_date), -- и tenant-first индекс
+  constraint person_rating_total_chk check (total_pct between 0 and 130),
+  constraint person_rating_parts_chk check (base_pct between 0 and 100 and bonus_early between 0 and 10
+    and bonus_streak between 0 and 10 and bonus_help between 0 and 10),
+  constraint person_rating_window_chk check (window_from <= window_to)
+);
+create unique index uq_person_rating_current on person_rating_snapshots (tenant_id, user_id) where is_current;
 ```
 
 ## 2.4 Контент: курсы, модули, уроки

@@ -252,9 +252,20 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     mkdirSync(join(dir, 'server/services'), { recursive: true })
     writeFileSync(join(dir, 'server/services/timeNorms.ts'), 'export const q = sql`select deviation_flag from content_time_norms`\n')
     writeFileSync(join(dir, 'server/services/workshops.ts'), 'import { plannedSecondsFor } from \'./timeNorms\'\n// флаг deviation_flag сюда не попадает\n')
+    // PR-35: «Плановий час» трека на карточке — третий именованный вход, только показ
+    writeFileSync(join(dir, 'server/services/personTracks.ts'), 'import { versionPlannedSeconds } from \'./timeNorms\'\n')
     const res = run(dir)
     expect(res.status).toBe(0)
     expect(res.stdout).toContain('[ok]   13.')
+  })
+
+  it('13. индекс залученості, взявший норму времени в формулу, — нарушение (Р-35.2, `docs/v2/38` §7.3)', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/engagementIndex.ts'), 'import { versionPlannedSeconds } from \'./timeNorms\'\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('13. норма времени')
   })
 
   /**

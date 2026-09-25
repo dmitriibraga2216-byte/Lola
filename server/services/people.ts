@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 import {
   cities, enrollments, functionalChiefs, invitations, locations, orgUnits, positionLevels, positions, roles, sessions, userNotes, userPlacements, userRoles, users,
 } from '../db/schema'
@@ -19,60 +20,115 @@ import { applyPositionRoles } from './positionRoleMap'
 import { levelLabel } from './development'
 import type { CompetencyLevel } from './development'
 import { studyHistory } from './reportsExtra'
-import { EMPLOYEES_ONLY, employeeOnly } from './repo/people'
+import { EMPLOYEES_ONLY, employeeOnly, employees } from './repo/people'
 import { STAGE_ON_HIRE } from '../../shared/enums'
 import type { z } from 'zod'
-import type { PersonCreateInput, PersonUpdateInput, personListQuerySchema } from '../../shared/schemas/people'
+import type { PersonCreateInput, PersonUpdateInput, peopleFilterSchema, personListQuerySchema } from '../../shared/schemas/people'
 import { managerIdOf } from './orgManager'
+import { hasRatingCondition, ratingOnlyBulkForbidden } from '../../shared/domain/engagementIndex'
 
 interface Ctx { tenantId: string, actorId: string }
 
 export type PersonListFilter = z.infer<typeof personListQuerySchema>
+export type PeopleFilter = z.infer<typeof peopleFilterSchema>
 
 /**
- * Список людей с фильтрами (docs/05-screens.md §5.9), курсорная пагинация по `(created_at, id)`.
+ * Область, в которой смотрящему виден індекс залученості людей (docs/v2/38 §2): `'tenant'` —
+ * HR и администратор; точки — руководитель своих точек (по текущему основному размещению
+ * человека, как у заметок и ленты); `'none'` — скоупа `person.rating.view_others` нет.
+ */
+export type RatingArea = 'tenant' | 'none' | string[]
+
+/**
+ * Індекс залученості строки — только там, где смотрящему его видно; иначе `null`. Одно выражение
+ * на показ, фильтр и сортировку: иначе сортировка по индексу выдала бы порядок людей, чьих цифр
+ * смотрящий не видит (§7.3 — сравнение людей по индексу вне его области недопустимо).
+ */
+function ratingVisibleSql(area: RatingArea): SQL<boolean> {
+  if (area === 'tenant') return sql<boolean>`true`
+  if (area === 'none' || area.length === 0) return sql<boolean>`false`
+  return sql<boolean>`exists (select 1 from ${userPlacements} vup where vup.user_id = ${users.id}
+    and vup.is_primary and vup.ended_at is null and vup.location_id in ${area})`
+}
+function visibleRatingSql(area: RatingArea): SQL {
+  if (area === 'tenant') return sql`${users.ratingPct}`
+  if (area === 'none' || area.length === 0) return sql`null::numeric`
+  return sql`(case when ${ratingVisibleSql(area)} then ${users.ratingPct} end)`
+}
+
+/**
+ * Условия фильтров без вкладки и курсора — общие для страницы, счётчиков чипов «Активні ·
+ * Заблоковані · Усі» (docs/31 `People`) и массового действия «всі за фільтром»: выбор людей
+ * строится одной функцией, поэтому «всі за фільтром» — ровно те, кого показывает список.
+ */
+function peopleConditions(ctx: Ctx, filter: PeopleFilter, rating: SQL): SQL[] {
+  const baseConditions: SQL[] = []
+  if (filter.q) {
+    baseConditions.push(or(
+      ilike(users.fullName, `%${filter.q}%`),
+      ilike(users.phone, `%${filter.q}%`),
+    )!)
+  }
+  if (filter.locationId || filter.positionId || filter.positionLevelId || filter.orgUnitId) {
+    const placementCond = [
+      eq(userPlacements.tenantId, ctx.tenantId),
+      isNull(userPlacements.endedAt),
+      ...(filter.locationId ? [eq(userPlacements.locationId, filter.locationId)] : []),
+      ...(filter.positionId ? [eq(userPlacements.positionId, filter.positionId)] : []),
+      ...(filter.positionLevelId ? [eq(userPlacements.positionLevelId, filter.positionLevelId)] : []),
+      ...(filter.orgUnitId ? [eq(userPlacements.orgUnitId, filter.orgUnitId)] : []),
+    ]
+    baseConditions.push(sql`exists (select 1 from ${userPlacements}
+      where ${and(...placementCond, eq(userPlacements.userId, users.id))})`)
+  }
+  if (filter.cityId) baseConditions.push(eq(users.cityId, filter.cityId))
+  if (filter.tag) baseConditions.push(sql`${filter.tag} = any(${users.tags})`)
+  if (filter.role) baseConditions.push(sql`exists (select 1 from ${userRoles} ur join ${roles} r on r.id = ur.role_id where ur.user_id = ${users.id} and r.code = ${filter.role})`)
+  if (filter.registeredFrom) baseConditions.push(sql`${users.createdAt} >= ${filter.registeredFrom}::date`)
+  if (filter.registeredTo) baseConditions.push(sql`${users.createdAt} < (${filter.registeredTo}::date + 1)`)
+  if (filter.activeFrom) baseConditions.push(sql`${users.lastSeenAt} >= ${filter.activeFrom}::date`)
+  if (filter.activeTo) baseConditions.push(sql`${users.lastSeenAt} < (${filter.activeTo}::date + 1)`)
+  // Скрытые (docs/16 §7.5) — только администратору, который явно попросил
+  if (!filter.includeHidden) baseConditions.push(eq(users.isHidden, false))
+  // Індекс залученості (docs/v2/38 §5.2): «не рассчитан» (null) не попадает ни под один порог
+  if (filter.ratingLt !== undefined) baseConditions.push(sql`${rating} < ${filter.ratingLt}`)
+  if (filter.ratingGte !== undefined) baseConditions.push(sql`${rating} >= ${filter.ratingGte}`)
+  return baseConditions
+}
+
+/** Вкладка списка — статус записи (docs/16 §5.1). */
+function tabCondition(tab: PeopleFilter['tab']): SQL | undefined {
+  if (tab === 'active') return inArray(users.status, ['invited', 'active'])
+  if (tab === 'blocked') return inArray(users.status, ['suspended', 'archived'])
+  return undefined
+}
+
+/**
+ * Список людей с фильтрами (docs/05-screens.md §5.9), курсорная пагинация по `(created_at, id)`,
+ * а при сортировке по індексу залученості — по `(индекс, created_at, id)` (docs/v2/38 §5.2).
  * Момент в курсоре — текстом из Postgres с микросекундами (`shared/domain/keyset.ts`): импорт
  * пишет пачку в одной транзакции, у всей пачки один `created_at`, и курсор в миллисекундах
  * выбрасывал её остаток со второй страницы и из выгрузки.
+ *
+ * `ratingArea` — где смотрящему виден индекс (§2): вне области строка отдаёт `ratingPct: null`
+ * и `ratingVisible: false`, фильтр и сортировка считают её «не рассчитанной».
  */
-export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
+export async function listPeople(ctx: Ctx, filter: PersonListFilter, opts: { ratingArea?: RatingArea } = {}) {
+  const ratingArea = opts.ratingArea ?? 'none'
+  const rating = visibleRatingSql(ratingArea)
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    // Условия фильтров без вкладки и курсора — общие для страницы и для счётчиков чипов
-    // «Активні · Заблоковані · Усі» (docs/31 `People`): счётчик считает по тем же фильтрам
-    // (пошук, посада, точка …), только статус переключается.
-    const baseConditions = []
-    if (filter.q) {
-      baseConditions.push(or(
-        ilike(users.fullName, `%${filter.q}%`),
-        ilike(users.phone, `%${filter.q}%`),
-      )!)
-    }
-    if (filter.locationId || filter.positionId || filter.positionLevelId || filter.orgUnitId) {
-      const placementCond = [
-        eq(userPlacements.tenantId, ctx.tenantId),
-        isNull(userPlacements.endedAt),
-        ...(filter.locationId ? [eq(userPlacements.locationId, filter.locationId)] : []),
-        ...(filter.positionId ? [eq(userPlacements.positionId, filter.positionId)] : []),
-        ...(filter.positionLevelId ? [eq(userPlacements.positionLevelId, filter.positionLevelId)] : []),
-        ...(filter.orgUnitId ? [eq(userPlacements.orgUnitId, filter.orgUnitId)] : []),
-      ]
-      baseConditions.push(sql`exists (select 1 from ${userPlacements}
-        where ${and(...placementCond, eq(userPlacements.userId, users.id))})`)
-    }
-    if (filter.cityId) baseConditions.push(eq(users.cityId, filter.cityId))
-    if (filter.tag) baseConditions.push(sql`${filter.tag} = any(${users.tags})`)
-    if (filter.role) baseConditions.push(sql`exists (select 1 from ${userRoles} ur join ${roles} r on r.id = ur.role_id where ur.user_id = ${users.id} and r.code = ${filter.role})`)
-    if (filter.registeredFrom) baseConditions.push(sql`${users.createdAt} >= ${filter.registeredFrom}::date`)
-    if (filter.registeredTo) baseConditions.push(sql`${users.createdAt} < (${filter.registeredTo}::date + 1)`)
-    if (filter.activeFrom) baseConditions.push(sql`${users.lastSeenAt} >= ${filter.activeFrom}::date`)
-    if (filter.activeTo) baseConditions.push(sql`${users.lastSeenAt} < (${filter.activeTo}::date + 1)`)
-    // Скрытые (docs/16 §7.5) — только администратору, который явно попросил
-    if (!filter.includeHidden) baseConditions.push(eq(users.isHidden, false))
+    // Счётчик считает по тем же фильтрам (пошук, посада, точка …), только статус переключается.
+    const baseConditions = peopleConditions(ctx, filter, rating)
 
     const conditions = [...baseConditions]
-    if (filter.tab === 'active') conditions.push(inArray(users.status, ['invited', 'active']))
-    if (filter.tab === 'blocked') conditions.push(inArray(users.status, ['suspended', 'archived']))
-    const after = keysetAfter(KEYSETS.people, filter.cursor, [users.createdAt, users.id], 'desc')
+    const tab = tabCondition(filter.tab)
+    if (tab) conditions.push(tab)
+    const byRating = filter.sort === 'rating'
+    // Индекс — numeric(5,1): в ключе сортировки и курсоре — целые десятые, «не рассчитан» — −1
+    const ratingKey = sql<number>`coalesce(round(${rating} * 10)::int, -1)`
+    const after = byRating
+      ? keysetAfter(KEYSETS.peopleByRating, filter.cursor, [ratingKey, users.createdAt, users.id], 'desc')
+      : keysetAfter(KEYSETS.people, filter.cursor, [users.createdAt, users.id], 'desc')
     if (after) conditions.push(after)
 
     const [counts] = await tx.select({
@@ -96,11 +152,15 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
       externalId: users.externalId,
       isBlocked: users.isBlocked,
       isHidden: users.isHidden,
+      ratingPct: sql<string | null>`${rating}`,
+      ratingUpdatedAt: users.ratingUpdatedAt,
+      ratingVisible: ratingVisibleSql(ratingArea),
+      ratingKey,
     })
       .from(users)
       .leftJoin(cities, eq(cities.id, users.cityId))
       .where(employeeOnly(...conditions))
-      .orderBy(desc(users.createdAt), desc(users.id))
+      .orderBy(...(byRating ? [desc(ratingKey)] : []), desc(users.createdAt), desc(users.id))
       .limit(filter.limit + 1)
 
     const hasMore = rows.length > filter.limit
@@ -133,15 +193,41 @@ export async function listPeople(ctx: Ctx, filter: PersonListFilter) {
       : []
 
     return {
-      items: page.map(({ cursorAt: _cursorAt, ...r }) => ({
+      items: page.map(({ cursorAt: _cursorAt, ratingKey: _ratingKey, ratingPct, ratingUpdatedAt, ratingVisible, ...r }) => ({
         ...r,
+        // Індекс залученості (не баллы рейтинга): число; null — «не рассчитан» или не видно
+        // смотрящему (`ratingVisible: false` — вне его области, §2: «свои точки»)
+        ratingPct: ratingPct === null || ratingPct === undefined ? null : Number(ratingPct),
+        ratingUpdatedAt: ratingVisible ? ratingUpdatedAt : null,
+        ratingVisible: !!ratingVisible,
         placements: placements.filter(p => p.userId === r.id)
           .map(({ userId: _, ...p }) => p),
         roles: [...new Set(roleRows.filter(x => x.userId === r.id).map(x => x.name))],
       })),
-      cursor: hasMore && last ? encodeKeyset(KEYSETS.people, [last.cursorAt, last.id]) : null,
+      cursor: hasMore && last
+        ? byRating
+          ? encodeKeyset(KEYSETS.peopleByRating, [Number(last.ratingKey), last.cursorAt, last.id])
+          : encodeKeyset(KEYSETS.people, [last.cursorAt, last.id])
+        : null,
       counts: counts ?? { active: 0, blocked: 0, all: 0 },
     }
+  })
+}
+
+/** Потолок «всі за фільтром»: столько же, сколько отмеченных вручную (`bulkSchema.ids`). */
+export const BULK_FILTER_MAX = 500
+
+/**
+ * Люди под фильтром списка — для массового действия «всі за фільтром»: те же условия и та же
+ * вкладка, что у страницы списка. `null` — под фильтр попало больше `BULK_FILTER_MAX`.
+ */
+async function peopleIdsByFilter(ctx: Ctx, filter: PeopleFilter, ratingArea: RatingArea): Promise<string[] | null> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const conditions = peopleConditions(ctx, filter, visibleRatingSql(ratingArea))
+    const tab = tabCondition(filter.tab)
+    if (tab) conditions.push(tab)
+    const rows = await employees(tx, { id: users.id }, ...conditions).orderBy(desc(users.createdAt), desc(users.id)).limit(BULK_FILTER_MAX + 1)
+    return rows.length > BULK_FILTER_MAX ? null : rows.map(r => r.id)
   })
 }
 
@@ -609,13 +695,20 @@ export async function gdprErase(ctx: Ctx, userId: string, reason: string): Promi
 }
 
 /** Экспорт списка в Excel — только колонки, доступные по роли (docs/16 §7.8). */
-export async function exportPeople(ctx: Ctx, filter: PersonListFilter, opts: { withContacts: boolean }): Promise<Buffer> {
+/**
+ * Выгрузка «Люди» (docs/16 §7.8). Індекс залученості — **не по умолчанию** (docs/v2/38 §7.3 п. 2,
+ * П-16.3): колонка появляется только с явной галкой «Включити індекс залученості», которую экран
+ * ставит после подтверждения «Показник довідковий і не призначений для кадрових рішень»; цифры —
+ * только людей области смотрящего (`ratingArea`), у остальных ячейка пустая.
+ */
+export async function exportPeople(ctx: Ctx, filter: PersonListFilter, opts: { withContacts: boolean, ratingArea?: RatingArea, includeRating?: boolean }): Promise<Buffer> {
   const { toXlsx } = await import('./reports')
   const all: Record<string, unknown>[] = []
+  const withRating = !!opts.includeRating && !!opts.ratingArea && opts.ratingArea !== 'none'
   let cursor: string | undefined
   do {
-    const page = await listPeople(ctx, { ...filter, cursor, limit: 100 })
-    for (const r of page.items) all.push({ 'ПІБ': r.fullName, 'Посада': r.placements[0]?.positionName ?? '', 'Рівень': r.placements[0]?.levelName ?? '', 'Місто': r.cityName ?? '', 'Підрозділ': r.placements[0]?.orgUnitName ?? '', 'Точка': r.placements[0]?.locationName ?? '', 'Ролі': r.roles.join(', '), 'Мітки': r.tags.join(', '), ...(opts.withContacts ? { 'Телефон': r.phone ?? '' } : {}), 'Зареєстровано': r.createdAt.toISOString().slice(0, 10), 'Остання активність': r.lastSeenAt?.toISOString().slice(0, 10) ?? '', 'Зовнішній №': r.externalId ?? '', 'Статус': r.status })
+    const page = await listPeople(ctx, { ...filter, cursor, limit: 100 }, { ratingArea: opts.ratingArea })
+    for (const r of page.items) all.push({ 'ПІБ': r.fullName, 'Посада': r.placements[0]?.positionName ?? '', 'Рівень': r.placements[0]?.levelName ?? '', 'Місто': r.cityName ?? '', 'Підрозділ': r.placements[0]?.orgUnitName ?? '', 'Точка': r.placements[0]?.locationName ?? '', 'Ролі': r.roles.join(', '), 'Мітки': r.tags.join(', '), ...(opts.withContacts ? { 'Телефон': r.phone ?? '' } : {}), 'Зареєстровано': r.createdAt.toISOString().slice(0, 10), 'Остання активність': r.lastSeenAt?.toISOString().slice(0, 10) ?? '', 'Зовнішній №': r.externalId ?? '', 'Статус': r.status, ...(withRating ? { 'Індекс залученості, % (довідково)': r.ratingVisible && r.ratingPct !== null ? r.ratingPct : '' } : {}) })
     cursor = page.cursor ?? undefined
   } while (cursor && all.length < 10_000)
   return toXlsx('Люди', all as never)
@@ -784,10 +877,45 @@ export async function personActionLog(ctx: Ctx, userId: string) {
 }
 
 /** Массовые действия из списка (docs/16 §5.1). */
-export async function bulkPeople(ctx: Ctx, input: { ids: string[], action: 'add_tag' | 'set_location' | 'assign_role' | 'invite' | 'archive', tag?: string, locationId?: string, positionId?: string, roleCode?: string, reason?: 'dismissal' | 'transfer' | 'mistake' | 'other' }) {
+export interface BulkInput {
+  ids?: string[]
+  filter?: PeopleFilter
+  action: 'add_tag' | 'set_location' | 'assign_role' | 'invite' | 'archive'
+  tag?: string
+  locationId?: string
+  positionId?: string
+  roleCode?: string
+  reason?: 'dismissal' | 'transfer' | 'mistake' | 'other'
+}
+
+export type BulkResult =
+  | { ok: true, done: number, errors: { id: string, code: string }[] }
+  | { ok: false, code: 'forbidden' | 'rating_only_filter_forbidden' | 'too_many' }
+
+/**
+ * Массовые действия со списка (docs/16 §5.1): над отмеченными (`ids`) или над всеми по фильтру
+ * списка (`filter`, не больше `BULK_FILTER_MAX`).
+ *
+ * Індекс залученості не может быть **единственным** условием архивирования или блокировки
+ * (docs/v2/38 §7.3 п. 1, П-16.3, критерий §13 к. 3): «всіх, у кого нижче 50» — это наказание
+ * по справочной цифре, ради которого индекс и начинают накручивать. Фильтр только по индексу —
+ * `rating_only_filter_forbidden`; с любым вторым сужающим условием (точка, посада, мітка…) — можно.
+ * Отмеченные поимённо (`ids`) — решение по каждому человеку, а не условие: их правило не трогает
+ * (Р-35.5), экран же гасит «Архівувати», пока список отфильтрован одним индексом.
+ */
+export async function bulkPeople(ctx: Ctx, input: BulkInput, opts: { ratingArea?: RatingArea } = {}): Promise<BulkResult> {
+  let ids = input.ids ?? []
+  if (input.filter) {
+    const area = opts.ratingArea ?? 'none'
+    if (hasRatingCondition(input.filter) && area === 'none') return { ok: false, code: 'forbidden' }
+    if (ratingOnlyBulkForbidden(input.action, input.filter)) return { ok: false, code: 'rating_only_filter_forbidden' }
+    const found = await peopleIdsByFilter(ctx, input.filter, area)
+    if (!found) return { ok: false, code: 'too_many' }
+    ids = found
+  }
   let done = 0
   const errors: { id: string, code: string }[] = []
-  for (const id of input.ids) {
+  for (const id of ids) {
     try {
       switch (input.action) {
         case 'add_tag': {
@@ -831,7 +959,7 @@ export async function bulkPeople(ctx: Ctx, input: { ids: string[], action: 'add_
       errors.push({ id, code: String((err as Error).message ?? err).slice(0, 80) })
     }
   }
-  return { done, errors }
+  return { ok: true, done, errors }
 }
 
 /** «Скинути привʼязку Telegram» (docs/16 §5.1): канал повернеться на SMS до нової привʼязки. */

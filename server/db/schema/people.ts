@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigint, boolean, check, date, index, inet, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid,
+  bigint, boolean, check, date, index, inet, jsonb, numeric, pgTable, text, timestamp, unique, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
@@ -68,6 +68,17 @@ export const users = pgTable('users', {
    * ленты и тихие часы уведомлений. Неизвестное Postgres имя не сохраняется (`users_timezone_chk`).
    */
   timezone: text('timezone'),
+  /**
+   * Індекс навчальної залученості 0…130 % (docs/v2/38 §3.1, §7.1; миграция `v2_person_rating`,
+   * PR-35) — копия текущего снимка `person_rating_snapshots` для колонки «%» списка и её
+   * сортировки. **Не баллы рейтинга** (`points_ledger`, docs/33 D-069): те копятся и тратятся,
+   * индекс пересчитывается целиком раз в сутки (`rating.recalc`). `null` — не рассчитан: в окне
+   * нет назначений (в списке «—», не «0 %»), кандидату индекс не считается. Пишет только
+   * `server/services/engagementIndex.ts`.
+   */
+  ratingPct: numeric('rating_pct', { precision: 5, scale: 1 }),
+  /** Когда индекс пересчитан; старше 48 часов — цифра серая, «Дані оновлюються» (§3.1). */
+  ratingUpdatedAt: timestamp('rating_updated_at', { withTimezone: true }),
   status: text('status').notNull().default('invited'), // invited | active | suspended | archived
   hiredAt: date('hired_at'),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -106,6 +117,11 @@ export const users = pgTable('users', {
   // Пояс, которого Postgres не знает, не сохраняется: выражение падает «time zone not recognized»
   // (миграция `v2_user_activity`). Иначе он ломал бы позже запись события ленты этого человека.
   check('users_timezone_chk', sql`${t.timezone} is null or (timestamptz '2000-01-01 00:00:00+00' at time zone ${t.timezone}) is not null`),
+  // Колонка «%» списка сотрудников и её сортировка (docs/v2/38 §3.1, §5.2; PR-35). Предикат — только
+  // вид: вкладки списка — это `invited`+`active` и `suspended`+`archived`, а у архивированных
+  // последнее значение фиксируется (§7.2) — индекс с `status = 'active'` не взяла бы ни одна.
+  index('idx_users_tenant_rating').on(t.tenantId, t.ratingPct.desc().nullsLast()).where(sql`kind = 'employee'`),
+  check('users_rating_pct_chk', sql`${t.ratingPct} is null or ${t.ratingPct} between 0 and 130`),
 ])
 
 export const userPlacements = pgTable('user_placements', {

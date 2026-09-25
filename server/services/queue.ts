@@ -68,6 +68,8 @@ export async function getBoss(): Promise<PgBoss> {
       // из сегментов учёта времени в суточный агрегат
       await b.createQueue('activity.purge', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('activity.aggregate', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/38 §11 (PR-35): індекс залученості — полный пересчёт раз в сутки, партиями по 500
+      await b.createQueue('rating.recalc', { retryLimit: 2, expireInSeconds: 1800 })
       // docs/v2/34 §11 (PR-36): корзина хранилища и отложенные загрузки
       await b.createQueue('storage.purge', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
@@ -143,6 +145,9 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('activity.purge', '0 3 * * *', {}, { singletonKey: 'activity.purge', tz: 'Europe/Kyiv' })
       await b.schedule('activity.aggregate', '25 * * * *', { windowMinutes: 120 }, { singletonKey: 'activity.aggregate', key: 'hourly' })
       await b.schedule('activity.aggregate', '50 4 * * *', { windowMinutes: 2880 }, { singletonKey: 'activity.aggregate.daily', key: 'daily', tz: 'Europe/Kyiv' })
+      // Індекс залученості (docs/v2/38 §7.2, §11): раз в сутки целиком из первичных данных — записей
+      // на курс и суточного агрегата ленты; инкрементальных доначислений нет
+      await b.schedule('rating.recalc', '0 4 * * *', {}, { singletonKey: 'rating.recalc', tz: 'Europe/Kyiv' })
       // Хранилище (docs/v2/34 §11): корзина с истёкшим сроком — в purged в 04:00 (объект в S3
       // остаётся до решения владельца продукта, docs/v2/44 §8); отложенные загрузки — каждые 15 минут
       await b.schedule('storage.purge', '0 4 * * *', {}, { singletonKey: 'storage.purge', tz: 'Europe/Kyiv' })

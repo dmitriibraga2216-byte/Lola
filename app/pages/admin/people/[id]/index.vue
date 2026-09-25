@@ -1,5 +1,8 @@
 <script setup lang="ts">
-const { formatDateTime, formatShortDate } = useFormat()
+import type { EngagementView } from '#shared/domain/engagementIndex'
+import type { PersonTracks as PersonTracksDto } from '#shared/domain/personTracks'
+
+const { formatDateTime, formatShortDate, formatNumber } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope' })
 
 const { t, te } = useI18n()
@@ -20,16 +23,22 @@ interface Person {
   sessions: { id: string, createdAt: string, updatedAt?: string, userAgent: string | null, ip: string | null, revokedAt: string | null }[]
 }
 interface Ref { id: string, name: string }
-// Вкладки мокапа PersonCard: Профіль · Ролі · Навчання · Безпека · Журнал (+ Атестації и Нотатки из docs/16 §5.2,
-// Документи и Відсутності — docs/v2/38 §5.1). Нотатки, документы и отсутствия видны только носителям
-// своих скоупов (docs/v2/38 §2); область (своя точка) проверяет сервер
-type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity' | 'notes' | 'documents' | 'absences'
-const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity', 'notes', 'documents', 'absences']
-const visibleTabs = computed(() => TABS.filter(tb => tb === 'notes'
-  ? hasScope('person.note.read')
-  : tb === 'documents'
-    ? hasScope('person.document.view_others') || hasScope('person.document.manage')
-    : tb === 'absences' ? hasScope('person.absence.manage') : true))
+// Вкладки мокапа PersonCard: Профіль · Ролі · Навчання · Атестації · Безпека · Журнал (docs/16 §5.2).
+// «Профіль» — карточка одной страницей в порядке эталона (docs/v2/38 §5.1, П-16.2, PR-35): шапка с этапом
+// (docs/v2/33 §5.3) → «Активність за {рік}» → «Призначені треки» по этапам → личные данные → «Нотатки (N)»
+// → «Документи (N)» → «Відсутності». Нотатки, документы и отсутствия — свёрнутыми секциями и только
+// носителям своих скоупов (docs/v2/38 §2); область (своя точка) проверяет сервер.
+type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity'
+const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity']
+const visibleTabs = computed(() => TABS)
+// Прежние вкладки PR-32/33 стали секциями «Профілю»: ссылка `?tab=absences` (уведомление о сдвиге
+// срока) и закладки открывают карточку с развёрнутой секцией
+type Section = 'notes' | 'documents' | 'absences'
+const SECTIONS: Section[] = ['notes', 'documents', 'absences']
+const canNotes = computed(() => hasScope('person.note.read'))
+const canDocuments = computed(() => hasScope('person.document.view_others') || hasScope('person.document.manage'))
+const canAbsences = computed(() => hasScope('person.absence.manage'))
+const openSection = ref<Section | null>((SECTIONS as string[]).includes(String(route.query.tab)) ? route.query.tab as Section : null)
 
 const person = ref<Person | null>(null)
 const error = ref('')
@@ -37,6 +46,31 @@ const notice = ref('')
 const inviteUrl = ref('')
 const busy = ref(false)
 const tab = ref<Tab>((TABS as string[]).includes(String(route.query.tab)) ? route.query.tab as Tab : 'profile')
+
+// Блок «Етап» (docs/v2/33 §5.3, docs/v2/38 §5.1): треки по этапам и текущий этап для шапки — один ответ
+const tracks = ref<PersonTracksDto | null>(null)
+const tracksLoading = ref(false)
+const tracksFailed = ref(false)
+async function loadTracks() {
+  tracksLoading.value = true
+  tracksFailed.value = false
+  try { tracks.value = await api<PersonTracksDto>(`/people/${id}/tracks`) }
+  catch { tracksFailed.value = true }
+  finally { tracksLoading.value = false }
+}
+// Індекс залученості (docs/v2/38 §5.2–§5.3) — не баллы рейтинга: чип в шапке ведёт на расшифровку.
+// Только носителю `person.rating.view_others`; вне его области сервер отвечает 403 — чипа нет.
+const engagement = ref<EngagementView | null>(null)
+async function loadEngagement() {
+  if (!hasScope('person.rating.view_others')) return
+  try { engagement.value = await api<EngagementView>(`/people/${id}/rating`) }
+  catch { engagement.value = null }
+}
+const engagementText = computed(() => {
+  const v = engagement.value
+  if (!v) return ''
+  return v.total === null ? '—' : t('engagement.value', { value: formatNumber(v.total, { maximumFractionDigits: 1 }) })
+})
 const editing = ref(route.query.edit === '1')
 watch(tab, v => router.replace({ query: { ...route.query, tab: v, edit: undefined } }))
 
@@ -83,7 +117,7 @@ async function loadRefs() {
 async function loadTab(v: Tab) {
   try {
     if (v === 'learning' || v === 'assessment') learning.value ??= await api(`/people/${id}/learning`)
-    // Журнал дій (docs/16 §5.2) — `/action-log`; карту активності за рік вкладка вантажить сама (PersonActivityMap)
+    // Журнал дій (docs/16 §5.2) — `/action-log`; карта активності за рік — під шапкою «Профілю» (PR-35)
     if (v === 'activity') activity.value = await api(`/people/${id}/action-log`)
     if (v === 'profile') { chiefs.value = await api('/functional-chiefs', { query: { userId: id } }); learning.value ??= await api<NonNullable<typeof learning.value>>(`/people/${id}/learning`).catch(() => null) }
     if (v === 'security' && hasScope('audit.view')) securityEvents.value = (await api<{ rows: Record<string, unknown>[] }>('/logs/security', { query: { userId: id, limit: 20 } })).rows
@@ -91,7 +125,13 @@ async function loadTab(v: Tab) {
   catch (err) { error.value = apiErrorOf(err).message }
 }
 watch(tab, loadTab, { immediate: true })
-onMounted(() => { load(); loadRefs() })
+onMounted(() => { load(); loadRefs(); loadTracks(); loadEngagement() })
+// Секция, открытая ссылкой, — в поле зрения после отрисовки
+watch(person, async (p) => {
+  if (!p || !openSection.value) return
+  await nextTick()
+  document.getElementById(`person-section-${openSection.value}`)?.scrollIntoView({ block: 'start' })
+}, { once: true })
 
 async function act(fn: () => Promise<unknown>, doneMsg: string) {
   error.value = ''
@@ -156,6 +196,10 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       </div>
       <span :class="['badge', person.status]">{{ t(`people.status.${person.status}`) }}</span>
       <span v-if="person.isHidden" class="badge">{{ t('people.hiddenBadge') }}</span>
+      <!-- Блок «Етап» у шапці (docs/v2/33 §5.3): поточний етап людини з датою входу -->
+      <span v-if="tracks?.current" :class="['stage', `c-${tracks.current.color}`]" data-testid="person-stage">{{ t('person.stageSince', { stage: tracks.current.stageName, date: fmt(tracks.current.enteredAt) }) }}</span>
+      <!-- Індекс залученості (docs/v2/38 §5.3) — не бали рейтингу: чип веде на розшифровку -->
+      <NuxtLink v-if="engagement" :to="`/admin/people/${id}/rating`" :class="['index-chip', { stale: engagement.stale }]" :title="t('person.engagementHint')">{{ t('person.engagement') }}: <b>{{ engagementText }}</b></NuxtLink>
     </header>
 
     <div class="actions">
@@ -176,10 +220,13 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       <button v-for="tb in visibleTabs" :key="tb" role="tab" :aria-selected="tab === tb" :class="['tab', { on: tab === tb }]" @click="tab = tb">{{ t(`person.tabs.${tb}`) }}</button>
     </div>
 
-    <!-- Профіль -->
+    <!-- Профіль: картка одною сторінкою в порядку еталона (docs/v2/38 §5.1, П-16.2) -->
     <section v-if="tab === 'profile'" class="panel">
       <PersonForm v-if="editing" mode="edit" :initial="person" :busy="busy" @submit="saveProfile" @cancel="editing = false" />
-      <div v-else class="grid">
+      <template v-else>
+      <PersonActivityMap :person-id="id" />
+      <PersonTracks :data="tracks" :loading="tracksLoading" :failed="tracksFailed" @retry="loadTracks" />
+      <div class="grid">
         <div class="card">
           <h2>{{ t('person.profile') }}</h2>
           <dl>
@@ -228,7 +275,10 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
             <div><dt>{{ t('person.doneCount') }}</dt><dd class="teal">{{ learningSummary.done }}</dd></div>
             <div><dt>{{ t('person.overdueCount') }}</dt><dd :class="{ coral: learningSummary.overdue > 0 }">{{ learningSummary.overdue }}</dd></div>
             <div><dt>{{ t('person.certificates') }}</dt><dd>{{ learning?.certificates.length ?? 0 }}</dd></div>
-            <div><dt>{{ t('person.rating') }}</dt><dd>{{ learning?.currentRating ?? 0 }}</dd></div>
+            <!-- Два різні числа, і обидва підписані (docs/v2/38 §7.1): бали рейтингу — валюта геймифікації
+                 (points_ledger, docs/33 D-069); індекс залученості — довідковий показник 0–130 % -->
+            <div><dt :title="t('person.ratingPointsHint')">{{ t('person.rating') }}</dt><dd>{{ learning?.currentRating ?? 0 }}</dd></div>
+            <div v-if="engagement"><dt :title="t('person.engagementHint')">{{ t('person.engagement') }}</dt><dd :class="{ faint: engagement.stale }"><NuxtLink :to="`/admin/people/${id}/rating`" class="link">{{ engagementText }}</NuxtLink></dd></div>
           </dl>
         </div>
 
@@ -268,6 +318,11 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
           </template>
         </div>
       </div>
+      <!-- Згорнуті секції зі счётчиками (docs/v2/38 §5.1): розгорнути нотатки = прочитати, це пишеться в журнал -->
+      <div v-if="canNotes" id="person-section-notes"><PersonNotes :person-id="id" :auto-open="openSection === 'notes'" /></div>
+      <div v-if="canDocuments" id="person-section-documents"><PersonDocuments :person-id="id" :auto-open="openSection === 'documents'" /></div>
+      <div v-if="canAbsences" id="person-section-absences"><PersonAbsences :person-id="id" :auto-open="openSection === 'absences'" /></div>
+      </template>
     </section>
 
     <!-- Ролі (мокап PersonCard: список ролей, у производной — подпись «Видана автоматично…», срок и причина — docs/16 §6.2) -->
@@ -387,10 +442,9 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       </div>
     </section>
 
-    <!-- Активність: карта навчальної активності за рік (docs/v2/38 §5.1, PR-34; блоком під шапкою — PR-35)
-         і журнал дій (мокап PersonCard: «Журнал»; сессии — на вкладке «Безпека») -->
+    <!-- Журнал дій (мокап PersonCard: «Журнал»; docs/16 §5.2). Карта активності за рік — під шапкою
+         «Профілю» (docs/v2/38 §5.1, PR-35); сесії — на вкладці «Безпека» -->
     <section v-else-if="tab === 'activity'" class="panel">
-      <PersonActivityMap :person-id="id" />
       <div class="card">
         <h2>{{ t('person.log') }}</h2>
         <ul v-if="activity.length" class="list">
@@ -398,21 +452,6 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
         </ul>
         <p v-else class="sub">{{ t('person.noData') }}</p>
       </div>
-    </section>
-
-    <!-- Нотатки (docs/v2/38 §5.1): открыть вкладку и значит развернуть секцию — чтение пишется в журнал -->
-    <section v-else-if="tab === 'notes' && visibleTabs.includes('notes')" class="panel">
-      <PersonNotes :person-id="id" auto-open />
-    </section>
-
-    <!-- Документи (docs/v2/38 §5.1, §6.2) -->
-    <section v-else-if="tab === 'documents' && visibleTabs.includes('documents')" class="panel">
-      <PersonDocuments :person-id="id" auto-open />
-    </section>
-
-    <!-- Відсутності (docs/v2/38 §5.1, §6.3, §6.4): норма, остаток, записи, «Скоригувати» -->
-    <section v-else-if="tab === 'absences' && visibleTabs.includes('absences')" class="panel">
-      <PersonAbsences :person-id="id" auto-open />
     </section>
 
     <div v-if="showArchive" class="overlay" @click.self="showArchive = false">
@@ -473,6 +512,15 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); margin-left: var(--space-2); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
+/* Етап людини в шапці (docs/v2/33 §5.3): колір етапу — токен бренд-бука з довідника */
+.stage { font-size: var(--font-size-body-s); font-weight: 800; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.stage.c-ink { background: var(--color-ink); color: var(--color-bg-soft); }
+.stage.c-sun { background: var(--color-sun); color: var(--color-sun-ink); }
+.stage.c-teal { background: var(--color-teal); color: var(--color-teal-deep); }
+.stage.c-coral { background: var(--color-coral); color: var(--color-coral-deep); }
+/* Індекс залученості — результат (бірюза); старше 48 годин — сірим (docs/v2/38 §3.1) */
+.index-chip { font-size: var(--font-size-body-s); border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-teal-soft); color: var(--color-teal-ink); text-decoration: none; }
+.index-chip.stale, dd.faint .link { color: var(--color-ink-faint); background: var(--color-bg-line-soft); }
 /* Срок сдвинут с дней отсутствия (docs/v2/38 §7.14): справка рядом с датой, не тревога */
 .badge.shifted { display: block; width: fit-content; margin-top: var(--space-1); color: var(--color-ink-muted); }
 .form-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-start; }

@@ -150,6 +150,13 @@ create index idx_lifecycle_stages_tenant on lifecycle_stages (tenant_id, sort);
 | `applies_to_employee` | можно ли назначать сотруднику | то же для сотрудника |
 | `counts_in_rating` | учитывается ли в рейтинге (`docs/38`) | назначения этапа не влияют на рейтинг |
 
+> [уточнено, PR-35] «Рейтинг» здесь — оба числа о человеке: баллы рейтинга геймификации
+> (`points_ledger`, «Поточний рейтинг», PR `gamification` — `rewards.ts`) и індекс навчальної
+> залученості `docs/v2/38` §7.1 (`users.rating_pct`, `engagementIndex.ts`). Курс этапа без возможности
+> не даёт баллов и не входит в окно индекса — решение в обоих местах через `stageCan()`. Подпись
+> возможности в настройках этапов — «Бали й індекс». Критерий `33` §13 к. 4 («рейтинг человека не
+> изменяется») для индекса проверен `tests/integration/v2-person-rating.spec.ts`.
+
 Значения по умолчанию, создаваемые при инициализации тенанта:
 
 | `code` | `name_uk` | progress | deadline | grading | attempts | review | certificate | graph | ai_generate | candidate | employee | rating |

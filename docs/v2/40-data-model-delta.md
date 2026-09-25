@@ -158,6 +158,13 @@ SQL: итоговый констрейнт `media_assets.origin` (§4), блок
 | `absence_records` | Факты отсутствий с диапазоном дат и числом дней | Т |
 | `person_rating_snapshots` | Снимок расчёта рейтинга с разложением формулы; источник истины для `users.rating_pct` | Т |
 
+> [уточнено, PR-35, миграция `0094_v2_person_rating`] «Рейтинг» здесь — **індекс навчальної
+> залученості** (0…130 %), а не баллы рейтинга `points_ledger`. `person_rating_snapshots` заведена
+> с отступлениями от DDL `38` §3.7, перечисленными там же: без отдельного индекса `(tenant_id,
+> user_id, calc_date desc)` (его роль играет уникальный ключ), с `uq_person_rating_current` и
+> проверками слагаемых. `users.rating_pct` получил `users_rating_pct_chk` (0…130), частичный индекс
+> `idx_users_tenant_rating` — `where kind = 'employee'` без условия статуса (Р-35.1).
+
 > [уточнено, PR-34, миграция `v2_user_activity`] `user_activity_events` и `user_activity_daily` заведены с
 > отступлениями от DDL `38` §3.3, перечисленными там же: у события нет `seconds_spent` (время — из учёта времени PR-21,
 > в агрегат его сводит `activity.aggregate`), есть `created_at` и индекс уборки `(tenant_id, occurred_at)`; второй

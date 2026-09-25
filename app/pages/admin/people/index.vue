@@ -1,5 +1,7 @@
 <script setup lang="ts">
-const { formatShortDate } = useFormat()
+import { isEngagementStale, ratingIsOnlyCondition } from '#shared/domain/engagementIndex'
+
+const { formatShortDate, formatNumber } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope' })
 
 const { t } = useI18n()
@@ -20,6 +22,10 @@ interface PersonRow {
   externalId: string | null
   isBlocked: boolean
   isHidden: boolean
+  /** Індекс залученості (docs/v2/38 §5.2) — не бали рейтингу; `ratingVisible: false` — поза областю смотрящего. */
+  ratingPct: number | null
+  ratingUpdatedAt: string | null
+  ratingVisible: boolean
   placements: { isPrimary: boolean, locationName: string, positionName: string, levelName: string | null, orgUnitName: string | null }[]
   roles: string[]
 }
@@ -28,7 +34,12 @@ interface Unit { id: string, name: string, children: Unit[], locations: Ref[] }
 
 const tab = ref<'active' | 'blocked' | 'all'>('active')
 const q = ref('')
-const filter = reactive({ positionId: '', positionLevelId: '', cityId: '', orgUnitId: '', locationId: '', role: '', tag: '', registeredFrom: '', registeredTo: '', activeFrom: '', activeTo: '', includeHidden: false })
+const filter = reactive({ positionId: '', positionLevelId: '', cityId: '', orgUnitId: '', locationId: '', role: '', tag: '', registeredFrom: '', registeredTo: '', activeFrom: '', activeTo: '', includeHidden: false, ratingGte: '' as string | number, ratingLt: '' as string | number })
+// Колонка «%» — індекс залученості (docs/v2/38 §5.2, П-16.3): лише носію `person.rating.view_others`
+const canRating = computed(() => hasScope('person.rating.view_others'))
+/** Сортування за індексом — лише за спаданням (Р-35.3): «антитопу» першою сторінкою немає (§7.3). */
+const sort = ref<'created' | 'rating'>('created')
+const showRatingHelp = ref(false)
 const showFilters = ref(false)
 const items = ref<PersonRow[]>([])
 const cursor = ref<string | null>(null)
@@ -40,10 +51,13 @@ const notice = ref('')
 const refs = reactive<{ positions: Ref[], levels: Ref[], cities: Ref[], locations: Ref[], roles: { code: string, name: string }[], tags: Ref[], units: Unit[] }>({ positions: [], levels: [], cities: [], locations: [], roles: [], tags: [], units: [] })
 
 // Колонки (docs/16 §5.1): выбор сохраняется в браузере
-const ALL_COLUMNS = ['position', 'level', 'city', 'orgUnit', 'location', 'roles', 'tags', 'phone', 'status', 'registered', 'lastSeen', 'externalId'] as const
+const ALL_COLUMNS = ['position', 'level', 'city', 'orgUnit', 'location', 'roles', 'tags', 'phone', 'status', 'registered', 'lastSeen', 'rating', 'externalId'] as const
 type Col = typeof ALL_COLUMNS[number]
-// Мокап People, docs/31: Посада · Рівень · Підрозділ · Ролі · Прийнято · Активність
-const columns = ref<Col[]>(['position', 'level', 'orgUnit', 'roles', 'registered', 'lastSeen'])
+// Мокап People, docs/31: Посада · Рівень · Підрозділ · Ролі · Прийнято · Активність; «%» — справа від
+// «Останній вхід» (docs/v2/38 §5.2)
+const columns = ref<Col[]>(['position', 'level', 'orgUnit', 'roles', 'registered', 'lastSeen', 'rating'])
+const offeredColumns = computed(() => ALL_COLUMNS.filter(c => c !== 'rating' || canRating.value))
+const shownColumns = computed(() => columns.value.filter(c => c !== 'rating' || canRating.value))
 const showColumns = ref(false)
 try { const saved = localStorage.getItem('lola.people.columns'); if (saved) columns.value = JSON.parse(saved) } catch { /* без сохранения */ }
 watch(columns, (c) => { try { localStorage.setItem('lola.people.columns', JSON.stringify(c)) } catch { /* без сохранения */ } }, { deep: true })
@@ -58,12 +72,12 @@ async function load(reset = true) {
   error.value = ''
   try {
     const res = await apiRaw<{ data: PersonRow[], meta: { cursor: string | null, counts: { active: number, blocked: number, all: number } } }>('/people', {
-      query: { tab: tab.value, ...(q.value ? { q: q.value } : {}), ...activeFilter.value, ...(!reset && cursor.value ? { cursor: cursor.value } : {}) },
+      query: { tab: tab.value, ...(q.value ? { q: q.value } : {}), ...activeFilter.value, ...(sort.value === 'rating' ? { sort: 'rating' } : {}), ...(!reset && cursor.value ? { cursor: cursor.value } : {}) },
     })
     items.value = reset ? res.data : [...items.value, ...res.data]
     cursor.value = res.meta.cursor
     counts.value = res.meta.counts
-    if (reset) selected.value = new Set()
+    if (reset) { selected.value = new Set(); allByFilter.value = false }
   }
   catch (err) { error.value = apiErrorOf(err).message }
   finally { loading.value = false }
@@ -88,12 +102,13 @@ const flatUnits = computed(() => {
 })
 
 function resetFilter() {
-  Object.assign(filter, { positionId: '', positionLevelId: '', cityId: '', orgUnitId: '', locationId: '', role: '', tag: '', registeredFrom: '', registeredTo: '', activeFrom: '', activeTo: '', includeHidden: false })
+  Object.assign(filter, { positionId: '', positionLevelId: '', cityId: '', orgUnitId: '', locationId: '', role: '', tag: '', registeredFrom: '', registeredTo: '', activeFrom: '', activeTo: '', includeHidden: false, ratingGte: '', ratingLt: '' })
   q.value = ''
 }
 
 watch(tab, () => load())
 watch(filter, () => load())
+watch(sort, () => load())
 let searchTimer: ReturnType<typeof setTimeout>
 watch(q, () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(), 300) })
 onMounted(() => {
@@ -103,10 +118,19 @@ onMounted(() => {
   loadRefs()
 })
 
+// Індекс у вивантаженні — не за замовчуванням: лише явною галкою з підтвердженням (docs/v2/38 §7.3 п. 2)
+const exportRating = ref(false)
 const exportUrl = computed(() => {
-  const p = new URLSearchParams({ tab: tab.value, ...(q.value ? { q: q.value } : {}), ...Object.fromEntries(Object.entries(activeFilter.value).map(([k, v]) => [k, String(v)])) })
+  const p = new URLSearchParams({ tab: tab.value, ...(q.value ? { q: q.value } : {}), ...Object.fromEntries(Object.entries(activeFilter.value).map(([k, v]) => [k, String(v)])), ...(sort.value === 'rating' ? { sort: 'rating' } : {}), ...(exportRating.value ? { includeRating: '1' } : {}) })
   return `/api/v1/people/export?${p}`
 })
+function onExport(e: MouseEvent) {
+  if (exportRating.value && !confirm(t('people.exportRatingConfirm'))) e.preventDefault()
+}
+
+// ── Індекс залученості в рядку (docs/v2/38 §5.2): значення вище 100 — як є, старше 48 год — сірим ──
+const ratingText = (p: PersonRow) => (p.ratingPct === null ? '—' : t('engagement.value', { value: formatNumber(p.ratingPct, { maximumFractionDigits: 1 }) }))
+const ratingStale = (p: PersonRow) => isEngagementStale(p.ratingUpdatedAt)
 
 // ── Действия в строке ──
 const menuFor = ref<string | null>(null)
@@ -128,14 +152,31 @@ const archiveConfirm = () => act(async () => { await api(`/people/${archiveOne.v
 // ── Массовые действия ──
 const selected = ref<Set<string>>(new Set())
 const allChecked = computed(() => items.value.length > 0 && items.value.every(i => selected.value.has(i.id)))
-function toggleAll() { selected.value = allChecked.value ? new Set() : new Set(items.value.map(i => i.id)) }
-function toggle(id: string) { const s = new Set(selected.value); if (s.has(id)) s.delete(id); else s.add(id); selected.value = s }
+function toggleAll() { allByFilter.value = false; selected.value = allChecked.value ? new Set() : new Set(items.value.map(i => i.id)) }
+function toggle(id: string) { allByFilter.value = false; const s = new Set(selected.value); if (s.has(id)) s.delete(id); else s.add(id); selected.value = s }
 const bulk = reactive({ action: '' as '' | 'add_tag' | 'set_location' | 'assign_role' | 'invite' | 'archive', tag: '', locationId: '', roleCode: '' })
+/** «Вибрати всіх за фільтром»: дія над усіма, хто під фільтром списку, а не лише над сторінкою. */
+const allByFilter = ref(false)
+const totalByFilter = computed(() => counts.value[tab.value])
+const selectedCount = computed(() => (allByFilter.value ? totalByFilter.value : selected.value.size))
+/** Фільтр списку для «всі за фільтром» — ті самі умови, що й сторінка (docs/16 §5.1). */
+const bulkFilter = computed(() => {
+  const f: Record<string, unknown> = { tab: tab.value, ...(q.value ? { q: q.value } : {}) }
+  for (const [k, v] of Object.entries(activeFilter.value)) f[k] = k === 'ratingGte' || k === 'ratingLt' ? Number(v) : v
+  return f
+})
+/**
+ * Індекс не може бути єдиною умовою архівування (docs/v2/38 §7.3 п. 1, критерій §13 к. 3): поки список
+ * відфільтровано лише індексом, «Архівувати» вимкнено — і для позначених, і для «всіх за фільтром».
+ * Сервер у режимі «всі за фільтром» відповідає 422 `rating_only_filter_forbidden`.
+ */
+const ratingOnly = computed(() => ratingIsOnlyCondition(bulkFilter.value))
 async function runBulk() {
   if (!bulk.action) return
-  if (bulk.action === 'archive' && !confirm(t('people.bulk.confirmArchive', { n: selected.value.size }))) return
+  if (bulk.action === 'archive' && !confirm(t('people.bulk.confirmArchive', { n: selectedCount.value }))) return
   await act(async () => {
-    const r = await api<{ done: number, errors: unknown[] }>('/people/bulk', { method: 'POST', body: { ids: [...selected.value], action: bulk.action, ...(bulk.tag ? { tag: bulk.tag } : {}), ...(bulk.locationId ? { locationId: bulk.locationId } : {}), ...(bulk.roleCode ? { roleCode: bulk.roleCode } : {}) } })
+    const who = allByFilter.value ? { filter: bulkFilter.value } : { ids: [...selected.value] }
+    const r = await api<{ done: number, errors: unknown[] }>('/people/bulk', { method: 'POST', body: { ...who, action: bulk.action, ...(bulk.tag ? { tag: bulk.tag } : {}), ...(bulk.locationId ? { locationId: bulk.locationId } : {}), ...(bulk.roleCode ? { roleCode: bulk.roleCode } : {}) } })
     notice.value = t('people.bulk.done', { done: r.done, errors: r.errors.length })
     bulk.action = ''
   }, notice.value)
@@ -153,7 +194,8 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
       <div class="head-actions">
         <NuxtLink v-if="hasScope('people.invite')" to="/admin/people/new" class="btn primary">{{ t('people.add') }}</NuxtLink>
         <NuxtLink v-if="hasScope('people.import')" to="/admin/import" class="btn">{{ t('people.import') }}</NuxtLink>
-        <a v-if="hasScope('report.export')" :href="exportUrl" class="btn" download>{{ t('people.export') }}</a>
+        <label v-if="hasScope('report.export') && canRating" class="check export-rating"><input v-model="exportRating" type="checkbox"> {{ t('people.exportRating') }}</label>
+        <a v-if="hasScope('report.export')" :href="exportUrl" class="btn" download @click="onExport">{{ t('people.export') }}</a>
       </div>
     </header>
 
@@ -177,10 +219,14 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
       <label>{{ t('people.activeFrom') }}<input v-model="filter.activeFrom" type="date"></label>
       <label>{{ t('people.activeTo') }}<input v-model="filter.activeTo" type="date"></label>
       <label class="check"><input v-model="filter.includeHidden" type="checkbox"> {{ t('people.includeHidden') }}</label>
+      <template v-if="canRating">
+        <label>{{ t('people.ratingGte') }}<input v-model="filter.ratingGte" type="number" min="0" max="130" step="1" inputmode="numeric"></label>
+        <label>{{ t('people.ratingLt') }}<input v-model="filter.ratingLt" type="number" min="0" max="130" step="1" inputmode="numeric"></label>
+      </template>
     </section>
 
     <section v-if="showColumns" class="columns card">
-      <label v-for="c in ALL_COLUMNS" :key="c" class="check"><input type="checkbox" :checked="columns.includes(c)" @change="toggleColumn(c)"> {{ t(`people.col.${c}`) }}</label>
+      <label v-for="c in offeredColumns" :key="c" class="check"><input type="checkbox" :checked="columns.includes(c)" @change="toggleColumn(c)"> {{ t(`people.col.${c}`) }}</label>
     </section>
 
     <div class="tabs" role="tablist">
@@ -191,15 +237,17 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
     <p v-if="notice" class="notice">{{ notice }}</p>
 
     <div v-if="selected.size" class="bulk card">
-      <b>{{ t('people.bulk.selected', { n: selected.size }) }}</b>
+      <b>{{ allByFilter ? t('people.bulk.allByFilter', { n: totalByFilter }) : t('people.bulk.selected', { n: selected.size }) }}</b>
+      <button v-if="allChecked && !allByFilter && totalByFilter > items.length" type="button" class="btn ghost" @click="allByFilter = true">{{ t('people.bulk.selectAllByFilter', { n: totalByFilter }) }}</button>
       <select v-model="bulk.action" :aria-label="t('people.col.actions')">
         <option value="">{{ t('people.col.actions') }}</option>
         <option v-if="hasScope('people.edit')" value="add_tag">{{ t('people.bulk.addTag') }}</option>
         <option v-if="hasScope('people.edit')" value="set_location">{{ t('people.bulk.setLocation') }}</option>
         <option v-if="hasScope('role.assign')" value="assign_role">{{ t('people.bulk.assignRole') }}</option>
         <option v-if="hasScope('people.invite')" value="invite">{{ t('people.bulk.invite') }}</option>
-        <option v-if="hasScope('people.deactivate')" value="archive">{{ t('people.bulk.archive') }}</option>
+        <option v-if="hasScope('people.deactivate')" value="archive" :disabled="ratingOnly">{{ t('people.bulk.archive') }}</option>
       </select>
+      <p v-if="ratingOnly && hasScope('people.deactivate')" class="hint">{{ t('people.bulk.ratingOnly') }}</p>
       <input v-if="bulk.action === 'add_tag'" v-model="bulk.tag" list="tags-list" :placeholder="t('people.col.tags')">
       <datalist id="tags-list"><option v-for="r in refs.tags" :key="r.id" :value="r.name" /></datalist>
       <select v-if="bulk.action === 'set_location'" v-model="bulk.locationId"><option value="">{{ t('person.location') }}</option><option v-for="r in refs.locations" :key="r.id" :value="r.id">{{ r.name }}</option></select>
@@ -217,7 +265,15 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
           <tr>
             <th class="chk"><input type="checkbox" :checked="allChecked" :aria-label="t('people.bulk.selected', { n: items.length })" @change="toggleAll"></th>
             <th>{{ t('people.col.name') }}</th>
-            <th v-for="c in columns" :key="c">{{ t(`people.col.${c}`) }}</th>
+            <th v-for="c in shownColumns" :key="c" :class="{ num: c === 'rating' }">
+              <!-- «%» — індекс залученості, не відсоток проходження: заголовок пояснює (docs/v2/38 §5.2, критерій §13 к. 2) -->
+              <span v-if="c === 'rating'" class="rating-head">
+                <button type="button" class="head-help" :aria-expanded="showRatingHelp" aria-controls="rating-help" @click="showRatingHelp = !showRatingHelp">{{ t('people.col.rating') }}</button>
+                <button type="button" :class="['sort', { on: sort === 'rating' }]" :aria-pressed="sort === 'rating'" :aria-label="t('people.ratingSort')" :title="t('people.ratingSort')" @click="sort = sort === 'rating' ? 'created' : 'rating'">↓</button>
+                <span v-if="showRatingHelp" id="rating-help" class="popover" role="note">{{ t('people.ratingHelp') }}</span>
+              </span>
+              <template v-else>{{ t(`people.col.${c}`) }}</template>
+            </th>
             <th class="act">{{ t('people.col.actions') }}</th>
           </tr>
         </thead>
@@ -231,8 +287,11 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
               <!-- Мокап People: ПІБ+e-mail в одній колонці -->
               <div class="sub">{{ person.email || person.phone || '—' }}</div>
             </td>
-            <template v-for="c in columns" :key="c">
-              <td v-if="c === 'position'">{{ primary(person)?.positionName || '—' }}</td>
+            <template v-for="c in shownColumns" :key="c">
+              <td v-if="c === 'rating'" class="num">
+                <span v-if="person.ratingVisible" :class="['rating', { stale: ratingStale(person), none: person.ratingPct === null }]" :title="person.ratingPct === null ? t('people.ratingNone') : ratingStale(person) ? t('people.ratingStale') : undefined">{{ ratingText(person) }}</span>
+              </td>
+              <td v-else-if="c === 'position'">{{ primary(person)?.positionName || '—' }}</td>
               <td v-else-if="c === 'level'">{{ primary(person)?.levelName || '—' }}</td>
               <td v-else-if="c === 'city'">{{ person.cityName || '—' }}</td>
               <td v-else-if="c === 'orgUnit'">{{ primary(person)?.orgUnitName || '—' }}</td>
@@ -304,6 +363,18 @@ select, input[type="date"], input[type="text"], input:not([type]) { font: inheri
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .bulk { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; border: 1px solid var(--color-sun); }
+.bulk .hint { flex-basis: 100%; margin: 0; font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.export-rating { font-size: var(--font-size-body-s); }
+/* Колонка «%» (docs/v2/38 §5.2): число як є — «101 %», «130 %»; не розраховано — «—»; старше 48 год — сірим */
+th.num, td.num { text-align: right; white-space: nowrap; }
+.rating-head { position: relative; display: inline-flex; align-items: center; gap: var(--space-1); }
+.head-help { font: inherit; font-weight: 800; border: none; background: transparent; color: var(--color-ink-muted); cursor: help; padding: 0; text-decoration: underline dotted; }
+.sort { font: inherit; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: 0 var(--space-2); cursor: pointer; }
+.sort.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
+.popover { position: absolute; right: 0; top: 100%; z-index: 6; width: min(280px, 80vw); white-space: normal; text-align: left; font-weight: 400; color: var(--color-ink); background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
+.rating { font-weight: 800; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-teal-soft); color: var(--color-teal-ink); }
+.rating.stale { background: var(--color-bg-line-soft); color: var(--color-ink-faint); }
+.rating.none { background: transparent; color: var(--color-ink-faint); font-weight: 400; }
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }
 th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); white-space: nowrap; }

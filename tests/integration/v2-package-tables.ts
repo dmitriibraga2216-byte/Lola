@@ -144,6 +144,10 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   // уникальный ключ `(tenant_id, user_id, local_date)`, второй такой же не заводится.
   'user_activity_events',
   'user_activity_daily',
+  // 38. Индекс навчальної залученості (PR-35, миграция v2_person_rating): снимок расчёта с числами
+  // формулы — источник истины для `users.rating_pct`. Tenant-first индекс — уникальный ключ
+  // `(tenant_id, user_id, calc_date)`; «текущий» снимок — частичный уникальный рядом.
+  'person_rating_snapshots',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

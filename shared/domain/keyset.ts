@@ -69,6 +69,11 @@ export const KEYSETS = {
   storageFiles: ['at', 'uuid'],
   /** Снимки оргструктуры: `created_at desc, id desc` (docs/v2/32 §5.1 «Знімки», PR-31). */
   orgSnapshots: ['at', 'uuid'],
+  /**
+   * Журнал ИИ-вызовов (docs/v2/30 §5.6, §10 `GET /ai/calls`; PR-27): `created_at desc, id::text desc`,
+   * как у остальных журналов — id у `ai_calls` тоже `bigint`.
+   */
+  aiCalls: ['at', 'text'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

@@ -168,6 +168,12 @@ export default defineNitroPlugin(async () => {
       const n = await vacancySpamWatchTenant(tenantId)
       if (n) console.log(`[vacancy.spam_watch] ${tenantId}: посилено вакансій ${n}`)
     }, recruitingTenantIds))
+    // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход в S3 живёт 90 дней, строка — 400
+    await work('ai.calls_cleanup', () => runPerTenant('ai.calls_cleanup', async (tenantId) => {
+      const { aiCallsCleanup } = await import('../services/ai/calls')
+      const r = await aiCallsCleanup(tenantId)
+      if (r.rows || r.inputRefs) console.log(`[ai.calls_cleanup] ${tenantId}: рядків ${r.rows}, посилань на вхід ${r.inputRefs}`)
+    }))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

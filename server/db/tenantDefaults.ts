@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
 import type { PgTransaction } from 'drizzle-orm/pg-core'
-import { MEDIA_ORIGINS, STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES, SYSTEM_PERSON_DOCUMENT_TYPES } from '../../shared/enums'
+import { AI_PURPOSES, MEDIA_ORIGINS, STAGE_CAPABILITIES, SYSTEM_CANDIDATE_STATUSES, SYSTEM_PERSON_DOCUMENT_TYPES } from '../../shared/enums'
 import { DEFAULT_SHOP_CATEGORIES } from '../../shared/domain/gamification'
-import type { LifecycleStageCode, MediaOrigin, StageCapability, StorageRetentionAction, StorageRetentionAnchor } from '../../shared/enums'
+import type { AiPurpose, LifecycleStageCode, MediaOrigin, StageCapability, StorageRetentionAction, StorageRetentionAnchor } from '../../shared/enums'
 
 /**
  * Справочники по умолчанию для нового тенанта. Вызывается из сида и createTenant
@@ -110,6 +110,48 @@ export async function ensureRetentionPolicies(tx: PgTransaction<any, any, any>, 
     on conflict (tenant_id, origin) do nothing`)
 }
 
+/**
+ * Профили поставщика модели платформы (`docs/v2/30` §3.2 [решение]: профили платформы
+ * **копируются тенанту строками**, а не подключаются через `tenant_id is null` — nullable-тенант
+ * ломает RLS, а копия даёт тенанту право поменять регион или подставить свой ключ).
+ *
+ * По одному профилю на роль, все — детерминированная заглушка `stub` (`docs/v2/44` §8,
+ * `HANDOFF` §6: реальный вендор и ключ — решение владельца продукта). Заглушка ничего никуда
+ * не отправляет, поэтому её срок хранения у поставщика честно `none`. Подключение вендора —
+ * правка строки (`PUT /ai/providers/:id`: драйвер, адрес, модель, срок хранения), не кода.
+ *
+ * `Record<AiPurpose, …>`, а не массив: новая роль без своего профиля здесь не скомпилируется.
+ * Модель генерации — прежняя метка заглушки PR-17 (`stub-template-v1` в `vacancy_ai_generations.model`),
+ * модель эмбеддинга — прежняя `hash-v1` (`library_modules.embedding_model = 'stub:hash-v1:768'`):
+ * перевод на профили не делает векторы библиотеки «чужой модели» и не пересчитывает их.
+ */
+export const DEFAULT_AI_PROVIDERS: Record<AiPurpose, { code: string, name: string, modelName: string }> = {
+  transcribe: { code: 'platform-transcribe', name: 'Розшифровка (заглушка платформи)', modelName: 'stub-v1' },
+  interview_score: { code: 'platform-interview-score', name: 'Оцінка співбесіди (заглушка платформи)', modelName: 'stub-v1' },
+  review_hint: { code: 'platform-review-hint', name: 'Підказка перевіряючому (заглушка платформи)', modelName: 'stub-v1' },
+  summary: { code: 'platform-summary', name: 'Підсумок кандидата (заглушка платформи)', modelName: 'stub-v1' },
+  generate: { code: 'platform-generate', name: 'Генерація тексту (заглушка платформи)', modelName: 'stub-template-v1' },
+  embed: { code: 'platform-embed', name: 'Ембединги пошуку (заглушка платформи)', modelName: 'hash-v1' },
+}
+
+/**
+ * Досевает недостающие профили платформы (идемпотентно по `(tenant_id, code)`). Зовётся посевом
+ * тенанта и шлюзом модели при первом обращении роли без профиля — так тенант, заведённый до
+ * PR-27, получает профили без копии умолчаний в SQL миграции. Выключенный профиль не
+ * «воскресает»: строка есть, `on conflict do nothing` её не трогает.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function ensureAiProviders(tx: PgTransaction<any, any, any>, tenantId: string): Promise<void> {
+  const values = AI_PURPOSES.map((purpose) => {
+    const p = DEFAULT_AI_PROVIDERS[purpose]
+    return sql`(${tenantId}::uuid, ${p.code}, ${p.name}, ${purpose}, 'stub', ${p.modelName}, 'none', 'eu')`
+  })
+  await tx.execute(sql`
+    insert into ai_providers (tenant_id, code, name, purpose, driver, model_name, provider_retention, data_region)
+    values ${sql.join(values, sql`, `)}
+    on conflict (tenant_id, code) do nothing`)
+}
+
 /** Достраивает карту возможностей до полного перечня: не указанный ключ — `false` (§3.3). */
 function caps(on: Partial<Record<StageCapability, boolean>>): Record<StageCapability, boolean> {
   return Object.fromEntries(STAGE_CAPABILITIES.map(k => [k, on[k] ?? false])) as Record<StageCapability, boolean>
@@ -168,4 +210,6 @@ export async function ensureTenantDefaults(tx: PgTransaction<any, any, any>, ten
   }
   // Политики хранения — строка на происхождение, все выключены (docs/v2/34 §7.3, PR-36)
   await ensureRetentionPolicies(tx, tenantId)
+  // Профили поставщика модели — по заглушке на роль (docs/v2/30 §3.2, PR-27)
+  await ensureAiProviders(tx, tenantId)
 }

@@ -3538,7 +3538,8 @@
       "storage_pending_upload_expired": "File could not be uploaded",
       "storage_bulk_delete_done": "Files deleted from storage",
       "content_time_deviation": "Time deviates from the estimate",
-      "absence_deadline_shifted": "Deadline moved because of an absence"
+      "absence_deadline_shifted": "Deadline moved because of an absence",
+      "ai_provider_down": "AI provider is unavailable"
     }
   },
   "ntpl": {

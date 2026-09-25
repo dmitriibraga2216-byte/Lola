@@ -14,6 +14,8 @@ import { countView, noticeAudience } from './notices'
 import { bookmarkKeys } from './hubExtra'
 import { ratingAggregate } from './contentRatings'
 import type { ContentBlock } from '../../shared/schemas/content'
+import { embedTexts, type AiRef } from './ai/gateway'
+import { KNOWLEDGE_EMBEDDING_PROMPT } from './ai/prompts'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -32,29 +34,21 @@ export function blocksToText(body: ContentBlock[]): string {
   }).join(' ').replace(/\s+/g, ' ').trim().slice(0, 20_000)
 }
 
+/** Размерность векторов базы знаний — колонка `knowledge_articles.embedding vector(1536)`. */
+const KNOWLEDGE_EMBEDDING_DIMS = 1536
+
 /**
- * Embedding для семантического поиска (docs/03 §3.7). Провайдер — через
- * EMBEDDINGS_URL (OpenAI-совместимый /v1/embeddings); без него — null,
- * поиск работает только полнотекстово. Ключ не логируется.
+ * Embedding для семантического поиска (docs/03 §3.7) — через шлюз модели (`ai/gateway.ts`,
+ * PR-27): профиль роли `embed`, строка `ai_calls` на каждый вызов. **Заглушка сюда не годится**
+ * (`acceptStub: false`): у статьи нет колонки модели, и векторы заглушки смешались бы с векторами
+ * настоящей модели в одном поиске без возможности их отличить (у библиотеки для этого есть
+ * `embedding_model`). Пока профиль тенанта — заглушка, вызова нет и вектора нет: поиск работает
+ * полнотекстово, ровно как до PR-27 без `EMBEDDINGS_URL`.
  */
-export async function embed(text: string): Promise<number[] | null> {
-  const url = process.env.EMBEDDINGS_URL
-  const key = process.env.EMBEDDINGS_API_KEY
-  if (!url || !text.trim()) return null
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-      body: JSON.stringify({ model: process.env.EMBEDDINGS_MODEL || 'text-embedding-3-small', input: text.slice(0, 8000) }),
-      signal: AbortSignal.timeout(15_000),
-    })
-    const json = await res.json() as { data?: { embedding: number[] }[] }
-    const v = json.data?.[0]?.embedding
-    return v && v.length === 1536 ? v : null
-  }
-  catch {
-    return null
-  }
+async function embed(ctx: Ctx, text: string, ref: AiRef): Promise<number[] | null> {
+  if (!text.trim()) return null
+  const r = await embedTexts(ctx, { prompt: KNOWLEDGE_EMBEDDING_PROMPT, texts: [text.slice(0, 8000)], dims: KNOWLEDGE_EMBEDDING_DIMS, ref, acceptStub: false })
+  return r.ok ? r.vectors[0] ?? null : null
 }
 
 export async function listArticles(ctx: Ctx, filter: { status?: string, categoryId?: string } = {}) {
@@ -100,9 +94,11 @@ export async function getArticle(ctx: Ctx, idOrSlug: string, opts: { countView?:
 export async function createArticle(ctx: Ctx, input: { title: string, summary?: string, body: ContentBlock[], categoryId?: string, tags?: string[], visibility?: unknown, ownerId?: string, reviewAt?: string | null, relatedCourses?: string[], relatedArticles?: string[], attachments?: { mediaId: string, name: string }[] }) {
   const body = sanitizeBody(input.body)
   const plainText = blocksToText(body)
-  const vec = await embed(`${input.title}\n${plainText}`)
+  const id = randomUUID()
+  const vec = await embed(ctx, `${input.title}\n${plainText}`, { kind: 'knowledge_article', id })
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [a] = await tx.insert(knowledgeArticles).values({
+      id,
       tenantId: ctx.tenantId,
       title: input.title,
       slug: `${slugify(input.title)}-${randomUUID().slice(0, 4)}`,
@@ -131,7 +127,7 @@ export async function updateArticle(ctx: Ctx, id: string, input: { title?: strin
     if (!before) return null
     const contentChanged = body !== undefined || (input.title !== undefined && input.title !== before.title)
     const version = contentChanged ? before.version + 1 : before.version
-    const vec = contentChanged ? await embed(`${input.title ?? before.title}\n${plainText ?? before.plainText}`) : undefined
+    const vec = contentChanged ? await embed(ctx, `${input.title ?? before.title}\n${plainText ?? before.plainText}`, { kind: 'knowledge_article', id }) : undefined
 
     const [after] = await tx.update(knowledgeArticles).set({
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -214,7 +210,7 @@ export async function search(ctx: Ctx, q: string, limit = 20, source: 'all' | 'r
   const words = q.trim().split(/\s+/).filter(w => w.length >= 2).slice(0, 8)
   if (words.length === 0) return []
   const tsq = words.map(w => `${stem(w.replace(/[':&|!()]/g, ''))}:*`).join(' & ')
-  const vec = source === 'all' || source === 'resources' ? await embed(q) : null
+  const vec = source === 'all' || source === 'resources' ? await embed(ctx, q, { kind: 'search_query', id: null }) : null
   const like = `%${q.trim()}%`
   const want = (k: 'resources' | 'news' | 'notices') => source === 'all' || source === k
   // Новости и объявления без FTS-индекса: каждое слово — ilike по заголовку или тексту, все слова обязательны

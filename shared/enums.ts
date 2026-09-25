@@ -1050,6 +1050,57 @@ export const ABSENCE_LIMITS = {
   maxRangeDays: 366,
 } as const
 
+// ── Провайдер модели и журнал вызовов (docs/v2/30 §3.2, план `45` PR-27) ──────────────────
+
+/**
+ * Роль профиля провайдера (`ai_providers.purpose`, `ai_calls.purpose`): одна роль на профиль.
+ * Четыре — из `30` §3.2; `generate` и `embed` добавлены PR-27 (пометка-исправление там же):
+ * генерация текста вакансии (PR-17) и эмбеддинги библиотеки и базы знаний (PR-25) — тоже
+ * вызовы модели, и без своей роли они шли бы мимо профиля, журнала и оси потребления.
+ */
+export const AI_PURPOSES = ['transcribe', 'interview_score', 'review_hint', 'summary', 'generate', 'embed'] as const
+export type AiPurpose = typeof AI_PURPOSES[number]
+
+/**
+ * Драйвер профиля (`ai_providers.driver`, `30` §3.2): вендор скрыт за драйвером. `stub` —
+ * детерминированная заглушка без сети (`docs/v2/44` §8, `HANDOFF` §6): четвёртое значение
+ * сверх документа, чтобы «работает заглушка» было строкой профиля, а не переменной окружения.
+ */
+export const AI_DRIVERS = ['openai_compatible', 'http_custom', 'self_hosted', 'stub'] as const
+export type AiDriver = typeof AI_DRIVERS[number]
+
+/** Сколько данные живут у поставщика (`ai_providers.provider_retention`, `30` §3.2, §7.7). */
+export const AI_PROVIDER_RETENTIONS = ['none', 'ephemeral', 'unknown'] as const
+export type AiProviderRetention = typeof AI_PROVIDER_RETENTIONS[number]
+
+/** Регион обработки данных (`ai_providers.data_region`, `30` §3.2): `other` — только с комментарием админа. */
+export const AI_DATA_REGIONS = ['eu', 'other'] as const
+export type AiDataRegion = typeof AI_DATA_REGIONS[number]
+
+/**
+ * Итог вызова (`ai_calls.status`, `30` §3.2). `refused` — вызов не сделан: жёсткая ось
+ * исчерпана, ИИ-подписка не действует, профиля нет; `degraded` — вызов не сделан, а операция
+ * идёт дальше без ИИ (ось «жёсткий с деградацией», `35` §7.1).
+ */
+export const AI_CALL_STATUSES = ['queued', 'running', 'ok', 'failed', 'timeout', 'refused', 'degraded'] as const
+export type AiCallStatus = typeof AI_CALL_STATUSES[number]
+
+/**
+ * О чём вызов (`ai_calls.ref_kind`, мягкая ссылка, `44` В-11). Четыре — `30` §3.2; ещё четыре
+ * добавлены PR-27 для вызовов, которые были до журнала: генерация вакансии (`ref_id` — строка
+ * `vacancy_ai_generations`), эмбеддинг модуля библиотеки и статьи базы знаний, вектор
+ * поискового запроса (`ref_id` пуст — запрос не сущность).
+ */
+export const AI_CALL_REF_KINDS = [
+  'interview_session', 'interview_turn', 'review_hint', 'summary',
+  'vacancy_generation', 'library_module', 'knowledge_article', 'search_query',
+] as const
+export type AiCallRefKind = typeof AI_CALL_REF_KINDS[number]
+
+/** Три ИИ-оси тарифа (`35` §7.1, §7.7 п. 3): подмножество `LIMIT_AXES`, `ai_calls.usage_axis`. */
+export const AI_USAGE_AXES = ['ai_interview_ops', 'ai_review_ops', 'ai_generate_ops'] as const satisfies readonly LimitAxis[]
+export type AiUsageAxis = typeof AI_USAGE_AXES[number]
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -1155,4 +1206,10 @@ export const ENUMS: Record<string, readonly string[]> = {
   vacancy_publication_state: VACANCY_PUBLICATION_STATES,
   vacancy_ai_generation_target: VACANCY_AI_GENERATION_TARGETS,
   vacancy_ai_generation_status: VACANCY_AI_GENERATION_STATUSES,
+  ai_purpose: AI_PURPOSES,
+  ai_driver: AI_DRIVERS,
+  ai_provider_retention: AI_PROVIDER_RETENTIONS,
+  ai_data_region: AI_DATA_REGIONS,
+  ai_call_status: AI_CALL_STATUSES,
+  ai_call_ref_kind: AI_CALL_REF_KINDS,
 }

@@ -167,33 +167,54 @@ export interface UsageRef {
  */
 export async function recordUsage(tenantId: string, axis: LimitAxis, delta: number, ref: UsageRef = {}): Promise<number> {
   if (!delta) return currentUsage(tenantId, axis)
-  const limit = await effectiveLimit(tenantId, axis)
-  const w = await currentWindow(tenantId)
-  const refKind = ref.refKind ?? AXIS_METER[axis].refKind
-  const used = await withTenant(tenantId, ref.actorUserId ?? null, async (tx) => {
-    await openCounter(tx, tenantId, axis, w, limit)
-    const [row] = await tx.execute(sql`
-      update usage_counters
-         set used = greatest(0, used + ${delta}), updated_at = now()
-       where tenant_id = ${tenantId}::uuid and axis = ${axis} and period_start = ${w.start}::date
-       returning used
-    `) as unknown as { used: string | number }[]
-    if (refKind) {
-      await tx.insert(usageEvents).values({
-        tenantId,
-        axis,
-        delta,
-        refKind,
-        refId: ref.refId ?? null,
-        actorUserId: ref.actorUserId ?? null,
-        meta: ref.meta ?? {},
-        requestContext: currentRequestContext(), // null у фоновых задач — это норма
-      })
-    }
-    return Number(row?.used ?? 0)
-  })
-  await noticeAfterChange(tenantId, axis, used, limit)
+  const prep = await prepareUsage(tenantId, axis)
+  const used = await withTenant(tenantId, ref.actorUserId ?? null, tx => applyUsageTx(tx, tenantId, axis, delta, ref, prep))
+  await settleUsage(tenantId, axis, used, prep.limit)
   return used
+}
+
+/** Лимит и окно периода — читаются до транзакции (кеш `effectiveLimits`, PR-08). */
+export interface UsagePrep { limit: number | null, window: BillingWindow }
+
+export async function prepareUsage(tenantId: string, axis: LimitAxis): Promise<UsagePrep> {
+  return { limit: await effectiveLimit(tenantId, axis), window: await currentWindow(tenantId) }
+}
+
+/**
+ * Тело `recordUsage()` внутри **чужой** транзакции: счётчик и строка журнала расхода пишутся
+ * атомарно с тем, за что списываются. Так шлюз модели (`server/services/ai/gateway.ts`, PR-27)
+ * отмечает вызов успешным, списывает операцию и сохраняет результат одной транзакцией — тенант
+ * не платит за результат, который не сохранился, и не получает результат без списания.
+ * После фиксации транзакции вызывающий обязан позвать `settleUsage()` (баннер и уведомление).
+ */
+export async function applyUsageTx(tx: TenantTx, tenantId: string, axis: LimitAxis, delta: number, ref: UsageRef, prep: UsagePrep): Promise<number> {
+  const w = prep.window
+  const refKind = ref.refKind ?? AXIS_METER[axis].refKind
+  await openCounter(tx, tenantId, axis, w, prep.limit)
+  const [row] = await tx.execute(sql`
+    update usage_counters
+       set used = greatest(0, used + ${delta}), updated_at = now()
+     where tenant_id = ${tenantId}::uuid and axis = ${axis} and period_start = ${w.start}::date
+     returning used
+  `) as unknown as { used: string | number }[]
+  if (refKind) {
+    await tx.insert(usageEvents).values({
+      tenantId,
+      axis,
+      delta,
+      refKind,
+      refId: ref.refId ?? null,
+      actorUserId: ref.actorUserId ?? null,
+      meta: ref.meta ?? {},
+      requestContext: currentRequestContext(), // null у фоновых задач — это норма
+    })
+  }
+  return Number(row?.used ?? 0)
+}
+
+/** Поднять или погасить предупреждение оси после зафиксированного изменения счётчика. */
+export async function settleUsage(tenantId: string, axis: LimitAxis, used: number, limit: number | null): Promise<void> {
+  await noticeAfterChange(tenantId, axis, used, limit)
 }
 
 /**

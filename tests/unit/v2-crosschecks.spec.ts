@@ -257,6 +257,81 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(res.stdout).toContain('[ok]   13.')
   })
 
+  /**
+   * Проверка 14 скрипта (PR-27, `docs/v2/42` §5 проверка 17, инвариант 18): код ИИ не трогает
+   * состояние кандидата, правильность ответа и сдачу практикума. Три фикстуры: запись колонки
+   * кандидата Drizzle-именем, snake_case команды документа, и каталог без таких имён.
+   */
+  it('14. код ИИ сам двигает кандидата по воронке', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/ai'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ai/score.ts'), 'export const reject = (tx) => tx.update(users).set({ candidateState: \'rejected\' })\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('14. ИИ ничего не решает о людях')
+  })
+
+  it('14. команда документа дословно: is_correct в сыром SQL', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/ai'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ai/hint.ts'), 'export const q = sql`update attempt_answers set is_correct = true`\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('14. ИИ')
+  })
+
+  it('14. шлюз без полей решения проходит, а без каталога ИИ проверка пропускается', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/ai'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ai/gateway.ts'), 'export const callModel = async () => ({ ok: true })\n')
+    expect(run(dir).stdout).toContain('[ok]   14.')
+    const empty = fixture()
+    expect(run(empty).stdout).toContain('[skip] 14.')
+  })
+
+  /**
+   * Проверка 15 скрипта (PR-27): вызов модели — только через шлюз. Четыре фикстуры: прямой
+   * `.embed(` провайдера (путь PR-25 до шлюза), чтение ключа платформы мимо шлюза, драйвер,
+   * позванный из сервиса, и законные места — сам шлюз, модуль эмбеддингов, комментарий.
+   */
+  it('15. сервис сам выбирает провайдер эмбеддингов и зовёт его мимо журнала', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/library.ts'), 'const provider = embeddingProvider(768)\nexport const v = await provider.embed([text])\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('15. вызов модели — только через шлюз')
+  })
+
+  it('15. ключ платформы читается мимо шлюза', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/vacancyAi.ts'), 'const key = process.env.AI_PROVIDER_API_KEY\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('15. вызов модели')
+  })
+
+  it('15. драйвер модели позван из сервиса напрямую', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/summary.ts'), 'import { runDriver } from \'./ai/drivers\'\nexport const out = await runDriver(req)\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('15. вызов модели')
+  })
+
+  it('15. шлюз, модуль эмбеддингов и комментарий нарушением не считаются', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services/ai'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/ai/gateway.ts'), 'const key = process.env.AI_PROVIDER_API_KEY\nexport const r = await runDriver(req)\nconst v = await ov.embed(texts)\n')
+    writeFileSync(join(dir, 'server/services/embeddings.ts'), 'export async function requestEmbeddings() {}\nexport function httpEmbeddingProvider() { return { embed: async () => [] } }\n')
+    writeFileSync(join(dir, 'server/services/knowledge.ts'), '// раньше здесь был process.env.EMBEDDINGS_URL и provider.embed(), теперь — шлюз\nexport const x = 1\n')
+    const res = run(dir)
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.stdout).toContain('[ok]   15.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

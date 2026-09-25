@@ -141,6 +141,11 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 
 **31 эндпоинт.**
 
+> [дополнено, PR-27] Реализованы `GET /ai/calls`, `GET /ai/providers`, `GET /ai/providers/:id`,
+> `PUT /ai/providers/:id` и сверх таблицы `POST /ai/providers` — новый профиль, например запасной
+> для цепочки `30` §7.12 (§8.4: свёртка `[/:id]` развёрнута так). Скоуп у всех пяти — `ai.audit`.
+> Итог §2.12 считает документ, а не реализацию, и не пересчитывался.
+
 ### 2.4 Библиотека переиспользуемых модулей — документ `31`
 
 | Метод | Путь | Скоуп | Назначение |
@@ -595,6 +600,15 @@ honeypot-поле `website`, подписанный `form_nonce` с окном 4
 | `ai.audit` | 403 | нет скоупа на журнал ИИ | «Немає доступу до журналу ШІ» |
 | `provider.retention_unknown` | 422 | провайдер с неизвестным сроком хранения на расшифровку | «Провайдер із невідомим строком зберігання не допускається для розшифровки» |
 
+> [дополнено, PR-27] Реализован `provider.retention_unknown`; «нет скоупа» — общий `403 forbidden`,
+> как у всех ручек (`44` В-16 §8.2.7), отдельного кода `ai.audit` нет. Сверх таблицы: коды профиля
+> `422 provider.endpoint_required`, `422 provider.endpoint_invalid`, `422 provider.region_comment_required`,
+> `422 provider.fallback_self` \| `fallback_not_found` \| `fallback_purpose` \| `fallback_cycle` \|
+> `fallback_depth`, `409 provider.code_taken` и коды вызова модели `409 ai.unavailable` (причина —
+> `details.reason`: `expired`, `off`, `readonly`, `suspended`) и `503 ai.provider_failed`.
+> `limit.ai_interview_exhausted` и `limit.ai_generate_exhausted` не заводятся — единый
+> `409 limit_exceeded` с `details.axis` (`44` В-16). Итог §4.13 не пересчитывался.
+
 ### 4.5 Библиотека модулей — `31`
 
 | Код | HTTP | Когда | Текст (uk) |
@@ -882,6 +896,9 @@ honeypot-поле `website`, подписанный `form_nonce` с окном 4
 | `ai.review_hint_failed` | 3 неудачи подсказки подряд | in-app | админу |
 | `ai.quality_degraded` | доля `major` выше 15 % за 30 дней | e-mail, in-app | админу |
 | `ai.provider_down` | 5 неудач провайдера подряд | in-app | админу |
+
+> [дополнено, PR-27] `ai.provider_down` шлёт шлюз модели под кодом `ai_provider_down` (реестр
+> `DEFAULT_TEMPLATES` — `snake_case`), раз в сутки на профиль и адресата-админа.
 
 ### 6.4 Библиотека модулей — `31` (7)
 

@@ -622,6 +622,10 @@ grep -rn "candidate_state\|candidate_status_id\|is_correct\|workshop_submissions
 ```
 Пусто. Плюс тест: попытка сохранить `interview_criterion_scores` без `rationale` или без
 хотя бы одной цитаты в `evidence` отклоняется, сессия уходит в `needs_human`. С этапа 15.
+> [дополнено, PR-27] Команда исполняется проверкой 14 `scripts/v2-crosschecks.sh` с момента, когда
+> каталог `server/services/ai/` появился (шлюз модели PR-27), — плюс те же имена в camelCase: запрос
+> Drizzle назвал бы колонку `candidateState`, и grep документа его бы не увидел. Тест на
+> `interview_criterion_scores` — PR-28, вместе с таблицей.
 
 **18. Голос не живёт дольше срока** (`30` §7.7).
 ```sql
@@ -632,6 +636,11 @@ where origin = 'interview_answer' and purge_after < now() and lifecycle <> 'purg
 расхождение в тексте, не в DDL, и подлежит правке в `30` до начала этапа 15.
 Ноль после прогона фоновой задачи. Плюс тест: провайдер с `provider_retention='unknown'` не
 назначается на `transcribe` — попытка сохранить такую конфигурацию отклоняется. С этапа 15.
+> [дополнено, PR-27] Вторая половина исполняется `tests/integration/v2-ai-providers.spec.ts`
+> («сквозная проверка 18») и по HTTP `tests/integration/v2-ai-http.spec.ts` (`422
+> provider.retention_unknown`): созданием, правкой срока, правкой роли, через запасной профиль
+> (запасной — только той же роли) и мимо сервиса — CHECK `ai_providers_transcribe_retention_chk`.
+> SQL-половина про `media_assets` — PR-29 (`interview.media_purge`).
 
 **19. Уведомления кандидату идут вне тихих часов, но внутри 09:00–20:00** (П-23).
 Тест: событие для кандидата в 22:10 при тихих часах тенанта 21:00–08:00 уходит в 09:00 по

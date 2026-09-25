@@ -12,22 +12,43 @@ const locations = ref<{ id: string, name: string }[]>([])
 const error = ref('')
 const notice = ref('')
 const step = ref(1)
+const route = useRoute()
+/**
+ * Запуск со ссылки «людина чекає на оцінювання» с шага траектории (docs/28 §28.21): анкета шага
+ * выбрана, человек уже в аудитории — руководителю остаётся выбрать оценщиков и сроки.
+ */
+const subject = ref<{ id: string, name: string } | null>(null)
 const form = reactive({ title: '', formId: '', periodFrom: '', periodTo: '', startsAt: '', endsAt: '', positionIds: [] as string[], locationIds: [] as string[], raterKinds: ['self', 'manager'] as string[], raterRoles: RATER_KINDS.map(k => ({ ...RATER_ROLE_DEFAULTS[k] })), peersCount: 2, anonymousForSubject: true, minRatersToShow: 3, selfFirst: false, calibration: false })
 async function load() {
-  try { items.value = await api('/assessment/cycles'); forms.value = await api('/assessment/forms'); positions.value = await api('/refs/positions'); locations.value = await api('/refs/locations'); form.formId ||= forms.value[0]?.id ?? '' }
+  try {
+    items.value = await api('/assessment/cycles'); forms.value = await api('/assessment/forms'); positions.value = await api('/refs/positions'); locations.value = await api('/refs/locations')
+    const wantedForm = typeof route.query.formId === 'string' ? route.query.formId : ''
+    form.formId ||= forms.value.some(f => f.id === wantedForm) ? wantedForm : forms.value[0]?.id ?? ''
+  }
   catch (err) { error.value = apiErrorOf(err).message }
 }
-onMounted(load)
+async function loadSubject() {
+  const id = typeof route.query.subjectId === 'string' ? route.query.subjectId : ''
+  if (!id) return
+  try {
+    const p = await api<{ id: string, fullName: string }>(`/people/${id}`)
+    subject.value = { id: p.id, name: p.fullName }
+    form.title ||= `${forms.value.find(f => f.id === form.formId)?.title ?? ''} — ${p.fullName}`
+  }
+  catch { /* человека нет или нет права смотреть людей — аудиторию выберут сами */ }
+}
+onMounted(async () => { await load(); await loadSubject() })
 async function create() {
   error.value = ''
   const rules: unknown[] = []
+  if (subject.value) rules.push({ type: 'user', ids: [subject.value.id] })
   if (form.positionIds.length) rules.push({ type: 'position', ids: form.positionIds, locationIds: form.locationIds.length ? form.locationIds : undefined })
   else if (form.locationIds.length) rules.push({ type: 'location', ids: form.locationIds })
   try {
     const c = await api<{ id: string }>('/assessment/cycles', { method: 'POST', body: { title: form.title, formId: form.formId, periodFrom: form.periodFrom, periodTo: form.periodTo, startsAt: new Date(form.startsAt).toISOString(), endsAt: new Date(form.endsAt).toISOString(), subjects: { rules, match: 'any' }, raterKinds: form.raterKinds, raterRoles: form.raterRoles.filter(r => form.raterKinds.includes(r.kind)), peersCount: form.peersCount, anonymousForSubject: form.anonymousForSubject, minRatersToShow: form.minRatersToShow, selfFirst: form.selfFirst, calibration: form.calibration } })
     const r = await api<{ tasks: number, subjects: number }>(`/assessment/cycles/${c.id}/start`, { method: 'POST' })
     notice.value = t('assess.started', { subjects: r.subjects, tasks: r.tasks })
-    step.value = 1; form.title = ''
+    step.value = 1; form.title = ''; subject.value = null
     await load()
   } catch (err) { error.value = apiErrorOf(err).message }
 }
@@ -59,6 +80,10 @@ const fmt = (d: string) => formatShortDate(new Date(d))
         <label class="sub">{{ t('assess.period') }} <input v-model="form.periodFrom" class="field" type="date"> — <input v-model="form.periodTo" class="field" type="date"></label>
       </div>
       <div v-if="step === 2" class="grid">
+        <p v-if="subject" class="row" data-testid="cycle-subject">
+          <span class="subject">{{ t('assess.subjectFromTrajectory', { name: subject.name }) }}</span>
+          <button type="button" class="chip" :aria-label="t('assess.subjectRemove')" :title="t('assess.subjectRemove')" @click="subject = null">×</button>
+        </p>
         <label class="sub">{{ t('assess.subjectsPositions') }}</label>
         <div class="row"><label v-for="p in positions" :key="p.id" class="check"><input v-model="form.positionIds" type="checkbox" :value="p.id"> {{ p.name }}</label></div>
         <label class="sub">{{ t('assess.subjectsLocations') }}</label>
@@ -108,6 +133,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .field, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .short { width: 70px; }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.subject { font-weight: 700; overflow-wrap: anywhere; }
 .check { display: flex; gap: var(--space-1); align-items: center; font-size: var(--font-size-body-s); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }

@@ -121,6 +121,12 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   trajectory_access_closed: 'Траєкторія «{{title}}»: доступ до наступного кроку закрито{{#step}} ({{step}}){{/step}}',
   trajectory_mentor_confirm: 'Траєкторія «{{title}}»: підопічний чекає на ваше підтвердження кроку{{#step}} «{{step}}»{{/step}}',
   trajectory_request: 'Заявка на траєкторію «{{title}}» чекає рішення',
+  // Шаг, который выполняет другой человек о нём (решение владельца 25.09.2026, docs/28 §28.21):
+  // тому, кто выполнит, — кто ждёт и что сделать; ссылка на заполнение — в `payload.url` (refUrl).
+  // Чек-лист — руководителю (или администраторам, если руководитель не может); оценивание —
+  // оценщикам цикла (`fill`) или тому, кто запускает цикл (`launch`)
+  trajectory_checklist_waiting: 'Траєкторія «{{title}}»: {{name}} чекає, поки ви заповните чек-лист «{{checklist}}»',
+  trajectory_assessment_waiting: 'Траєкторія «{{title}}»: {{name}} чекає на оцінювання «{{form}}»{{#fill}} — заповніть анкету{{/fill}}{{#launch}} — запустіть цикл оцінки{{/launch}}',
   // Оргструктура (docs/v2/32 §8, PR-30). Адресат везде — результат `resolveManager()`,
   // а не `locations.manager_id`: вопрос «кто руководитель» задаётся одному месту (П-16.4).
   org_node_assigned: 'Вас додано до оргструктури: {{node_title}}. Керівник — {{manager_name}}.',
@@ -519,6 +525,8 @@ async function commonVars(tx: TenantTx, tenantId: string, userId: string): Promi
  * Уведомления траектории, адресованные самому учащемуся: ведут в его ленту (docs/17 §5.2), где
  * открытый шаг открывается своим экраном. Наставнику (`trajectory_mentor_confirm`) и керівнику
  * (`trajectory_request`) чужая лента `/learn/trajectories/:id` не откроется — им ссылки нет.
+ * Исполнителю шага о человеке (`trajectory_checklist_waiting`, `trajectory_assessment_waiting`,
+ * docs/28 §28.21) ссылка — на само заполнение, в `payload.url`: форма чек-листа, анкета или запуск цикла.
  */
 const LEARNER_TRAJECTORY_CODES = new Set(['trajectory_assigned', 'trajectory_next_unlocked', 'trajectory_finished', 'trajectory_access_closed'])
 

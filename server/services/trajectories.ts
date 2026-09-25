@@ -1,13 +1,13 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import type { z } from 'zod'
 import {
-  assignments, automationRules, enrollments, libraryModuleVersions, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
+  assessmentCycles, assessmentTasks, assignments, automationRules, enrollments, libraryModuleVersions, noticeAcks, trajectories, trajectoryEdges, trajectoryEnrollments,
   trajectoryNodeStates, trajectoryNodes, users,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
-import { enqueueNotification } from './notifications'
+import { enqueueNotification, tenantAdminIds } from './notifications'
 import { eventForTransition, logPassEvent } from './passEvents'
 import { findContent } from './taskContent'
 import { createAssignmentTx, expandAssignment } from './assignments'
@@ -620,11 +620,17 @@ async function activate(run: Run, node: Node): Promise<void> {
     case 'task': {
       await setState(run, node.id, { status: 'available', activatedAt: now })
       const assignmentId = await createNodeAssignment(run, node)
-      await setState(run, node.id, { assignmentId })
+      const opened = await setState(run, node.id, { assignmentId })
       // docs/33 D-027: узел-объявление — прохождение по notice_acks; уже подтверждённое объявление зачитывается сразу
       if (assignmentId && node.contentType === 'notice' && node.contentId && await noticeAcked(run.tx, node.contentId, run.enr.userId)) {
         await setState(run, node.id, { status: 'done', passed: true, finishedAt: now })
         return complete(run, node)
+      }
+      // Шаг выполняет другой человек о нём (решение владельца 25.09.2026): исполнителю — «людина чекає»
+      // со ссылкой на заполнение. Точкой сохранения: сбой уведомления не должен остановить траекторию
+      if (assignmentId && isReviewedStep(node.contentType) && node.contentId) {
+        const step: ReviewedStep = { stateId: opened.id, enrollmentId: run.enr.id, userId: run.enr.userId, trajectory: run.t.title, step: node.title ?? null, contentType: node.contentType, contentId: node.contentId }
+        await run.tx.transaction(sp => notifyReviewers(sp, run.tenantId, step)).catch(err => console.error('trajectory review notify', err))
       }
       await enqueueNotification(run.tx, { tenantId: run.tenantId, userId: run.enr.userId, code: 'trajectory_next_unlocked', payload: { title: run.t.title, step: node.title ?? null }, dedupKey: `trajectory_next:${run.enr.id}:${node.id}`, refType: 'trajectory_enrollment', refId: run.enr.id })
       return
@@ -805,12 +811,130 @@ export async function startEnrollment(tenantId: string, enrollmentId: string, ac
   return ok
 }
 
+// ── Шаг, который выполняет другой человек о нём ───────────────────────────────────────
+
+/**
+ * Виды «Завдання», которые проходит не учащийся, а другой человек о нём (решение владельца продукта
+ * 25.09.2026; docs/17 §5.2, docs/28 §28.21): чек-лист о человеке заполняет руководитель (или другой
+ * проверяющий), оценивание — оценщики цикла оценки. Учащемуся на таком шаге нажимать нечего: лента
+ * говорит, кого и чего он ждёт (`myTrajectory` → `review`), исполнителю уходит «людина чекає на цьому
+ * кроці» со ссылкой на заполнение, а засчитывает шаг тот же хук результата, что у остальных видов, —
+ * `onTaskResult` из `checklists.finishRun` (прогон о нём) и `assessment.finishCycle` (оценивание
+ * завершено). Значение — право руководителя на своё действие (docs/20 §2): заполнить чек-лист,
+ * запустить цикл оценки.
+ */
+export const REVIEWED_STEPS = { check_list: 'checklist.run', assessment: 'assessment.run' } as const
+export type ReviewedType = keyof typeof REVIEWED_STEPS
+export const isReviewedStep = (contentType: string | null | undefined): contentType is ReviewedType => !!contentType && Object.prototype.hasOwnProperty.call(REVIEWED_STEPS, contentType)
+
+/** Открытый шаг, который ждёт другого человека. */
+interface ReviewedStep { stateId: string, enrollmentId: string, userId: string, trajectory: string, step: string | null, contentType: ReviewedType, contentId: string }
+
+/** Что лента показывает на таком шаге: кто выполнит (имя руководителя; null — ушло администраторам) и до когда идёт оценивание. */
+export interface StepReview { kind: 'checklist' | 'assessment', person: string | null, until: Date | null }
+
+/**
+ * Руководитель, который выполнит шаг за человека: только `resolveManager()` (П-16.4) и только с
+ * правом на действие (`scope`) — иначе ссылка из уведомления привела бы его на запрет.
+ */
+async function reviewingManager(tx: TenantTx, userId: string, scope: string): Promise<{ id: string, name: string } | null> {
+  const managerId = await managerIdOf(tx, userId)
+  if (!managerId) return null
+  const [m] = await tx.execute(sql`
+    select u.full_name from users u
+    where u.id = ${managerId}::uuid and u.status = 'active' and not u.is_blocked
+      and exists (select 1 from user_roles ur join roles r on r.id = ur.role_id
+                  where ur.user_id = u.id and ${scope} = any(r.scopes) and (ur.valid_until is null or ur.valid_until > now()))`) as unknown as { full_name: string }[]
+  return m ? { id: managerId, name: m.full_name } : null
+}
+
+/** Кому «людина чекає»: руководитель с правом на действие, иначе администраторы тенанта — шаг не виснет молча. */
+async function reviewRecipients(tx: TenantTx, tenantId: string, userId: string, scope: string): Promise<string[]> {
+  const m = await reviewingManager(tx, userId, scope)
+  if (m) return [m.id]
+  return (await tenantAdminIds(tx, tenantId)).filter(id => id !== userId)
+}
+
+/** Идёт ли оценивание человека по анкете: ближайший конец окна среди незавершённых циклов, где он оцениваемый. */
+async function assessmentUntil(tx: TenantTx, userId: string, formId: string): Promise<Date | null> {
+  const rows = await tx.select({ endsAt: assessmentCycles.endsAt }).from(assessmentCycles)
+    .where(and(eq(assessmentCycles.formId, formId), inArray(assessmentCycles.status, ['active', 'calibration']),
+      sql`exists (select 1 from assessment_tasks t where t.cycle_id = ${assessmentCycles.id} and t.subject_user_id = ${userId}::uuid)`))
+  return rows.length ? new Date(Math.min(...rows.map(r => r.endsAt.getTime()))) : null
+}
+
+/**
+ * «Людина чекає на цьому кроці траєкторії» — тому, кто должен выполнить шаг, со ссылкой на заполнение.
+ * Чек-лист — руководителю: форма прогона о человеке. Оценивание — оценщикам активного цикла этой
+ * анкеты (кроме самого человека): их анкета о нём; если цикл не запущен — тому, кто запускает
+ * (руководителю с `assessment.run`): экран запуска с анкетой и человеком. Ключ дедупликации — состояние
+ * узла × адресат × действие: повторный вызов при старте цикла дошлёт только новым оценщикам.
+ */
+async function notifyReviewers(tx: TenantTx, tenantId: string, s: ReviewedStep): Promise<number> {
+  const [person] = await tx.select({ name: users.fullName }).from(users).where(eq(users.id, s.userId))
+  const contentTitle = (await findContent(tx, s.contentType, s.contentId))?.title ?? s.step ?? ''
+  let n = 0
+  const send = async (userId: string, code: string, key: string, payload: Record<string, unknown>) => {
+    const sent = await enqueueNotification(tx, {
+      tenantId, userId, code, payload: { title: s.trajectory, step: s.step, name: person?.name ?? '', ...payload },
+      dedupKey: `trajectory_review:${s.stateId}:${key}`, refType: 'trajectory_enrollment', refId: s.enrollmentId,
+    })
+    if (sent) n++
+  }
+  if (s.contentType === 'check_list') {
+    const url = `/learn/checklists/run/trj-${s.stateId}?checklistId=${s.contentId}&subjectUserId=${s.userId}`
+    for (const r of await reviewRecipients(tx, tenantId, s.userId, REVIEWED_STEPS.check_list)) await send(r, 'trajectory_checklist_waiting', r, { checklist: contentTitle, url })
+    return n
+  }
+  const raters = await tx.select({ taskId: assessmentTasks.id, raterId: assessmentTasks.raterUserId }).from(assessmentTasks)
+    .innerJoin(assessmentCycles, eq(assessmentCycles.id, assessmentTasks.cycleId))
+    .where(and(eq(assessmentCycles.formId, s.contentId), eq(assessmentCycles.status, 'active'), eq(assessmentTasks.subjectUserId, s.userId),
+      inArray(assessmentTasks.status, ['pending', 'in_progress']), ne(assessmentTasks.raterUserId, s.userId)))
+  for (const r of raters) await send(r.raterId, 'trajectory_assessment_waiting', `${r.raterId}:fill:${r.taskId}`, { form: contentTitle, fill: true, url: `/learn/assessment/tasks/${r.taskId}` })
+  if (!await assessmentUntil(tx, s.userId, s.contentId)) {
+    const url = `/admin/assessment/cycles?formId=${s.contentId}&subjectId=${s.userId}`
+    for (const r of await reviewRecipients(tx, tenantId, s.userId, REVIEWED_STEPS.assessment)) await send(r, 'trajectory_assessment_waiting', `${r}:launch`, { form: contentTitle, launch: true, url })
+  }
+  return n
+}
+
+/**
+ * Цикл оценки стартовал (`assessment.startCycle`): у людей, которые уже ждут на шаге-оценивании этой
+ * анкеты, появились оценщики — им «людина чекає» со ссылкой на анкету. Внутри транзакции старта цикла.
+ */
+export async function notifyWaitingReviewers(tx: TenantTx, tenantId: string, contentType: ReviewedType, contentId: string, userIds: string[]): Promise<number> {
+  if (!userIds.length) return 0
+  const rows = await tx.select({
+    stateId: trajectoryNodeStates.id, enrollmentId: trajectoryEnrollments.id, userId: trajectoryEnrollments.userId, trajectory: trajectories.title, step: trajectoryNodes.title,
+  }).from(trajectoryNodeStates)
+    .innerJoin(trajectoryNodes, eq(trajectoryNodes.id, trajectoryNodeStates.nodeId))
+    .innerJoin(trajectoryEnrollments, eq(trajectoryEnrollments.id, trajectoryNodeStates.enrollmentId))
+    .innerJoin(trajectories, eq(trajectories.id, trajectoryEnrollments.trajectoryId))
+    .where(and(
+      inArray(trajectoryEnrollments.userId, userIds), eq(trajectoryEnrollments.status, 'in_progress'), isNull(trajectoryEnrollments.cancelledAt),
+      eq(trajectoryNodes.kind, 'task'), eq(trajectoryNodes.contentType, contentType), eq(trajectoryNodes.contentId, contentId),
+      inArray(trajectoryNodeStates.status, ['available', 'in_progress']),
+    ))
+  let n = 0
+  for (const r of rows) n += await notifyReviewers(tx, tenantId, { ...r, contentType, contentId })
+  return n
+}
+
+/** Шаг ленты, который ждёт другого человека: кто его выполнит и до когда идёт оценивание — считает сервер. */
+async function stepReview(tx: TenantTx, userId: string, contentType: ReviewedType, contentId: string): Promise<StepReview> {
+  if (contentType === 'check_list') return { kind: 'checklist', person: (await reviewingManager(tx, userId, REVIEWED_STEPS.check_list))?.name ?? null, until: null }
+  const until = await assessmentUntil(tx, userId, contentId)
+  return { kind: 'assessment', person: until ? null : (await reviewingManager(tx, userId, REVIEWED_STEPS.assessment))?.name ?? null, until }
+}
+
 const RESULT_TYPE: Record<string, ContentType> = { course: 'course', quiz: 'test', test: 'test', workshop: 'workshop', meetup: 'meetup', webinar: 'webinar', resource: 'resource', complex_test: 'complex_test', training_program: 'training_program', poll: 'poll', assessment: 'assessment', check_list: 'check_list', notice: 'notice' }
 
 /**
  * Результат по контенту у человека (вызывается там же, где programs.onItemResult).
  * Пройдено → узел done, дальше по графу. Не пройдено → узел failed только если за ним стоит
  * «Розгалуження» (ему нужен результат); иначе узел остаётся открытым — человек пробует ещё.
+ * У шагов, которые выполняет другой человек (`REVIEWED_STEPS`), «человек» — тот, о ком результат:
+ * проверяемый прогона чек-листа (`checklists.finishRun`), оцениваемый цикла (`assessment.finishCycle`).
  */
 export async function onTaskResult(tenantId: string, userId: string, itemType: string, contentId: string, result: { passed: boolean, score?: number | null }): Promise<number> {
   const contentType = RESULT_TYPE[itemType]
@@ -990,6 +1114,12 @@ export async function myTrajectory(ctx: Ctx, enrollmentId: string, opts: { any?:
     }
     const asgIds = [...states.values()].map(s => s.assignmentId).filter((x): x is string => !!x)
     const enrs = asgIds.length ? await tx.select({ id: enrollments.id, assignmentId: enrollments.assignmentId, status: enrollments.status, progress: enrollments.progressPct }).from(enrollments).where(and(inArray(enrollments.assignmentId, asgIds), eq(enrollments.userId, enr.userId), isNull(enrollments.cancelledAt))) : []
+    // Открытый шаг, который выполняет другой человек о нём (решение 25.09.2026): кого и чего ждём
+    const reviews = new Map<string, StepReview>()
+    for (const id of order) {
+      const n = g.byId.get(id)!, st = states.get(id)?.status
+      if (n.kind === 'task' && isReviewedStep(n.contentType) && n.contentId && (st === 'available' || st === 'in_progress')) reviews.set(id, await stepReview(tx, enr.userId, n.contentType, n.contentId))
+    }
     const steps = order.filter(id => !['start', 'finish'].includes(g.byId.get(id)!.kind) && states.get(id)?.status !== 'skipped').map((id) => {
       const n = g.byId.get(id)!, s = states.get(id)
       const ce = enrs.find(e => e.assignmentId === s?.assignmentId)
@@ -997,6 +1127,7 @@ export async function myTrajectory(ctx: Ctx, enrollmentId: string, opts: { any?:
         nodeId: id, kind: n.kind, title: n.title ?? titles.get(id) ?? null, contentTitle: titles.get(id) ?? null, contentType: n.contentType, contentId: n.contentId, days: n.days,
         status: s?.status ?? 'locked', activatedAt: s?.activatedAt ?? null, finishedAt: s?.finishedAt ?? null, firesAt: s?.firesAt ?? null, score: s?.score ?? null, passed: s?.passed ?? null, reason: s?.reason ?? null,
         assignmentId: s?.assignmentId ?? null, courseEnrollmentId: ce?.id ?? null, courseProgress: ce?.progress ?? null,
+        review: reviews.get(id) ?? null,
       }
     })
     const tasks = steps.filter(s => s.kind === 'task')

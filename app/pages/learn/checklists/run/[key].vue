@@ -16,6 +16,8 @@ interface CL { id: string, title: string, items: Item[], scale: { options: Opt[]
 const cl = ref<CL | null>(null)
 const run = ref<OfflineRun | null>(null)
 const people = ref<{ id: string, fullName: string }[]>([])
+/** Про кого прогін: ссылка «людина чекає» с шага траектории несёт `subjectUserId` (docs/28 §28.21). */
+const subjectName = ref('')
 const error = ref('')
 const flagged = ref<string[]>([])
 const stage = ref<'fill' | 'result'>('fill')
@@ -33,10 +35,13 @@ onMounted(async () => {
     try { cl.value = JSON.parse(localStorage.getItem(CACHE) || 'null') } catch { /* ignore */ }
     if (!cl.value) { error.value = t('cl.needOnlineFirst'); return }
   }
-  run.value = offline.load(key) ?? { key, runId: null, checklistId, locationId: route.query.locationId ? String(route.query.locationId) : undefined, startedAt: new Date().toISOString(), answers: {}, actionPlan: [], pendingFinish: false }
+  run.value = offline.load(key) ?? { key, runId: null, checklistId, locationId: route.query.locationId ? String(route.query.locationId) : undefined, subjectUserId: route.query.subjectUserId ? String(route.query.subjectUserId) : undefined, startedAt: new Date().toISOString(), answers: {}, actionPlan: [], pendingFinish: false }
   for (const it of cl.value.items) run.value.answers[it.id] ??= { value: null, comment: '', isNa: false, photos: [] }
   offline.save(run.value)
   try { people.value = (await api<{ id: string, fullName: string }[]>('/people?limit=100')).map(p => ({ id: p.id, fullName: p.fullName })) } catch { people.value = me.value ? [{ id: me.value.user.id, fullName: me.value.user.fullName }] : [] }
+  if (run.value.subjectUserId) {
+    try { subjectName.value = (await api<{ fullName: string }>(`/people/${run.value.subjectUserId}`)).fullName } catch { /* офлайн — имя покажем в следующий раз, прогон всё равно о нём */ }
+  }
 })
 const groups = computed(() => { const m = new Map<string, Item[]>(); for (const it of cl.value?.items ?? []) { const g = it.group || ''; m.set(g, [...(m.get(g) ?? []), it]) } return [...m] })
 const location = computed(() => (route.query.locationName ? String(route.query.locationName) : ''))
@@ -106,6 +111,7 @@ const itemText = (id: string) => cl.value?.items.find(i => i.id === id)?.text ??
       <NuxtLink to="/learn/checklists" class="back" :aria-label="t('common.back')">←</NuxtLink>
       <h1>{{ cl.title }}<template v-if="location"> · {{ location }}</template></h1>
     </div>
+    <p v-if="subjectName" class="about" data-testid="run-subject">{{ t('cl.aboutPerson', { name: subjectName }) }}</p>
     <div class="bar" role="progressbar" :aria-valuenow="done" :aria-valuemax="cl.items.length"><i :style="{ width: `${cl.items.length ? (done / cl.items.length) * 100 : 0}%` }" /></div>
     <p class="points"><b>{{ localScore?.points ?? 0 }}</b><span>{{ t('cl.pointsOf', { max: cl.maxPoints }) }} · {{ localScore?.score ?? 0 }}%</span></p>
     <p v-if="!offline.online.value" class="offline">{{ t('cl.offlineFill') }}</p>
@@ -173,6 +179,7 @@ const itemText = (id: string) => cl.value?.items.find(i => i.id === id)?.text ??
 .head { display: flex; align-items: center; gap: var(--space-3); }
 .back { color: var(--color-ink); text-decoration: none; font-weight: 900; font-size: 22px; }
 h1 { margin: var(--space-2) 0; font-weight: 900; font-size: 20px; letter-spacing: -0.01em; }
+.about { margin: 0 0 var(--space-2); font-weight: 700; color: var(--color-ink-muted); overflow-wrap: anywhere; }
 .bar { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); transition: width 0.2s; }
 .points { display: flex; align-items: baseline; gap: var(--space-2); margin: var(--space-2) 0; }

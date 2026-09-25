@@ -2,10 +2,18 @@
 /**
  * Лента прохождения траектории по мокапу MyTrajectory: «Пройдено 4 з 9», процент, шаги в колонку —
  * пройденные бирюзовые с галочкой, текущий солнечный, будущие приглушённые; затримка — «Відкриється {дата}».
- * Только фактический путь человека, без канвы (docs/17 §5.2). Сервер считает, компонент показывает.
+ * Шаг, который выполняет другой человек о нём (чек-лист, оценивание), — статус «Очікує…» и пояснение,
+ * кто и что сделает, без кнопки. Только фактический путь человека, без канвы (docs/17 §5.2).
+ * Сервер считает, компонент показывает.
  */
 const { formatDate } = useFormat()
-export interface Step { nodeId: string, kind: string, title: string | null, contentTitle: string | null, contentType: string | null, contentId: string | null, days: number | null, status: string, activatedAt: string | null, finishedAt: string | null, firesAt: string | null, score: string | null, passed: boolean | null, reason: string | null, assignmentId: string | null, courseEnrollmentId: string | null, courseProgress: string | null }
+/**
+ * Шаг, который выполняет другой человек о нём (решение владельца 25.09.2026, docs/17 §5.2): кто
+ * выполнит (`person` — имя руководителя; null — уведомлены администраторы) и до когда идёт оценивание
+ * (`until`). Считает сервер; есть только у открытого шага чек-листа или оценивания.
+ */
+export interface StepReview { kind: 'checklist' | 'assessment', person: string | null, until: string | null }
+export interface Step { nodeId: string, kind: string, title: string | null, contentTitle: string | null, contentType: string | null, contentId: string | null, days: number | null, status: string, activatedAt: string | null, finishedAt: string | null, firesAt: string | null, score: string | null, passed: boolean | null, reason: string | null, assignmentId: string | null, courseEnrollmentId: string | null, courseProgress: string | null, review: StepReview | null }
 export interface Ladder { id: string, title: string, status: string, progressPct: string, mentorId: string | null, total: number, done: number, steps: Step[] }
 
 const props = defineProps<{ ladder: Ladder, mine?: boolean, canConfirm?: boolean }>()
@@ -22,11 +30,25 @@ function stepTitle(s: Step) {
   if (s.kind === 'stop_delay' && s.days != null) return t('traj.step.stopDelayTitle', { n: s.days })
   return s.title || s.contentTitle || t(`traj.kind.${s.kind}`)
 }
+/** Открытый шаг ждёт другого человека: кнопки нет, есть статус и пояснение — кто и что сделает. */
+const waiting = (s: Step) => !!s.review && (s.status === 'available' || s.status === 'in_progress')
+const waitLabel = (s: Step) => t(s.review?.kind === 'checklist' ? 'traj.step.waitingManager' : 'traj.step.waitingAssessment')
+function reviewNote(s: Step) {
+  const r = s.review!
+  if (r.kind === 'checklist') {
+    // Прогон о человеке был, но чек-лист не пройден: шаг ждёт повторной проверки (тот же хук, что у теста)
+    if (s.passed === false) return t('traj.review.checklistRetry', { score: Number(s.score ?? 0) })
+    return r.person ? t('traj.review.checklist', { name: r.person }) : t('traj.review.checklistAdmin')
+  }
+  if (r.until) return t('traj.review.assessmentRunning', { date: fmt(r.until) })
+  return r.person ? t('traj.review.assessmentLaunch', { name: r.person }) : t('traj.review.assessmentAdmin')
+}
 function stepSub(s: Step) {
   if (s.kind === 'task') {
     const type = s.contentType ? t(`contentType.${s.contentType}`) : ''
     if (s.status === 'done') return `${type} · ${t('traj.step.done')}${s.score != null ? ` ${Number(s.score)}%` : s.courseProgress != null ? ' 100%' : ''}`
     if (s.status === 'failed') return `${type} · ${s.reason === 'access_closed' ? t('traj.step.closed') : t('traj.step.failed')}`
+    if (waiting(s)) return type
     if (s.status === 'available' || s.status === 'in_progress') return `${type} · ${s.courseProgress != null && Number(s.courseProgress) > 0 ? t('traj.step.inProgress', { n: Number(s.courseProgress) }) : t('traj.step.open')}`
     return `${type} · ${t('traj.step.notAssigned')}`
   }
@@ -56,6 +78,8 @@ function stepLink(s: Step) {
     case 'notice': return `/learn/notices/${s.contentId}`
     case 'training_program': return '/learn/programs'
     case 'poll': return '/learn/surveys'
+    // Чек-лист и оценивание выполняет не учащийся, а другой человек о нём (решение 25.09.2026):
+    // вести некуда — шаг показывает, кого ждёт (`waiting`), и засчитывается сам
     default: return null
   }
 }
@@ -79,6 +103,7 @@ function stepLink(s: Step) {
           <template v-if="tone(s) === 'done'">✓</template>
           <template v-else-if="tone(s) === 'failed'">×</template>
           <template v-else-if="tone(s) === 'future'">🔒</template>
+          <template v-else-if="waiting(s)">…</template>
           <template v-else>→</template>
         </span>
         <div class="body">
@@ -87,6 +112,11 @@ function stepLink(s: Step) {
           <NuxtLink v-if="stepLink(s)" :to="stepLink(s)!" class="step-title">{{ stepTitle(s) }}</NuxtLink>
           <span v-else class="step-title">{{ stepTitle(s) }}</span>
           <span class="step-sub">{{ stepSub(s) }}</span>
+          <!-- Шаг выполняет другой человек о нём: статус и пояснение вместо кнопки (docs/17 §5.2) -->
+          <template v-if="waiting(s)">
+            <span class="step-wait" :data-testid="`step-wait-${s.nodeId}`">{{ waitLabel(s) }}</span>
+            <span class="step-note">{{ reviewNote(s) }}</span>
+          </template>
           <button v-if="s.kind === 'mentor' && s.status === 'available' && canConfirm" class="btn primary small confirm" type="button" @click="emit('confirm', s.nodeId)">{{ t('traj.confirmStep') }}</button>
         </div>
       </li>
@@ -116,5 +146,7 @@ function stepLink(s: Step) {
 .step-title { font-weight: 800; color: inherit; text-decoration: none; }
 a.step-title { text-decoration: underline; }
 .step-sub { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.step-wait { font-weight: 800; color: var(--color-sun-ink); overflow-wrap: anywhere; }
+.step-note { font-size: var(--font-size-body-s); color: var(--color-ink-muted); overflow-wrap: anywhere; }
 .confirm { justify-self: start; margin-top: var(--space-2); }
 </style>

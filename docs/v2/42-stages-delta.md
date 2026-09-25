@@ -695,6 +695,38 @@ select to_regclass('public.storage_quota_addons');
 согласия на ИИ-собеседование, экран собеседования с записью голоса, «Підсумок кандидата».
 Кандидат приходит с телефона и чаще всего не имеет второго устройства. С этапа 13.
 
+### 5.1 Где исполняется каждая проверка — полный прогон PR-40
+
+> [дополнено, PR-40, полный прогон 25.09.2026 на свежей базе: `migrate` → `seed` → тесты] Каждая
+> проверка 9–24 сопоставлена с исполнителем. **Номера скрипта и номера этого раздела — разные ряды**:
+> `scripts/v2-crosschecks.sh` нумерует свои проверки 1–17 по порядку появления (1–5 — `HANDOFF`
+> §7.3), а журнал `46` местами называет «сквозной проверкой N» номер скрипта. Соответствие — в
+> колонке «Скрипт». Прогон: скрипт — 17 из 17 `[ok]`; 34 файла тестов ниже — 524 зелёных, 6
+> пропущено (HTTP-половины, которым нужна сборка `.output`; в CI идут после `pnpm build`).
+
+| `42` §5 | Проверка | Скрипт | Тест | Прогон PR-40 |
+|---:|---|:-:|---|---|
+| 9 | ветвление по коду этапа — только `stageCan()` | 1 | фикстуры скрипта — `tests/unit/v2-crosschecks.spec.ts` | `[ok]`, 51 зелёный |
+| 10 | ни одна выборка людей без явного `kind` | 2 | слой 2 (сканер) и слой 3 (канарейка) — `tests/integration/users-kind-filter.spec.ts`; итоговый SQL конструктора — `tests/unit/report-builder-kind.spec.ts`; отчёты по штату — `reports-kind.spec.ts`; журналы — `logs-candidate-kind.spec.ts` (#143); **интеграционный тест документа** («≥3 кандидатов на тенант: список сотрудников, адресаты рассылки, отчёт по штату, `users_active`, выгрузка») — `tests/integration/v2-handoff-74-candidates.spec.ts` (PR-40) | `[ok]`; 15 + 18 + 13 + 15 + 20 зелёных |
+| 11 | перечень `media_assets.origin` = `40` §4.2, ровно один `check` | — | `tests/integration/v2-contract-04-media-origin.spec.ts` | 3 зелёных |
+| 12 | RLS `enable`+`force`, tenant-first индекс; сводная на все таблицы | — | `v2-contract-01-rls`, `-02-tenant-index`, `-03-tenants-fk`; сводная (тест 6 `40` §8) — `v2-contract-06-package-tables.spec.ts` (PR-40): 74 тенантные + 3 платформенные, на длину | 2 + 1 + 1 + 8 зелёных |
+| 13 | вакансия не носитель правил прохождения | 7 | `tests/unit/vacancy-rules.spec.ts` («сквозная проверка 13»); правка вакансии не меняет созданного назначения — `tests/integration/v2-vacancies.spec.ts` (`29` §13 к. 8), `tests/e2e/vacancies.spec.ts` | `[ok]`; 19 + 19 зелёных |
+| 14 | выключенная возможность этапа не лежит в `params` | — | `tests/integration/v2-lifecycle-params.spec.ts` («42 §5, сквозная проверка 14»: SQL по всей базе + контрольный ключ мимо сервиса) | 14 зелёных |
+| 15 | кандидат не в оплачиваемом лимите сотрудников | — | SQL дословно — `tests/integration/v2-billing-usage.spec.ts` и `v2-handoff-74-candidates.spec.ts`; найм: `users_active` +1, `candidates_active` −1 одной транзакцией — `tests/integration/v2-candidates-funnel.spec.ts` | 36 + 28 зелёных |
+| 16 | публичный контур изолирован: чужой токен — 404 | 8 | `tests/integration/v2-vacancy-apply.spec.ts` («изоляция публичного контура»). Путь по факту — `/api/v1/public/…`, а не `/api/public/v1/…` (`41` §3) | `[ok]`; 26 зелёных |
+| 17 | ИИ ничего не решает о людях | 14, 16 | балл без обоснования и цитаты не сохраняется, сессия `needs_human` — `tests/integration/v2-interview.spec.ts` (`30` §13 к. 4, 5) | `[ok]`; 21 зелёный |
+| 18 | голос не живёт дольше срока | 17 | SQL дословно после `interview.media_purge` — `tests/integration/v2-ai-summary.spec.ts`; `provider_retention='unknown'` не назначается на `transcribe` — `v2-ai-providers.spec.ts`, `tests/unit/ai-gateway-rules.spec.ts`, по HTTP — `v2-ai-http.spec.ts` | `[ok]`; 14 + 17 + 24 зелёных |
+| 19 | уведомления кандидату — вне тихих часов, внутри 09:00–20:00 | 10 | `tests/integration/v2-notify-37.spec.ts`, `tests/unit/v2-notify-37-quiet-hours.spec.ts` | `[ok]`; 8 + 5 зелёных |
+| 20 | делегирование не расширяет доступ к ПД кандидата | — | `tests/integration/v2-crosscheck-20-delegation-pd.spec.ts` — сервисом и по HTTP | 5 зелёных; 3 HTTP — в CI |
+| 21 | очередь проверки не пересоздаётся | 6 | — (grep) | `[ok]` |
+| 22 | время — биениями, а не «открыл — закрыл» | 11 | `tests/integration/v2-learning-time.spec.ts` (блок «сквозная проверка 22»), `tests/unit/learning-time.spec.ts` | `[ok]`; 20 + 27 зелёных |
+| 23 | один механизм докупки объёма | — | `to_regclass('public.storage_quota_addons')` — `v2-billing-limits.spec.ts`, `v2-storage-quota.spec.ts`, `v2-contract-06` («null или представление»); одна функция эффективного лимита на баннер и счёт — `v2-storage-quota.spec.ts`, `tests/unit/storage-one-formula.spec.ts` | 26 + 33 (3 HTTP — в CI) + 6 зелёных |
+| 24 | 320 px: публичные и кандидатские экраны | — | `/j/:token` и форма отклика — `tests/e2e/vacancy-apply.spec.ts`; «Підсумок кандидата» — `tests/e2e/candidate-summary.spec.ts` (обе меряют горизонтальный скролл на 320 px; в CI после сборки). **Экран согласия на ИИ-собеседование и экран собеседования с записью голоса автоматической проверки на 320 px не имеют** | **частично**: три экрана из пяти — e2e в CI; два — ручной шаг владельца на стенде (описание PR-40) и долг в `46` (запись PR-40) |
+
+Проверки скрипта вне этого раздела: 3–5 — базовые `HANDOFF` §7.3 (драйвер мимо `withTenant()`, i18n, токены),
+9 — единственный `resolveManager()` (П-16.4), 12 — Bearer только скоупами и одна лента платформы (В-20, П-21),
+13 — норма времени не входит в балл (`37` §7.14 б), 15 — вызов модели только через шлюз (`30` §7.16).
+
 ---
 
 ## 6. Критерии приёмки этапов

@@ -3132,31 +3132,77 @@ ai_quality_sampled_by: auto | override
 
 ## Дельта пакета v2
 
-> Патч `docs/v2/39-patches.md` П-02. Пакет `docs/v2/` (рекрутинг, этапы жизненного цикла и
-> офбординг, ИИ в отборе, библиотека контента, оргструктура, хранилище, тарифы, обратная связь
-> по контенту, делегирование проверки, расширения карточки человека) заявляет 73 новые таблицы
-> и 14 `alter table` к существующим. Полная схема — `docs/v2/40-data-model-delta.md`; сверка с
-> фактическим состоянием репозитория — `docs/v2/43-reconciliation.md` §1 (три таблицы из 73 не
-> заводятся отдельно и заменяются `alter table` уже существующих: `org_conflicts` вместо
-> `org_structure_conflicts`, `user_notes` вместо `person_notes`, `tenant_addons` вместо
-> `storage_quota_addons` — итого 70 новых таблиц). Список одной строкой на подсистему:
+> [исправлено, PR-40, по факту миграций `0056`–`0096`] Ранее: «Патч `docs/v2/39-patches.md`
+> П-02. Пакет `docs/v2/` (рекрутинг, этапы жизненного цикла и офбординг, ИИ в отборе, библиотека
+> контента, оргструктура, хранилище, тарифы, обратная связь по контенту, делегирование проверки,
+> расширения карточки человека) заявляет 73 новые таблицы и 14 `alter table` к существующим.
+> Полная схема — `docs/v2/40-data-model-delta.md`; сверка с фактическим состоянием репозитория —
+> `docs/v2/43-reconciliation.md` §1 (три таблицы из 73 не заводятся отдельно и заменяются
+> `alter table` уже существующих: `org_conflicts` вместо `org_structure_conflicts`, `user_notes`
+> вместо `person_notes`, `tenant_addons` вместо `storage_quota_addons` — итого 70 новых таблиц).
+> Список одной строкой на подсистему» (таблица почти вся из прочерков — факт не был сверен).
 
-| Подсистема | Документ пакета | Новых таблиц |
-|---|---|---:|
-| Рекрутинг: кандидаты и вакансии | `docs/v2/28-recruiting-candidates.md`, `29-vacancies.md` | по счётчикам `40` §2 |
-| Жизненный цикл и офбординг | `docs/v2/33-lifecycle.md` | — |
-| ИИ-собеседование | `docs/v2/30-ai-interview.md` | — |
-| Библиотека модулей | `docs/v2/31-module-library.md` | 4 (PR-25; §2.4 выше) |
-| Оргструктура | `docs/v2/32-org-structure.md` | — |
-| Хранилище | `docs/v2/34-storage.md` | — |
-| Тариф и лимиты | `docs/v2/35-billing-limits.md` | — |
-| Обратная связь по контенту | `docs/v2/36-content-feedback.md` | — |
-| Делегирование проверки | `docs/v2/37-review-delegation.md` | — |
-| Расширения карточки человека | `docs/v2/38-people-extensions.md` | — |
+Патч `docs/v2/39-patches.md` П-02. По факту `create table` в миграциях `server/db/migrations/
+0056_v2_*.sql`…`0096_v2_*.sql` пакет завёл **76 таблиц: 73 тенантные и 3 платформенные**
+(`plan_prices`, `plan_addons`, `platform_announcements`) — не 70. Из 73 таблиц §2
+`docs/v2/40-data-model-delta.md` (71 Т + 2 П) отдельно не заведены три (решения
+`docs/v2/44-decisions.md`, `docs/v2/43-reconciliation.md` §1):
 
-Точный список таблиц и колонок каждой подсистемы — в `docs/v2/40-data-model-delta.md` §2 и §3;
-этот документ переносить построчно не нужно, он остаётся источником истины и обновляется по
-мере реализации PR пакета (`docs/v2/45-plan.md`).
+- `org_structure_conflicts` → `alter table org_conflicts` (В-7, PR-30, миграция 0075);
+- `person_notes` → `alter table user_notes` (`43` §1.2, PR-32, миграция 0082);
+- `storage_quota_addons` → строка `tenant_addons` с осью `storage_pack` (Р-6, PR-08/36,
+  миграция 0059) — без отдельной таблицы и без `alter`.
+
+Сверх §2 заведено шесть таблиц, которых план не называл: `review_queue_items` (В-2, PR-18 —
+таблица с нуля вместо витрины из двух запросов на лету: самой таблицы в базе не было);
+`platform_announcement_reads`, `position_groups`, `user_totp`, `user_totp_recovery_codes`
+(патчи `docs/v2/39` П-21, П-24.5, П-24.1 — PR-39) и платформенная `platform_announcements`
+(П-21, П-24.2, PR-39). Итог: 73 − 3 + 6 = **76**.
+
+Таблиц базового ТЗ, получивших фактический `alter table` (колонка добавлена, снята или расширен
+CHECK) — **23**, а не 15: из пятнадцати таблиц §3.1 (14 + `enrollments`) состоялись 14 —
+пятнадцатая, `review_queue_items`, оказалась новой таблицей (см. выше), а не `alter`; сверх плана
+задеты ещё девять — `tenants`, `org_conflicts`, `user_notes` (это и есть `org_structure_conflicts`/
+`person_notes` выше), `notifications`, `course_categories`, `attempt_results`, `positions`,
+`automation_rules`, `sessions`. Разбор по колонкам — в «Изменения существующих таблиц по факту»
+в конце этого раздела.
+
+Состав по факту — таблица на файл миграции (каждая из 76 таблиц пакета встречается в ней ровно
+один раз):
+
+| Подсистема | Документ | Таблицы (Т/П) | Миграция | PR | Где описаны колонки |
+|---|---|---|---|---|---|
+| Жизненный цикл | `33` §3.2 | `lifecycle_stages` (Т) | 0057 | PR-05 [#92] | выше, «Сквозные таблицы…» |
+| Тариф и лимиты | `35` §3.1–3.4 | `plan_prices` (П), `plan_addons` (П), `tenant_addons` (Т) | 0059 | PR-08 [#94] | `docs/v2/35` §3.1–3.4 + миграция |
+| Жизненный цикл, офбординг | `33` §3.5–3.6 | `employee_lifecycle_state`, `offboarding_cases` (Т) | 0060 | PR-07 [#95] | выше, «Сквозные таблицы…» |
+| Тариф и лимиты | `35` §3.3, 3.5, 3.6 | `usage_counters`, `usage_events`, `limit_notices` (Т) | 0061 | PR-09 [#96] | `docs/v2/35` §3.3 и далее + миграция |
+| Рекрутинг: кандидаты | `28` §3.2–3.6 | `candidate_statuses`, `candidate_scores`, `candidate_comments`, `candidate_status_history` (Т) | 0064 | PR-13 [#98] | `docs/v2/28` §3.2–3.6 + миграция |
+| Проверка и делегирование | `37` §3.1 | `review_queue_items` (Т) | 0066 | PR-18 [#100] | выше, «Очередь проверки» |
+| Обратная связь по контенту | `36` §3.2–3.4 | `content_issues`, `content_reports`, `content_issue_events`, `content_reporter_stats` (Т) | 0069 | PR-23 [#103] | `docs/v2/36` §3.2–3.4 + миграция |
+| Рекрутинг: вакансии | `29` §3.1–3.4 | `vacancy_templates`, `vacancies`, `vacancy_languages`, `vacancy_criteria`, `vacancy_criterion_scores` (Т) | 0071 | PR-15 [#106] | `docs/v2/29` §3.1–3.4 + миграция |
+| Тариф и лимиты | `35` §3.5–3.6 | `tenant_payments`, `plan_change_requests` (Т) | 0073 | PR-10 [#110] | `docs/v2/35` §3.5–3.6 + миграция |
+| Рекрутинг: вакансии | `29` §3.9 | `vacancy_applications`, `public_apply_attempts` (Т) | 0074 | PR-16 [#109] | `docs/v2/29` §3.9 + миграция |
+| Оргструктура | `32` §3 | `org_nodes`, `org_node_assignments`, `org_manager_map`, `org_structure_snapshots` (Т) | 0075 | PR-30 [#111] | выше, «Сквозные таблицы…» |
+| Обратная связь по контенту | `36` §3.2, §4 | `content_issue_routing_rules` (Т) | 0077 | PR-24 [#117] | `docs/v2/36` §3.2, §4 + миграция |
+| Проверка и делегирование | `37` §3.6 | `learning_time_sessions`, `learning_time_totals` (Т) | 0078 | PR-21 [#116] | выше, «Учёт времени обучения» |
+| Проверка и делегирование | `37` §3.2–3.4 | `review_routing_rules`, `review_delegations`, `reviewer_capacity`, `reviewer_absences`, `review_sla_events`, `reviewer_stats_daily` (Т) | 0080 | PR-19 [#118] | выше, «Делегирование, распределение, SLA» |
+| Библиотека модулей | `31` §3 | `library_modules`, `library_module_versions`, `library_module_usages`, `library_module_proposals` (Т) | 0081 | PR-25 [#119] | `docs/v2/31` §3 + миграция |
+| Расширения карточки человека | `38` §3.4–3.5 | `person_document_types`, `person_documents` (Т) | 0082 | PR-32 [#121] | `docs/v2/38` §3.4–3.5 + миграция |
+| Хранилище | `34` §3.3 | `storage_usage_counters`, `storage_usage_daily`, `storage_retention_policies`, `storage_deletion_requests`, `storage_pending_uploads` (Т) | 0083 | PR-36 [#122] | `docs/v2/34` §3.3 + миграция |
+| Настройки (патчи `39`) | П-21, П-24.5, П-24.1 | `platform_announcements` (П), `platform_announcement_reads`, `position_groups`, `user_totp`, `user_totp_recovery_codes` (Т) | 0084 | PR-39 [#124] | ниже в этом разделе, «Настройки тенанта и платформы» |
+| Расширения карточки человека | `38` §3.6 | `absence_norms` (Т) | 0084 | PR-39 [#124] | ниже в этом разделе, «Настройки тенанта и платформы» |
+| Проверка и делегирование | `37` §3.5 | `content_time_norms` (Т) | 0085 | PR-22 [#126] | выше, «Нормы времени на контент» |
+| Рекрутинг: вакансии | `29` §3.7–3.10 | `job_board_accounts`, `vacancy_publications`, `vacancy_ai_generations` (Т) | 0086 | PR-17 [#125] | `docs/v2/29` §3.7–3.10 + миграция |
+| Расширения карточки человека | `38` §3.6, §7.13–14 | `absence_records` (Т) | 0090 | PR-33 [#133] | ниже в этом разделе, «Факты отсутствий и сдвиг дедлайнов» |
+| ИИ | `30` §3.2 | `ai_providers`, `ai_calls` (Т) | 0091 | PR-27 [#134] | `docs/v2/30` §3.2 + миграция |
+| Расширения карточки человека | `38` §3.3 | `user_activity_events`, `user_activity_daily` (Т) | 0093 | PR-34 [#135] | `docs/v2/38` §3.3 + миграция |
+| Расширения карточки человека | `38` §3.7 | `person_rating_snapshots` (Т) | 0094 | PR-35 [#137] | `docs/v2/38` §3.7 + миграция |
+| ИИ-собеседование | `30` §3.1, §3.3 | `interview_scenarios`, `interview_criteria`, `interview_consents`, `interview_sessions`, `interview_turns`, `interview_criterion_scores` (Т) | 0095 | PR-28 [#139] | `docs/v2/30` §3.1, §3.3 + миграция |
+| ИИ-собеседование | `30` §3.5–3.6 | `candidate_summaries`, `ai_review_hints`, `ai_quality_reviews` (Т) | 0096 | PR-29 [#142] | `docs/v2/30` §3.5–3.6 + миграция |
+
+`docs/v2/40-data-model-delta.md` §2–§3 остаётся историческим планом (что задумывалось до
+реализации); состав и колонки по факту — таблица выше и разделы «Изменения существующих таблиц
+по факту» и «Перечни вне ENUMS» в конце этого документа.
 
 **Обратная связь по контенту** (`docs/v2/36`) реализована двумя миграциями: `0069_v2_content_issues`
 (PR-23: `content_issues`, `content_reports`, `content_issue_events`, `content_reporter_stats`) и
@@ -3246,3 +3292,92 @@ create index idx_absence_records_tenant_range on absence_records (tenant_id, dat
 -- Дедлайн — параметр назначения (CLAUDE.md п. 11): сдвигается в записи на курс, контент не трогается
 alter table enrollments add column deadline_shifted_reason text;  -- deadline_shift_reason: absence
 ```
+
+### Изменения существующих таблиц по факту
+
+> [дополнено, PR-40, по факту миграций] Разбор всех `alter table … add column` / `drop column` /
+> `alter column` в файлах `_v2_*.sql`, плюс расширения CHECK там, где план предполагал новую
+> колонку, а по факту получилось иначе (`quizzes`). Таблицы пакета (`vacancies`, `review_queue_items`,
+> `candidate_scores`), которые тоже получили `alter` уже ПОСЛЕ своего создания той же миграцией
+> пакета, — не «существующие»; они отмечены отдельной строкой в конце первой таблицы ради полноты
+> ledger'а, но не считаются в «23» ниже и не входят в сравнение с `40` §3.1.
+
+| Таблица | Колонки добавлены | Колонки сняты/изменены | Миграции | PR |
+|---|---|---|---|---|
+| `users` | `kind`; `candidate_state`, `candidate_status_id`, `source`, `source_detail`, `recruiter_id`, `access_until`, `comm_language`, `resume_asset_id`, `converted_from_candidate_at`, `consent_given_at`, `consent_expires_at`; `candidate_state_at`, `anonymized_at`; `vacancy_id`; `timezone`; `rating_pct`, `rating_updated_at` — 18 | — | 0056, 0064, 0068, 0072, 0093, 0094 | PR-04, 13, 14, 15, 34, 35 |
+| `tenants` | `candidates_enabled` — 1 | — | 0056 | PR-04 |
+| `courses` | `lifecycle_stage_id`, `stage_locked` — 2 | — | 0057 | PR-05 |
+| `plans` | `title_uk`, `tier`, `ai_included`, `ai_term_days`, `addons_allowed`, `is_active`, `valid_from`, `valid_to`, `max_candidates`, `max_ai_generate_ops`, `max_ai_review_ops`, `max_ai_interview_ops`, `max_export_rows` — 13 | — | 0059 | PR-08 |
+| `tenant_limits` | `billing_period`, `status`, `paid_until`, `grace_until`, `ai_until`, `autorenew`, `currency`, `ai_status`, `candidates`, `ai_generate_ops`, `ai_review_ops`, `ai_interview_ops`, `export_rows` — 13 | — | 0059 | PR-08 |
+| `tenant_usage` | `plan_code`, `candidates_active`, `storage_by_category`, `ai_ops`, `sms_out`, `telegram_out`, `integrations_active`, `axes` — 8 | — | 0061 | PR-09 |
+| `media_assets` | `deleted_by`, `delete_reason`; `origin`, `course_id`, `stage_code`, `enrollment_id`, `source_entity`, `source_id`, `lifecycle`, `is_evidence`, `retention_until`, `orphaned_at`, `purge_after`, `last_accessed_at` — 14 | переименованы (не сняты): `uploaded_by`→`owner_user_id`, `checksum`→`checksum_sha256` (В-4) | 0062, 0063 | PR-11, 12 |
+| `org_conflicts` | `severity`, `node_id` — 2 | `CHECK kind` пересоздан: 4 → 10 значений (`ORG_CONFLICT_KINDS`) | 0075 | PR-30 |
+| `notifications` | `escalated_to_id` — 1 | — | 0075 | PR-30 |
+| `course_categories` | `owner_id` — 1 | — | 0077 | PR-24 |
+| `attempt_results` | `issue_id` — 1 | — | 0077 | PR-24 |
+| `lesson_progress` | `content_seconds`, `discarded_seconds`, `sessions_count` — 3 | — | 0078 | PR-21 |
+| `attempts` | `net_seconds`, `discarded_seconds` — 2 | — | 0078 | PR-21 |
+| `workshop_submissions` | `attempt_seconds`, `content_seconds` — 2 | сняты `reviewer_id`, `claimed_at`, `sla_due_at` (зеркало очереди, В-2 — уже отмечено в «Очередь проверки» выше) | 0078, 0087 | PR-21, 20 |
+| `attempt_answers` | `input_mode` — 1 | — | 0078 | PR-21 |
+| `lessons` | `library_module_id`, `library_version_id` — 2 | `module_id` стал nullable | 0081 | PR-25 |
+| `user_notes` | `visibility`, `category`, `is_pinned`, `flagged_at`, `flagged_terms`, `shared_at`, `archived_at` — 7 | — | 0082 | PR-32 |
+| `positions` | `group_id` — 1 | — | 0084 | PR-39 |
+| `automation_rules` | `position_id`, `position_group_id` — 2 | — | 0084 | PR-39 |
+| `sessions` | `two_factor_pending` — 1 | — | 0084 | PR-39 |
+| `trajectory_nodes` | `library_version_id` — 1 | — | 0088 | PR-26 |
+| `enrollments` | `deadline_shifted_reason` — 1 | — | 0090 | PR-33 |
+| `quizzes` | — 0 | `CHECK kind` расширен: `('quiz','certification')` → `('quiz','certification','interview')`; колонка `mode` из плана не добавлена (отменена решением В-12) | 0095 | PR-28 |
+| *(своя таблица пакета, не «существующая»)* `vacancies` | `public_language` (0074), `spam_hardened_until` (0086) | — | 0074, 0086 | PR-16, 17 |
+| *(своя таблица пакета)* `review_queue_items` | `claimed_by`, `claimed_at` | — | 0080 | PR-19 |
+| *(своя таблица пакета)* `candidate_scores` | `ai_stub` | — | 0095 | PR-28 |
+
+23 таблицы базового ТЗ (все строки выше без пометки «своя таблица пакета») получили фактический
+`alter`. Расхождения с планом `40` §3.1/§3.5 (14 таблиц + `enrollments`, всего 15):
+
+| Таблица | План (`40` §3.1/§3.5) | Факт | PR / причина |
+|---|---|---|---|
+| `users` | 16 колонок | 18 (+`candidate_state_at`, +`anonymized_at`) | PR-14, 0068 — метка времени статуса воронки и анонимизация ПД кандидата |
+| `quizzes` | +1 колонка `mode` | 0 новых колонок; расширен `CHECK` на `kind` до `('quiz','certification','interview')` | PR-28, 0095, В-12 — интервью — третье значение `kind`, не отдельный режим; `mode` отменена |
+| `plans` | 9 колонок, включая `sort` | 13: `sort` не добавлялась (существует с 0009); +5 неплановых `max_candidates`, `max_ai_generate_ops`, `max_ai_review_ops`, `max_ai_interview_ops`, `max_export_rows` | PR-08, 0059 — потолки тарифа сверх счётчиков `35` §3.1 |
+| `tenant_limits` | 10 колонок, включая `updated_at`, `updated_by` | 13: `updated_at`/`updated_by` существуют с 0041 (не добавлялись); +5 неплановых `candidates`, `ai_generate_ops`, `ai_review_ops`, `ai_interview_ops`, `export_rows` | PR-08, 0059 — фактические счётчики лимита рядом с потолками `plans` |
+| `tenant_usage` | колонка `plan_id` | колонка `plan_code` (text) | PR-09, 0061 — у `plans` первичный ключ `code`, не `id` |
+| `media_assets` | 19 колонок (список §3.3) | 14 через `add column` (включая неплановую `stage_code`) + 2 переименования существующих (`uploaded_by`, `checksum`) + 4 из 19 существовали до пакета (`created_at`, `category_id`, `deleted_at`, `original_name`) | PR-11/12, 0062–0063, В-4 |
+| `review_queue_items` | «21 колонка через `alter`» (план считал таблицу существующей) | таблицы не было: `create table` (PR-18, 0066) с этими колонками сразу; фактический `alter` позже — только `claimed_by`/`claimed_at` (PR-19, 0080) | В-2 — витрина двумя запросами, не таблица (см. «Очередь проверки» выше) |
+
+Сверх плана `alter` также получили `tenants`, `org_conflicts`, `notifications`, `course_categories`,
+`attempt_results`, `positions`, `automation_rules`, `sessions`, `user_notes` (две последние —
+факт превращения `org_structure_conflicts`/`person_notes` в `alter` существующих таблиц, а не
+неожиданность; остальные семь план не называл вовсе).
+
+### Перечни вне ENUMS (держатся CHECK, в `shared/enums.ts` не внесены)
+
+> [дополнено, PR-40, по факту миграций] Каждый `CHECK … in (…)` / `= any (array[…])` по
+> текстовой колонке во всех `_v2_*.sql`, чьё множество значений не совпадает ни с одним массивом
+> `shared/enums.ts`. Это не ошибка теста (`schema-parity.spec.ts` блок 3 сверяет с реестром
+> `ENUMS` только раздел «Перечисления, снятые с эталона» выше — сюда эти строки не переносятся,
+> правило см. в начале документа), а перечни, которые решили держать только в БД.
+
+| Таблица.колонка | Значения | Констрейнт | Миграция |
+|---|---|---|---|
+| `plan_prices.billing_period`, `tenant_limits.billing_period`, `tenant_payments.billing_period`, `plan_change_requests.billing_period` | `month`, `year` | `plan_prices_billing_period_check`, `tenant_limits_billing_period_check`, `tenant_payments_billing_period_check`, `plan_change_requests_billing_period_check` | 0059, 0073 |
+| `plan_addons.axis` | `LIMIT_AXES` (11) + служебное `ai_term` | `plan_addons_axis_check` | 0059 |
+| `plan_addons.term` | `period`, `perpetual` | `plan_addons_term_check` | 0059 |
+| `tenant_addons.source` | `purchase`, `grant`, `compensation` | `tenant_addons_source_check` | 0059 |
+| `tenant_limits.status` | `trial`, `active`, `grace`, `readonly`, `suspended` | `tenant_limits_status_check` | 0059 |
+| `tenant_limits.ai_status` | `active`, `expired`, `off` | `tenant_limits_ai_status_check` | 0059 |
+| `tenant_payments.kind` | `subscription`, `addon`, `adjustment` | `tenant_payments_kind_check` | 0073 |
+| `tenant_payments.status` | `pending`, `paid`, `failed`, `refunded`, `written_off` | `tenant_payments_status_check` | 0073 |
+| `tenant_payments.method` | `bank_transfer`, `card`, `manual` | `tenant_payments_method_check` | 0073 |
+| `plan_change_requests.status` | `preflight`, `blocked`, `scheduled`, `applied`, `cancelled` | `plan_change_requests_status_check` | 0073 |
+| `lifecycle_stages.color`, `candidate_statuses.color` | `ink`, `sun`, `teal`, `coral` (токены бренд-бука, CLAUDE.md п. 9) | `lifecycle_stages_color_check`, `candidate_statuses_color_chk` | 0057, 0064 |
+| `library_modules.content_kind` | `article`, `file`, `video`, `link` (подмножество `resources.kind` без `scorm`) | `library_modules_content_kind_chk` | 0081 |
+| `interview_scenarios.transcribe_lang`, `candidate_summaries.lang`, `vacancies.public_language` | `uk`, `en`, `ru` | `interview_scenarios_lang_chk`, `candidate_summaries_lang_chk`, `vacancies_public_language_chk` | 0095, 0096, 0074 |
+
+Дважды проверено и подтверждено «пробела нет» (упомянуты как подозрительные, но CHECK совпадает
+с `ENUMS` по значениям):
+
+- `limit_notices.axis`/`limit_notices.level` — полностью совпадают с `LIMIT_AXES` (11 значений,
+  без `ai_term`) и `LIMIT_NOTICE_LEVELS`;
+- `candidate_statuses.maps_to` (`active, hired, rejected, archived, withdrawn`) — не отдельный
+  перечень: набор значений совпадает с `candidate_state` (`ENUMS.candidate_state`), заводить
+  вторую запись не нужно.

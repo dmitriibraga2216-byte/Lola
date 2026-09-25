@@ -219,6 +219,7 @@ h2 { margin: 0; font-weight: 800; }
 .tab:disabled { opacity: 0.4; }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); }
 .card.qr { place-items: center; }
+/* v2-allow: check5 — фон под QR обязан быть чёрно-белым для сканирования, токен --color-bg этого не гарантирует */
 .qr-img { width: min(480px, 100%); image-rendering: pixelated; border-radius: var(--radius-m); background: #fff; }
 .table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2); border-bottom: 1px solid var(--color-bg-line); }

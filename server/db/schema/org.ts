@@ -24,6 +24,7 @@ export const locations = pgTable('locations', {
   address: text('address'),
   cityId: uuid('city_id'),
   timezone: text('timezone').notNull().default('Europe/Kyiv'),
+  // v2-allow: check9 — (а) объявление колонки locations.manager_id в справочнике точек
   managerId: uuid('manager_id').references((): AnyPgColumn => users.id),
   isActive: boolean('is_active').notNull().default(true),
 }, t => [

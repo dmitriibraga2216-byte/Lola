@@ -345,6 +345,7 @@ tr.on td { background: var(--color-bg); }
 .label { font-weight: 800; margin-top: var(--space-2); }
 .hint { margin: 0; }
 .mono { font-family: ui-monospace, monospace; }
+/* v2-allow: check5 — фон превью HTML-письма обязан быть буквально белым «листом бумаги» */
 .html-preview { width: 100%; height: 240px; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); background: #fff; }
 .badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
 .badge.global { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }

@@ -31,6 +31,7 @@ export const MODULE_ROUTES: { prefix: string, module: ModuleCode }[] = [
   { prefix: '/api/v1/assessment', module: 'assessment' },
   { prefix: '/api/v1/checklists', module: 'assessment' },
   { prefix: '/api/v1/checklist-runs', module: 'assessment' },
+  // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
   { prefix: '/api/v1/knowledge', module: 'knowledge' },
   { prefix: '/api/v1/news', module: 'news' },
   { prefix: '/api/v1/notices', module: 'notices' },
@@ -57,6 +58,7 @@ export const MODULE_PAGES: { prefix: string, module: ModuleCode }[] = [
   { prefix: '/admin/development', module: 'development' },
   { prefix: '/admin/assessment', module: 'assessment' },
   { prefix: '/admin/checklists', module: 'assessment' },
+  // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
   { prefix: '/admin/knowledge', module: 'knowledge' },
   { prefix: '/admin/news', module: 'news' },
   { prefix: '/admin/notices', module: 'notices' },

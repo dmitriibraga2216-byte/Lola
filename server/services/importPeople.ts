@@ -619,6 +619,7 @@ export async function applyImport(ctx: Ctx, jobId: string) {
         const targetId = (r.externalId && extMap.get(r.externalId)) || (r.phone && phMap.get(r.phone)) || null
         const managerId = r.managerExternalId ? extMap.get(r.managerExternalId) ?? null : null
         if (targetId && managerId && targetId !== managerId) {
+          // v2-allow: check9 — (в) запись user_placements.manager_id из файла импорта
           await tx.update(userPlacements).set({ managerId, updatedAt: new Date() }).where(and(eq(userPlacements.userId, targetId), eq(userPlacements.isPrimary, true), isNull(userPlacements.endedAt)))
         }
       }

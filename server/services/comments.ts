@@ -29,6 +29,7 @@ async function contentAuthor(tx: TenantTx, sourceType: CommentSourceType, source
       const [p] = await tx.select({ authorIds: programs.authorIds }).from(programs).where(eq(programs.id, sourceId))
       return p?.authorIds?.[0] ?? null
     }
+    // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
     case 'knowledge': {
       const [r] = await tx.select({ authorIds: resources.authorIds }).from(resources).where(eq(resources.id, sourceId))
       return r?.authorIds?.[0] ?? null
@@ -87,6 +88,7 @@ async function sourceTitle(tx: TenantTx, sourceType: CommentSourceType, sourceId
   switch (sourceType) {
     case 'course': return (await tx.select({ title: courses.title }).from(courses).where(eq(courses.id, sourceId)))[0]?.title ?? null
     case 'program': return (await tx.select({ title: programs.title }).from(programs).where(eq(programs.id, sourceId)))[0]?.title ?? null
+    // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
     case 'knowledge': return null // заголовок береться з поточної версії ресурсу на клієнті
     case 'notice': return (await tx.select({ title: notices.title }).from(notices).where(eq(notices.id, sourceId)))[0]?.title ?? null
     case 'task': return (await tx.select({ title: quizzes.title }).from(quizzes).where(eq(quizzes.id, sourceId)))[0]?.title ?? null

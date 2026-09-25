@@ -174,6 +174,7 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
 
     const [adminUser] = await tx.insert(schema.users).values({ tenantId, phone: input.adminPhone, fullName: input.adminName, status: 'invited' }).returning({ id: schema.users.id })
     await tx.insert(schema.userPlacements).values({ tenantId, userId: adminUser!.id, locationId: loc!.id, positionId: pos!.id, isPrimary: true })
+    // v2-allow: check9 — (в) посев нового тенанта: администратор становится руководителем точки
     await tx.update(schema.locations).set({ managerId: adminUser!.id }).where(eq(schema.locations.id, loc!.id))
     // Создатель тенанта — и администратор, и владелец (docs/24 §4.3, docs/01 §1.9.4): человек,
     // чей телефон оператор вписал в форму, и есть подписант договора. Две роли, а не одна

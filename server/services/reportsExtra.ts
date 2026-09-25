@@ -300,6 +300,7 @@ export async function studyHistory(ctx: Ctx, userId: string) {
 /** Понедельник: каждому руководителю точки — три числа и три ссылки. */
 export async function weeklyDigest(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
+    // v2-allow: check9 — (б) недельный дайджест по точке (docs/22 §8): цифры тоже по точке
     const managers = await tx.execute(sql`select distinct l.manager_id, l.id as location_id, l.name from locations l where l.manager_id is not null and l.is_active`) as unknown as { manager_id: string, location_id: string, name: string }[]
     let n = 0
     const week = new Date().toISOString().slice(0, 10)

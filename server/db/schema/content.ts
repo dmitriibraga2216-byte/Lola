@@ -102,6 +102,7 @@ export const accessGroups = pgTable('access_groups', {
   tenantId: tenantId(),
   name: text('name').notNull(),
   description: text('description'),
+  // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
   appliesTo: text('applies_to').notNull().default('knowledge'), // knowledge | catalog
 }, t => [
   unique().on(t.tenantId, t.name, t.appliesTo),

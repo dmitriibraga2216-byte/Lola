@@ -86,6 +86,7 @@ export type AccessSubjectType = typeof ACCESS_SUBJECT_TYPES[number]
 export const accessGroupSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(500).nullable().optional(),
+  // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
   appliesTo: z.enum(['knowledge', 'catalog']).default('knowledge'),
   members: z.array(z.object({
     subjectType: z.enum(ACCESS_SUBJECT_TYPES),

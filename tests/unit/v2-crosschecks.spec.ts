@@ -346,6 +346,59 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
   })
 
   /**
+   * Метки-исключения `v2-allow: checkN — причина` — общий механизм `apply_markers`, которым
+   * проверки 1, 5 и 9 заменили allowlist по номерам строк (см. инструкцию в шапке
+   * `scripts/v2-crosschecks.sh`). Проверяется на check9, но механизм один на всех трёх:
+   * причина освобождает от нарушения; её отсутствие — нет и подсвечивается отдельно; метка
+   * чужой проверки тоже не освобождает.
+   */
+  it('9. метка v2-allow: check9 с причиной освобождает от нарушения', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(
+      join(dir, 'server/services/bad.ts'),
+      '// v2-allow: check9 — тестовая причина исключения\nexport const q = "select l.manager_id from locations l"\n',
+    )
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   9.')
+  })
+
+  it('9. метка на самой нарушающей строке (не только строкой выше) тоже освобождает', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(
+      join(dir, 'server/services/bad.ts'),
+      'export const q = "select l.manager_id from locations l" // v2-allow: check9 — причина на той же строке\n',
+    )
+    const res = run(dir)
+    expect(res.status).toBe(0)
+    expect(res.stdout).toContain('[ok]   9.')
+  })
+
+  it('9. метка v2-allow: check9 без причины не освобождает и сама подсвечивается', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(join(dir, 'server/services/bad.ts'), '// v2-allow: check9\nexport const q = "select l.manager_id from locations l"\n')
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('9. руководитель человека мимо resolveManager()')
+    expect(res.stdout).toContain('без причины')
+  })
+
+  it('9. метка другой проверки (check3) не освобождает от проверки 9', () => {
+    const dir = fixture()
+    mkdirSync(join(dir, 'server/services'), { recursive: true })
+    writeFileSync(
+      join(dir, 'server/services/bad.ts'),
+      '// v2-allow: check3 — причина относится к другой проверке\nexport const q = "select l.manager_id from locations l"\n',
+    )
+    const res = run(dir)
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('9. руководитель человека мимо resolveManager()')
+  })
+
+  /**
    * Сквозная проверка 19 (`docs/v2/42-stages-delta.md` §5, П-23): тихие часы кандидата
    * безусловны (не смотрят на тумблер тенанта) и используют его собственное окно
    * 09:00–20:00, а не сотрудницкое. Полное поведение по времени — интеграционный тест

@@ -85,9 +85,17 @@ describe('PR-38: описание сутностей конструктора', 
 describe('PR-38: конструктор виконує нові сутності', () => {
   const ctx = () => ({ tenantId, actorId })
 
-  it('«Динаміка сховища» не падає з обмеженою областю (scopeCol: null, регресія на `pl not found`)', async () => {
-    await expect(runReport(ctx(), { entity: 'storage', fields: ['day', 'origin', 'bytes'], filters: {}, groupBy: null }, 50, [lazarevaId])).resolves.toEqual(expect.any(Array))
-    await expect(runReport(ctx(), { entity: 'storage', fields: ['day', 'origin', 'bytes'], filters: {}, groupBy: null }, 50, [])).resolves.toEqual([])
+  it('«Динаміка сховища» не падає з обмеженою областю (scopeCol: null, регресія на `pl not found`) і сама область на неї не впливає', async () => {
+    // scopeCol: null — у сховища немає розрізу «точка» (тенантний показник, не людина),
+    // тож звуження не застосовується взагалі: будь-яка область (чужа, порожня, відсутня)
+    // дає той самий результат. Порівнюємо з тим, що реально повернула база (а не з `[]`
+    // напряму) — інакше перевірка залежить від того, чи є в спільному тенанті CI дані
+    // «Динаміки сховища» за сьогодні від паралельних спек, а не від самого правила scopeCol.
+    const spec = { entity: 'storage', fields: ['day', 'origin', 'bytes'], filters: {}, groupBy: null } as const
+    const withScope = await runReport(ctx(), spec, 50, [lazarevaId])
+    expect(withScope).toEqual(expect.any(Array))
+    await expect(runReport(ctx(), spec, 50, [])).resolves.toEqual(withScope)
+    await expect(runReport(ctx(), spec, 50, null)).resolves.toEqual(withScope)
   })
 
   it('«Укомплектованість структури» виконується (вузол — не людина, без фільтру kind)', async () => {

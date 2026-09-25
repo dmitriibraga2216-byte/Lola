@@ -13,6 +13,7 @@ import { canAccessResource } from './resources'
 import { countView, noticeAudience } from './notices'
 import { bookmarkKeys } from './hubExtra'
 import { ratingAggregate } from './contentRatings'
+import { recordActivity } from './activity'
 import type { ContentBlock } from '../../shared/schemas/content'
 import { embedTexts, type AiRef } from './ai/gateway'
 import { KNOWLEDGE_EMBEDDING_PROMPT } from './ai/prompts'
@@ -78,7 +79,11 @@ export async function getArticle(ctx: Ctx, idOrSlug: string, opts: { countView?:
       isNull(knowledgeArticles.deletedAt),
     ))
     if (!a) return null
-    if (opts.countView) await countView(tx, ctx, 'article', a.id, a.title) // раз на человека в день (Spec 21)
+    // Просмотр считается раз на человека в день (Spec 21) — и столько же раз статья попадает в
+    // ленту активности как `knowledge_read` (docs/v2/38 §7.9): перечитывание в тот же день не событие
+    if (opts.countView && await countView(tx, ctx, 'article', a.id, a.title)) {
+      await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'knowledge_read', ref: { entity: 'knowledge_articles', id: a.id } })
+    }
     const links = await tx.select().from(knowledgeLinks).where(eq(knowledgeLinks.articleId, a.id))
     const [my] = await tx.select({ helpful: knowledgeFeedback.helpful }).from(knowledgeFeedback).where(and(eq(knowledgeFeedback.articleId, a.id), eq(knowledgeFeedback.userId, ctx.actorId)))
     const related = a.relatedArticles.length ? await tx.select({ id: knowledgeArticles.id, title: knowledgeArticles.title, slug: knowledgeArticles.slug }).from(knowledgeArticles).where(and(sql`${knowledgeArticles.id} in ${a.relatedArticles}`, eq(knowledgeArticles.status, 'published'), isNull(knowledgeArticles.deletedAt))) : []

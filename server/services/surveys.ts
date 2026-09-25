@@ -8,6 +8,7 @@ import { loadScale } from './assessment'
 import type { ScaleInfo } from './assessment'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
+import { recordActivity } from './activity'
 
 /**
  * Опросы (docs/03 §3.8; docs/20 §14.5, §14.7 — Spec 20).
@@ -244,6 +245,9 @@ export async function answerQuestion(ctx: Ctx, surveyId: string, questionId: str
     // docs/33 D-020: опитування пройдено — єдиний хук (участь іменна навіть в анонімному опитуванні, відповідь — ні)
     const { onTaskCompleted } = await import('./taskCompletion')
     await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'poll', contentId: surveyId, status: 'done', enrollmentId: part.enrollmentId, sourceKind: 'survey_response', sourceId: part.id })
+    // Лента (docs/v2/38 §7.9) ссылается на **участие**, а не на ответ: ответ анонимного опроса
+    // не связывается с человеком ни здесь, ни где-либо ещё
+    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'survey_submitted', ref: { entity: 'survey_participations', id: part.id } })
     const results = s.showResults ? await reportTx(tx, s, { withRespondents: false }) : null
     return { ok: true as const, done: true as const, results }
   }).then(async (res) => {

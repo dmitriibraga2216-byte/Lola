@@ -638,6 +638,13 @@
       "when": 1790234640000,
       "tag": "0092_fix_resource_node",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1790234700000,
+      "tag": "0093_v2_user_activity",
+      "breakpoints": true
     }
   ]
 }

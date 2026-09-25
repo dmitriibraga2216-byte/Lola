@@ -61,6 +61,13 @@ export const users = pgTable('users', {
   birthdayConsent: boolean('birthday_consent').notNull().default(true), // согласие показывать день рождения (docs/21 §3.8, §7.8; 29 Б.16 — opt-out)
   avatarKey: text('avatar_key'),
   locale: text('locale'), // null → локаль тенанта
+  /**
+   * IANA-пояс человека — override пояса точки, только для удалённых (docs/v2/38 §3.1, §7.10;
+   * миграция `v2_user_activity`, PR-34). null — пояс точки размещения. Первое звено единой
+   * цепочки `personTimezone()` (`server/services/activity.ts`): по ней локальный день события
+   * ленты и тихие часы уведомлений. Неизвестное Postgres имя не сохраняется (`users_timezone_chk`).
+   */
+  timezone: text('timezone'),
   status: text('status').notNull().default('invited'), // invited | active | suspended | archived
   hiredAt: date('hired_at'),
   archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -96,6 +103,9 @@ export const users = pgTable('users', {
   check('users_candidate_state_chk', sql`${t.candidateState} is null or ${t.candidateState} in ('active', 'hired', 'rejected', 'archived', 'withdrawn')`),
   check('users_candidate_coherence_chk', sql`(${t.kind} = 'candidate' and ${t.candidateState} is not null) or (${t.kind} = 'employee' and ${t.candidateState} is null)`),
   check('users_candidate_source_chk', sql`${t.source} is null or ${t.source} in ('manual', 'vacancy_link', 'job_board', 'referral', 'import', 'api')`),
+  // Пояс, которого Postgres не знает, не сохраняется: выражение падает «time zone not recognized»
+  // (миграция `v2_user_activity`). Иначе он ломал бы позже запись события ленты этого человека.
+  check('users_timezone_chk', sql`${t.timezone} is null or (timestamptz '2000-01-01 00:00:00+00' at time zone ${t.timezone}) is not null`),
 ])
 
 export const userPlacements = pgTable('user_placements', {

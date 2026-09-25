@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  enrollments, lessonProgress, locations, reviewQueueItems, userPlacements, userRoles, roles, users, workshopComments, workshopSubmissions, workshops,
+  enrollments, locations, reviewQueueItems, userPlacements, userRoles, roles, users, workshopComments, workshopSubmissions, workshops,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -10,6 +10,7 @@ import { enqueueNotification } from './notifications'
 import { claimReview, closeReview, enqueueReview, heldByOtherSql, releaseReview, reviewConflict, staleClaims } from './reviewQueue'
 import { CLAIM_TTL_MS } from './reviewRules'
 import { closeOpenSegments } from './learningTime'
+import { recordActivity } from './activity'
 import { plannedSecondsFor } from './timeNorms'
 import type { ContentBlock, WorkshopFile } from '../../shared/schemas/content'
 import { managerIdOf, managerIdsOf } from './orgManager'
@@ -335,6 +336,7 @@ export async function submitWorkshop(ctx: Ctx, workshopId: string, input: { text
     // Сдача отправлена — открытый сегмент измерения закрывается `completed` (docs/v2/37 §3.6);
     // время сдачи в строку и в очередь проверки досчитает свёртка `time.rollup`
     await closeOpenSegments(tx, { tenantId: ctx.tenantId, userId: ctx.actorId, subjectType: 'workshop', subjectId: workshopId })
+    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'workshop_submitted', ref: { entity: 'workshop_submissions', id: s!.id } })
     return { ok: true as const, submissionId: s!.id, pendingUpload }
   })
 }
@@ -514,8 +516,8 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     }).where(eq(workshopSubmissions.id, submissionId))
 
     if (input.decision === 'accepted' && s.enrollmentId && s.lessonId) {
-      await tx.insert(lessonProgress).values({ tenantId: ctx.tenantId, enrollmentId: s.enrollmentId, lessonId: s.lessonId, status: 'completed', completedAt: now })
-        .onConflictDoUpdate({ target: [lessonProgress.tenantId, lessonProgress.enrollmentId, lessonProgress.lessonId], set: { status: 'completed', completedAt: now } })
+      const { markLessonCompleted } = await import('./learning')
+      await markLessonCompleted(tx, ctx.tenantId, { userId: s.userId, enrollmentId: s.enrollmentId, lessonId: s.lessonId, at: now })
     }
 
     // По файлам принято решение человеком — они становятся доказательством прохождения
@@ -536,6 +538,8 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     const code = input.decision === 'accepted' ? 'workshop_accepted' : input.decision === 'rework' ? 'workshop_rework' : 'workshop_rejected'
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s.userId, code, payload: { title: w.title, comment, submissionId }, dedupKey: `ws_${code}:${submissionId}:${s.reworkCount}` })
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'workshop.grade', entity: 'workshop_submission', entityId: submissionId, after: { decision: input.decision, score } })
+    // Лента проверяющего (docs/v2/38 §7.9): решение по работе, включая доработку, — его учебная работа
+    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'review_graded', ref: { entity: 'workshop_submissions', id: submissionId } })
     // Критерий приёмки docs/v2/37 §13 п. 6: автор материала вправе проверять работу по нему,
     // но факт фиксируется отдельной записью — по ней строится отчёт «проверки авторами» (§9.2).
     if (w.authorIds.includes(ctx.actorId)) {

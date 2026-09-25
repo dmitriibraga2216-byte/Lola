@@ -7,6 +7,7 @@ import type { SQL } from 'drizzle-orm'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
+import { recordActivity } from './activity'
 import { loadScale } from './assessment'
 import type { ScaleInfo } from './assessment'
 import type { ChecklistInput } from '../../shared/schemas/assessment'
@@ -213,6 +214,9 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
     // docs/33 D-020: чек-лист заповнено — завдання спостерігача виконане (результат — відсоток прогону; провал точки — не провал завдання)
     const { onTaskCompleted } = await import('./taskCompletion')
     await onTaskCompleted(tx, ctx.tenantId, ctx.actorId, { contentType: 'check_list', contentId: r.checklistId, status: 'done', result: score.score, sourceKind: 'checklist_run', sourceId: runId })
+    // Лента того, кто заполнил чек-лист (docs/v2/38 §7.9), — днём заполнения: прогон, досланный
+    // из офлайна, несёт своё `finishedAt` (Р-34.3)
+    await recordActivity(tx, ctx.tenantId, { userId: ctx.actorId, kind: 'checklist_run_completed', ref: { entity: 'checklist_runs', id: runId }, occurredAt: finishedAt })
     return { ok: true as const, score }
   })
 }

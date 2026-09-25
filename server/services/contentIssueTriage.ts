@@ -8,6 +8,7 @@ import { keysetAfter, keysetAt } from '../utils/keyset'
 import type { Access } from './access'
 import { can, scopeForGrants } from './access'
 import { recordAudit } from './audit'
+import { recordActivity } from './activity'
 import { ACTIVE_EMPLOYEES_ONLY } from './repo/people'
 import { assignTx, authorIdsSql, uuidArray } from './contentIssueRouting'
 import { notifyAssignee, notifyMuted, notifyRescoreReady, notifyRescored, notifyReporters } from './contentIssueNotify'
@@ -505,6 +506,21 @@ async function event(tx: TenantTx, tenantId: string, issueId: string, actorId: s
   return row!.id
 }
 
+/**
+ * Замечание принято в работу (`new → in_progress`) — событие `content_issue_accepted` в ленту
+ * каждого заявителя карточки (docs/v2/38 §7.9: для автора замечаний это и есть его учебная
+ * работа). Днём **подачи**, а не принятия (Р-34.3): работу человек сделал, когда пожаловался;
+ * склеенные жалобы одного человека — одно событие, по первой из них.
+ */
+async function reportersActivity(tx: TenantTx, tenantId: string, issueId: string): Promise<void> {
+  const reporters = await tx.execute(sql`
+    select user_id, min(created_at) as reported_at from content_reports
+    where issue_id = ${issueId}::uuid group by user_id`) as unknown as { user_id: string, reported_at: Date | string }[]
+  for (const r of reporters) {
+    await recordActivity(tx, tenantId, { userId: r.user_id, kind: 'content_issue_accepted', ref: { entity: 'content_issues', id: issueId }, occurredAt: new Date(r.reported_at) })
+  }
+}
+
 /** Сколько попыток попадёт в пересчёт — число для `content_issue_rescore_ready`. */
 async function rescorePoolSize(tx: TenantTx, i: IssueRow): Promise<number> {
   if (i.targetType !== 'question') return 0
@@ -581,7 +597,10 @@ export async function updateIssue(v: Viewer, id: string, input: ContentIssuePatc
         if (!i.assigneeId) await assignTx(tx, v.tenantId, id, v.actorId, { actorId: v.actorId, from: null, step: 'manual' })
         await tx.update(contentIssues).set({ status: 'in_progress', updatedAt: now }).where(eq(contentIssues.id, id))
         const eventId = await event(tx, v.tenantId, id, v.actorId, { kind: 'status_changed', fromStatus: from, toStatus: to })
-        if (from === 'new') await notifyReporters(tx, v.tenantId, id, 'content_issue_accepted', eventId)
+        if (from === 'new') {
+          await notifyReporters(tx, v.tenantId, id, 'content_issue_accepted', eventId)
+          await reportersActivity(tx, v.tenantId, id)
+        }
       }
     }
 

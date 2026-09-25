@@ -35,11 +35,12 @@ const IS_JOIN = /Join\((?:\w+\.)?users\b|\bjoin\s+users\b/i
 
 /**
  * Признак того, что вид людей в выборке назван явно. Кроме прямых упоминаний `kind` —
- * имена из репозитория и `frameWhere()`: единый каркас отчётов (server/services/reportFrame.ts)
- * подставляет `EMPLOYEES_ONLY('u')` сам, одной точкой на все отчёты и журналы, — поэтому
- * запрос, который зовёт `frameWhere()`, отфильтрован по построению.
+ * имена из репозитория, `frameWhere()` и `frameKind()`: единый каркас отчётов
+ * (server/services/reportFrame.ts) подставляет `EMPLOYEES_ONLY('u')` сам, одной точкой на все
+ * отчёты и журналы, — поэтому запрос, который зовёт `frameWhere()`/`frameKind()`, отфильтрован
+ * по построению.
  */
-const FILTERED = /EMPLOYEES_ONLY|CANDIDATES_ONLY|IS_EMPLOYEE|IS_CANDIDATE|employeeOnly|candidateOnly|\bemployees\(|\bcandidates\(|frameWhere\(|users\.kind|\b[a-z_]+\.kind\s*=|\bkind\s*=\s*'(?:employee|candidate)'/
+const FILTERED = /EMPLOYEES_ONLY|CANDIDATES_ONLY|IS_EMPLOYEE|IS_CANDIDATE|employeeOnly|candidateOnly|\bemployees\(|\bcandidates\(|frameWhere\(|frameKind\(|users\.kind|\b[a-z_]+\.kind\s*=|\bkind\s*=\s*'(?:employee|candidate)'/
 
 /**
  * Выборка одного человека (или заранее известного набора) по первичному ключу. Фильтровать
@@ -63,6 +64,14 @@ const BY_PARAM_ID = /\b[\w.]*\bid\s*(?:=|in)\s*\(?\$\{/i
  * корректно для обоих видов людей, а фильтровать по виду нужно **ведущую** выборку.
  * Слепое пятно правила закрыто слоем 3 (канареечный кандидат) и тем, что единый каркас
  * отчётов (`frameWhere()`) фильтрует людей сам.
+ *
+ * > [исправлено, fix-report-kind] Пятно оказалось шире: в отчёте по записям на курс или по
+ * > попыткам строки отчёта и есть люди, а соединение `join users u on u.id = e.user_id` здесь
+ * > выглядит как «join ради ФИО». Так без вида жили три сущности конструктора отчётов,
+ * > «Прострочені», «Результати атестацій», «Прогрес навчання» и «Звіт з програм». Конструктор
+ * > собирает запрос из фрагментов (`from` — в описании сущности, `where` — в `runReport()`),
+ * > поэтому его держит не этот сканер, а `tests/unit/report-builder-kind.spec.ts` по итоговому
+ * > SQL каждой сущности; соседей — канарейка `tests/integration/reports-kind.spec.ts`.
  */
 const JOIN_BY_PK = /Join\((?:\w+\.)?users,\s*eq\(users\.id,|\bjoin\s+users\s+(\w+)\s+on\s+\1\.id\s*=/i
 

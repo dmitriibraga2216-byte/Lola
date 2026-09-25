@@ -2725,6 +2725,21 @@ announcement_audience: all | plans | tenants
 -- вверх по каждому виду отдельно — человек → точка → компания → системный дефолт (24 и 5)
 absence_norm_scope: tenant | location | user
 
+-- Вид отсутствия человека (`absence_records.kind`, `v2/38` §3.6): норма — только у vacation и sick
+-- (§7.13); не путать с reviewer_absence_kind — отсутствием проверяющего (`v2/41` §8.3.4)
+absence_kind: vacation | sick | unpaid | other
+
+-- Состояние записи отсутствия (`absence_records.status`, `v2/38` §4): в остаток — только approved,
+-- дедлайны и напоминания блокируют planned и approved (§7.14); cancelled — конечное
+absence_status: planned | approved | cancelled
+
+-- Откуда пришла запись отсутствия (`absence_records.source`, `v2/38` §3.6)
+absence_source: manual | import | api
+
+-- Почему сдвинут дедлайн записи на курс (`enrollments.deadline_shifted_reason`, `v2/38` §7.14,
+-- §13 к. 10, PR-33); ручное продление причину снимает
+deadline_shift_reason: absence
+
 -- Площадка публикации вакансии (`job_board_accounts.provider`, `v2/29` §3.7, PR-17)
 job_board_provider: work_ua | robota_ua | telegram
 
@@ -2852,3 +2867,25 @@ create table absence_norms (id, created_at, updated_at, tenant_id,
 `position_groups`, `user_totp`, `user_totp_recovery_codes`) вводят патчи, а не модульные документы,
 и в счёт «71 тенантная» `docs/v2/40` §2 не входят; `platform_announcements` — третья платформенная
 таблица пакета рядом с `plan_prices` и `plan_addons`.
+
+**Факты отсутствий и сдвиг дедлайнов** (`docs/v2/45` PR-33, миграция `v2_absences`; `docs/v2/38` §3.6,
+§7.13–7.14). Справочная величина, не кадровый учёт (`38` §7.12): единственное функциональное
+следствие — дедлайн обязательного назначения не ставится на дни отсутствия, и напоминания в эти дни
+не шлются.
+
+```sql
+create table absence_records (id, created_at, updated_at, tenant_id references tenants on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  kind text not null,                         -- absence_kind: vacation | sick | unpaid | other
+  date_from date not null, date_to date not null,  -- CHECK date_to >= date_from, не длиннее 366 дней
+  days_count numeric(4,1) not null,           -- календарные дни диапазона (CHECK = date_to − date_from + 1)
+  status text not null default 'approved',    -- absence_status: planned | approved | cancelled
+  source text not null default 'manual',      -- absence_source: manual | import | api
+  comment text,                               -- ≤ 300
+  created_by uuid references users(id) on delete set null);
+create index idx_absence_records_tenant on absence_records (tenant_id, user_id, date_from);
+create index idx_absence_records_tenant_range on absence_records (tenant_id, date_from, date_to)
+  where status in ('planned', 'approved');
+-- Дедлайн — параметр назначения (CLAUDE.md п. 11): сдвигается в записи на курс, контент не трогается
+alter table enrollments add column deadline_shifted_reason text;  -- deadline_shift_reason: absence
+```

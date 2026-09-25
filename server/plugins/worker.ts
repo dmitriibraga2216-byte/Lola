@@ -5,7 +5,7 @@ import { dueScanTenant } from '../jobs/dueScanTenant'
 import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs/candidateScan'
 import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
 import { shopReserveExpireTenant } from '../jobs/shopReserveExpire'
-import { documentsExpiryScan, notesArchiveScanTenant } from '../jobs/personRecordsScan'
+import { absenceDeadlineGuard, documentsExpiryScan, notesArchiveScanTenant } from '../jobs/personRecordsScan'
 import { vacancyPublicationHealthTenant, vacancySpamWatchTenant } from '../jobs/vacancyPublish'
 import { attemptPublish } from '../services/vacancyPublications'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
@@ -151,6 +151,11 @@ export default defineNitroPlugin(async () => {
     await work('documents.expiry_scan', () => runPerTenant('documents.expiry_scan', async (tenantId) => {
       const s = await documentsExpiryScan(tenantId)
       if (s.expiring || s.expired || s.notified) console.log(`[documents.expiry_scan] ${tenantId}:`, s)
+    }))
+    // docs/v2/38 §7.14, §11 (PR-33): срок обязательного назначения не стоит на днях отсутствия
+    await work('absence.deadline_guard', () => runPerTenant('absence.deadline_guard', async (tenantId) => {
+      const n = await absenceDeadlineGuard(tenantId)
+      if (n) console.log(`[absence.deadline_guard] ${tenantId}: перенесено строків ${n}`)
     }))
     // docs/v2/29 §11 (PR-17): публикация и генерация текста. Ретрай — по событию на строку
     // публикации (`enqueuePublishRetry`), здоровье аккаунтов и всплеск — сканы по тенантам.

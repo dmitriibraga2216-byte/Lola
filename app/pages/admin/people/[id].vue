@@ -21,12 +21,15 @@ interface Person {
 }
 interface Ref { id: string, name: string }
 // Вкладки мокапа PersonCard: Профіль · Ролі · Навчання · Безпека · Журнал (+ Атестації и Нотатки из docs/16 §5.2,
-// Документи — docs/v2/38 §5.1). Нотатки и документы видны только носителям своих скоупов (docs/v2/38 §2)
-type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity' | 'notes' | 'documents'
-const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity', 'notes', 'documents']
+// Документи и Відсутності — docs/v2/38 §5.1). Нотатки, документы и отсутствия видны только носителям
+// своих скоупов (docs/v2/38 §2); область (своя точка) проверяет сервер
+type Tab = 'profile' | 'roles' | 'learning' | 'assessment' | 'security' | 'activity' | 'notes' | 'documents' | 'absences'
+const TABS: Tab[] = ['profile', 'roles', 'learning', 'assessment', 'security', 'activity', 'notes', 'documents', 'absences']
 const visibleTabs = computed(() => TABS.filter(tb => tb === 'notes'
   ? hasScope('person.note.read')
-  : tb === 'documents' ? hasScope('person.document.view_others') || hasScope('person.document.manage') : true))
+  : tb === 'documents'
+    ? hasScope('person.document.view_others') || hasScope('person.document.manage')
+    : tb === 'absences' ? hasScope('person.absence.manage') : true))
 
 const person = ref<Person | null>(null)
 const error = ref('')
@@ -309,7 +312,7 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       <div class="card">
         <h2>{{ t('person.enrollments') }}</h2>
         <table v-if="learning?.enrollments.length" class="table"><thead><tr><th>{{ t('people.col.name') }}</th><th>{{ t('assign.col.status') }}</th><th>%</th><th>{{ t('dev.due') }}</th></tr></thead>
-          <tbody><tr v-for="e in learning.enrollments" :key="String(e.id)"><td>{{ e.title }} <span class="sub">{{ e.subject_type }}</span></td><td><span :class="['badge', String(e.status)]">{{ e.status }}</span></td><td>{{ e.progress_pct }}</td><td class="sub">{{ fmt(e.due_at) }}</td></tr></tbody></table>
+          <tbody><tr v-for="e in learning.enrollments" :key="String(e.id)"><td>{{ e.title }} <span class="sub">{{ e.subject_type }}</span></td><td><span :class="['badge', String(e.status)]">{{ e.status }}</span></td><td>{{ e.progress_pct }}</td><td class="sub">{{ fmt(e.due_at) }}<span v-if="e.deadline_shifted_reason === 'absence'" class="badge shifted">{{ t('person.deadlineShifted') }}</span></td></tr></tbody></table>
         <p v-else class="sub">{{ t('person.noData') }}</p>
       </div>
       <div class="card">
@@ -404,6 +407,11 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       <PersonDocuments :person-id="id" auto-open />
     </section>
 
+    <!-- Відсутності (docs/v2/38 §5.1, §6.3, §6.4): норма, остаток, записи, «Скоригувати» -->
+    <section v-else-if="tab === 'absences' && visibleTabs.includes('absences')" class="panel">
+      <PersonAbsences :person-id="id" auto-open />
+    </section>
+
     <div v-if="showArchive" class="overlay" @click.self="showArchive = false">
       <form class="modal" role="dialog" aria-modal="true" @submit.prevent="archiveConfirm">
         <h2>{{ t('person.archiveTitle') }}</h2>
@@ -462,6 +470,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); margin-left: var(--space-2); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
+/* Срок сдвинут с дней отсутствия (docs/v2/38 §7.14): справка рядом с датой, не тревога */
+.badge.shifted { display: block; width: fit-content; margin-top: var(--space-1); color: var(--color-ink-muted); }
 .form-row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: flex-start; }
 select, input, textarea { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); max-width: 100%; min-width: 0; box-sizing: border-box; }
 textarea { flex: 1; min-width: 200px; }

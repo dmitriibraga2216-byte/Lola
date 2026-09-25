@@ -1005,6 +1005,51 @@ export type AnnouncementAudience = typeof ANNOUNCEMENT_AUDIENCES[number]
 export const ABSENCE_NORM_SCOPES = ['tenant', 'location', 'user'] as const
 export type AbsenceNormScope = typeof ABSENCE_NORM_SCOPES[number]
 
+/**
+ * Вид отсутствия человека (`absence_records.kind`, docs/v2/38 §3.6). Норма ведётся только для
+ * `vacation` и `sick` (§7.13); `unpaid` и `other` учитываются как факт — для остатка их нет,
+ * а дедлайн обязательного обучения они сдвигают так же (§7.14: «покрытые отсутствием» дни).
+ * Не путать с `reviewer_absence_kind` — отсутствие проверяющего из docs/v2/37 (`41` §8.3.4).
+ */
+export const ABSENCE_KINDS = ['vacation', 'sick', 'unpaid', 'other'] as const
+export type AbsenceKind = typeof ABSENCE_KINDS[number]
+/** Виды с нормой (`absence_norms.vacation_days` / `sick_days`, §7.13). */
+export const ABSENCE_NORM_KINDS = ['vacation', 'sick'] as const satisfies readonly AbsenceKind[]
+export type AbsenceNormKind = typeof ABSENCE_NORM_KINDS[number]
+
+/**
+ * Состояние записи отсутствия (`absence_records.status`, `38` §4): `planned → approved →
+ * cancelled`. В остаток входит только `approved` (§7.13); дедлайны и напоминания блокируют
+ * `planned` и `approved` (§7.14). `cancelled` — конечное.
+ */
+export const ABSENCE_STATUSES = ['planned', 'approved', 'cancelled'] as const
+export type AbsenceStatus = typeof ABSENCE_STATUSES[number]
+
+/** Откуда пришла запись отсутствия (`absence_records.source`, `38` §3.6): вручную, импортом, по API. */
+export const ABSENCE_SOURCES = ['manual', 'import', 'api'] as const
+export type AbsenceSource = typeof ABSENCE_SOURCES[number]
+
+/**
+ * Почему сдвинут дедлайн записи (`enrollments.deadline_shifted_reason`, `38` §7.14, §13 к. 10).
+ * Единственное значение задано документом; ручное продление (`POST /manage/enrollments/:id/extend`)
+ * причину снимает — действующий срок поставил человек, а не правило.
+ */
+export const DEADLINE_SHIFT_REASONS = ['absence'] as const
+export type DeadlineShiftReason = typeof DEADLINE_SHIFT_REASONS[number]
+
+/** Числа записей отсутствий (`38` §6.3, §6.4) — одни для сервера, формы и тестов. */
+export const ABSENCE_LIMITS = {
+  commentMax: 300,
+  reasonMin: 5,
+  reasonMax: 300,
+  /**
+   * Самая длинная запись — 366 календарных дней `[решение]` (`38` §3.6 [дополнено, PR-33]):
+   * `days_count numeric(4,1)` и норма на календарный год; более долгое отсутствие вносится
+   * записями по годам.
+   */
+  maxRangeDays: 366,
+} as const
+
 export const ENUMS: Record<string, readonly string[]> = {
   enrollment_status: ENROLLMENT_STATUSES,
   task_type: TASK_TYPES,
@@ -1100,6 +1145,10 @@ export const ENUMS: Record<string, readonly string[]> = {
   person_document_status: PERSON_DOCUMENT_STATUSES,
   announcement_audience: ANNOUNCEMENT_AUDIENCES,
   absence_norm_scope: ABSENCE_NORM_SCOPES,
+  absence_kind: ABSENCE_KINDS,
+  absence_status: ABSENCE_STATUSES,
+  absence_source: ABSENCE_SOURCES,
+  deadline_shift_reason: DEADLINE_SHIFT_REASONS,
   job_board_provider: JOB_BOARD_PROVIDERS,
   job_board_owner_type: JOB_BOARD_OWNER_TYPES,
   job_board_account_status: JOB_BOARD_ACCOUNT_STATUSES,

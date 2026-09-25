@@ -293,7 +293,8 @@
       "activity": "Activity",
       "notes": "Notes",
       "security": "Security",
-      "documents": "Documents"
+      "documents": "Documents",
+      "absences": "Absences"
     },
     "lastName": "Last name",
     "firstName": "First name",
@@ -412,7 +413,8 @@
     "newPassword": "New password",
     "repeatPassword": "Repeat password",
     "passwordsDiffer": "Passwords do not match",
-    "mustChangeAfterLogin": "Change password after first sign-in"
+    "mustChangeAfterLogin": "Change password after first sign-in",
+    "deadlineShifted": "moved: absence"
   },
   "import": {
     "willDo": "What will happen",
@@ -3535,7 +3537,8 @@
       "storage_pending_upload_done": "File uploaded",
       "storage_pending_upload_expired": "File could not be uploaded",
       "storage_bulk_delete_done": "Files deleted from storage",
-      "content_time_deviation": "Time deviates from the estimate"
+      "content_time_deviation": "Time deviates from the estimate",
+      "absence_deadline_shifted": "Deadline moved because of an absence"
     }
   },
   "ntpl": {
@@ -6868,7 +6871,109 @@
     "overridesHint": "An empty field means the location inherits the company norm. You can override sick leave only",
     "location": "Location",
     "inherits": "same as company",
-    "inherit": "Inherit"
+    "inherit": "Inherit",
+    "savedShifted": "Record saved. Deadlines moved: {n}",
+    "recordSaved": "Absence record saved",
+    "cancelled": "Record cancelled. Deadlines already moved stay as they are",
+    "cancelConfirm": "Cancel this absence record? Deadlines already moved are not moved back.",
+    "card": {
+      "title": "Absences in {year}",
+      "titleShort": "Absences",
+      "plaque": "Absence data is for reference only. It affects only learning planning and does not replace HR records.",
+      "loadError": "Could not load absences",
+      "retry": "Retry",
+      "numbers": "Norm: {norm} · Used: {used} · Remaining: {remaining}",
+      "exceeded": "Exceeded by {n} d.",
+      "reason": "Reason: {reason}",
+      "usedOther": "{kind}: {n} d."
+    },
+    "kind": {
+      "vacation": "Leave",
+      "sick": "Sick leave",
+      "unpaid": "Unpaid leave",
+      "other": "Other"
+    },
+    "status": {
+      "planned": "Planned",
+      "approved": "Approved",
+      "cancelled": "Cancelled"
+    },
+    "source": {
+      "tenant": "Company norm",
+      "location": "Location norm",
+      "user": "Individual, {who}, {date}",
+      "system": "System norm"
+    },
+    "sourceKind": {
+      "manual": "manually",
+      "import": "import",
+      "api": "via API"
+    },
+    "adjust": {
+      "open": "Adjust",
+      "title": "Adjust the absence norm",
+      "kind": "Kind",
+      "levelLabel": "Level",
+      "level": {
+        "tenant": "Company",
+        "location": "Location",
+        "user": "This employee"
+      },
+      "levelLocation": "Location “{name}”",
+      "value": "Value, days",
+      "valueHint": "From 0 to 365 in half-day steps. Leave empty to inherit from the level above",
+      "inherit": "inherit",
+      "valueInvalid": "From 0 to 365 days in half-day steps",
+      "reason": "Reason",
+      "reasonRequiredLabel": "Reason (required for an employee)",
+      "reasonRequired": "Give a reason for the individual adjustment — at least 5 characters",
+      "preview": "Norm {norm} → Used {used} → Remaining {remaining}",
+      "negative": "More days are used than the new norm. The balance will become negative: −{n}"
+    },
+    "record": {
+      "add": "Add an absence",
+      "edit": "Change the absence",
+      "kind": "Kind",
+      "from": "From",
+      "to": "To",
+      "status": "Status",
+      "days": "Calendar days: {n}",
+      "comment": "Comment",
+      "hint": "Mandatory learning deadlines that fall on these days move to the first working day after return. No reminders are sent on these days.",
+      "listTitle": "Records for the year",
+      "empty": "No absences in {year}",
+      "period": "Period",
+      "daysCol": "Days",
+      "ofTotal": "of {n}",
+      "createdBy": "Added by",
+      "actions": "Actions",
+      "approve": "Approve",
+      "change": "Change",
+      "cancel": "Cancel"
+    },
+    "missed": {
+      "title": "Deadline passed during an absence",
+      "line": "deadline {due}, absence {from}–{to}",
+      "move": "Move",
+      "newDate": "New deadline",
+      "reason": "Reason",
+      "reasonDefault": "The deadline passed during an absence",
+      "dateRequired": "Choose a new deadline date",
+      "moved": "Deadline moved"
+    },
+    "err": {
+      "overlap": "The absence overlaps an existing record {from}–{to}",
+      "order": "The end date cannot be earlier than the start date",
+      "tooLong": "The period cannot exceed a year. Add a longer absence as several records",
+      "periodRequired": "Set the absence period",
+      "forbidden": "Absences of this person are managed by HR or their location manager",
+      "not_found": "The person or the absence record was not found",
+      "person_archived": "The employee has been dismissed — their absences are read-only",
+      "absence_cancelled": "The record is cancelled and cannot be changed — add a new one",
+      "absence_status_invalid": "The status only moves forward: “Planned” → “Approved” → “Cancelled”",
+      "reason_required": "Give a reason for the individual adjustment — at least 5 characters",
+      "validation_failed": "Check the kind, period, status and comment"
+    }
   },
   "platformNews": {
     "title": "Lola platform announcements",

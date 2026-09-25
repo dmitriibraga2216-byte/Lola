@@ -8,10 +8,26 @@
 #   scripts/v2-crosschecks.sh <ROOT>   # против произвольного каталога (используется тестом
 #                                       # tests/unit/v2-crosschecks.spec.ts на фикстурах)
 #
-# Каждая проверка сопровождается allowlist'ом — поимённым списком строк с комментарием,
-# почему строка не считается нарушением (docs/v2/44-decisions.md В-8: «allowlist — не список
-# исключений, а список осознанных решений; строка без комментария не принимается ревьюером»).
-# Пустой allowlist для проверки означает, что на текущем main нарушений не найдено.
+# Как разрешить конкретное срабатывание (не файл и не каталог целиком — про них см. ниже).
+# Поставьте метку на нарушающей строке или на строке НЕПОСРЕДСТВЕННО НАД НЕЙ, синтаксисом
+# комментария того места, где она стоит:
+#   .ts / .vue <script>:   // v2-allow: checkN — <причина>
+#   .sql / sql`...` в .ts: -- v2-allow: checkN — <причина>
+#   .vue <template>:       <!-- v2-allow: checkN — <причина> -->
+#   .vue <style> / .css:   /* v2-allow: checkN — <причина> */
+# N — номер именно той проверки, чьё срабатывание разрешается: метка другой проверки не
+# освобождает (check3 не гасит проверку 9). Разделитель причины — тире «—», причина обязательна
+# и должна объяснять суть: метка без неё сама считается нарушением, иначе метки начнут ставить
+# не глядя (docs/v2/44-decisions.md В-8: «allowlist — не список исключений, а список осознанных
+# решений»). Метка живёт на самой нарушающей строке (или прямо над ней) и переезжает вместе
+# с кодом при правках — в отличие от старого allowlist'а по номерам строк, её не сдвигают
+# правки строк ВЫШЕ по файлу.
+#
+# Исключения целым файлом или каталогом (справочник `shared/enums.ts`, миграции, посев) не
+# страдают от сдвига строк и по-прежнему заданы списком путей внутри самой проверки.
+#
+# Проверка без единой метки в коде и с пустым результатом grep означает, что на текущем main
+# нарушений не найдено.
 
 set -uo pipefail
 
@@ -21,16 +37,69 @@ cd "$ROOT" || { echo "Каталог не найден: $ROOT" >&2; exit 2; }
 
 overall=0
 
-# Оставляет только строки вида "путь:номер:...", чьё "путь:номер:" НЕ входит в allowlist.
-# Allowlist передаётся построчно через stdin вторым потоком не используется — проще: аргументы.
-filter_allowlist() {
-  local hits="$1"; shift
-  local out="$hits"
-  for entry in "$@"; do
-    [ -z "$entry" ] && continue
-    out="$(printf '%s\n' "$out" | grep -vF "$entry:" || true)"
-  done
-  printf '%s\n' "$out" | sed '/^$/d'
+# Оставляет только срабатывания ("путь:номер:..."), у которых нет метки v2-allow для проверки
+# $2 на этой же строке или на строке над ней (формат — см. инструкцию в шапке файла). Метка без
+# причины не освобождает: строка остаётся в выводе, но отдельным, легко узнаваемым сообщением —
+# так «метку без причины» видно в [FAIL], а не молча пропускают (docs/v2/44-decisions.md В-8).
+apply_markers() {
+  local hits="$1" check="$2"
+  [ -z "$hits" ] && return 0
+  V2_ALLOW_HITS="$hits" V2_ALLOW_CHECK="$check" python3 - <<'PYEOF'
+import os
+import re
+
+hits = os.environ.get('V2_ALLOW_HITS', '')
+check = os.environ['V2_ALLOW_CHECK']
+
+# Комментарий любого синтаксиса репозитория (см. шапку файла), затем "v2-allow: checkN" точно
+# этого номера — (?!\d) не даёт, например, check1 поймать метку check13.
+MARKER = re.compile(r'(?://|--|<!--|/\*)\s*v2-allow:\s*check' + re.escape(check) + r'(?!\d)(.*)$')
+EM_DASH = '—'  # «—»: разделитель причины (не путать с "--" — открывающей комментарий SQL)
+
+def reason_of(tail: str) -> str:
+    tail = tail.strip()
+    for end in ('-->', '*/'):
+        if tail.endswith(end):
+            tail = tail[:-len(end)].strip()
+    return tail[1:].strip() if tail.startswith(EM_DASH) else ''
+
+_cache: dict = {}
+def lines_of(path: str):
+    if path not in _cache:
+        try:
+            with open(path, encoding='utf-8') as fh:
+                _cache[path] = fh.read().split('\n')
+        except OSError:
+            _cache[path] = None
+    return _cache[path]
+
+out = []
+for entry in hits.split('\n'):
+    if not entry:
+        continue
+    parts = entry.split(':', 2)
+    if len(parts) < 3 or not parts[1].isdigit():
+        out.append(entry)  # неожиданный формат строки — не трогаем
+        continue
+    path, lineno = parts[0], int(parts[1])
+    lines = lines_of(path)
+    marked, reason = False, ''
+    if lines is not None:
+        for ln in (lineno, lineno - 1):  # сама строка, затем строка над ней
+            if 1 <= ln <= len(lines):
+                m = MARKER.search(lines[ln - 1])
+                if m:
+                    marked, reason = True, reason_of(m.group(1))
+                    break
+    if marked and reason:
+        continue  # законное исключение — не показываем
+    if marked:
+        out.append(f'{path}:{lineno}: метка "v2-allow: check{check}" без причины — не освобождает ({entry})')
+        continue
+    out.append(entry)
+
+print('\n'.join(out))
+PYEOF
 }
 
 report() {
@@ -59,25 +128,11 @@ check1_stage_codes() {
   hits="$(grep -rEn "$pattern" server app shared --include='*.ts' 2>/dev/null \
     | grep -v 'server/db/seed' | grep -v 'server/db/tenantDefaults.ts' | grep -v 'shared/enums.ts' \
     | grep -v 'drizzle/sql' | grep -v 'i18n/' || true)"
-  # Allowlist: значение 'knowledge' здесь — код модуля «база знань» (контент), а не код этапа
-  # жизненного цикла «навчання» (lifecycle_stages.code). Текстовое совпадение случайное —
-  # модуль появился в базовом ТЗ задолго до пакета docs/v2 и переименовывать его не входит
-  # в план (docs/v2/45-plan.md ничего об этом не говорит).
-  local allow=(
-    "server/db/schema/content.ts:105" # сдвиги: +1 в v2 PR-11/12 (импорт enrollments в схеме media_assets), +1 в PR-24 (course_categories.owner_id), +1 в PR-25 (импорт схемы библиотеки)
-    "server/api/v1/access-groups/index.get.ts:7"
-    # Номера сдвинулись дважды: fix-keyset-cursor (+2, импорт keyset) и PR-30 (+1 импорт
-    # orgManager, −2 на сжатии локального managerOf()). Сами строки не менялись: 29 → 32, 89 → 90.
-    "server/services/comments.ts:32"
-    "server/services/comments.ts:90"
-    "server/services/modules.ts:34"
-    "server/services/modules.ts:60" # 54→60: маршруты модуля «Бонуси і магазин» выше в MODULE_ROUTES (gamification)
-    "server/services/resources.ts:488" # 479→485 в PR-25: тело модуля библиотеки скрыто из списков ресурсов (`listed()`); 485→488 в PR-22: синхронизация «Орієнтовного часу» материала в норму времени
-    "shared/schemas/resources.ts:89"
-    "shared/schemas/settings.ts:17" # 14→17: импорт умолчаний правил нарахування (gamification)
-    "shared/schemas/catalog.ts:35" # строка сдвинулась на 2 в fix-keyset-cursor (импорт keyset)
-  )
-  hits="$(filter_allowlist "$hits" "${allow[@]}")"
+  # Точечные срабатывания разрешены меткой v2-allow: check1 прямо в коде (см. шапку файла):
+  # значение 'knowledge' там — код модуля «база знань» (контент), а не код этапа жизненного
+  # цикла «навчання» (lifecycle_stages.code). Текстовое совпадение случайное — модуль появился
+  # в базовом ТЗ задолго до пакета docs/v2, и переименовывать его не входит в план.
+  hits="$(apply_markers "$hits" 1)"
   report "1. коды этапов вне справочника/миграций" "$hits"
 }
 
@@ -250,24 +305,11 @@ check5_tokens() {
   local hex_hits
   hex_hits="$(grep -rnoE '#[0-9a-fA-F]{3,8}\b' app --include='*.vue' --include='*.css' 2>/dev/null \
     | grep -v 'app/assets/tokens.css' | grep -v 'app/assets/ui.css' || true)"
-  # Allowlist — хекс-литералы, найденные на момент написания проверки (main, 2026-09-23).
-  # Был и четвёртый — app/pages/learn/profile.vue `#fff4c7`, дубль токена --color-sun-soft;
-  # снят в `gamification` (страница переехала в learn/profile/index.vue и берёт токен).
-  # - app/pages/learn/meetups/checkin.vue:83 `#000` — фон видео-плеера (letterbox), должен
-  #   быть буквально чёрным независимо от темы оформления, не элемент бренд-палитры.
-  #   Строка 82→83 — тот же сдвиг на одну строку (задача про единое форматирование дат);
-  # - app/pages/admin/settings/notifications.vue:348 `#fff` — фон превью HTML-письма: должен
-  #   быть буквально белым «листом бумаги», иначе превью не соответствует письму получателя.
-  #   Строка 347→348 — тот же сдвиг;
-  # - app/pages/admin/meetups/[id].vue:222 `#fff` — фон под QR-кодом: контраст QR обязан быть
-  #   чёрным/белым для сканирования, тон беж-фона токена --color-bg этого не гарантирует.
-  #   Строка 221→222 — тот же сдвиг.
-  local allow=(
-    "app/pages/learn/meetups/checkin.vue:83"
-    "app/pages/admin/settings/notifications.vue:348"
-    "app/pages/admin/meetups/[id].vue:222"
-  )
-  hex_hits="$(filter_allowlist "$hex_hits" "${allow[@]}")"
+  # Точечные срабатывания разрешены меткой v2-allow: check5 прямо в коде, комментарием CSS
+  # (`/* ... */`, см. шапку файла) над правилом: letterbox-фон видео, «бумажный» фон превью
+  # письма и чёрно-белая подложка QR — во всех трёх буквальный чёрный/белый нужен независимо
+  # от темы оформления, а токен --color-bg этого не гарантирует.
+  hex_hits="$(apply_markers "$hex_hits" 5)"
 
   local inline_hits
   inline_hits="$(grep -rnoE '\s(style|:style)="[^"]*[0-9]+px[^"]*"' app --include='*.vue' 2>/dev/null \
@@ -371,7 +413,8 @@ check9_resolve_manager() {
     server app shared --include='*.ts' --include='*.vue' 2>/dev/null \
     | grep -v 'server/services/orgManager.ts' \
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(\*|//|--|#)' || true)"
-  # Allowlist. Три вида законных обращений к полю точки:
+  # Точечные срабатывания разрешены меткой v2-allow: check9 прямо в коде (см. шапку файла).
+  # Три вида законных обращений к полю точки, на которые ссылаются причины меток:
   #
   # (а) САМО ПОЛЕ как элемент справочника точек — его заводят, правят и показывают
   #     (`docs/16` §3.3). Понижение поля до резервного источника не означает, что его больше
@@ -383,25 +426,12 @@ check9_resolve_manager() {
   # (в) ЗАПИСЬ поля — импорт людей заполняет `user_placements.manager_id` по внешнему номеру,
   #     посев платформы ставит администратора руководителем точки. Ни то ни другое не читает
   #     поле ради ответа «кто руководитель человека X».
-  local allow=(
-    "server/db/schema/org.ts:26"                  # (а) объявление колонки locations.manager_id
-    "server/db/schema/people.ts:112"              # (а) объявление колонки user_placements.manager_id
-    "server/services/refs.ts:32"                  # (а) список редактируемых полей справочника точек
-    "server/services/refs.ts:35"                  # (а) карта camelCase → snake_case того же справочника
-    "server/api/v1/refs/[kind]/[id].patch.ts:15"  # (а) zod-схема правки точки
-    "server/services/orgTree.ts:11"               # (б) карточка точки в публичной оргструктуре: «керівник точки»
-    "server/services/orgTree.ts:21"               # (б) то же, подстановка имени в карточку
-    "server/services/meetupSessions.ts:380"       # (б) право вести занятие — у держателя точки (docs/18 §7)
-    "server/services/checklists.ts:198"           # (б) чек-лист по точке провален → руководителю точки (docs/20 §8)
-    "server/services/checklists.ts:415"           # (б) точка не выполнила норму прогонов → руководителю точки
-    "server/services/checklists.ts:418"           # (б) то же, условие выборки
-    "server/services/checklists.ts:419"           # (б) то же, тип строки
-    "server/services/reportsExtra.ts:303"         # (б) недельный дайджест по точке (docs/22 §8): цифры тоже по точке; 283→299 — рейтинг на книге балів (gamification, D-069); 299→303 — срок из review_queue_items (PR-20)
-    "server/services/assessment.ts:400"           # (б) «какими точками человек руководит» — вопрос о точках
-    "server/services/importPeople.ts:622"         # (в) запись user_placements.manager_id из файла
-    "server/services/platform.ts:172"             # (в) посев нового тенанта: администратор — руководитель точки
-  )
-  hits="$(filter_allowlist "$hits" "${allow[@]}")"
+  #
+  # [При переносе на метки, PR crosschecks-markers: строка server/services/assessment.ts:400,
+  # категория (б) «какими точками человек руководит», снята как протухшая. PR-30 перевёл этот
+  # файл на managerIdsOf() из orgManager.ts (см. doc-комментарий у placementsOf()), и обращений
+  # к полю точки напрямую в нём больше нет — метку не на что вешать.]
+  hits="$(apply_markers "$hits" 9)"
   report "9. руководитель человека мимо resolveManager() (docs/v2/39 П-16.4)" "$hits"
 }
 

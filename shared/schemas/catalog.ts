@@ -32,6 +32,7 @@ export const catalogDecideSchema = z.object({
 export const catalogSettingsSchema = z.object({ restrictAccess: z.boolean().optional() })
 
 /** Єдина стрічка коментарів (docs/02, docs/10 §14.2). */
+// v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
 export const COMMENT_SOURCE_TYPES = ['task', 'course', 'program', 'knowledge', 'notice'] as const
 export type CommentSourceType = typeof COMMENT_SOURCE_TYPES[number]
 

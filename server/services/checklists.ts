@@ -195,6 +195,7 @@ export async function finishRun(ctx: Ctx, runId: string, input: { answers?: RunA
     }).where(eq(checklistRuns.id, runId))
 
     // Уведомления (docs/20 §8): провал → руководителю точки сразу; критический → руководителям сети (admin)
+    // v2-allow: check9 — (б) чек-лист по точке провален → руководителю точки (docs/20 §8)
     const [loc] = r.locationId ? await tx.select({ managerId: locations.managerId, name: locations.name }).from(locations).where(eq(locations.id, r.locationId)) : []
     if (!score.passed && loc?.managerId && loc.managerId !== ctx.actorId) {
       await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: loc.managerId, code: 'checklist_failed', payload: { title: c!.title, location: loc.name, score: score.score }, dedupKey: `cl_failed:${runId}` })
@@ -412,11 +413,13 @@ export async function disciplineReport(ctx: Ctx, scope: string[] | null = null) 
 export async function frequencyScan(tenantId: string): Promise<number> {
   return withTenant(tenantId, null, async (tx) => {
     const rows = await tx.execute(sql`
+      -- v2-allow: check9 — (б) точка не выполнила норму прогонов → руководителю точки
       select c.title, l.name as location, l.manager_id, (c.frequency->>'timesPerWeek')::int as norm,
              (select count(*)::int from checklist_runs r where r.checklist_id = c.id and r.location_id = l.id and r.status = 'finished' and r.started_at >= now() - interval '7 days') as done
       from checklists c cross join locations l
+      -- v2-allow: check9 — (б) то же, условие выборки
       where c.is_active and c.frequency is not null and c.subject_kind = 'location' and l.manager_id is not null
-    `) as unknown as { title: string, location: string, manager_id: string, norm: number, done: number }[]
+    `) as unknown as { title: string, location: string, manager_id: string, norm: number, done: number }[] // v2-allow: check9 — (б) то же, тип строки
     const week = new Date().toISOString().slice(0, 10)
     let n = 0
     for (const r of rows.filter(r => r.done < r.norm)) {

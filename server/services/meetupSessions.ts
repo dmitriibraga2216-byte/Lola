@@ -377,6 +377,7 @@ async function markAttendance(tx: TenantTx, ctx: Ctx, s: typeof meetupSessions.$
 async function canMarkRetroactively(tx: TenantTx, ctx: Ctx, s: typeof meetupSessions.$inferSelect, allowByScope: boolean): Promise<boolean> {
   if (allowByScope) return true
   if (!s.locationId) return false
+  // v2-allow: check9 — (б) право вести занятие — у держателя точки (docs/18 §7)
   const [loc] = await tx.select({ managerId: locations.managerId }).from(locations).where(eq(locations.id, s.locationId))
   return loc?.managerId === ctx.actorId
 }

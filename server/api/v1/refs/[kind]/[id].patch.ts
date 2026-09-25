@@ -14,6 +14,7 @@ const body = z.object({
   parentId: z.string().uuid().nullable().optional(),
   cityId: z.string().uuid().nullable().optional(),
   orgUnitId: z.string().uuid().optional(),
+  // v2-allow: check9 — (а) zod-схема правки точки
   managerId: z.string().uuid().nullable().optional(),
   address: z.string().max(300).nullable().optional(),
   timezone: z.string().max(60).optional(),

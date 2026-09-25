@@ -33,9 +33,11 @@ const EDITABLE: Record<RefKind, string[]> = {
   'position-levels': ['name', 'sort'],
   'position-groups': ['name', 'sort_order'],
   'org-units': ['name', 'parent_id'],
+  // v2-allow: check9 — (а) список редактируемых полей справочника точек
   'locations': ['name', 'address', 'city_id', 'org_unit_id', 'timezone', 'manager_id', 'is_active'],
   'tags': ['name', 'color', 'description'], // область действия не меняется — иначе метка «переедет» с людей на курсы
 }
+// v2-allow: check9 — (а) карта camelCase → snake_case справочника точек (тот же список полей)
 const CAMEL: Record<string, string> = { isActive: 'is_active', levelId: 'level_id', parentId: 'parent_id', cityId: 'city_id', orgUnitId: 'org_unit_id', managerId: 'manager_id', groupId: 'group_id', sortOrder: 'sort_order' }
 
 export async function usageCount(ctx: Ctx, kind: RefKind, id: string): Promise<number> {

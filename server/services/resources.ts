@@ -485,6 +485,7 @@ export async function reorderResourceCategories(ctx: Ctx, ids: string[]) {
 
 // ── Группы доступа (docs/02 access_groups, docs/21 §14.1) ─────────────────────────────
 
+// v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
 export async function listAccessGroups(ctx: Ctx, appliesTo?: 'knowledge' | 'catalog') {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const groups = await tx.select().from(accessGroups)

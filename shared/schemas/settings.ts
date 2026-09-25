@@ -14,6 +14,7 @@ import type { ContentType } from '../enums'
 // ── Модули (docs/24 §3.2; docs/32 §В.2: wiki остаётся в коде, по умолчанию выключена) ──
 export const MODULES = [
   'workshops', 'programs', 'trajectories', 'meetups', 'webinars', 'complexTests', 'development',
+  // v2-allow: check1 — 'knowledge' тут код модуля «база знань», не код этапа lifecycle_stages
   'assessment', 'knowledge', 'news', 'notices', 'events', 'wiki', 'forum', 'chat', 'bonuses', 'workTasks',
 ] as const
 export type ModuleCode = typeof MODULES[number]

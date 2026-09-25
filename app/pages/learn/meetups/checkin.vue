@@ -80,6 +80,7 @@ onUnmounted(stop)
 <style scoped>
 .back { color: var(--color-ink-muted); text-decoration: none; font-weight: 700; }
 h1 { margin: var(--space-2) 0; font-weight: 900; }
+/* v2-allow: check5 — фон видео-плеера (letterbox) обязан быть буквально чёрным независимо от темы оформления */
 .video { width: 100%; border-radius: var(--radius-l); background: #000; aspect-ratio: 1; object-fit: cover; }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: var(--space-1) 0; }
 .ok { background: var(--color-teal); color: var(--color-teal-deep); padding: var(--space-3); border-radius: var(--radius-m); font-weight: 800; }

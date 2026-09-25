@@ -94,6 +94,20 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('interview.transcribe', { retryLimit: 0, expireInSeconds: 600 })
       await b.createQueue('interview.score', { retryLimit: 0, expireInSeconds: 600 })
       await b.createQueue('interview.reap', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/v2/30 §11 (PR-29): голос не живёт дольше срока — ежедневно 03:40, до корзины
+      // хранилища (storage.purge, 04:00), по всем тенантам. Упавшее удаление объекта — падение
+      // задачи и повтор, а не тишина
+      await b.createQueue('interview.media_purge', { retryLimit: 2, retryDelay: 600, expireInSeconds: 1800 })
+      // Підсумок кандидата: сборка по событию (собеседование обработано), авто-отправка по сроку —
+      // каждые 10 минут, истечение ссылок — 03:50
+      await b.createQueue('summary.build', { retryLimit: 2, retryBackoff: true, expireInSeconds: 600 })
+      await b.createQueue('summary.auto_send', { retryLimit: 1, expireInSeconds: 600 })
+      await b.createQueue('summary.expire', { retryLimit: 2, expireInSeconds: 600 })
+      // Подсказка проверяющему — по событию сдачи; строки ещё может не быть (транзакция сдачи не
+      // зафиксирована) — повтор через 20 с. Качество ИИ: выборка 06:00, метрика 06:30
+      await b.createQueue('ai.review_hint', { retryLimit: 3, retryDelay: 20, expireInSeconds: 600 })
+      await b.createQueue('ai.quality_sample', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('ai.metrics_rollup', { retryLimit: 2, expireInSeconds: 900 })
       // Расписания docs/06 §6.3; singletonKey не даёт наплодить дублей
       await b.schedule('attempt.expire', '*/5 * * * *', {}, { singletonKey: 'attempt.expire' })
       await b.schedule('notification.dispatch', '* * * * *', {}, { singletonKey: 'notification.dispatch' })
@@ -168,6 +182,11 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
       await b.schedule('ai.calls_cleanup', '10 4 * * *', {}, { singletonKey: 'ai.calls_cleanup', tz: 'Europe/Kyiv' })
       await b.schedule('interview.reap', '*/15 * * * *', {}, { singletonKey: 'interview.reap' })
+      await b.schedule('interview.media_purge', '40 3 * * *', {}, { singletonKey: 'interview.media_purge', tz: 'Europe/Kyiv' })
+      await b.schedule('summary.auto_send', '*/10 * * * *', {}, { singletonKey: 'summary.auto_send' })
+      await b.schedule('summary.expire', '50 3 * * *', {}, { singletonKey: 'summary.expire', tz: 'Europe/Kyiv' })
+      await b.schedule('ai.quality_sample', '0 6 * * *', {}, { singletonKey: 'ai.quality_sample', tz: 'Europe/Kyiv' })
+      await b.schedule('ai.metrics_rollup', '30 6 * * *', {}, { singletonKey: 'ai.metrics_rollup', tz: 'Europe/Kyiv' })
       return b
     })
   }

@@ -293,6 +293,14 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   interview_consent_withdrawn: '{{name}} відкликав згоду на запис співбесіди. Записи видалено',
   interview_abandoned: 'Співбесіду не завершено.{{#until}} Посилання діє до {{until}}.{{/until}} Продовжіть з того ж питання',
   interview_abandoned_recruiter: '{{name}} не завершив співбесіду: добу без активності. Спробу збережено',
+  // docs/v2/30 §8 (PR-29): Підсумок, подсказка проверяющему, качество ИИ. Кандидату — только
+  // результат (`interview_result_ready`, e-mail): строка «Документ сформовано автоматично» — и в
+  // письме, как в самом документе (§7.14). `summary_auto_send_scheduled` — рекрутеру колокольчиком,
+  // `ai_review_hint_failed` — админу колокольчиком, `ai_quality_degraded` — админу e-mail и колокольчик
+  interview_result_ready: 'Дякуємо за участь у відборі. За посиланням — підсумок вашої співбесіди: {{url}}{{#until}} Посилання діє до {{until}}.{{/until}} Документ сформовано автоматично',
+  summary_auto_send_scheduled: 'Підсумок кандидата {{name}} буде надіслано {{time}}. Можна скасувати в картці кандидата',
+  ai_review_hint_failed: 'ШІ-підказка для перевіряючих не формується: {{n}} невдалі спроби поспіль. Перевірте налаштування провайдера',
+  ai_quality_degraded: 'Розбіжність оцінок ШІ та людини зросла до {{x}} % ({{prompt}}). Перевірте вибірку якості',
 }
 
 /**
@@ -319,6 +327,8 @@ export function emailDefaultEnabled(code: string): boolean {
     || /^org_structure_(import_finished|rollback)$/.test(code)
     // docs/v2/30 §8 (PR-28): рекрутеру — «in-app, email», кандидату о брошенной сессии — e-mail
     || /^interview_(declined|completed|needs_human|consent_withdrawn|abandoned|abandoned_recruiter)$/.test(code)
+    // docs/v2/30 §8 (PR-29): Підсумок кандидату — e-mail; розбіжність ШІ з людиною — «email, in-app» адміну
+    || code === 'interview_result_ready' || code === 'ai_quality_degraded'
     || eventClassOf(code) === 'managerDigest'
     || /^(scheduled_report|report_export_)/.test(code)
 }

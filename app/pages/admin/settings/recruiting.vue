@@ -18,7 +18,11 @@ interface Recruiting {
   archiveAfterDays: number
   consentMonths: number
   notifyRejected: boolean
+  /** Авто-відправка Підсумку (docs/v2/30 §6.5, §7.15). */
+  summaryAutoSend: { enabled: boolean, scoreKind: 'manual' | 'task' | 'ai' | 'recruiter', minScore: number | null, delayHours: number, skipRejected: boolean }
 }
+
+const SCORE_KINDS = ['manual', 'task', 'ai', 'recruiter'] as const
 
 const form = ref<Recruiting | null>(null)
 const error = ref('')
@@ -37,7 +41,10 @@ async function save() {
   error.value = ''
   notice.value = ''
   try {
-    form.value = await api<Recruiting>('/settings/recruiting', { method: 'PATCH', body: { ...form.value } })
+    // Порожнє поле числа v-model.number віддає рядком — поріг «не задано» це null, а не ''
+    const auto = form.value.summaryAutoSend
+    const minScore = typeof auto.minScore === 'number' ? auto.minScore : null
+    form.value = await api<Recruiting>('/settings/recruiting', { method: 'PATCH', body: { ...form.value, summaryAutoSend: { ...auto, minScore } } })
     notice.value = t('recruitingSettings.saved')
     // Меню читает флаг из `/auth/me`: без обновления раздел «Кандидати» появится только
     // после перезагрузки страницы.
@@ -80,6 +87,31 @@ async function save() {
         <span>{{ t('recruitingSettings.notifyRejected') }}</span>
       </label>
 
+      <!-- Авто-відправка Підсумку (docs/v2/30 §6.5): поріг, обов'язкова ненульова затримка, скасування рекрутером -->
+      <fieldset class="group">
+        <legend>{{ t('recruitingSettings.autoSend.title') }}</legend>
+        <label class="row">
+          <input v-model="form.summaryAutoSend.enabled" type="checkbox">
+          <span>{{ t('recruitingSettings.autoSend.enabled') }}</span>
+        </label>
+        <label>{{ t('recruitingSettings.autoSend.scoreKind') }}
+          <select v-model="form.summaryAutoSend.scoreKind" :disabled="!form.summaryAutoSend.enabled">
+            <option v-for="k in SCORE_KINDS" :key="k" :value="k">{{ t(`candidate.scoreKind.${k}`) }}</option>
+          </select>
+        </label>
+        <label>{{ t('recruitingSettings.autoSend.minScore') }}
+          <input v-model.number="form.summaryAutoSend.minScore" type="number" step="1" :disabled="!form.summaryAutoSend.enabled" :required="form.summaryAutoSend.enabled">
+        </label>
+        <label>{{ t('recruitingSettings.autoSend.delayHours') }}
+          <input v-model.number="form.summaryAutoSend.delayHours" type="number" min="1" max="168" :disabled="!form.summaryAutoSend.enabled">
+        </label>
+        <label class="row">
+          <input v-model="form.summaryAutoSend.skipRejected" type="checkbox" :disabled="!form.summaryAutoSend.enabled">
+          <span>{{ t('recruitingSettings.autoSend.skipRejected') }}</span>
+        </label>
+        <p class="sub">{{ t('recruitingSettings.autoSend.hint') }}</p>
+      </fieldset>
+
       <button class="btn" type="submit" :disabled="busy">{{ t('common.save') }}</button>
     </form>
   </div>
@@ -88,4 +120,6 @@ async function save() {
 <style scoped>
 .form { display: grid; gap: var(--space-3); max-width: 32rem; }
 .row { display: flex; gap: var(--space-2); align-items: center; }
+.group { display: grid; gap: var(--space-3); border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-s); padding: var(--space-3); margin: 0; }
+.group legend { font-weight: 800; }
 </style>

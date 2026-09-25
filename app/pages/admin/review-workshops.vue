@@ -6,6 +6,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'rev
 const { t } = useI18n()
 const { api } = useApi()
 const { formatShortDate } = useFormat()
+const { hasScope } = useAuth()
 
 interface Item { id: string, workshopTitle: string, fullName: string, attemptNo: number, status: string, submittedAt: string | null, hoursLeft: number | null, reviewerId: string | null, reworkCount: number, locationName: string | null, pendingUpload?: boolean }
 interface Criterion { id: string, text: string, isCritical: boolean, weight: number }
@@ -153,6 +154,9 @@ async function skip() {
              работе, жёлтая предупреждает автора материала — кнопки при этом активны. -->
         <p v-if="card.conflict === 'self'" class="conflict self">{{ t('review.conflictSelf') }}</p>
         <p v-else-if="card.conflict === 'author'" class="conflict author">{{ t('review.conflictAuthor') }}</p>
+        <!-- Підказка ШІ (docs/v2/30 §5.5, §7.13): справа від критеріїв, згорнута; перемикачі критеріїв
+             нижче підказка не заповнює — усі вони «Ні», поки їх не змінить наставник (§13 к. 11) -->
+        <AiReviewHint v-if="hasScope('ai.review.use')" target-kind="workshop_submission" :target-id="card.submission.id" />
         <h2>{{ t('workshop.criteria') }}</h2>
         <div v-for="c in card.submission.criteriaSnapshot" :key="c.id" class="crit">
           <label class="crit-row">

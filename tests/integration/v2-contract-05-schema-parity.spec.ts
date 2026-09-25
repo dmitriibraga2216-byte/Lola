@@ -57,6 +57,11 @@ const FORBIDDEN = /attempts|pass_score|due_at|time_limit/
  *   внешнему сервису, а не разрешённое число попыток прохождения — кандидат об этой колонке
  *   не знает и на его назначение она не ссылается.
  *
+ * - `candidate_summaries.auto_send_due_at` — когда **Підсумок уйдёт кандидату письмом** по правилу
+ *   авто-отправки тенанта (`30` §3.5, §7.15): задержка, в течение которой рекрутер может отменить
+ *   отправку. Срок доставки документа, а не дедлайн прохождения; имя колонки — дословно из DDL
+ *   документа (PR-29).
+ *
  * Список закрытый: правило прохождения, попавшее в таблицу пакета, по-прежнему красит тест.
  */
 const PACKAGE_COLUMN_EXCEPTIONS = new Set([
@@ -67,6 +72,7 @@ const PACKAGE_COLUMN_EXCEPTIONS = new Set([
   'review_sla_events.due_at',
   'storage_pending_uploads.attempts',
   'vacancy_publications.attempts',
+  'candidate_summaries.auto_send_due_at',
 ])
 
 const adminUrl = process.env.DATABASE_ADMIN_URL

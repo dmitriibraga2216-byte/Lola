@@ -209,3 +209,21 @@ export const interviewWithdrawSchema = z.object({
 export const interviewTextAnswerSchema = z.object({
   text: z.string().max(INTERVIEW_TEXT_ANSWER_MAX, `До ${INTERVIEW_TEXT_ANSWER_MAX} символів`),
 }).strict()
+
+// ── Рекрутер: несогласие с оценкой ИИ (§6.4, §7.3, §12 п. 6; план `45` PR-29) ──────────────
+
+/**
+ * `POST /candidates/:id/interview/criteria/:criterionId/override` — форма «Не погоджуюсь» (`30` §6.4).
+ * Критерий приходит путём. «Ваш бал» — в шкале критерия (проверяет сервис: шкала своя у каждого
+ * критерия). `expectedHumanAt` — оптимистическая блокировка §12 п. 6: момент прежнего
+ * несогласия, который видел рекрутер (`null` — несогласий не было); не совпал — `409 conflict`
+ * и актуальное значение.
+ */
+export const interviewOverrideSchema = z.object({
+  humanValue: z.number({ invalid_type_error: 'Вкажіть бал' }).min(0, 'Бал не може бути від\'ємним'),
+  humanComment: z.string().trim().min(10, 'Поясніть від 10 символів').max(1000, 'До 1000 символів'),
+  major: z.boolean().default(false),
+  expectedHumanAt: z.string().datetime({ offset: true }).nullable().optional(),
+}).strict()
+
+export type InterviewOverrideInput = z.infer<typeof interviewOverrideSchema>

@@ -162,6 +162,7 @@ export async function advanceSession(tenantId: string, sessionId: string): Promi
     return 'scoring' as const
   })
   if (next === 'scoring') await enqueueScore(tenantId, sessionId, 1)
+  if (next === 'needs_human') await summaryAfterInterview(tenantId, sessionId)
   return next
 }
 
@@ -185,6 +186,24 @@ export type ScoreOutcome = 'scored' | 'needs_human' | 'retry' | 'skipped'
  * Вызовы внутри сессии не тарифицируются (операция списана резервом на старте, `30` §7.12).
  */
 export async function scoreSession(tenantId: string, sessionId: string, tryNo = 1): Promise<ScoreOutcome> {
+  const outcome = await scoreSessionOnce(tenantId, sessionId, tryNo)
+  if (outcome === 'scored' || outcome === 'needs_human') await summaryAfterInterview(tenantId, sessionId)
+  return outcome
+}
+
+/**
+ * Собеседование обработано — оценка есть или решение за человеком: у кандидата без Підсумка он
+ * собирается задачей `summary.build` (`30` §11, PR-29). Уже собранный не пересобирается: новую
+ * версию делает рекрутер («Сформувати заново»), иначе документ менялся бы у него на глазах.
+ */
+async function summaryAfterInterview(tenantId: string, sessionId: string): Promise<void> {
+  const [s] = await withTenant(tenantId, null, tx => tx.select({ candidateId: interviewSessions.candidateId }).from(interviewSessions).where(eq(interviewSessions.id, sessionId)))
+  if (!s) return
+  const { enqueueSummaryBuild } = await import('../candidateSummaries')
+  await enqueueSummaryBuild(tenantId, s.candidateId)
+}
+
+async function scoreSessionOnce(tenantId: string, sessionId: string, tryNo: number): Promise<ScoreOutcome> {
   const loaded = await withTenant(tenantId, null, async (tx) => {
     const [s] = await tx.select().from(interviewSessions).where(eq(interviewSessions.id, sessionId))
     if (!s || s.state !== 'scoring' || s.redactedAt) return null

@@ -149,6 +149,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/settings/scales', label: t('admin.nav.scales'), show: hasScope('settings.tenant'), group: t('admin.group.platform') },
     { to: '/admin/settings/lifecycle', label: t('admin.nav.lifecycle'), show: hasScope('lifecycle.view'), group: t('admin.group.platform') },
     { to: '/admin/settings/recruiting', label: t('admin.nav.recruitingSettings'), show: hasScope('settings.tenant'), group: t('admin.group.platform') },
+    // Функції ШІ і вибіркова перевірка якості його висновків (docs/v2/30 §5.6, §7.16, PR-29)
+    { to: '/admin/settings/ai', label: t('admin.nav.aiSettings'), show: hasScope('ai.audit'), group: t('admin.group.platform') },
     { to: '/admin/settings/translations', label: t('admin.nav.translations'), show: hasScope('settings.tenant'), group: t('admin.group.platform') },
     { to: '/admin/certificates', label: t('admin.nav.certificates'), show: hasScope('report.team'), group: t('admin.group.platform') },
     // Тариф і ліміти (docs/v2/35 §2, роль «Власник»): лічильники бачать `admin` і `owner` — скоуп, а не «налаштування простору».

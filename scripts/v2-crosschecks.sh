@@ -648,6 +648,103 @@ check16_interview_no_decisions() {
   report "16. ИИ ничего не решает о людях: модуль собеседования, балл без обоснования (docs/v2/42 §5 проверка 17)" "$hits"
 }
 
+# ── Проверка 17. Голос не живёт дольше срока ───────────────────────────────────────────────
+# docs/v2/42-stages-delta.md §5 проверка 18, docs/v2/30 §7.7, §11 `interview.media_purge`,
+# §13 к. 10; план `45` PR-29. Аудио ответа собеседования (`origin = 'interview_answer'`) живёт
+# 90 дней от конца сессии, но не дольше согласия на обработку ПД; отзыв согласия и перезапись
+# отправляют его в корзину сразу. SQL документа («ноль строк после прогона задачи») исполняет
+# интеграционный тест `tests/integration/v2-ai-summary.spec.ts` (нужна БД и S3): прогон
+# `interview.media_purge` по всем тенантам — и `select count(*) from media_assets where origin =
+# 'interview_answer' and purge_after < now() and lifecycle <> 'purged'` даёт ноль; отказ S3 —
+# строка остаётся, задача падает. Здесь — то, что делает этот ноль возможным и что статически
+# ломается одной правкой:
+#  (а) задача стоит в очереди и по расписанию: `createQueue` и `schedule('interview.media_purge'`
+#      в `server/services/queue.ts`, обработчик `work('interview.media_purge'` в `server/plugins/worker.ts`;
+#  (б) голос не помечается `purged` мимо модуля стирания `server/services/interview/mediaPurge.ts`:
+#      пометка без удаления объекта оставила бы запись в S3 навсегда (так работает корзина
+#      хранилища, `docs/v2/44` §8). Любая запись `lifecycle = 'purged'` / `lifecycle: 'purged'` в
+#      `server/` вне модуля обязана в пределах своего запроса исключать `interview_answer`;
+#  (в) корзина не возвращает голос: `restoreFile` в `server/services/storage.ts` отказывает
+#      `interview_answer` (отзыв согласия — «записи видалено», обещано кандидату);
+#  (г) ошибка удаления объекта голоса не глушится: в модуле стирания нет пустого `catch`,
+#      `.catch(() => …)` и пакетного `DeleteObjectsCommand` (он и давал `MissingContentMD5` на
+#      MinIO, проглоченный `deleteS3Prefix()` при удалении тенанта).
+check17_voice_retention() {
+  local purge="server/services/interview/mediaPurge.ts"
+  if [ ! -f "$purge" ]; then
+    echo "[skip] 17. голос не живёт дольше срока (модуль $purge ещё не создан — PR-29)"
+    return
+  fi
+  local hits
+  hits="$(V2_PURGE_MODULE="$purge" python3 - <<'PY'
+import os
+import pathlib
+import re
+
+purge = os.environ['V2_PURGE_MODULE']
+out = []
+
+def code_lines(text):
+    return text.split('\n')
+
+def is_comment(line):
+    t = line.strip()
+    return t.startswith('//') or t.startswith('*') or t.startswith('/*') or t.startswith('--')
+
+# (а) расписание и обработчик
+queue = pathlib.Path('server/services/queue.ts')
+worker = pathlib.Path('server/plugins/worker.ts')
+qs = queue.read_text(encoding='utf-8') if queue.is_file() else ''
+ws = worker.read_text(encoding='utf-8') if worker.is_file() else ''
+if "createQueue('interview.media_purge'" not in qs:
+    out.append('server/services/queue.ts:0: нет очереди interview.media_purge — голос некому стирать по сроку')
+if "schedule('interview.media_purge'" not in qs:
+    out.append('server/services/queue.ts:0: interview.media_purge не стоит в расписании — срок голоса не исполняется')
+if "work('interview.media_purge'" not in ws:
+    out.append('server/plugins/worker.ts:0: нет обработчика interview.media_purge')
+
+# (б) пометка purged мимо модуля стирания — только запись: `set … lifecycle = 'purged'` в SQL и
+# `lifecycle: 'purged'` внутри `.set({…})` Drizzle; чтение (`where m.lifecycle = 'purged'`) — не запись
+PURGED_SQL = re.compile(r"\bset\b.*\blifecycle\s*=\s*'purged'", re.IGNORECASE)
+PURGED_ORM = re.compile(r"lifecycle\s*:\s*'purged'")
+EXCLUDES = re.compile(r"origin\s*(<>|!=)\s*'interview_answer'|ne\(\s*mediaAssets\.origin\s*,\s*'interview_answer'\s*\)")
+for f in sorted(pathlib.Path('server').rglob('*.ts')):
+    path = f.as_posix()
+    if path == purge:
+        continue
+    lines = code_lines(f.read_text(encoding='utf-8'))
+    for i, line in enumerate(lines):
+        if is_comment(line):
+            continue
+        orm = PURGED_ORM.search(line) and '.set(' in '\n'.join(lines[max(0, i - 3):i + 1])
+        if not (PURGED_SQL.search(line) or orm):
+            continue
+        window = '\n'.join(lines[max(0, i - 12):i + 13])
+        if not EXCLUDES.search(window):
+            out.append(f"{path}:{i + 1}: lifecycle 'purged' без исключения interview_answer — голос помечен удалённым, а объект остался в S3")
+
+# (в) восстановление из корзины
+storage = pathlib.Path('server/services/storage.ts')
+if storage.is_file():
+    st = storage.read_text(encoding='utf-8')
+    m = re.search(r'export async function restoreFile\b[\s\S]*?\n}\n', st)
+    if m and 'interview_answer' not in m.group(0):
+        out.append('server/services/storage.ts:0: restoreFile возвращает голос кандидата из корзины — запись без срока мимо interview.media_purge')
+
+# (г) ошибка удаления не глушится
+lines = code_lines(pathlib.Path(purge).read_text(encoding='utf-8'))
+SWALLOW = re.compile(r'catch\s*(\([^)]*\))?\s*\{\s*\}|\.catch\(\s*\(\s*\w*\s*\)\s*=>|DeleteObjectsCommand')
+for i, line in enumerate(lines):
+    if SWALLOW.search(line) and not is_comment(line):
+        out.append(f'{purge}:{i + 1}: ошибка удаления голоса глушится или удаление пакетное — неудача должна остаться видна')
+
+print('\n'.join(out))
+PY
+)"
+  hits="$(apply_markers "$hits" 17)"
+  report "17. голос не живёт дольше срока: interview.media_purge, purged только с удалением объекта (docs/v2/42 §5 проверка 18)" "$hits"
+}
+
 check1_stage_codes
 check2_users_kind_filter
 check3_driver_bypass
@@ -664,5 +761,6 @@ check13_time_norms_not_in_score
 check14_ai_no_decisions
 check15_ai_gateway_only
 check16_interview_no_decisions
+check17_voice_retention
 
 exit $overall

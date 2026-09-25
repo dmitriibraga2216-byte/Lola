@@ -1030,6 +1030,9 @@ export async function gradeManual(ctx: Ctx, answerId: string, input: { isCorrect
 
     // Решение по ответу принято — элемент очереди закрывается (не удаляется, проверка 21).
     await closeReview(tx, { taskType: 'quiz_open_answer', sourceIds: [answerId], reviewerId: ctx.actorId, decision: input.isCorrect ? 'зараховано' : 'не зараховано' })
+    // Подсказка ИИ (docs/v2/30 §7.13, PR-29) решение не меняет — только сверяется с ним (`agreement`)
+    const { recordHintDecisionTx } = await import('./reviewHints')
+    await recordHintDecisionTx(tx, { tenantId: ctx.tenantId, kind: 'attempt_answer', targetId: answerId, reviewerId: ctx.actorId, passed: input.isCorrect, decision: input.isCorrect ? 'accepted' : 'rejected' })
 
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'attempt.grade', entity: 'attempt_answer', entityId: answerId, after: { isCorrect: input.isCorrect, score } })
     // Лента проверяющего (docs/v2/38 §7.9): проверенный ответ — его учебная работа в системе

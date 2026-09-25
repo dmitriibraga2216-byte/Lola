@@ -377,7 +377,7 @@ export async function listStorageFiles(ctx: Ctx, q: StorageFilesQuery): Promise<
 
 export type RestoreResult
   = | { ok: true, lifecycle: 'active' }
-    | { ok: false, code: 'not_found' | 'already_purged' | 'not_deleted' }
+    | { ok: false, code: 'not_found' | 'already_purged' | 'not_deleted' | 'not_restorable' }
 
 /**
  * `POST /storage/files/:id/restore` (§4, §10): `pending_delete → active` в один клик. Квоту
@@ -393,6 +393,10 @@ export async function restoreFile(ctx: Ctx, mediaId: string): Promise<RestoreRes
     if (!row) return { ok: false, code: 'not_found' } // чужой тенант — 404 (CLAUDE.md п. 15)
     if (row.lifecycle === 'purged') return { ok: false, code: 'already_purged' }
     if (row.lifecycle !== 'pending_delete') return { ok: false, code: 'not_deleted' }
+    // Голос кандидата из корзины не возвращается (`docs/v2/30` §7.6, §7.7; PR-29): туда его кладут
+    // отзыв согласия, перезапись и ответ текстом — «записи видалено», обещано кандидату. Восстановление
+    // вернуло бы запись без срока, мимо `interview.media_purge`.
+    if (row.origin === 'interview_answer') return { ok: false, code: 'not_restorable' }
     await tx.execute(sql`
       update media_assets set lifecycle = 'active', deleted_at = null, deleted_by = null, delete_reason = null,
              purge_after = null, updated_at = now()
@@ -441,6 +445,10 @@ export async function purgeDue(tenantId: string, now: Date = new Date()): Promis
        where id in (
          select id from media_assets
           where lifecycle = 'pending_delete' and purge_after <= ${now.toISOString()}::timestamptz
+            -- Голос кандидата корзина не «очищает» пометкой: его объект удаляет по-настоящему
+            -- interview.media_purge (docs/v2/30 §7.7, сквозная проверка 18 docs/v2/42 §5) —
+            -- пометка purged без удаления оставила бы запись в S3 навсегда
+            and origin <> 'interview_answer'
           order by purge_after
           limit ${PURGE_BATCH}
           for update skip locked)

@@ -209,6 +209,60 @@ export default defineNitroPlugin(async () => {
       const r = await reapSessions(tenantId)
       if (r.abandoned) console.log(`[interview.reap] ${tenantId}: брошено ${r.abandoned}`)
     }, recruitingTenantIds))
+    // docs/v2/30 §7.7, §11 (PR-29): голос не живёт дольше срока. Обход — **все** тенанты, и
+    // приостановленные тоже: срок записи — обещание кандидату, а не политика хранения тенанта
+    // (`allTenantIds`), поэтому не `runPerTenant`, который их пропускает. Каждый тенант — своя
+    // транзакция withTenant(); неудача удаления объекта одного тенанта не держит остальных, но
+    // в конце круга задача падает и уходит в повтор — ошибка S3 не глушится
+    await work('interview.media_purge', async () => {
+      const { interviewMediaPurge } = await import('../services/interview/mediaPurge')
+      const { allTenantIds } = await import('../services/tenantResolve')
+      const failed: string[] = []
+      for (const tenantId of await allTenantIds()) {
+        try {
+          const r = await interviewMediaPurge(tenantId)
+          if (r.termed || r.purged) console.log(`[interview.media_purge] ${tenantId}: строк ${r.termed}, видалено ${r.purged}`)
+        }
+        catch (err) {
+          console.error(`[interview.media_purge] ${tenantId}:`, err)
+          failed.push(tenantId)
+        }
+      }
+      if (failed.length) throw new Error(`interview.media_purge: не видалено голос у ${failed.length} тенант(ах): ${failed.join(', ')}`)
+    })
+    // Підсумок кандидата (docs/v2/30 §11, PR-29): сборка по событию, авто-отправка и истечение — кругами
+    await perTenant<{ tenantId: string, candidateId: string }>('summary.build', async (data) => {
+      const { buildOnInterviewDone } = await import('../services/candidateSummaries')
+      await buildOnInterviewDone(data.tenantId, data.candidateId)
+    })
+    await work('summary.auto_send', () => runPerTenant('summary.auto_send', async (tenantId) => {
+      const { summaryAutoSendScan } = await import('../services/candidateSummaries')
+      const r = await summaryAutoSendScan(tenantId)
+      if (r.built || r.scheduled || r.sent || r.skipped.length) console.log(`[summary.auto_send] ${tenantId}:`, r)
+    }, recruitingTenantIds))
+    await work('summary.expire', () => runPerTenant('summary.expire', async (tenantId) => {
+      const { summaryExpire } = await import('../services/candidateSummaries')
+      const n = await summaryExpire(tenantId)
+      if (n) console.log(`[summary.expire] ${tenantId}: закінчилось посилань ${n}`)
+    }))
+    // Подсказка проверяющему (docs/v2/30 §7.13): строки ещё нет — транзакция сдачи не
+    // зафиксирована или откатилась; исключение отдаёт задачу в повтор очереди
+    await perTenant<{ tenantId: string, hintId: string }>('ai.review_hint', async (data) => {
+      const { buildReviewHint } = await import('../services/reviewHints')
+      const r = await buildReviewHint(data.tenantId, data.hintId)
+      if (r === 'missing') throw new Error(`ai.review_hint: підказки ${data.hintId} ще немає`)
+    })
+    // Качество ИИ (docs/v2/30 §7.16, §11): ежедневная выборка и метрика расхождения
+    await work('ai.quality_sample', () => runPerTenant('ai.quality_sample', async (tenantId) => {
+      const { sampleQuality } = await import('../services/aiQuality')
+      const r = await sampleQuality(tenantId)
+      if (r.scores || r.hints) console.log(`[ai.quality_sample] ${tenantId}:`, r)
+    }))
+    await work('ai.metrics_rollup', () => runPerTenant('ai.metrics_rollup', async (tenantId) => {
+      const { qualityRollup } = await import('../services/aiQuality')
+      const r = await qualityRollup(tenantId)
+      if (r.some(m => m.degraded)) console.log(`[ai.metrics_rollup] ${tenantId}:`, r.filter(m => m.degraded))
+    }))
     // Планировщик: due.scan → N задач due.scan.tenant (docs/25 §5), одна на тенанта в день
     await work('due.scan', async () => {
       const day = new Date().toISOString().slice(0, 10)

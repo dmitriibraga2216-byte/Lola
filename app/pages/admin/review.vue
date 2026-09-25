@@ -10,6 +10,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'rev
 
 const { t } = useI18n()
 const { api } = useApi()
+const { hasScope } = useAuth()
 
 interface Item {
   answerId: string
@@ -168,6 +169,9 @@ async function decide(item: Item, isCorrect: boolean) {
       <ul v-if="item.question?.criteria.length" class="criteria">
         <li v-for="c in item.question.criteria" :key="c">{{ c }}</li>
       </ul>
+
+      <!-- Підказка ШІ (docs/v2/30 §5.5, §7.13): поруч із формою, але форму не заповнює — рішення за наставником -->
+      <AiReviewHint v-if="item.isCorrect === null && hasScope('ai.review.use')" target-kind="attempt_answer" :target-id="item.answerId" />
 
       <template v-if="item.isCorrect === null">
         <div class="grade">

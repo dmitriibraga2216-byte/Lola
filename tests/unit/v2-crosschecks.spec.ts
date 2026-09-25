@@ -388,6 +388,73 @@ describe('scripts/v2-crosschecks.sh — падает на искусственн
     expect(run(fixture()).stdout).toContain('[skip] 16.')
   })
 
+  /**
+   * Проверка 17 скрипта (PR-29, `docs/v2/42` §5 проверка 18, `docs/v2/30` §7.7, §11): голос не
+   * живёт дольше срока — задача стоит в расписании, `purged` ставит только модуль стирания и только
+   * после удаления объекта, корзина голос не возвращает, ошибка удаления не глушится. SQL документа
+   * («ноль после прогона») — интеграционный тест `v2-ai-summary.spec.ts`.
+   */
+  function voiceFixture(overrides: Record<string, string> = {}): string {
+    const dir = fixture()
+    const files: Record<string, string> = {
+      'server/services/interview/mediaPurge.ts': 'export async function purge(key: string) { await s3().send(new DeleteObjectCommand({ Key: key })) }\n',
+      'server/services/queue.ts': "await b.createQueue('interview.media_purge', {})\nawait b.schedule('interview.media_purge', '40 3 * * *', {})\n",
+      'server/plugins/worker.ts': "await work('interview.media_purge', async () => {})\n",
+      'server/services/storage.ts': [
+        'export async function restoreFile(id: string) {',
+        "  if (origin === 'interview_answer') return { ok: false }",
+        '}',
+        'export async function purgeDue() {',
+        "  return sql`update media_assets set lifecycle = 'purged' where id in (select id from media_assets where lifecycle = 'pending_delete' and origin <> 'interview_answer')`",
+        '}',
+        '',
+      ].join('\n'),
+      ...overrides,
+    }
+    for (const [path, body] of Object.entries(files)) {
+      mkdirSync(join(dir, path, '..'), { recursive: true })
+      writeFileSync(join(dir, path), body)
+    }
+    return dir
+  }
+
+  it('17. корзина помечает голос purged без удаления объекта', () => {
+    const res = run(voiceFixture({
+      'server/services/storage.ts': "export async function restoreFile() { return origin === 'interview_answer' }\n}\nexport const purgeDue = () => sql`update media_assets set lifecycle = 'purged' where lifecycle = 'pending_delete'`\n",
+    }))
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('17. голос не живёт дольше срока')
+  })
+
+  it('17. задача стирания снята с расписания', () => {
+    const res = run(voiceFixture({ 'server/services/queue.ts': "await b.createQueue('interview.media_purge', {})\n" }))
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('не стоит в расписании')
+  })
+
+  it('17. ошибка удаления объекта голоса глушится', () => {
+    const res = run(voiceFixture({ 'server/services/interview/mediaPurge.ts': 'export const purge = (key: string) => s3().send(new DeleteObjectCommand({ Key: key })).catch(() => undefined)\n' }))
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('глушится')
+  })
+
+  it('17. восстановление из корзины возвращает голос', () => {
+    const res = run(voiceFixture({
+      'server/services/storage.ts': "export async function restoreFile(id: string) {\n  return { ok: true }\n}\nexport const purgeDue = () => sql`update media_assets set lifecycle = 'purged' where origin <> 'interview_answer'`\n",
+    }))
+    expect(res.status).not.toBe(0)
+    expect(res.stdout).toContain('restoreFile')
+  })
+
+  it('17. чтение purged, пометка с исключением голоса и пакет без модуля — не нарушение; без модуля — пропуск', () => {
+    const res = run(voiceFixture({
+      'server/services/reportFiles.ts': "export const list = sql`select * from media_assets m where m.lifecycle = 'purged'`\n",
+    }))
+    expect(res.status, res.stdout).toBe(0)
+    expect(res.stdout).toContain('[ok]   17.')
+    expect(run(fixture()).stdout).toContain('[skip] 17.')
+  })
+
   it('6. объяснение запрета в комментарии не считается нарушением', () => {
     const dir = fixture()
     mkdirSync(join(dir, 'server/services'), { recursive: true })

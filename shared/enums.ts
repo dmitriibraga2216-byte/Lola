@@ -1168,6 +1168,77 @@ export type InterviewCriterionSource = typeof INTERVIEW_CRITERION_SOURCES[number
 export const INTERVIEW_SCORE_AGREEMENTS = ['pending', 'match', 'minor', 'major'] as const
 export type InterviewScoreAgreement = typeof INTERVIEW_SCORE_AGREEMENTS[number]
 
+// ── Підсумок кандидата, подсказка проверяющему, качество ИИ (docs/v2/30 §3.5, §3.6, §4; план `45` PR-29) ──
+
+/**
+ * Состояние Підсумку (`candidate_summaries.state`, `30` §4): `draft` — документ собирается
+ * (генеративная секция ещё не получена), `ready` — собран и может уйти кандидату, `sent` — ушёл,
+ * ссылка живёт до `share_expires_at`; `revoked` — доступ по ссылке отозван (рекрутером, отзывом
+ * согласия, новой версией), `expired` — срок ссылки истёк.
+ */
+export const CANDIDATE_SUMMARY_STATES = ['draft', 'ready', 'sent', 'revoked', 'expired'] as const
+export type CandidateSummaryState = typeof CANDIDATE_SUMMARY_STATES[number]
+
+/** Полнота Підсумку (`candidate_summaries.completeness`, `30` §5.4): `partial` — «Неповне проходження». */
+export const CANDIDATE_SUMMARY_COMPLETENESS = ['full', 'partial'] as const
+export type CandidateSummaryCompleteness = typeof CANDIDATE_SUMMARY_COMPLETENESS[number]
+
+/** Кто написал текст (`candidate_summaries.generated_by`, `30` §3.5): правка человеком — `ai_edited`. */
+export const CANDIDATE_SUMMARY_GENERATED_BY = ['ai', 'ai_edited', 'manual'] as const
+export type CandidateSummaryGeneratedBy = typeof CANDIDATE_SUMMARY_GENERATED_BY[number]
+
+/**
+ * Секции Підсумку (`candidate_summaries.sections`, `30` §7.14): семь, в порядке документа; каждую
+ * можно выключить перед отправкой (§5.4). Строка «Документ сформовано автоматично» — **не секция**:
+ * она живёт в `body.disclaimer`, её держит CHECK таблицы, и выключить её нечем (`30` §13 к. 14).
+ */
+export const CANDIDATE_SUMMARY_SECTIONS = ['candidate', 'progress', 'scores', 'interview', 'strengths_risks', 'incomplete', 'passport'] as const
+export type CandidateSummarySection = typeof CANDIDATE_SUMMARY_SECTIONS[number]
+
+/**
+ * Чем Підсумок ушёл кандидату (`candidate_summaries.sent_channel`, `30` §5.4, §8): письмом
+ * `interview_result_ready` или ссылкой, которую рекрутер скопировал и передал сам
+ * («Скопіювати посилання»). Второе значение — PR-29: у кнопки §5.4 иначе нет следа в строке.
+ */
+export const CANDIDATE_SUMMARY_CHANNELS = ['email', 'link'] as const
+export type CandidateSummaryChannel = typeof CANDIDATE_SUMMARY_CHANNELS[number]
+
+/** К чему подсказка (`ai_review_hints.target_kind`, `30` §3.6, §7.13): развёрнутый ответ теста или сдача практикума. */
+export const AI_REVIEW_HINT_TARGETS = ['attempt_answer', 'workshop_submission'] as const
+export type AiReviewHintTarget = typeof AI_REVIEW_HINT_TARGETS[number]
+
+/**
+ * Состояние подсказки (`ai_review_hints.state`, `30` §4): `degraded` — ось `ai_review_ops`
+ * исчерпана или ИИ-подписка не действует, работа идёт в обычную ручную проверку (`35` §7.1);
+ * `skipped` — ключа нет (сверять не с чем) или ответ пуст.
+ */
+export const AI_REVIEW_HINT_STATES = ['queued', 'ready', 'failed', 'skipped', 'degraded'] as const
+export type AiReviewHintState = typeof AI_REVIEW_HINT_STATES[number]
+
+/**
+ * Совпадение решения ментора с подсказкой (`ai_review_hints.agreement`, `30` §7.13): считается
+ * при решении по покрытию ключа; `not_shown` — ментор решил, не раскрыв панель (контрольная группа).
+ */
+export const AI_REVIEW_HINT_AGREEMENTS = ['pending', 'match', 'minor', 'major', 'not_shown'] as const
+export type AiReviewHintAgreement = typeof AI_REVIEW_HINT_AGREEMENTS[number]
+
+/** Что перепроверяется (`ai_quality_reviews.ref_kind`, `30` §3.6, §7.16). */
+export const AI_QUALITY_REF_KINDS = ['interview_criterion_score', 'review_hint', 'summary'] as const
+export type AiQualityRefKind = typeof AI_QUALITY_REF_KINDS[number]
+
+/** Вердикт перепроверки (`ai_quality_reviews.verdict`, `30` §3.6); пусто — ещё не проверено. */
+export const AI_QUALITY_VERDICTS = ['correct', 'minor_error', 'major_error', 'harmful'] as const
+export type AiQualityVerdict = typeof AI_QUALITY_VERDICTS[number]
+
+/**
+ * Откуда строка перепроверки (`ai_quality_reviews.sampled_by`, `30` §3.6, §6.4, §7.16). `auto` —
+ * значение по умолчанию DDL: ежедневная выборка `ai.quality_sample`. `override` — PR-29:
+ * несогласие рекрутера с оценкой ИИ (форма §6.4) ставит строку сразу, не дожидаясь выборки, —
+ * иначе критерий `30` §13 к. 6 («создана `ai_quality_reviews`») зависел бы от расписания.
+ */
+export const AI_QUALITY_SAMPLED_BY = ['auto', 'override'] as const
+export type AiQualitySampledBy = typeof AI_QUALITY_SAMPLED_BY[number]
+
 /**
  * Вид события ленты активности (`user_activity_events.kind`, docs/v2/38 §3.3, §7.9; PR-34).
  * Закрытый список из двенадцати: карта отвечает на «людина вчилася?», поэтому вход в систему,
@@ -1306,4 +1377,15 @@ export const ENUMS: Record<string, readonly string[]> = {
   interview_transcript_status: INTERVIEW_TRANSCRIPT_STATUSES,
   interview_criterion_source: INTERVIEW_CRITERION_SOURCES,
   interview_score_agreement: INTERVIEW_SCORE_AGREEMENTS,
+  candidate_summary_state: CANDIDATE_SUMMARY_STATES,
+  candidate_summary_completeness: CANDIDATE_SUMMARY_COMPLETENESS,
+  candidate_summary_generated_by: CANDIDATE_SUMMARY_GENERATED_BY,
+  candidate_summary_section: CANDIDATE_SUMMARY_SECTIONS,
+  candidate_summary_channel: CANDIDATE_SUMMARY_CHANNELS,
+  ai_review_hint_target: AI_REVIEW_HINT_TARGETS,
+  ai_review_hint_state: AI_REVIEW_HINT_STATES,
+  ai_review_hint_agreement: AI_REVIEW_HINT_AGREEMENTS,
+  ai_quality_ref_kind: AI_QUALITY_REF_KINDS,
+  ai_quality_verdict: AI_QUALITY_VERDICTS,
+  ai_quality_sampled_by: AI_QUALITY_SAMPLED_BY,
 }

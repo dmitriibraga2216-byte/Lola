@@ -14,6 +14,7 @@ import type { InterviewAnswerMode, InterviewSessionState } from '../../../shared
 import type { InterviewAnswerInput, InterviewHeartbeatInput, InterviewUploadInput } from '../../../shared/schemas/interview'
 import { notifyAll, recruitingRecipients, type Ctx } from './common'
 import { redactInterviewData } from './redaction'
+import { setSessionAudioTermTx } from './mediaPurge'
 
 /**
  * Прохождение собеседования кандидатом (`docs/v2/30-ai-interview.md` §4, §5.2, §7.6, §7.12,
@@ -436,13 +437,17 @@ async function finishTx(tx: TenantTx, ctx: Ctx, s: Session): Promise<FinishTail>
   const voice = turns.some(t => t.answerMode === 'voice')
   const [person] = await personById(tx, { consentExpiresAt: users.consentExpiresAt }, s.candidateId) as unknown as { consentExpiresAt: string | null }[]
   const state: InterviewSessionState = pending ? 'transcribing' : 'scoring'
+  const purgeAfter = voice ? audioPurgeAfter(now, person?.consentExpiresAt ?? null) : null
   await tx.update(interviewSessions).set({
     state,
     finishedAt: now,
     lastActivityAt: now,
-    purgeAfter: voice ? audioPurgeAfter(now, person?.consentExpiresAt ?? null) : null,
+    purgeAfter,
     updatedAt: now,
   }).where(eq(interviewSessions.id, s.id))
+  // Срок голоса — и на самих записях (`30` §7.7, сквозная проверка 18): его исполняет
+  // `interview.media_purge`, а видит SQL проверки `media_assets.purge_after`
+  if (purgeAfter) await setSessionAudioTermTx(tx, s.id, purgeAfter)
   await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'interview.finish', entity: 'interview_session', entityId: s.id, after: { state, answered: s.turnsAnswered, attemptStatus: submitted?.status ?? attempt.status } })
   return { sessionId: s.id, state, submitted, released: false }
 }

@@ -82,6 +82,10 @@ export const KEYSETS = {
   aiCalls: ['at', 'text'],
   /** Сценарии собеседования (docs/v2/30 §5.6, §10 `GET /interview-scenarios`; PR-28): `updated_at desc, id desc`. */
   interviewScenarios: ['at', 'uuid'],
+  /** Підсумки кандидатов (docs/v2/30 §10 `GET /candidate-summaries`; PR-29): `created_at desc, id desc`. */
+  candidateSummaries: ['at', 'uuid'],
+  /** Очередь перепроверки качества ИИ (docs/v2/30 §7.16, §10 `GET /ai/quality-reviews`; PR-29): `created_at desc, id desc`. */
+  aiQualityReviews: ['at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

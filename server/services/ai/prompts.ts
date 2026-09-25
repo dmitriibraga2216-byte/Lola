@@ -3,6 +3,7 @@ import type { AiPurpose } from '../../../shared/enums'
 import { VACANCY_AI_CRITERIA_MAX, VACANCY_AI_CRITERIA_MIN, VACANCY_AI_TEXT_MAX_CHARS } from '../../../shared/enums'
 import { sanitizeUserHtml } from '../sanitize'
 import { stubVector } from '../embeddings'
+import { stubHint } from '../../../shared/domain/reviewHint'
 
 /**
  * Промпты — артефакт реализации (`docs/v2/30` §1): версионируются парой `key` + `version`
@@ -383,6 +384,134 @@ export const INTERVIEW_SCORE_PROMPT: PromptDef<InterviewScoreInput, InterviewSco
         evidence: (c.evidence ?? []).map(e => ({ turnId: e.turnId ?? null, quote: e.quote ?? null })),
       })),
     }
+  },
+  cacheable: true,
+  storeInput: true,
+}
+
+// ── Подсказка проверяющему (`30` §3.6, §7.13, план `45` PR-29) ─────────────────────────
+
+export interface ReviewHintInput {
+  lang: 'uk' | 'en' | 'ru'
+  /** Повтор с усиленной инструкцией после ответа без дословных цитат или со словами вердикта. */
+  strict: boolean
+  /** Текст вопроса или задания практикума — без разметки. */
+  task: string
+  /** Пункты контрольного ключа: формулировки методиста, модель их только сопоставляет. */
+  keyPoints: { id: string, text: string }[]
+  reference: string | null
+  /** Текст урока, где стоит вопрос, — контекст сверки (`30` §7.13 «текст модуля»), обрезанный. */
+  moduleText: string | null
+  answer: string
+}
+
+export interface ReviewHintOutput {
+  items: { keyPointId: string | null, status: string | null, quote: string | null, why: string | null }[]
+  confidence: number | null
+}
+
+/**
+ * Сверка ответа с ключом — **три списка и ничего больше** (`30` §3.6 [решение], §7.13). Промпт
+ * прямо запрещает оценку, «правильно»/«неправильно» и советы проверяющему; разбор мягкий, а
+ * проверку «каждый пункт ключа — один статус, цитата дословно из ответа, пояснение без слов
+ * вердикта» делает сервис-владелец (`shared/domain/reviewHint.ts#validateHint`).
+ */
+export const REVIEW_HINT_PROMPT: PromptDef<ReviewHintInput, ReviewHintOutput> = {
+  key: 'review.hint',
+  version: 'v1',
+  purpose: 'review_hint',
+  stub: input => ({ items: stubHint(input.keyPoints, input.answer).map(i => ({ keyPointId: i.keyPointId as string, status: i.status as string, quote: (i.quote as string | undefined) ?? null, why: null })), confidence: 0.5 }),
+  chat: input => [
+    {
+      role: 'system',
+      content: [
+        'You help a human reviewer compare a learner answer with the answer key. You never grade: a person decides.',
+        'For EVERY key point return exactly one status: "matched" (the answer says it), "missing" (the answer does not mention it) or "contradicts" (the answer says the opposite).',
+        'For "matched" and "contradicts" copy a quote VERBATIM from the answer. For "contradicts" add "why" — one neutral sentence of at most 200 characters describing the difference.',
+        `Write "why" in ${LANGUAGE_WORD[input.lang]}. Never use words like correct, incorrect, right, wrong, pass, fail, accept, reject, score or their translations, and give no advice to the reviewer.`,
+        ...(input.strict ? ['Your previous reply had quotes that are not in the answer or verdict words. Quotes must be exact substrings of the answer.'] : []),
+        'Return JSON {"items": [{"keyPointId": "k1", "status": "matched", "quote": "...", "why": null}], "confidence": 0.5}.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({ task: input.task, keyPoints: input.keyPoints, reference: input.reference, moduleText: input.moduleText, answer: input.answer }),
+    },
+  ],
+  parse(raw) {
+    const r = z.object({
+      items: z.array(z.object({
+        keyPointId: z.string().nullable().optional(),
+        status: z.string().nullable().optional(),
+        quote: z.string().nullable().optional(),
+        why: z.string().nullable().optional(),
+      }).passthrough()),
+      confidence: z.number().min(0).max(1).nullable().optional(),
+    }).passthrough().parse(raw)
+    return {
+      items: r.items.map(i => ({ keyPointId: i.keyPointId ?? null, status: i.status ?? null, quote: i.quote ?? null, why: i.why ?? null })),
+      confidence: r.confidence ?? null,
+    }
+  },
+  cacheable: true,
+  // Ответ человека — его ПД: в журнале только дайджест, сам вход — файлом на 90 дней (`30` §3.2)
+  storeInput: true,
+}
+
+// ── Підсумок: сильные стороны и зоны риска (`30` §7.14 п. 5, план `45` PR-29) ─────────────
+
+export interface SummaryPointsInput {
+  lang: 'uk' | 'en' | 'ru'
+  strict: boolean
+  criteria: { name: string, value: number | null, scaleMax: number, humanValue: number | null, rationale: string | null }[]
+  scores: { kind: string, value: number | null }[]
+  progress: { title: string, status: string, score: number | null }[]
+}
+
+export interface SummaryPointsOutput { strengths: unknown, risks: unknown }
+
+const STUB_POINT: Record<SummaryPointsInput['lang'], { strong: (n: string, v: number, m: number) => string, risk: (n: string, v: number, m: number) => string, pending: (t: string) => string }> = {
+  uk: { strong: (n, v, m) => `Критерій «${n}»: ${v} з ${m} (заглушка, не висновок моделі)`, risk: (n, v, m) => `Критерій «${n}»: ${v} з ${m} — варто уточнити на співбесіді з людиною (заглушка)`, pending: t => `Не завершено: «${t}» (заглушка)` },
+  en: { strong: (n, v, m) => `Criterion “${n}”: ${v} of ${m} (stub, not a model conclusion)`, risk: (n, v, m) => `Criterion “${n}”: ${v} of ${m} — worth clarifying in a human interview (stub)`, pending: t => `Not finished: “${t}” (stub)` },
+  ru: { strong: (n, v, m) => `Критерий «${n}»: ${v} из ${m} (заглушка, не вывод модели)`, risk: (n, v, m) => `Критерий «${n}»: ${v} из ${m} — стоит уточнить на собеседовании с человеком (заглушка)`, pending: t => `Не завершено: «${t}» (заглушка)` },
+}
+
+/**
+ * Единственная генеративная секция Підсумку (`30` §7.14 п. 5). **Модель не решает о людях**
+ * (инвариант 18): промпт просит наблюдения по данным и прямо запрещает рекомендацию нанять или
+ * отказать; сервис-владелец отклоняет ответ со словами решения (`checkPoints`) — секция тогда
+ * пустая, а документ собирается без неё.
+ */
+export const SUMMARY_POINTS_PROMPT: PromptDef<SummaryPointsInput, SummaryPointsOutput> = {
+  key: 'summary.points',
+  version: 'v1',
+  purpose: 'summary',
+  stub(input) {
+    const t = STUB_POINT[input.lang]
+    const scored = input.criteria.filter(c => (c.humanValue ?? c.value) !== null)
+    const strengths = scored.filter(c => (c.humanValue ?? c.value)! >= c.scaleMax * 0.7).slice(0, 3).map(c => t.strong(c.name, (c.humanValue ?? c.value)!, c.scaleMax))
+    const risks = [
+      ...scored.filter(c => (c.humanValue ?? c.value)! < c.scaleMax * 0.5).map(c => t.risk(c.name, (c.humanValue ?? c.value)!, c.scaleMax)),
+      ...input.progress.filter(p => p.status !== 'done').map(p => t.pending(p.title)),
+    ].slice(0, 3)
+    return { strengths, risks }
+  },
+  chat: input => [
+    {
+      role: 'system',
+      content: [
+        'You summarise observable strengths and areas to clarify for a job candidate, for a document that a human recruiter reviews and may send to the candidate.',
+        'Use only the data given. Never recommend hiring or rejecting, never judge age, gender, health, family, religion, origin, accent or speech.',
+        `Write in ${LANGUAGE_WORD[input.lang]}, at most 5 strengths and 5 risks, each at most 200 characters, neutral and respectful: the candidate may read it.`,
+        ...(input.strict ? ['Your previous reply contained a hiring recommendation or was too long. Describe observations only.'] : []),
+        'Return JSON {"strengths": ["..."], "risks": ["..."]}.',
+      ].join(' '),
+    },
+    { role: 'user', content: JSON.stringify({ criteria: input.criteria, scores: input.scores, progress: input.progress }) },
+  ],
+  parse(raw) {
+    const r = z.object({ strengths: z.unknown(), risks: z.unknown() }).passthrough().parse(raw)
+    return { strengths: r.strengths, risks: r.risks }
   },
   cacheable: true,
   storeInput: true,

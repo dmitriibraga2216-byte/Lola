@@ -135,6 +135,7 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/settings/scales': "hasScope('settings.tenant')",
   '/admin/settings/lifecycle': "hasScope('lifecycle.view')",
   '/admin/settings/recruiting': "hasScope('settings.tenant')",
+  '/admin/settings/ai': "hasScope('ai.audit')",
   '/admin/settings/translations': "hasScope('settings.tenant')",
   '/admin/certificates': "hasScope('report.team')",
   // PR-10 (docs/v2/35): тариф і ліміти бачать `admin` і `owner` — окремий скоуп, не «налаштування простору».

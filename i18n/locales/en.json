@@ -159,7 +159,8 @@
       "reviewRouting": "Routing rules",
       "storage": "Storage",
       "platformAnnouncements": "Lola announcements",
-      "interviews": "Interview scenarios"
+      "interviews": "Interview scenarios",
+      "aiSettings": "Artificial intelligence"
     },
     "section": {
       "learning": "Learning",
@@ -3678,7 +3679,11 @@
       "interview_needs_human": "Interview assessment not produced",
       "interview_consent_withdrawn": "Candidate withdrew recording consent",
       "interview_abandoned": "Interview not finished",
-      "interview_abandoned_recruiter": "Candidate did not finish the interview"
+      "interview_abandoned_recruiter": "Candidate did not finish the interview",
+      "interview_result_ready": "Interview summary sent to the candidate",
+      "summary_auto_send_scheduled": "Summary will be sent automatically",
+      "ai_review_hint_failed": "AI hint is not generated",
+      "ai_quality_degraded": "AI–human disagreement has grown"
     }
   },
   "ntpl": {
@@ -5316,7 +5321,8 @@
       "scores": "Scores",
       "comments": "Comments",
       "history": "History",
-      "interview": "Interview"
+      "interview": "Interview",
+      "summary": "Summary"
     },
     "state": {
       "active": "In selection",
@@ -5416,7 +5422,16 @@
     "consentMonths": "Consent term, months (1–24)",
     "consentHint": "When the term ends, name, contacts, CV and comments are anonymised; progress and scores remain",
     "notifyRejected": "Email the candidate about a rejection",
-    "saved": "Saved"
+    "saved": "Saved",
+    "autoSend": {
+      "title": "Automatic sending of the Summary",
+      "enabled": "Send the incomplete candidate Summary after the selection is finished",
+      "scoreKind": "Send after receiving the score:",
+      "minScore": "Minimum score",
+      "delayHours": "Delay before sending, hours (1–168)",
+      "skipRejected": "Do not send to rejected candidates",
+      "hint": "The recruiter is notified and can cancel sending before the delay ends. Every Summary carries the line “The document was generated automatically” — no setting turns it off."
+    }
   },
   "funnelReport": {
     "title": "Funnel report",
@@ -7460,6 +7475,23 @@
         "abandoned": "not finished",
         "expired": "time is over",
         "failed": "no answers"
+      },
+      "override": {
+        "open": "I disagree",
+        "title": "I disagree with the program’s score",
+        "value": "Your score (0 to {max})",
+        "comment": "Why",
+        "commentHint": "Only the team will see this text; it is needed to check the model’s quality",
+        "major": "Mark as a serious model error",
+        "save": "Save",
+        "saved": "Your score is saved next to the program’s score",
+        "conflict": "Someone has just disagreed with this score: {value}. Review it and change it if needed",
+        "human": "Human score: {value} of {max}",
+        "agreement": {
+          "match": "matches the program",
+          "minor": "small difference",
+          "major": "large difference"
+        }
       }
     },
     "history": {
@@ -7547,5 +7579,129 @@
     "critMeta": "weight {weight} · scale up to {max}",
     "addCriterion": "Add criterion",
     "removeCriterion": "Remove criterion “{name}”"
+  },
+  "reviewHint": {
+    "title": "AI hint",
+    "notScore": "This is not a score",
+    "open": "Show hint",
+    "hide": "Hide",
+    "loading": "Preparing the hint…",
+    "matched": "Matches the key",
+    "missing": "Not mentioned",
+    "contradictions": "Contradicts the key",
+    "coverage": "Key coverage: {matched} of {total}",
+    "absent": "No hint was produced, review the answer yourself",
+    "stub": "AI test stub, not a model: the lists are not a basis for a decision",
+    "reason": "Reason: {reason}",
+    "decide": "You make the decision: the hint only shows which parts of the key appear in the answer"
+  },
+  "candidateSummary": {
+    "title": "Candidate summary",
+    "empty": "No summary yet",
+    "build": "Generate",
+    "rebuild": "Generate again",
+    "rebuildConfirm": "A new version will be created. The link to the sent version will stop working. Continue?",
+    "partial": "Incomplete selection",
+    "version": "Version {n}",
+    "versions": "Earlier versions",
+    "state": {
+      "draft": "being assembled",
+      "ready": "ready",
+      "sent": "sent",
+      "revoked": "access revoked",
+      "expired": "link expired"
+    },
+    "sectionsTitle": "What goes into the document",
+    "sectionsHint": "Each section can be switched off before sending. The line about automatic generation is always there.",
+    "section": {
+      "candidate": "Candidate and vacancy",
+      "progress": "Completed content and results",
+      "scores": "Scores",
+      "interview": "Interview",
+      "strengths_risks": "Strengths and risk areas",
+      "incomplete": "Not completed",
+      "passport": "Technical passport"
+    },
+    "vacancy": "Vacancy",
+    "noVacancy": "no vacancy",
+    "kind": {
+      "course": "course",
+      "test": "test",
+      "workshop": "workshop"
+    },
+    "score": "score {value}",
+    "by": "{author}, {date}",
+    "stubScore": "AI test stub",
+    "interviewScore": "Program score: {value} of 100 · confidence {confidence}",
+    "needsHuman": "No program score — a person decides",
+    "human": "person: {value}",
+    "strengths": "Strengths",
+    "risks": "Worth clarifying",
+    "unavailable": "Section not generated: AI unavailable",
+    "nothing": "nothing",
+    "model": "Model: {model} · prompt {prompt}",
+    "generatedAt": "Generated {date}",
+    "edit": "Edit",
+    "editHint": "One item per line",
+    "save": "Save",
+    "saved": "Saved",
+    "send": "Send to candidate",
+    "sent": "Sent {date} · link valid until {until}",
+    "copy": "Copy link",
+    "copied": "Link copied",
+    "revoke": "Revoke access",
+    "revokeReason": "Reason for revoking",
+    "revoked": "Access revoked",
+    "autoDue": "Will be sent automatically {date}",
+    "autoCancel": "Cancel automatic sending",
+    "autoCancelled": "Automatic sending cancelled",
+    "redacted": "Text erased {date}: the candidate withdrew consent or the data was anonymised",
+    "public": {
+      "loading": "Loading the document…",
+      "notFound": "Link not found",
+      "expired": "The link has expired. Ask the recruiter for a new one",
+      "revoked": "Access to the document has been revoked",
+      "tooMany": "Too many requests. Try again in a few minutes",
+      "validUntil": "Link valid until {date}"
+    }
+  },
+  "aiSettings": {
+    "title": "Artificial intelligence",
+    "hint": "AI features of the space and quality review of its conclusions",
+    "reviewHints": "AI hint for reviewers",
+    "reviewHintsHint": "Compares an open answer with the key and shows what was covered. The mentor grades; employee answers are sent to the model.",
+    "saved": "Saved",
+    "quality": "Sampled quality review",
+    "qualityHint": "The verdict concerns the program’s conclusion, not the person",
+    "filter": {
+      "pending": "Not reviewed",
+      "reviewed": "Reviewed",
+      "all": "All"
+    },
+    "empty": "Nothing to review",
+    "ref": {
+      "interview_criterion_score": "Criterion score",
+      "review_hint": "Reviewer hint",
+      "summary": "Candidate summary"
+    },
+    "reason": {
+      "random": "random sample",
+      "major": "large difference with a person",
+      "low_confidence": "low confidence",
+      "override_major": "recruiter disagreed",
+      "override_flagged": "recruiter flagged a serious error"
+    },
+    "verdict": {
+      "correct": "Conclusion is sound",
+      "minor_error": "Minor error",
+      "major_error": "Serious error",
+      "harmful": "Harmful conclusion"
+    },
+    "notes": "Note",
+    "model": "Program: {value} · person: {human}",
+    "rationale": "Rationale",
+    "coverage": "Coverage: {value}",
+    "more": "Show more",
+    "redacted": "Text erased together with the candidate’s records"
   }
 }

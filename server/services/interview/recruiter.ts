@@ -35,6 +35,9 @@ export interface InterviewCriterionView {
   evidence: { turnId: string, ordinal: number, quote: string, charFrom: number, charTo: number, msFrom: number | null }[]
   agreement: string | null
   humanValue: number | null
+  /** Момент последнего несогласия — оптимистическая блокировка формы «Не погоджуюсь» (`30` §12 п. 6). */
+  humanAt: string | null
+  humanComment: string | null
   redacted: boolean
 }
 
@@ -149,6 +152,8 @@ export async function candidateInterview(v: Viewer, candidateId: string): Promis
             evidence: (x?.evidence ?? []) as InterviewCriterionView['evidence'],
             agreement: x?.agreement ?? null,
             humanValue: x ? num(x.humanValue) : null,
+            humanAt: x?.humanAt?.toISOString() ?? null,
+            humanComment: x?.humanComment ?? null,
             redacted: !!x?.redactedAt,
           }
         }),

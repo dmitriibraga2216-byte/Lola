@@ -82,6 +82,17 @@ export async function activeTenantIds(): Promise<string[]> {
   return rows.map(r => r.id)
 }
 
+/**
+ * Все тенанты, какой бы ни был статус, — только для обязательств перед людьми, которые не
+ * зависят от договора тенанта: срок голоса кандидата (`docs/v2/30` §7.7, `interview.media_purge`).
+ * Приостановленный тенант «не может возразить» против чистки своих данных (`docs/v2/34` §12), но
+ * срок записи голоса — обещание кандидату на экране согласия, а не политика хранения тенанта.
+ */
+export async function allTenantIds(): Promise<string[]> {
+  const rows = await db.execute(sql`select id from tenants order by created_at`) as unknown as { id: string }[]
+  return rows.map(r => r.id)
+}
+
 // ── Host ───────────────────────────────────────────────────────────────
 
 export interface HostConfig { base: string | null, defaultHosts: string[], defaultSlug: string | null }

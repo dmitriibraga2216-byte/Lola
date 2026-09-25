@@ -15,6 +15,7 @@ export default defineEventHandler(async (event) => {
   if (!r.ok) {
     if (r.code === 'already_purged') return apiError(event, 409, 'already_purged', 'Файл уже остаточно видалено — відновити не вийде')
     if (r.code === 'not_deleted') return apiError(event, 409, 'not_deleted', 'Файл не в кошику')
+    if (r.code === 'not_restorable') return apiError(event, 409, 'storage.not_restorable', 'Запис відповіді співбесіди не відновлюється: його видалено за згодою кандидата або строком зберігання')
     return apiError(event, 404, 'not_found', 'Файл не знайдено')
   }
   return apiData(r)

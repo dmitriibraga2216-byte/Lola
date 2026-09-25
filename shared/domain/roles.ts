@@ -193,6 +193,9 @@ export const SYSTEM_ROLES: Record<string, { name: string, scopes: Scope[], defau
       // PR-25: библиотеку видит и предлагает в неё свой урок (`docs/v2/31` §2); вставлять
       // модуль не может — нет `course.edit`, а положить в библиотеку — нет `library.publish`
       'library.view', 'library.use',
+      // PR-29 (`docs/v2/30` §2, §5.5): подсказка ИИ при проверке — «Ментор ✓». Подсказка не
+      // ставит оценку и не подставляет значений в форму: это материал для решения наставника
+      'ai.review.use',
     ],
   },
   manager: {

@@ -153,7 +153,7 @@ export async function moduleLock(tenantId: string, module: ModuleCode): Promise<
  * (PR-16) живёт под `/public/j/*` и флагом тенанта не гасится — он про приём отклика, а не
  * про работу с воронкой.
  */
-export const RECRUITING_ROUTES = ['/api/v1/candidates', '/api/v1/candidate-statuses', '/api/v1/reports/recruiting-funnel', '/api/v1/interviews', '/api/v1/interview-scenarios']
+export const RECRUITING_ROUTES = ['/api/v1/candidates', '/api/v1/candidate-statuses', '/api/v1/reports/recruiting-funnel', '/api/v1/interviews', '/api/v1/interview-scenarios', '/api/v1/candidate-summaries']
 
 export function isRecruitingRoute(path: string): boolean {
   const clean = path.split('?')[0]!

@@ -10,6 +10,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // из объявления, сессии у него нет и быть не должно — редирект на /login отправлял бы
   // соискателя логиниться в систему компании, куда он ещё только хочет попасть.
   if (to.path.startsWith('/j/')) return
+  // «Підсумок кандидата» за посиланням з листа (docs/v2/30 §5.4, §10): кандидат читає документ
+  // без входу — посилання і є доступом, строк його дії 30 днів, відкликання закриває його одразу
+  if (to.path.startsWith('/summary/')) return
   if (!me.value && !publicPages.has(to.path)) {
     return navigateTo('/login')
   }

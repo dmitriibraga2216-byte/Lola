@@ -2,7 +2,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import { mediaAssets, tenants } from '../db/schema'
 import { withTenant, type TenantTx } from '../utils/withTenant'
 import {
-  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type PoliciesPatch, type RecruitingPatch, type RewardRulesPatch, type TenantPatch, type TenantSettings,
+  ACCENT_TOKENS, MODULES, tenantSettingsSchema, type AccentToken, type EmailLayout, type ModuleCode, type NotificationSchedule, type AiSettingsPatch, type PoliciesPatch, type RecruitingPatch, type RewardRulesPatch, type TenantPatch, type TenantSettings,
 } from '../../shared/schemas/settings'
 import { SETTINGS_GROUP_RECRUITING } from '../../shared/enums'
 import type { ContentType } from '../../shared/enums'
@@ -168,10 +168,14 @@ export async function recruitingSettings(ctx: Ctx): Promise<RecruitingSettings> 
  * категорией ПД в продукте, поэтому идёт и в `audit_log`, и в журнал безопасности.
  */
 export async function updateRecruiting(ctx: Ctx, patch: RecruitingPatch): Promise<RecruitingSettings> {
-  const { enabled, ...rest } = patch
+  const { enabled, summaryAutoSend, ...rest } = patch
   const settings = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    if (Object.keys(rest).length) {
-      const r = await writeGroup(tx, ctx, SETTINGS_GROUP_RECRUITING, rest, { critical: false })
+    if (Object.keys(rest).length || summaryAutoSend) {
+      // Авто-отправка Підсумку (`docs/v2/30` §6.5) — вложенная группа: правка одного поля не
+      // сбрасывает остальные в умолчания; порог при включённой отправке проверяет полная схема
+      const before = (await readSettings(tx, ctx.tenantId)).recruiting
+      const merged = summaryAutoSend ? { ...rest, summaryAutoSend: { ...before.summaryAutoSend, ...summaryAutoSend } } : rest
+      const r = await writeGroup(tx, ctx, SETTINGS_GROUP_RECRUITING, merged, { critical: false })
       return r.settings.recruiting
     }
     return (await readSettings(tx, ctx.tenantId)).recruiting
@@ -193,6 +197,26 @@ export async function updateRecruiting(ctx: Ctx, patch: RecruitingPatch): Promis
     on = enabled
   }
   return { ...settings, enabled: on }
+}
+
+// ── Функции ИИ (docs/v2/30 §5.6, §7.13; план docs/v2/45 PR-29) ──
+
+export type AiSettings = TenantSettings['ai']
+
+/** Переключатели функций ИИ тенанта: сейчас одна — подсказка проверяющему (§7.13). */
+export async function aiSettings(ctx: Ctx): Promise<AiSettings> {
+  return withTenant(ctx.tenantId, ctx.actorId, async tx => (await readSettings(tx, ctx.tenantId)).ai)
+}
+
+/**
+ * Включение подсказки ИИ — решение отправлять ответы сотрудников модели: изменение идёт и в
+ * `audit_log`, и в журнал безопасности, как любое изменение того, куда уходят данные людей.
+ */
+export async function updateAiSettings(ctx: Ctx, patch: AiSettingsPatch): Promise<AiSettings> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const r = await writeGroup(tx, ctx, 'ai', patch, { critical: true })
+    return r.settings.ai
+  })
 }
 
 /** Включён ли модуль — для middleware маршрутов и меню. */

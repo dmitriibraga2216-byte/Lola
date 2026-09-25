@@ -19,7 +19,7 @@ const { hasScope } = useAuth()
 const { formatDate, formatDateTime } = useFormat()
 
 interface Evidence { turnId: string, ordinal: number, quote: string }
-interface Criterion { criterionId: string, name: string, description: string, scaleMax: number, value: number | null, confidenceWord: 'high' | 'medium' | 'low' | null, rationale: string | null, evidence: Evidence[], redacted: boolean }
+interface Criterion { criterionId: string, name: string, description: string, scaleMax: number, value: number | null, confidenceWord: 'high' | 'medium' | 'low' | null, rationale: string | null, evidence: Evidence[], redacted: boolean, agreement: string | null, humanValue: number | null, humanAt: string | null, humanComment: string | null }
 interface Turn { id: string, ordinal: number, promptText: string | null, answerMode: string | null, durationMs: number | null, transcript: string | null, transcriptStatus: string, audio: 'available' | 'deleted' | 'none', audioDeletedAt: string | null }
 interface Session {
   id: string
@@ -72,6 +72,52 @@ function jump(e: Evidence) {
 }
 
 const confidenceText = (w: string | null) => (w ? t(`interview.card.confidenceWord.${w}`) : '—')
+
+// ── «Не погоджуюсь» (§6.4, §7.3, §12 п. 6): балл человека рядом с оценкой програми ──────────
+interface OverrideForm { value: number | null, comment: string, major: boolean, error: string, busy: boolean }
+const overriding = ref<string | null>(null)
+const overrideForm = reactive<OverrideForm>({ value: null, comment: '', major: false, error: '', busy: false })
+const overrideNotice = ref('')
+
+function canOverride(s: Session, c: Criterion): boolean {
+  return hasScope('interview.override') && c.value !== null && !c.redacted && !s.redactedAt && ['scored', 'needs_human'].includes(s.state)
+}
+
+function openOverride(c: Criterion) {
+  overriding.value = c.criterionId
+  Object.assign(overrideForm, { value: c.humanValue, comment: '', major: false, error: '', busy: false })
+  overrideNotice.value = ''
+}
+
+async function saveOverride(c: Criterion) {
+  overrideForm.error = ''
+  if (overrideForm.value === null || Number.isNaN(overrideForm.value)) {
+    overrideForm.error = t('interview.card.override.value', { max: c.scaleMax })
+    return
+  }
+  overrideForm.busy = true
+  try {
+    await api(`/candidates/${props.candidateId}/interview/criteria/${c.criterionId}/override`, {
+      method: 'POST',
+      body: { humanValue: overrideForm.value, humanComment: overrideForm.comment, major: overrideForm.major, expectedHumanAt: c.humanAt },
+    })
+    overriding.value = null
+    overrideNotice.value = t('interview.card.override.saved')
+    await load()
+  }
+  catch (err) {
+    const e = apiErrorOf(err)
+    if (e.code === 'conflict') {
+      const current = (e.details as { current?: { humanValue: number | null } } | undefined)?.current
+      overrideForm.error = t('interview.card.override.conflict', { value: current?.humanValue ?? '—' })
+      await load()
+    }
+    else overrideForm.error = e.message
+  }
+  finally {
+    overrideForm.busy = false
+  }
+}
 </script>
 
 <template>
@@ -123,7 +169,33 @@ const confidenceText = (w: string | null) => (w ? t(`interview.card.confidenceWo
                 «{{ e.quote }}» <span class="sub">— {{ t('interview.card.turn', { n: e.ordinal }) }}</span>
               </button>
             </div>
+            <p v-if="c.humanValue !== null" class="note teal">
+              {{ t('interview.card.override.human', { value: c.humanValue, max: c.scaleMax }) }}<template v-if="c.agreement && c.agreement !== 'pending'"> · {{ t(`interview.card.override.agreement.${c.agreement}`) }}</template>
+            </p>
+            <template v-if="canOverride(s, c)">
+              <button v-if="overriding !== c.criterionId" class="btn ghost small" type="button" @click="openOverride(c)">{{ t('interview.card.override.open') }}</button>
+              <form v-else class="override" @submit.prevent="saveOverride(c)">
+                <strong>{{ t('interview.card.override.title') }}: {{ c.name }}</strong>
+                <label>{{ t('interview.card.override.value', { max: c.scaleMax }) }}
+                  <input v-model.number="overrideForm.value" type="number" min="0" :max="c.scaleMax" step="0.5" class="field num" required>
+                </label>
+                <label>{{ t('interview.card.override.comment') }}
+                  <textarea v-model="overrideForm.comment" class="field" rows="3" minlength="10" maxlength="1000" required :aria-describedby="`ovh-${c.criterionId}`" />
+                </label>
+                <p :id="`ovh-${c.criterionId}`" class="sub">{{ t('interview.card.override.commentHint') }}</p>
+                <label class="row">
+                  <input v-model="overrideForm.major" type="checkbox">
+                  <span>{{ t('interview.card.override.major') }}</span>
+                </label>
+                <p v-if="overrideForm.error" class="error-text" role="alert">{{ overrideForm.error }}</p>
+                <div class="row">
+                  <button class="btn primary small" type="submit" :disabled="overrideForm.busy">{{ t('interview.card.override.save') }}</button>
+                  <button class="btn ghost small" type="button" @click="overriding = null">{{ t('common.cancel') }}</button>
+                </div>
+              </form>
+            </template>
           </div>
+          <p v-if="overrideNotice" class="note teal" role="status">{{ overrideNotice }}</p>
         </section>
 
         <section v-if="s.flags.length" class="stack">
@@ -183,4 +255,8 @@ const confidenceText = (w: string | null) => (w ? t(`interview.card.confidenceWo
 .turns p { margin: 0; }
 .q { font-weight: 700; }
 audio { width: 100%; }
+.override { display: grid; gap: var(--space-2); border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-3); }
+.override label { display: grid; gap: var(--space-1); }
+.override .row { display: flex; }
+.num { max-width: 8rem; }
 </style>

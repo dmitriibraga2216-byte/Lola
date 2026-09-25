@@ -276,6 +276,37 @@ export function validateScores(criteria: readonly ScoreCriterionInput[], turns: 
   return problems.length ? { ok: false, problems } : { ok: true, scores }
 }
 
+// ── Несогласие с оценкой ИИ (`30` §6.4, §7.3; план `45` PR-29) ─────────────────────────
+
+export type CriterionAgreement = 'match' | 'minor' | 'major'
+
+/**
+ * Расхождение человека с моделью по критерию (`30` §7.3): `|human − ai| ≤ 10 %` шкалы — `match`,
+ * `≤ 30 %` — `minor`, иначе `major`. Сравнение в долях шкалы: критерии с максимумом 5 и 100
+ * меряются одной мерой. Граница включительно — «≤» документа; сравнение в сотых, чтобы 0,1 × 5 не
+ * превратилось в 0,5000000001 и не перевело точное попадание в `minor`.
+ */
+export function criterionAgreement(ai: number, human: number, scaleMax: number): CriterionAgreement {
+  const diff = Math.round(Math.abs(human - ai) * 10000)
+  const scale = Math.round(scaleMax * 10000)
+  if (diff * 10 <= scale) return 'match'
+  if (diff * 10 <= scale * 3) return 'minor'
+  return 'major'
+}
+
+/**
+ * Итог сессии с поправкой человека (`30` §7.3): по оспоренным критериям — балл человека, по
+ * остальным — модели, свёртка та же, что у оценки ИИ (`weightedScore`). Это число ложится в
+ * карточку новой строкой `candidate_scores.kind = 'manual'` авторства человека; строка `kind = 'ai'`
+ * не переписывается никогда — иначе теряется материал для метрики качества (§7.16).
+ */
+export function humanAdjustedScore(items: readonly { value: number | null, humanValue: number | null, scaleMax: number, weight: number }[]): number | null {
+  const used = items
+    .map(i => ({ value: i.humanValue ?? i.value, scaleMax: i.scaleMax, weight: i.weight }))
+    .filter((i): i is WeightedItem => i.value !== null)
+  return weightedScore(used)
+}
+
 // ── Сроки сессии ───────────────────────────────────────────────────────────────────────
 
 /**

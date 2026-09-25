@@ -902,3 +902,27 @@ HR и администратор — весь тенант). Кандидат и
 рекрутингом (`403 candidates.disabled`). Тест вида `interview` обычным путём
 (`POST /learning/quizzes/:id/attempts`) не стартует — `409 interview_consent.required`; вид теста в/из
 `interview` при существующих попытках не меняется — `409 quiz.kind_locked`.
+
+### Підсумок кандидата, подсказка проверяющему, качество ИИ (`docs/v2/30-ai-interview.md` §5.4–§5.6, §6.4, §7.3, §7.13–§7.16, §10, PR-29)
+
+| Метод | Путь | Что делает |
+|---|---|---|
+| POST | `/candidates/:id/interview/criteria/:criterionId/override` | «Не погоджуюсь» (`interview.override`): `{humanValue, humanComment, major, expectedHumanAt}` — балл человека рядом с оценкой ИИ, расхождение `agreement`, новая `candidate_scores.kind = 'manual'` (строка `kind = 'ai'` не меняется), `major` или отметка — в `ai_quality_reviews`. Нет оценки ИИ — `409 session.not_scored`; чужое несогласие позже увиденного — `409 conflict` с `details.current`; вне шкалы — `422` |
+| GET | `/candidate-summaries` | Підсумки (`summary.view`): фильтры `candidateId`, `state`, ключевой курсор (§4.1); роль с областью «точка» — только по своему кандидату |
+| POST | `/candidate-summaries` | «Сформувати» (`summary.edit`): `{candidateId, sections?}` — новая версия; прежняя отправленная по ссылке закрывается. Собирать не из чего — `409 summary.no_data` |
+| GET | `/candidate-summaries/:id` | документ, версия, состояние, план авто-отправки; ссылка кандидата — только с `summary.send` |
+| PATCH | `/candidate-summaries/:id` | «Редагувати» (`summary.edit`): `{sections?, strengths?, risks?}` → `generated_by = 'ai_edited'`; строку «Документ сформовано автоматично» не снимает ничто; отправленный — `409 summary.sent` |
+| POST | `/candidate-summaries/:id/send` | `{channel: email \| link}` (`summary.send`): ссылка на 30 дней, письмо `interview_result_ready` в окне кандидата. `422 contact.missing`, `409 consent.withdrawn`, `409 summary.not_latest`, `409 summary.not_candidate`, `409 summary.not_ready` |
+| POST | `/candidate-summaries/:id/revoke` | «Відкликати доступ» (`summary.send`): `{reason}`, `204` |
+| POST | `/candidate-summaries/:id/auto-send/cancel` | отмена авто-отправки до срока (`summary.send`), `204`; не назначена — `409 summary.auto_send_not_scheduled` |
+| GET | `/review-hints/:targetKind/:targetId` | «Підказка ШІ» (`ai.review.use`): три списка и покрытие ключа, без балла и вердикта; первое раскрытие — `shown_at`. `404 hint.absent`, `409 hint.degraded`, работа в чужих руках — `403` |
+| GET | `/ai/quality-reviews` | очередь перепроверки качества (`ai.audit`): `status = pending \| reviewed \| all`, `refKind`, ключевой курсор |
+| GET | `/ai/quality-reviews/:id` | перепроверка с самим выводом модели |
+| POST | `/ai/quality-reviews/:id` | `{verdict, notes}` — вердикт о модели, а не о человеке |
+| GET | `/settings/ai` | переключатели функций ИИ тенанта (`ai.audit`): `{reviewHints}` |
+| PATCH | `/settings/ai` | включить или выключить функцию ИИ (`ai.audit`); включение подсказки — и в журнал безопасности |
+
+Публичная ссылка кандидата — `GET /api/v1/public/candidate-summaries/:token` (раздел о публичном
+контуре ниже): документ без ПД третьих лиц и всегда со строкой «Документ сформовано автоматично»;
+истёкшая — `410 summary.share_expired`, отозванная — `410 summary.revoked`. Все пути
+`/candidate-summaries*` гасятся вместе с рекрутингом.

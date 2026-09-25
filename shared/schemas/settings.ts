@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { SCOPES } from '../domain/roles'
 import { DEFAULT_TASK_REWARDS, MAX_REWARD } from '../domain/gamification'
-import { CONTENT_TYPES } from '../enums'
+import { CANDIDATE_SCORE_KINDS, CONTENT_TYPES } from '../enums'
 import type { ContentType } from '../enums'
+import { SUMMARY_AUTO_SEND_DELAY } from '../domain/candidateSummary'
 
 /**
  * Настройки тенанта (docs/24 §3, `tenants.settings jsonb`) — единая zod-схема с дефолтами.
@@ -177,6 +178,34 @@ export const rewardRulesPatchSchema = z.object({
 }).strict()
 export type RewardRulesPatch = z.infer<typeof rewardRulesPatchSchema>
 
+/**
+ * Авто-отправка Підсумку (docs/v2/30 §6.5, §7.15; PR-29) — поля формы без значений по умолчанию:
+ * из них собираются и полная схема группы (с умолчаниями), и частичная правка (без них), чтобы
+ * `PATCH` одного поля не сбрасывал остальные в умолчания.
+ */
+export const summaryAutoSendFields = z.object({
+  /** «Надсилати неповний Підсумок кандидата після завершення відбору» — главный тумблер. */
+  enabled: z.boolean(),
+  /** «Надсилати після отримання оцінки:» — один из четырёх видов оценки (`28` §3.4). */
+  scoreKind: z.enum(CANDIDATE_SCORE_KINDS),
+  minScore: z.number().min(-9999).max(9999).nullable(),
+  delayHours: z.number().int()
+    .min(SUMMARY_AUTO_SEND_DELAY.min, `Від ${SUMMARY_AUTO_SEND_DELAY.min} до ${SUMMARY_AUTO_SEND_DELAY.max} годин`)
+    .max(SUMMARY_AUTO_SEND_DELAY.max, `Від ${SUMMARY_AUTO_SEND_DELAY.min} до ${SUMMARY_AUTO_SEND_DELAY.max} годин`),
+  /** «Не надсилати відхиленим кандидатам» — включён по умолчанию. */
+  skipRejected: z.boolean(),
+})
+
+export const summaryAutoSendSchema = z.object({
+  enabled: summaryAutoSendFields.shape.enabled.default(false),
+  scoreKind: summaryAutoSendFields.shape.scoreKind.default('recruiter'),
+  minScore: summaryAutoSendFields.shape.minScore.default(null),
+  delayHours: summaryAutoSendFields.shape.delayHours.default(SUMMARY_AUTO_SEND_DELAY.default),
+  skipRejected: summaryAutoSendFields.shape.skipRejected.default(true),
+}).superRefine((v, ctx) => {
+  if (v.enabled && v.minScore === null) ctx.addIssue({ code: 'custom', path: ['minScore'], message: 'Вкажіть мінімальний бал' })
+}).default({})
+
 export const tenantSettingsSchema = z.object({
   /** Простір (docs/24 §3.1; name/slug/locale/timezone — колонки tenants, акцент — branding) */
   space: z.object({
@@ -235,6 +264,17 @@ export const tenantSettingsSchema = z.object({
     archiveAfterDays: z.number().int().min(7).max(365).default(30), // §7.5, диапазон из документа
     consentMonths: z.number().int().min(1).max(24).default(6), // §7.9, по умолчанию 6 месяцев
     notifyRejected: z.boolean().default(false), // §6.2: «Повідомити кандидата» выключено по умолчанию
+    // docs/v2/30 §6.5, §7.15 (PR-29): авто-отправка Підсумку. Строки «Документ сформовано
+    // автоматично» здесь нет и не будет — её не выключает ни одна настройка (§13 к. 14)
+    summaryAutoSend: summaryAutoSendSchema,
+  }).default({}),
+  /**
+   * Функции ИИ тенанта (docs/v2/30 §5.6 «переключатели функций», PR-29). Пока одна — подсказка
+   * проверяющему (§7.13): выключена по умолчанию. Включая её, тенант решает отправлять ответы
+   * сотрудников модели; ИИ-подписка и ось `ai_review_ops` проверяются поверх (`35` §7.1).
+   */
+  ai: z.object({
+    reviewHints: z.boolean().default(false),
   }).default({}),
   guestPage: z.record(z.unknown()).default({}), // форма — guestBlocksSchema (hub)
   importPresets: z.record(z.unknown()).default({}),
@@ -278,7 +318,7 @@ export const modulesPatchSchema = modulesSchema.partial().strict()
 export const recruitingPatchSchema = tenantSettingsSchema.shape.recruiting
   .removeDefault()
   .partial()
-  .extend({ enabled: z.boolean().optional() })
+  .extend({ enabled: z.boolean().optional(), summaryAutoSend: summaryAutoSendFields.partial().strict().optional() })
   .strict()
 export type RecruitingPatch = z.infer<typeof recruitingPatchSchema>
 
@@ -384,3 +424,7 @@ export const previewAsSchema = z.object({ roleId: z.string().uuid() })
  */
 export const ownerTransferSchema = z.object({ userId: z.string().uuid() }).strict()
 export type OwnerTransfer = z.infer<typeof ownerTransferSchema>
+
+/** PATCH /settings/ai — переключатели функций ИИ тенанта (docs/v2/30 §5.6, PR-29). */
+export const aiSettingsPatchSchema = tenantSettingsSchema.shape.ai.removeDefault().partial().strict()
+export type AiSettingsPatch = z.infer<typeof aiSettingsPatchSchema>

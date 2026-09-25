@@ -848,6 +848,39 @@ export async function writeAiScoreTx(tx: TenantTx, tenantId: string, candidateId
   return row!.id
 }
 
+/**
+ * Человеческая поправка к оценке собеседования (`docs/v2/30` §6.4, §7.3; PR-29): рекрутер не
+ * согласился с оценкой ИИ по критерию — в карточку ложится **новая** строка `kind = 'manual'` его
+ * авторства (итог сессии с его баллом), прежняя ручная оценка перестаёт быть действующей и
+ * остаётся в истории. Строка `kind = 'ai'` этим путём не трогается никогда: машинная оценка стоит
+ * рядом непереписанной (`30` §13 к. 6, `42` этап 15 к. 3).
+ */
+export async function writeInterviewManualScoreTx(tx: TenantTx, tenantId: string, candidateId: string, input: { value: number, sessionId: string, authorId: string, comment: string }): Promise<string> {
+  await tx.update(candidateScores)
+    .set({ isCurrent: false, updatedAt: new Date() })
+    .where(and(eq(candidateScores.candidateId, candidateId), eq(candidateScores.kind, 'manual'), eq(candidateScores.isCurrent, true)))
+  const [row] = await tx.insert(candidateScores).values({
+    tenantId,
+    candidateId,
+    kind: 'manual',
+    valueNum: String(input.value),
+    comment: input.comment,
+    sourceType: 'interview',
+    sourceId: input.sessionId,
+    authorId: input.authorId,
+    isCurrent: true,
+  }).returning({ id: candidateScores.id })
+  await recordAudit(tx, {
+    tenantId,
+    actorId: input.authorId,
+    action: 'candidate.score',
+    entity: 'candidate_score',
+    entityId: row!.id,
+    after: { candidateId, kind: 'manual', valueNum: input.value, sourceType: 'interview', sourceId: input.sessionId },
+  })
+  return row!.id
+}
+
 /** Оценки кандидата: по умолчанию действующие, `history=true` — все (§10 `GET …/scores`). */
 export async function listScores(v: Viewer, id: string, opts: { kind?: CandidateScoreKind, history?: boolean } = {}): Promise<ScoreRow[] | null> {
   const row = await getCandidateRow(v, id)

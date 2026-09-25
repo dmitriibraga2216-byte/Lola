@@ -534,6 +534,9 @@ export async function grade(ctx: Ctx, submissionId: string, input: { decision: '
     // ни truncate, ни delete). Доработка тоже закрывает: работа вернулась к ученику, и
     // повторная сдача откроет ту же строку заново через enqueueReview().
     await closeReview(tx, { taskType: 'workshop', sourceIds: [submissionId], reviewerId: ctx.actorId, decision: WORKSHOP_DECISION_UK[input.decision], at: now })
+    // Подсказка ИИ (docs/v2/30 §7.13, PR-29) решение не меняет — только сверяется с ним; доработка — не зачёт
+    const { recordHintDecisionTx } = await import('./reviewHints')
+    await recordHintDecisionTx(tx, { tenantId: ctx.tenantId, kind: 'workshop_submission', targetId: submissionId, reviewerId: ctx.actorId, passed: input.decision === 'accepted', decision: input.decision })
 
     const code = input.decision === 'accepted' ? 'workshop_accepted' : input.decision === 'rework' ? 'workshop_rework' : 'workshop_rejected'
     await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: s.userId, code, payload: { title: w.title, comment, submissionId }, dedupKey: `ws_${code}:${submissionId}:${s.reworkCount}` })

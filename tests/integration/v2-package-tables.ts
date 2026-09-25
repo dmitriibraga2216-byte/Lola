@@ -158,6 +158,12 @@ export const V2_PACKAGE_TENANT_TABLES: string[] = [
   'interview_sessions',
   'interview_turns',
   'interview_criterion_scores',
+  // 30. Підсумок кандидата, подсказка проверяющему, качество (PR-29, миграция 0096_v2_ai_summary).
+  // Tenant-first полный индекс у каждой — уникальный ключ или `idx_*_tenant`; частичный
+  // `idx_candidate_summaries_tenant_due` (авто-отправка по сроку) стоит рядом с полным.
+  'candidate_summaries',
+  'ai_review_hints',
+  'ai_quality_reviews',
 ]
 
 /** Платформенные таблицы пакета, вне RLS (docs/v2/40 §8 тест 6: plan_prices, plan_addons). */

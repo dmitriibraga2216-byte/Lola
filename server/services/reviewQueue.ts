@@ -158,6 +158,12 @@ export async function enqueueReview(tx: TenantTx, input: EnqueueInput): Promise<
     .where(and(eq(reviewDelegations.queueItemId, row!.id), eq(reviewDelegations.state, 'active')))
 
   await routeQueueItem(tx, input.tenantId, row!.id, { reason: 'enqueue' })
+
+  // Подсказка ИИ проверяющему (`docs/v2/30` §7.13, PR-29): триггер — новая работа на проверке, и
+  // точка постановки та же — одна на все пути сдачи. Подсказка не участвует ни в назначении, ни в
+  // решении: строка `ai_review_hints` заводится рядом, модель зовёт задача `ai.review_hint`.
+  const { requestReviewHintTx } = await import('./reviewHints')
+  await requestReviewHintTx(tx, { tenantId: input.tenantId, taskType: input.taskType, sourceId: input.sourceId, userId: input.userId })
   return row!.id
 }
 

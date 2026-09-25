@@ -662,6 +662,52 @@ create table interview_criterion_scores (     -- оценка ИИ по крит
   -- ics_rationale_chk, ics_evidence_chk, ics_evidence_quote_chk, ics_redacted_chk; триггер ics_insert_guard
 );
 
+-- Підсумок кандидата, подсказка проверяющему, качество ИИ (`v2/30` §3.5, §3.6; план `v2/45` PR-29,
+-- миграция 0096). Ни одна из трёх таблиц не выносит решения о человеке (инвариант 18).
+create table candidate_summaries (            -- Підсумок кандидата: версия документа по итогам отбора
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  candidate_id uuid not null references users(id) on delete cascade, vacancy_id uuid, -- мягкая ссылка
+  version int not null default 1,
+  state text not null default 'draft',        -- candidate_summary_state
+  completeness text not null default 'partial', -- candidate_summary_completeness
+  body jsonb not null,                        -- семь секций `v2/30` §7.14 + disclaimer
+  sections jsonb not null default '[]',       -- включённые секции: candidate_summary_section
+  lang text not null default 'uk',
+  generated_by text not null default 'ai',    -- candidate_summary_generated_by
+  ai_call_id bigint references ai_calls(id) on delete set null, edited_by uuid, edited_at timestamptz,
+  media_id uuid references media_assets(id) on delete set null, -- PDF, origin = 'ai_artifact' (не формируется в PR-29)
+  share_token text unique, share_expires_at timestamptz, -- ссылка кандидату, 30 дней
+  auto_send_rule jsonb, auto_send_due_at timestamptz, auto_send_cancelled_at timestamptz, auto_send_cancelled_by uuid,
+  sent_at timestamptz, sent_channel text,     -- candidate_summary_channel
+  sent_by uuid, revoked_at timestamptz, revoke_reason text, redacted_at timestamptz,
+  unique (tenant_id, candidate_id, version)
+  -- candidate_summaries_disclaimer_chk: «Документ сформовано автоматично…» в body — всегда, кроме стёртой строки;
+  -- candidate_summaries_sent_chk, _revoked_chk, _redacted_chk
+);
+create table ai_review_hints (                -- подсказка проверяющему: три списка, полей вердикта нет
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  target_kind text not null,                  -- ai_review_hint_target
+  target_id uuid not null,                    -- attempt_answers.id | workshop_submissions.id, мягкая ссылка
+  user_id uuid not null references users(id) on delete cascade, reviewer_id uuid,
+  key_source jsonb not null, matched jsonb not null default '[]', missing jsonb not null default '[]',
+  contradictions jsonb not null default '[]', coverage numeric(4,3), confidence numeric(4,3),
+  ai_call_id bigint references ai_calls(id) on delete set null, ai_stub boolean not null default false,
+  state text not null default 'queued',       -- ai_review_hint_state
+  reason text, shown_at timestamptz, reviewer_decision jsonb, reviewer_decided_at timestamptz,
+  agreement text not null default 'pending',  -- ai_review_hint_agreement
+  unique (tenant_id, target_kind, target_id)
+);
+create table ai_quality_reviews (             -- выборочная перепроверка вывода модели; вердикт — о модели
+  id uuid primary key, tenant_id uuid not null references tenants(id) on delete cascade,
+  ref_kind text not null,                     -- ai_quality_ref_kind
+  ref_id uuid not null,                       -- мягкая ссылка
+  sampled_by text not null default 'auto',    -- ai_quality_sampled_by
+  sample_reason text, auditor_id uuid,
+  verdict text,                               -- ai_quality_verdict; пусто — не проверено
+  notes text, reviewed_at timestamptz,
+  unique (tenant_id, ref_kind, ref_id)
+);
+
 create table user_placements (                -- где человек работает
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -3048,6 +3094,27 @@ interview_transcript_status: pending | ok | low_confidence | failed | skipped | 
 interview_criterion_source: manual | ai_suggested
 -- Расхождение оценки ИИ с человеком (`v2/30` §7.3): match ≤ 10 % шкалы, minor ≤ 30 %, иначе major
 interview_score_agreement: pending | match | minor | major
+
+-- Підсумок кандидата, подсказка проверяющему, качество ИИ (`v2/30` §3.5, §3.6, §4, §7.13–§7.16;
+-- PR-29, миграция 0096)
+-- Состояние Підсумку: draft — собирается, ready — может уйти кандидату, revoked — ссылка отозвана
+-- (рекрутером, отзывом согласия, новой версией), expired — срок ссылки истёк
+candidate_summary_state: draft | ready | sent | revoked | expired
+candidate_summary_completeness: full | partial
+candidate_summary_generated_by: ai | ai_edited | manual
+-- Семь секций `v2/30` §7.14; строка «Документ сформовано автоматично» — не секция, выключить её нечем
+candidate_summary_section: candidate | progress | scores | interview | strengths_risks | incomplete | passport
+-- Чем Підсумок ушёл кандидату: письмом или ссылкой, скопированной рекрутером (`v2/30` §5.4); link — PR-29
+candidate_summary_channel: email | link
+ai_review_hint_target: attempt_answer | workshop_submission
+-- degraded — ось ai_review_ops исчерпана или ИИ не действует: работа идёт в обычную ручную проверку
+ai_review_hint_state: queued | ready | failed | skipped | degraded
+-- not_shown — ментор решил, не раскрыв подсказку (контрольная группа `v2/30` §7.13, §12 п. 12)
+ai_review_hint_agreement: pending | match | minor | major | not_shown
+ai_quality_ref_kind: interview_criterion_score | review_hint | summary
+ai_quality_verdict: correct | minor_error | major_error | harmful
+-- auto — ежедневная выборка ai.quality_sample; override (PR-29) — несогласие рекрутера по форме `v2/30` §6.4
+ai_quality_sampled_by: auto | override
 ```
 
 ## Что проверяет тест схемы

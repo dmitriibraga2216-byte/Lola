@@ -70,9 +70,17 @@ interface Card {
 }
 interface Status { id: string, nameUk: string, color: string, mapsTo: CandidateState, isActive: boolean }
 
-type Tab = 'overview' | 'scores' | 'interview' | 'comments' | 'history'
-/** «Співбесіда» (docs/v2/30 §5.3) — лише з `interview.view`: оцінки ШІ, розшифровка, флаги. */
-const TABS = computed<Tab[]>(() => ['overview', 'scores', ...(hasScope('interview.view') ? ['interview' as const] : []), 'comments', 'history'])
+type Tab = 'overview' | 'scores' | 'interview' | 'summary' | 'comments' | 'history'
+/**
+ * «Співбесіда» (docs/v2/30 §5.3) — лише з `interview.view`: оцінки ШІ, розшифровка, флаги.
+ * «Підсумок» (§5.4, PR-29) — лише з `summary.view`: документ, його версії, надсилання кандидату.
+ */
+const TABS = computed<Tab[]>(() => [
+  'overview', 'scores',
+  ...(hasScope('interview.view') ? ['interview' as const] : []),
+  ...(hasScope('summary.view') ? ['summary' as const] : []),
+  'comments', 'history',
+])
 const tab = ref<Tab>('overview')
 
 const card = ref<Card | null>(null)
@@ -431,6 +439,10 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
 
       <section v-else-if="tab === 'interview'" class="panel">
         <CandidateInterview :candidate-id="id" />
+      </section>
+
+      <section v-else-if="tab === 'summary'" class="panel">
+        <CandidateSummary :candidate-id="id" />
       </section>
 
       <section v-else class="panel">

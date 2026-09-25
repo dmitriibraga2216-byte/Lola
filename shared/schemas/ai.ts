@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { KEYSETS } from '../domain/keyset'
-import { AI_CALL_STATUSES, AI_DATA_REGIONS, AI_DRIVERS, AI_PROVIDER_RETENTIONS, AI_PURPOSES } from '../enums'
+import { AI_CALL_STATUSES, AI_DATA_REGIONS, AI_DRIVERS, AI_PROVIDER_RETENTIONS, AI_PURPOSES, AI_QUALITY_REF_KINDS, AI_QUALITY_VERDICTS } from '../enums'
 import { keysetCursorSchema } from './keyset'
 
 /**
@@ -94,3 +94,21 @@ export const aiCallsQuerySchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
 })
 export type AiCallsQuery = z.infer<typeof aiCallsQuerySchema>
+
+// ── Перепроверка качества ИИ (`30` §7.16, §10 `/ai/quality-reviews`; план `45` PR-29) ────────
+
+/** `GET /ai/quality-reviews` — очередь администратора: непроверенные сначала, ключевой курсор. */
+export const aiQualityListSchema = z.object({
+  status: z.enum(['pending', 'reviewed', 'all']).default('pending'),
+  refKind: z.enum(AI_QUALITY_REF_KINDS).optional(),
+  cursor: keysetCursorSchema(KEYSETS.aiQualityReviews).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+}).strict()
+export type AiQualityListQuery = z.infer<typeof aiQualityListSchema>
+
+/** `POST /ai/quality-reviews/:id` — вердикт о **модели**, а не о человеке (`30` §3.6). */
+export const aiQualityVerdictSchema = z.object({
+  verdict: z.enum(AI_QUALITY_VERDICTS, { errorMap: () => ({ message: 'Оберіть вердикт' }) }),
+  notes: z.string().trim().max(2000, 'До 2000 символів').nullable().optional(),
+}).strict()
+export type AiQualityVerdictInput = z.infer<typeof aiQualityVerdictSchema>

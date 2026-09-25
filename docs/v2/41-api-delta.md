@@ -139,6 +139,13 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | GET | `/ai/quality-reviews/:id` | `ai.audit` | перепроверка |
 | POST | `/ai/quality-reviews` | `ai.audit` | вердикт по выборке |
 
+> [дополнено, PR-29] Реализовано по таблице выше, с правками: публичная ссылка на Підсумок —
+> `GET /api/v1/public/candidate-summaries/:token` в публичном контуре (§8.3.2: тенант из токена функцией
+> `SECURITY DEFINER`, `hitRateLimit`, выровненный `404`); сверх таблицы — `GET /candidate-summaries/:id`,
+> `POST /candidate-summaries/:id/auto-send/cancel` (отмена авто-отправки, `30` §13 к. 13),
+> `GET|PATCH /settings/ai` (`ai.audit`); вердикт перепроверки — `POST /ai/quality-reviews/:id`. Коды и
+> контракты — `30` §10, `docs/04` §«Підсумок кандидата…».
+
 > [исправлено, PR-28] Вход, согласие и старт собеседования адресуются **тестом**, а не сессией: до
 > согласия сессии нет (`30` §13 к. 1, к. 2). Реализовано: `GET /interviews/entry/:quizId`,
 > `POST /interviews/entry/:quizId/consent`, `…/alternative`, `…/start`, `…/text-form`;

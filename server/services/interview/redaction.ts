@@ -15,7 +15,9 @@ import { discardInputFiles } from '../ai/calls'
  *   `purge_after = now()`; `purge`, а не мягкое удаление с 30 днями корзины, `30` §7.7);
  * - расшифровки и вопросы реплик (`transcript`, `prompt_text`), письменные ответы попытки;
  * - обоснования и цитаты оценок ИИ (`redacted_at`, CHECK `ics_redacted_chk`);
- * - вход и выход вызовов модели по сессии и её репликам: файл входа — в корзину, `output` — пусто.
+ * - вход и выход вызовов модели по сессии и её репликам: файл входа — в корзину, `output` — пусто;
+ * - Підсумки кандидата (PR-29): тело стёрто, ссылка отозвана, отправка по сроку снята; при
+ *   обезличивании — и цитаты в подсказках проверяющему.
  *
  * Что остаётся — баллы, уверенность, расхождение, метрики сессии и строки `ai_calls` без входа:
  * то, что нужно статистике и не идентифицирует человека (`30` §7.9). Необратимо, пишется в
@@ -24,7 +26,7 @@ import { discardInputFiles } from '../ai/calls'
 
 export type RedactReason = 'consent_withdrawn' | 'anonymized'
 
-export interface RedactResult { sessions: number, audio: number, inputs: number }
+export interface RedactResult { sessions: number, audio: number, inputs: number, summaries: number }
 
 export async function redactInterviewData(
   tx: TenantTx,
@@ -46,8 +48,17 @@ export async function redactInterviewData(
     await tx.execute(sql`
       update interview_consents set ip = null, user_agent = null, request_context = null, updated_at = now()
        where user_id = ${userId}::uuid`)
+    // Цитаты из ответов человека в подсказках проверяющему — те же его слова (PR-29). Импорт
+    // по месту: модуль подсказок тянет очередь проверки, а та — попытки, где стирание не нужно
+    const { redactHintsTx } = await import('../reviewHints')
+    await redactHintsTx(tx, userId)
   }
-  if (!sessions.length) return { sessions: 0, audio: 0, inputs: 0 }
+  // Підсумок несёт обоснования и цитаты собеседования: при отзыве согласия он отзывается и
+  // стирается вместе с ними (`30` §7.6 «дополнительно отзывает Підсумок», §12 п. 4), при
+  // обезличивании — тем более (§7.9 «`candidate_summaries.body` и PDF — удаляются»)
+  const { redactSummariesTx } = await import('../candidateSummaries')
+  const summaries = await redactSummariesTx(tx, tenantId, userId, opts.reason)
+  if (!sessions.length) return { sessions: 0, audio: 0, inputs: 0, summaries }
 
   const ids = sql.join(sessions.map(s => sql`${s.id}::uuid`), sql`, `)
   const attemptIds = sql.join(sessions.map(s => sql`${s.attempt_id}::uuid`), sql`, `)
@@ -94,7 +105,7 @@ export async function redactInterviewData(
     action: 'interview.redacted',
     entity: 'user',
     entityId: userId,
-    after: { reason: opts.reason, sessions: sessions.map(s => s.id), audio: audio.length, inputs },
+    after: { reason: opts.reason, sessions: sessions.map(s => s.id), audio: audio.length, inputs, summaries },
   })
-  return { sessions: sessions.length, audio: audio.length, inputs }
+  return { sessions: sessions.length, audio: audio.length, inputs, summaries }
 }

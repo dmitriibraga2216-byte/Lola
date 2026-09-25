@@ -256,7 +256,7 @@ describe('лента комментариев: курсор выдаёт сер�
 })
 
 describe('журналы: курсор по (created_at, id) (docs/22 §13.4)', () => {
-  const ctx = () => ({ tenantId, actorId: adminId })
+  const ctx = () => ({ tenantId, actorId: adminId, canSeeCandidates: true })
   const expected = { security: [] as string[], notifications: [] as string[], taskStatus: [] as string[] }
 
   beforeAll(async () => {

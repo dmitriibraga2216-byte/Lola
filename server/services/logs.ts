@@ -5,15 +5,27 @@ import { keysetAfter, keysetAt } from '../utils/keyset'
 import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import type { LogFilter } from '../../shared/schemas/reports'
 import { frameFirst, frameJoins, frameSelect, frameTail, periodSql } from './reportFrame'
+import { IS_EMPLOYEE } from './repo/people'
 
 interface Ctx { tenantId: string, actorId: string }
 type Row = Record<string, unknown>
+
+/**
+ * Контекст с явным правом видеть кандидатов (docs/28 §28.9.1 п.1, решение владельца 25.09) —
+ * только для функций, что показывают человека в строке журнала (`readLog`, `readLogPage`,
+ * `logRows`); `sessionsDailyAvg` и `retentionScan` людей не показывают и этого поля не требуют.
+ * Поле обязательное, без значения по умолчанию: право называется явно на каждом вызове — тот
+ * же принцип, что у `frameKind()` («умолчания нет намеренно»).
+ */
+type PersonLogCtx = Ctx & { canSeeCandidates: boolean }
 
 /**
  * Журналы (docs/22 §5, §13.4): единый вход `/logs/:kind` с фильтрами по периоду, человеку, типу события;
  * сроки хранения (Г-22.2) и ежедневная очистка `logs.retention`. Записи неизменяемы — только чтение и удаление по сроку.
  * Человек в каждом журнале — единый каркас (`reportFrame`): ПІБ · посада · місто · підрозділ · мітки;
  * технический контекст — одинаковые колонки `ip`, `geo`, `client` (CLAUDE.md п. 14).
+ * Кандидат в строке виден только смотрящему с `candidate.view` (docs/28 §28.9.1 п.1) — кроме
+ * `security`, он остаётся полным по `audit.view` (решение владельца 25.09; см. `kindGate` ниже).
  */
 export const LOG_KINDS = ['task-status', 'task-access', 'org-conflicts', 'notifications', 'sessions', 'security', 'import', 'automation', 'integrations'] as const
 export type LogKind = typeof LOG_KINDS[number]
@@ -27,7 +39,7 @@ const AUDIT_RETENTION_DAYS = 3 * 365
 export type { LogFilter }
 
 /** Только строки страницы, без курсора следующей — для выгрузки, отчётов и мест, где страница одна. */
-export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogFilter): Promise<Row[]> {
+export async function readLog(ctx: PersonLogCtx, kind: LogKind, f: LogFilter = {} as LogFilter): Promise<Row[]> {
   return (await readLogPage(ctx, kind, f)).rows
 }
 
@@ -42,7 +54,7 @@ export async function readLog(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogF
  * у протокола статусов строки идут из трёх таблиц; порядок текста годится, пока он один и тот
  * же в `order by` и в условии курсора.
  */
-export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as LogFilter): Promise<{ rows: Row[], cursor: string | null }> {
+export async function readLogPage(ctx: PersonLogCtx, kind: LogKind, f: LogFilter = {} as LogFilter): Promise<{ rows: Row[], cursor: string | null }> {
   const limit = Math.min(500, f.limit ?? 100)
   const period = (col: SQL) => periodSql(col, f)
   const cursor = (at: SQL, id: SQL) => {
@@ -56,6 +68,17 @@ export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as 
   const person = frameSelect()
   const joins = frameJoins()
   const byUser = (col: SQL) => f.userId ? sql`and ${col} = ${f.userId}::uuid` : sql``
+  /**
+   * Вид человека в строке — по праву смотрящего (docs/28 §28.9.1 п.1, решение владельца 25.09):
+   * без `candidate.view` строка про кандидата скрыта — остаются только сотрудники и строки без
+   * человека (`u.id is null`: место занято внешним join'ом в `org-conflicts`/`automation`,
+   * человек в строке — не обязателен); с правом ограничения нет. `IS_EMPLOYEE()` — тот же
+   * предикат репозитория людей, что у `frameKind()`/`frameWhere()` (В-8), здесь обёрнут
+   * null-проверкой ради nullable join'ов. Журнал `security` этот predicate не получает вовсе —
+   * решение владельца оставляет его полным для `audit.view`: вход кандидата там нужен для
+   * расследований.
+   */
+  const kindGate = ctx.canSeeCandidates ? sql`` : sql`and (u.id is null or ${IS_EMPLOYEE('u')})`
   // «Підрозділ» (мокап SecurityLog): подразделение основного размещения с потомками по ltree
   const byUnit = f.orgUnitId ? sql`and coalesce(pl.org_unit_id, l.org_unit_id) in (select id from org_units where path <@ (select path from org_units where id = ${f.orgUnitId}::uuid))` : sql``
   const rows = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
@@ -71,7 +94,7 @@ export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as 
                    coalesce(a.title, c.title) as task_title, 'course' as content_type, ev.event, ev.payload, case when ev.payload->>'from' in ('not_assigned', 'not_started', 'in_progress', 'done', 'failed') then ev.payload->>'from' end as from_status, ev.actor_id, ${context(sql`ev.request_context`, null)}
             from enrollment_events ev join enrollments e on e.id = ev.enrollment_id join users u on u.id = e.user_id ${joins}
             left join courses c on c.id = e.subject_id left join assignments a on a.id = e.assignment_id
-            where ev.event <> 'progress' ${period(sql`ev.created_at`)} ${cursor(sql`ev.created_at`, sql`ev.id`)} ${byUser(sql`e.user_id`)} ${f.type ? sql`and ev.event = ${f.type}` : sql``}
+            where ev.event <> 'progress' ${period(sql`ev.created_at`)} ${cursor(sql`ev.created_at`, sql`ev.id`)} ${byUser(sql`e.user_id`)} ${kindGate} ${f.type ? sql`and ev.event = ${f.type}` : sql``}
               ${f.contentType && f.contentType !== 'course' ? sql`and false` : sql``} ${f.contentId ? sql`and e.subject_id = ${f.contentId}::uuid` : sql``}
             union all
             select ar.id::text, ar.created_at, ${person},
@@ -79,7 +102,7 @@ export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as 
                    coalesce(a.title, qz.title), 'test', 'attempt.' || ar.reason, jsonb_build_object('attemptNo', at.attempt_no, 'attemptsAllowed', a.params->>'attemptsAllowed', 'comment', ar.comment), null, ar.created_by, ${context(sql`null::jsonb`, null)}
             from attempt_results ar join attempts at on at.id = ar.attempt_id join users u on u.id = at.user_id ${joins}
             left join quizzes qz on qz.id = at.quiz_id left join assignments a on a.id = at.assignment_id
-            where true ${period(sql`ar.created_at`)} ${cursor(sql`ar.created_at`, sql`ar.id`)} ${byUser(sql`at.user_id`)} ${f.type ? sql`and 'attempt.' || ar.reason = ${f.type}` : sql``}
+            where true ${period(sql`ar.created_at`)} ${cursor(sql`ar.created_at`, sql`ar.id`)} ${byUser(sql`at.user_id`)} ${kindGate} ${f.type ? sql`and 'attempt.' || ar.reason = ${f.type}` : sql``}
               ${f.contentType && f.contentType !== 'test' ? sql`and false` : sql``} ${f.contentId ? sql`and at.quiz_id = ${f.contentId}::uuid` : sql``}
             union all
             select pe.id::text, pe.created_at, ${person},
@@ -91,7 +114,7 @@ export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as 
             left join programs prg on prg.id = pe.subject_id and pe.subject_type = 'training_program'
             left join trajectories trj on trj.id = pe.subject_id and pe.subject_type = 'trajectory'
             left join assignments a on a.id = pr.assignment_id
-            where true ${period(sql`pe.created_at`)} ${cursor(sql`pe.created_at`, sql`pe.id`)} ${byUser(sql`pe.user_id`)} ${f.type ? sql`and pe.event = ${f.type}` : sql``}
+            where true ${period(sql`pe.created_at`)} ${cursor(sql`pe.created_at`, sql`pe.id`)} ${byUser(sql`pe.user_id`)} ${kindGate} ${f.type ? sql`and pe.event = ${f.type}` : sql``}
               ${f.contentType ? (f.contentType === 'training_program' ? sql`and pe.subject_type = 'training_program'` : sql`and false`) : sql``} ${f.contentId ? sql`and pe.subject_id = ${f.contentId}::uuid` : sql``}
           ) x order by x.created_at desc, x.id desc limit ${limit + 1}`) as unknown as Promise<Row[]>
       case 'task-access':
@@ -99,29 +122,32 @@ export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as 
         return tx.execute(sql`
           select t.id, t.created_at, ${cursorAt(sql`t.created_at`)}, ${person}, t.content_type, t.content_id, t.title as task_title, t.action, t.assignment_id, ${context(sql`t.request_context`, null)}
           from task_access_log t join users u on u.id = t.user_id ${joins}
-          where true ${period(sql`t.created_at`)} ${cursor(sql`t.created_at`, sql`t.id`)} ${byUser(sql`t.user_id`)}
+          where true ${period(sql`t.created_at`)} ${cursor(sql`t.created_at`, sql`t.id`)} ${byUser(sql`t.user_id`)} ${kindGate}
             ${f.type ? sql`and t.action = ${f.type}` : sql``} ${f.contentType ? sql`and t.content_type = ${f.contentType}` : sql``} ${f.contentId ? sql`and t.content_id = ${f.contentId}::uuid` : sql``}
           order by t.created_at desc, t.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>
       case 'org-conflicts':
         return tx.execute(sql`
           select o.id, o.created_at, ${cursorAt(sql`o.created_at`)}, ${person}, o.kind, o.source, o.details, o.import_job_id, o.resolved_at, act.full_name as actor, ${context(sql`o.request_context`, null)}
           from org_conflicts o left join users u on u.id = o.user_id ${joins} left join users act on act.id = o.actor_id
-          where true ${period(sql`o.created_at`)} ${cursor(sql`o.created_at`, sql`o.id`)} ${byUser(sql`o.user_id`)} ${byUnit} ${f.type ? sql`and o.kind = ${f.type}` : sql``}
+          where true ${period(sql`o.created_at`)} ${cursor(sql`o.created_at`, sql`o.id`)} ${byUser(sql`o.user_id`)} ${byUnit} ${kindGate} ${f.type ? sql`and o.kind = ${f.type}` : sql``}
             ${f.state === 'open' ? sql`and o.resolved_at is null` : f.state === 'resolved' ? sql`and o.resolved_at is not null` : sql``}
           order by o.created_at desc, o.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>
       case 'notifications':
         return tx.execute(sql`
           select n.id, n.created_at, ${cursorAt(sql`n.created_at`)}, n.code, n.channel, n.status, n.error, n.rendered_text, n.sent_at, n.scheduled_for, ${person}, ${context(sql`n.request_context`, null)}
           from notifications n join users u on u.id = n.user_id ${joins}
-          where true ${period(sql`n.created_at`)} ${cursor(sql`n.created_at`, sql`n.id`)} ${byUser(sql`n.user_id`)} ${f.type ? sql`and n.code = ${f.type}` : sql``}
+          where true ${period(sql`n.created_at`)} ${cursor(sql`n.created_at`, sql`n.id`)} ${byUser(sql`n.user_id`)} ${kindGate} ${f.type ? sql`and n.code = ${f.type}` : sql``}
           order by n.created_at desc, n.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>
       case 'sessions':
         return tx.execute(sql`
           select s.id, s.created_at, ${cursorAt(sql`s.created_at`)}, coalesce(s.revoked_at, s.updated_at) as ended_at, (s.revoked_at is null and s.expires_at > now()) as active, s.impersonated_by, ${person}, ${context(sql`s.request_context`, sql`s.ip`)}
           from sessions s join users u on u.id = s.user_id ${joins}
-          where true ${period(sql`s.created_at`)} ${cursor(sql`s.created_at`, sql`s.id`)} ${byUser(sql`s.user_id`)}
+          where true ${period(sql`s.created_at`)} ${cursor(sql`s.created_at`, sql`s.id`)} ${byUser(sql`s.user_id`)} ${kindGate}
           order by s.created_at desc, s.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>
       case 'security':
+        // Решение владельца 25.09 (docs/28 §28.9.1 п.1): журнал безопасности не получает kindGate —
+        // вход кандидата в нём виден целиком тому, у кого есть право на сам журнал (`audit.view`,
+        // проверяется на входе в ручку); это нужно для расследований и не сужается `candidate.view`.
         return tx.execute(sql`
           select s.id, s.created_at, ${cursorAt(sql`s.created_at`)}, s.severity, s.event, s.meta, ${person}, ${context(sql`s.request_context`, sql`s.ip`)}
           from security_log s left join users u on u.id = s.user_id ${joins}
@@ -137,7 +163,7 @@ export async function readLogPage(ctx: Ctx, kind: LogKind, f: LogFilter = {} as 
         return tx.execute(sql`
           select r.id, r.created_at, ${cursorAt(sql`r.created_at`)}, r.status, r.error, r.actions_result, r.trigger_payload, ar.name as rule, ${person}, ${context(sql`r.request_context`, null)}
           from automation_runs r join automation_rules ar on ar.id = r.rule_id left join users u on u.id = r.user_id ${joins}
-          where true ${period(sql`r.created_at`)} ${cursor(sql`r.created_at`, sql`r.id`)} ${byUser(sql`r.user_id`)} ${f.type ? sql`and r.status = ${f.type}` : sql``}
+          where true ${period(sql`r.created_at`)} ${cursor(sql`r.created_at`, sql`r.id`)} ${byUser(sql`r.user_id`)} ${kindGate} ${f.type ? sql`and r.status = ${f.type}` : sql``}
           order by r.created_at desc, r.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>
       case 'integrations':
         return tx.execute(sql`
@@ -178,7 +204,7 @@ export async function sessionsDailyAvg(ctx: Ctx, days = 30): Promise<{ day: stri
 }
 
 /** Строки журнала для выгрузки: колонки каркаса первыми, объекты — строкой. */
-export async function logRows(ctx: Ctx, kind: LogKind, f: LogFilter): Promise<Row[]> {
+export async function logRows(ctx: PersonLogCtx, kind: LogKind, f: LogFilter): Promise<Row[]> {
   const rows = await readLog(ctx, kind, { ...f, limit: 500 })
   return frameFirst(rows.map(r => ({ ...r, geo: r.geo && typeof r.geo === 'object' ? [(r.geo as Row).country, (r.geo as Row).city].filter(Boolean).join(', ') : r.geo })))
 }

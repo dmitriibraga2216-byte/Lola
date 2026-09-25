@@ -31,7 +31,7 @@ const userIds: string[] = [], courseIds: string[] = [], trajIds: string[] = [], 
 const cleanup: { table: string, ids: string[] }[] = []
 const track = (table: string, id: string) => { (cleanup.find(c => c.table === table) ?? cleanup[cleanup.push({ table, ids: [] }) - 1]!).ids.push(id) }
 const stamp = Date.now()
-const ctx = (actorId = adminId) => ({ tenantId, actorId })
+const ctx = (actorId = adminId) => ({ tenantId, actorId, canSeeCandidates: true })
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 const hours = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString()
 /**

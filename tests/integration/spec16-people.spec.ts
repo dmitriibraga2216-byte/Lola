@@ -24,7 +24,7 @@ let originalSettings: unknown
 const PHONE_PREFIX = '+38093'
 const EMAIL = `s16-${Date.now()}@example.test`
 const userIds: string[] = []
-const ctx = () => ({ tenantId, actorId: adminId })
+const ctx = () => ({ tenantId, actorId: adminId, canSeeCandidates: true })
 
 async function makePerson(name: string, opts: { email?: string, locationId?: string, orgUnitId?: string, externalId?: string, tags?: string[] } = {}) {
   const phone = `${PHONE_PREFIX}${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`

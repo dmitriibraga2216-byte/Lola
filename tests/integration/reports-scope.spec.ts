@@ -136,7 +136,7 @@ describe('docs/22: каркас, прогресс, выгрузка, журна�
 
   it('журналы (§5): единый вход с фильтрами; очистка по срокам хранения', async () => {
     const { readLog, retentionScan, LOG_KINDS } = await import('../../server/services/logs')
-    const ctx = { tenantId, actorId: adminId }
+    const ctx = { tenantId, actorId: adminId, canSeeCandidates: true }
     for (const k of LOG_KINDS) expect(Array.isArray(await readLog(ctx, k, { limit: 5 }))).toBe(true)
     const sec = await readLog(ctx, 'security', { userId: managerId })
     expect(sec.every(r => r.user_id === managerId)).toBe(true)

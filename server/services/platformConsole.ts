@@ -88,7 +88,7 @@ export async function tenantOverview(id: string, opts: { withBilling: boolean })
   if (f?.limitNear) flags.push('limit_near')
   if (card.status === 'suspended') flags.push('suspended')
   return {
-    tenant: { id: card.id, slug: card.slug, name: card.name, status: card.status, plan: card.plan, trialEndsAt: card.trial_ends_at, createdAt: card.created_at, archivedAt: card.archived_at },
+    tenant: { id: card.id, slug: card.slug, name: card.name, status: card.status, plan: card.plan, trialEndsAt: card.trial_ends_at, createdAt: card.created_at, archivedAt: card.archived_at, customDomain: card.custom_domain as string | null },
     stats: { activeUsers: card.active_users, totalUsers: card.total_users, wau: card.wau, completed30d: card.completed_30d },
     flags,
     subscription: sub ?? null,

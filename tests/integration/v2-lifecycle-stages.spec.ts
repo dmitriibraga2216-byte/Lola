@@ -16,7 +16,7 @@ process.env.PLATFORM_DATABASE_URL ??= 'postgres://platform_admin:platform_admin_
 process.env.ENCRYPTION_KEY ??= 'test-encryption-key'
 
 const { createTenant, platformLogin, validatePlatformSession, ensureFirstAdmin } = await import('../../server/services/platform')
-const { listStages, listCandidateStages, setCourseStage, setStageCapabilities, stageCan, courseStageCan } = await import('../../server/services/lifecycle')
+const { listStages, listStagesForPlatform, listCandidateStages, setCourseStage, setStageCapabilities, stageCan, courseStageCan } = await import('../../server/services/lifecycle')
 const { withTenant } = await import('../../server/utils/withTenant')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
@@ -164,6 +164,13 @@ describe('33 §7.1: stageCan() — единственная точка пров�
     const r = await setStageCapabilities(newTenantId, knowledge.id, { ...knowledge.capabilities, progress: true })
     expect(typeof r === 'string' ? r : r.capabilities.progress).toBe(true)
     await setStageCapabilities(newTenantId, knowledge.id, knowledge.capabilities)
+  })
+
+  it('ops-console-2: listStagesForPlatform() отдаёт те самі етапи, що listStages(), без ctx.actorId — оператор не людина тенанта', async () => {
+    const own = await listStages({ tenantId: newTenantId, actorId: adminId })
+    const platform = await listStagesForPlatform(newTenantId)
+    expect(platform.map(s => s.id).sort()).toEqual(own.map(s => s.id).sort())
+    expect(platform.find(s => s.code === 'knowledge')?.capabilities.ai_generate).toBe(true)
   })
 })
 

@@ -17,7 +17,7 @@ process.env.PLATFORM_DATABASE_URL ??= 'postgres://platform_admin:platform_admin_
 
 const hostMw = (await import('../../server/middleware/01.host')).default as unknown as (e: FakeEvent) => Promise<unknown>
 const sessionMw = (await import('../../server/middleware/01.session')).default as unknown as (e: FakeEvent) => Promise<void>
-const { platformLogin, validatePlatformSession, createTenant } = await import('../../server/services/platform')
+const { platformLogin, validatePlatformSession, createTenant, updateTenant } = await import('../../server/services/platform')
 const TF = await import('../../server/services/platformTwoFactor')
 const Ops = await import('../../server/services/platformOperators')
 const { listTenantsPage, tenantOverview } = await import('../../server/services/platformConsole')
@@ -396,5 +396,36 @@ describe('список компаний и обзор карточки (docs/24 
     expect(ovSupport?.subscription).toBeNull()
     expect(ovSupport?.flags).not.toContain('payment_overdue')
     expect(await tenantOverview('00000000-0000-0000-0000-000000000000', { withBilling: true })).toBeNull()
+  })
+})
+
+describe('карточка компанії, вкладки (ops-console-2, docs/24 §4.2, §4.4–4.5)', () => {
+  it('власний домен з PATCH /platform/tenants/:id зʼявляється в tenantOverview() — вкладка «Домен»', async () => {
+    const adminId = await mkOperator('domtab', 'owner')
+    const actor = { adminId, email: `${MARK}domtab@lola.test`, fullName: 'ОП domtab' }
+    const slug = `${MARK}${Date.now().toString(36)}dom`
+    const r = await createTenant({ slug, name: 'ОпсКонсоль Домен', adminPhone: '+380501119908', adminName: 'Власник' }, actor)
+    if (!r.ok) throw new Error(r.code)
+    createdTenants.push(r.tenantId)
+    expect((await tenantOverview(r.tenantId, { withBilling: true }))?.tenant.customDomain).toBeNull()
+    const upd = await updateTenant(r.tenantId, { customDomain: 'nav.ops-console-2.test' }, actor)
+    expect(upd.ok).toBe(true)
+    expect((await tenantOverview(r.tenantId, { withBilling: true }))?.tenant.customDomain).toBe('nav.ops-console-2.test')
+  })
+
+  it('GET /platform/tenants/:id/lifecycle-stages вимагає tenant.read і повертає можливості етапів — вкладка «Етапи»', async () => {
+    const slug = `${MARK}${Date.now().toString(36)}stg`
+    const actor = { adminId: '00000000-0000-0000-0000-000000000001', email: 'test', fullName: 'test' }
+    const r = await createTenant({ slug, name: 'ОпсКонсоль Етапи', adminPhone: '+380501119909', adminName: 'Власник' }, actor)
+    if (!r.ok) throw new Error(r.code)
+    createdTenants.push(r.tenantId)
+    const handler = (await import('../../server/api/v1/platform/tenants/[id]/lifecycle-stages/index.get')).default as unknown as (e: FakeEvent) => Promise<{ data: { code: string, capabilities: Record<string, boolean> }[] }>
+    const base = { adminId: '00000000-0000-0000-0000-000000000000', email: 'x', fullName: 'x', sessionId: 'x', twoFactorPending: false, twoFactorEnrolled: true }
+    const e = ev(`/api/v1/platform/tenants/${r.tenantId}/lifecycle-stages`)
+    e._params = { id: r.tenantId }
+    e.context.platform = { ...base, role: 'viewer' } // читання доступне навіть viewer'у (READ у PLATFORM_MATRIX)
+    const res = await handler(e)
+    expect(res.data.length).toBeGreaterThan(0)
+    expect(res.data.some(s => s.code === 'knowledge' && s.capabilities.ai_generate === true)).toBe(true)
   })
 })

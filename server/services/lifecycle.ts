@@ -106,6 +106,20 @@ export async function listStages(ctx: Ctx): Promise<StageRow[]> {
   })
 }
 
+/**
+ * Справочник этапов тенанта для консоли оператора (ops-console-2, docs/v2/33 §2): те же строки,
+ * что видит тенант в `/settings/lifecycle-stages`, но без `ctx.actorId` — оператор не человек
+ * тенанта. Возможности правит только оператор (`setStageCapabilities`), остальные поля — тенант.
+ */
+export async function listStagesForPlatform(tenantId: string): Promise<StageRow[]> {
+  return withTenant(tenantId, null, async (tx) => {
+    const rows = await tx.select().from(lifecycleStages).orderBy(asc(lifecycleStages.sort))
+    const counts = await courseCounts(tx)
+    const people = await peopleCounts(tx)
+    return rows.map(r => toRow(r, counts.get(r.id) ?? 0, people.get(r.id) ?? 0))
+  })
+}
+
 async function courseCounts(tx: TenantTx): Promise<Map<string, number>> {
   const rows = await tx.execute(sql`
     select lifecycle_stage_id as stage_id, count(*)::int as n

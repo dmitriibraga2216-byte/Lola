@@ -1900,216 +1900,8 @@
     "localSaveFailed": "Could not save the recording on the device. Please try again"
   },
   "ops": {
-    "title": "Operator panel",
     "password": "Password",
-    "newTenant": "Create tenant",
-    "create": "Create",
-    "created": "Space “{slug}” created. The admin signs in by phone",
-    "createHint": "Creates: system roles, one location, one position, an admin. Login code arrives via SMS/Telegram once configured.",
-    "f": {
-      "name": "Company name",
-      "adminName": "Admin full name",
-      "adminPhone": "Administrator phone"
-    },
-    "suspend": "Suspend",
-    "activate": "Activate",
-    "impersonate": "Sign in as",
-    "pickUser": "Pick a user",
-    "reasonHint": "Reason (required, 10+ chars)",
-    "impWarn": "Logged in the tenant's security log. A permanent banner is shown in the UI.",
-    "enter": "Enter",
-    "col": {
-      "tenant": "Tenant",
-      "plan": "Plan",
-      "trial": "Trial until",
-      "users": "Active / total",
-      "completed": "Completed 30d",
-      "status": "Status",
-      "active": "Active",
-      "disk": "Disk",
-      "created": "Created",
-      "state": "State",
-      "actions": "Actions"
-    },
-    "kpi": {
-      "tenants_active": "active spaces",
-      "trials_ending": "trials ending",
-      "users_active": "active people",
-      "dau": "today",
-      "wau": "this week",
-      "attempts_today": "quizzes today",
-      "notifications_queued": "queued",
-      "notifications_failed_24h": "notification failures 24h",
-      "webhooks_failed_24h": "webhook failures 24h",
-      "media": "media"
-    },
-    "platform": "Platform",
-    "tenants": "Platform tenants",
-    "hint": "Separate API prefix and scopes: tenant administrators cannot even read these screens",
-    "resume": "Resume",
-    "purge": "Delete",
-    "cancelPurge": "Cancel deletion",
-    "gb": "GB",
-    "purgeAt": "Data will be deleted on {date}",
-    "state": {
-      "active": "Active",
-      "trial": "Trial",
-      "suspended": "Suspended",
-      "archived": "Pending deletion"
-    },
-    "done": {
-      "suspend": "Workspace “{name}” suspended: sign-in closed, jobs stopped, data intact",
-      "resume": "Workspace “{name}” resumed",
-      "purge": "Deletion of “{name}” scheduled. It can be cancelled before the date",
-      "cancelPurge": "Deletion of “{name}” cancelled, workspace stays suspended",
-      "limits": "Limits for “{name}” saved",
-      "domain": "Domain for “{name}” saved",
-      "payment": "Payment for {name} recorded",
-      "planChange": "Plan for {name} changed",
-      "extend": "Dates for {name} extended"
-    },
-    "domain": {
-      "title": "Domain",
-      "hint": "Client's own domain (docs/33 D-059): CNAME to the platform, Let's Encrypt certificate — set up manually by the operator (docs/27). Empty field — default subdomain only.",
-      "value": "Domain without protocol"
-    },
-    "confirm": {
-      "reason": "Reason (for the platform log)",
-      "typeSlug": "Type slug “{slug}” to confirm",
-      "suspend": {
-        "title": "Suspend workspace",
-        "text": "Sign-in will be closed, background jobs and notifications stopped, data kept intact. Active sessions will be ended.",
-        "ok": "Suspend"
-      },
-      "resume": {
-        "title": "Resume workspace",
-        "text": "Sign-in and background jobs will work again.",
-        "ok": "Resume"
-      },
-      "purge": {
-        "title": "Delete workspace data",
-        "text": "Irreversible. Data and files will be fully deleted in {days} days; until then the deletion can be cancelled. The action is recorded in the platform log.",
-        "ok": "Delete in 30 days"
-      },
-      "cancelPurge": {
-        "title": "Cancel deletion",
-        "text": "The workspace returns to “Suspended”, data is kept.",
-        "ok": "Cancel deletion"
-      }
-    },
-    "limits": {
-      "title": "Limits",
-      "hint": "Empty field — limit of the “{plan}” plan. The people limit counts active users.",
-      "plan": "plan",
-      "fromPlan": "from plan",
-      "overridden": "Limits are overridden",
-      "users": "Active people",
-      "storageGb": "Storage, GB",
-      "smsPerMonth": "SMS per month",
-      "apiPerMinute": "API requests per minute",
-      "webhooks": "Webhooks",
-      "activeJobs": "Jobs per worker round",
-      "candidates": "Active candidates",
-      "aiGenerateOps": "AI generations per period",
-      "aiReviewOps": "AI reviews per period",
-      "aiInterviewOps": "AI interviews per period",
-      "exportRows": "Rows per export"
-    },
-    "billing": {
-      "title": "Plan and payment",
-      "status": "Subscription status",
-      "paidUntil": "Paid until",
-      "aiUntil": "AI until",
-      "period": "Billing period",
-      "periodOf": {
-        "month": "Monthly",
-        "year": "Annual"
-      },
-      "newPayment": "Record a payment",
-      "kind": "Payment type",
-      "kindOf": {
-        "subscription": "Plan",
-        "addon": "Add-on",
-        "adjustment": "Adjustment"
-      },
-      "addonCode": "Add-on code",
-      "qty": "Quantity",
-      "amount": "Amount",
-      "currency": "Currency",
-      "method": "Method",
-      "methodOf": {
-        "bank_transfer": "Bank transfer",
-        "card": "Card",
-        "manual": "Manual"
-      },
-      "invoiceNumber": "Invoice number",
-      "record": "Record payment",
-      "history": "Payment history",
-      "empty": "No payments yet",
-      "until": "until {date}",
-      "state": {
-        "trial": "Trial",
-        "active": "Active",
-        "grace": "Grace period",
-        "readonly": "Read-only",
-        "suspended": "Suspended"
-      },
-      "aiState": {
-        "active": "active",
-        "expired": "expired",
-        "off": "off"
-      },
-      "paymentStatus": {
-        "pending": "Pending",
-        "paid": "Paid",
-        "failed": "Failed",
-        "refunded": "Refunded",
-        "written_off": "Written off"
-      },
-      "extendTitle": "Extend dates without a payment",
-      "extendOk": "Save dates"
-    },
-    "planChange": {
-      "title": "Change plan",
-      "hint": "The plan will change from «{from}» to «{to}» immediately, without an overage check (§7.10).",
-      "ok": "Change plan"
-    },
-    "ann": {
-      "title": "Platform announcements",
-      "hint": "The second kind of “news”: from Lola to spaces, read-only. Not company news — those are written by the space admin",
-      "f": {
-        "title": "Title",
-        "audience": "Audience",
-        "body": "Text",
-        "plans": "Plans",
-        "tenants": "Spaces",
-        "publish": "Publish right away"
-      },
-      "audience": {
-        "all": "All spaces",
-        "plans": "By plan",
-        "tenants": "Selected spaces"
-      },
-      "create": "Create announcement",
-      "created": "Announcement created",
-      "archiveConfirm": "Remove “{title}” from the spaces' feed?",
-      "state": {
-        "draft": "Draft",
-        "published": "Published",
-        "archived": "Removed"
-      },
-      "readers": "read: {n}",
-      "publish": "Publish",
-      "archive": "Remove"
-    },
-    "tf": {
-      "open": "Reset 2FA",
-      "title": "Reset two-factor sign-in",
-      "text": "For an admin who lost both the phone and the recovery codes when there is no other admin. The client will see the reason in the security log; the person's sessions will be closed",
-      "nobody": "Nobody in this space has set up two-factor sign-in",
-      "reset": "Reset",
-      "done": "Two-factor sign-in for “{name}” was reset"
-    }
+    "gb": "GB"
   },
   "integrations": {
     "telegram": "Telegram",
@@ -7723,7 +7515,6 @@
     "title": "Lola console",
     "menu": "Menu",
     "loading": "Loading…",
-    "soon": "This section of the new console arrives in the next update. Meanwhile it works in the previous panel:",
     "roles": {
       "owner": "Owner",
       "admin": "Administrator",
@@ -7744,8 +7535,7 @@
       "announcements": "Announcements",
       "metrics": "Metrics",
       "operators": "Operators",
-      "audit": "Log",
-      "legacy": "Previous panel"
+      "audit": "Log"
     },
     "login": {
       "title": "Operator sign-in",
@@ -7779,8 +7569,16 @@
       "anyFlag": "All flags",
       "name": "Company",
       "users": "Active",
-      "created": "Created",
-      "empty": "Nothing found — change the search or filters."
+      "created": "Space “{slug}” created. The admin signs in by phone",
+      "empty": "Nothing found — change the search or filters.",
+      "f": {
+        "name": "Company name",
+        "slug": "Slug",
+        "adminName": "Admin full name",
+        "adminPhone": "Administrator phone"
+      },
+      "create": "Create a company",
+      "createHint": "Creates: system roles, one location, one position, an admin. Login code arrives via SMS/Telegram once configured."
     },
     "status": {
       "active": "Active",
@@ -7795,9 +7593,6 @@
     "overview": {
       "back": "← Companies",
       "tabs": "Card sections",
-      "tab": "Overview",
-      "soon": "Other tabs coming soon",
-      "soonHint": "Settings, limits, billing, users and log arrive in the next update; meanwhile use the previous panel",
       "state": "State",
       "trialEnds": "Trial until",
       "paidUntil": "Paid until",
@@ -7837,6 +7632,219 @@
       "resetTitle": "Reset second factor: {name}",
       "resetHint": "The operator lost their phone and recovery codes. Their sessions end and they set up 2FA again on sign-in. The reason is written to the log.",
       "reason": "Reason (10–500 characters)"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "limits": "Limits",
+      "billing": "Plan & billing",
+      "users": "Users",
+      "domain": "Domain & mail",
+      "lifecycle": "Lifecycle stages",
+      "actions": "Actions"
+    },
+    "limits": {
+      "title": "Limits",
+      "hint": "Empty field — limit of the “{plan}” plan. The people limit counts active users.",
+      "plan": "plan",
+      "fromPlan": "from plan",
+      "users": "Active people",
+      "storageGb": "Storage, GB",
+      "smsPerMonth": "SMS per month",
+      "apiPerMinute": "API requests per minute",
+      "webhooks": "Webhooks",
+      "activeJobs": "Jobs per worker round",
+      "candidates": "Active candidates",
+      "aiGenerateOps": "AI generations per period",
+      "aiReviewOps": "AI reviews per period",
+      "aiInterviewOps": "AI interviews per period",
+      "exportRows": "Rows per export",
+      "saved": "Limits saved"
+    },
+    "billing": {
+      "status": "Subscription status",
+      "paidUntil": "Paid until",
+      "aiUntil": "AI until",
+      "period": "Billing period",
+      "periodOf": {
+        "month": "Monthly",
+        "year": "Annual"
+      },
+      "newPayment": "Record a payment",
+      "kind": "Payment type",
+      "kindOf": {
+        "subscription": "Plan",
+        "addon": "Add-on",
+        "adjustment": "Adjustment"
+      },
+      "addonCode": "Add-on code",
+      "qty": "Quantity",
+      "amount": "Amount",
+      "currency": "Currency",
+      "method": "Method",
+      "methodOf": {
+        "bank_transfer": "Bank transfer",
+        "card": "Card",
+        "manual": "Manual"
+      },
+      "invoiceNumber": "Invoice number",
+      "record": "Record payment",
+      "history": "Payment history",
+      "empty": "No payments yet",
+      "until": "until {date}",
+      "state": {
+        "trial": "Trial",
+        "active": "Active",
+        "grace": "Grace period",
+        "readonly": "Read-only",
+        "suspended": "Suspended"
+      },
+      "aiState": {
+        "active": "active",
+        "expired": "expired",
+        "off": "off"
+      },
+      "paymentStatus": {
+        "pending": "Pending",
+        "paid": "Paid",
+        "failed": "Failed",
+        "refunded": "Refunded",
+        "written_off": "Written off"
+      },
+      "extendTitle": "Extend dates without a payment",
+      "extendOk": "Save dates",
+      "extended": "Dates extended",
+      "paymentRecorded": "Payment recorded",
+      "changeTitle": "Change plan",
+      "changeOk": "Change plan",
+      "planChanged": "Plan changed"
+    },
+    "tenantUsers": {
+      "name": "User",
+      "status": "Status",
+      "twoFactor": "2FA",
+      "tfOn": "Connected",
+      "tfOff": "Not set up",
+      "reset": "Reset 2FA",
+      "resetTitle": "Reset two-factor sign-in: {name}",
+      "resetHint": "For a user who lost both the phone and the recovery codes. The client will see the reason in the security log; the person's sessions will be closed",
+      "resetDone": "Two-factor sign-in for “{name}” was reset",
+      "impersonate": "Sign in as",
+      "impersonateWarn": "Logged in the tenant's security log. A permanent banner is shown in the UI.",
+      "enter": "Enter",
+      "empty": "There are no people in this space yet"
+    },
+    "domainTab": {
+      "title": "Domain",
+      "hint": "Client's own domain: CNAME to the platform, a Let's Encrypt certificate is set up manually by the operator (docs/27). Empty field — default subdomain only.",
+      "value": "Domain without protocol",
+      "saved": "Domain saved",
+      "smtpTitle": "SMTP: TLS errors",
+      "smtpHint": "Allow a self-signed or expired certificate on the client's mail server. An unsafe flag — for the platform operator only.",
+      "smtpLabel": "Ignore TLS errors",
+      "smtpSaved": "SMTP setting saved"
+    },
+    "lifecycleTab": {
+      "hint": "Only the platform operator sets a stage’s capabilities (docs/v2/33 §2) — the tenant edits the rest (name, order, expected days) in \"Settings → Lifecycle stages\".",
+      "empty": "The tenant has no stages yet"
+    },
+    "actionsTab": {
+      "reason": "Reason (for the platform log)",
+      "suspend": "Suspend",
+      "resume": "Resume",
+      "purge": "Delete",
+      "cancelPurge": "Cancel deletion",
+      "purgeAt": "Data will be deleted on {date}",
+      "typeSlug": "Type slug “{slug}” to confirm",
+      "confirm": {
+        "suspend": {
+          "title": "Suspend workspace",
+          "text": "Sign-in will be closed, background jobs and notifications stopped, data kept intact. Active sessions will be ended.",
+          "ok": "Suspend"
+        },
+        "resume": {
+          "title": "Resume workspace",
+          "text": "Sign-in and background jobs will work again.",
+          "ok": "Resume"
+        },
+        "purge": {
+          "title": "Delete workspace data",
+          "text": "Irreversible. Data and files will be fully deleted in {days} days; until then the deletion can be cancelled. The action is recorded in the platform log.",
+          "ok": "Delete in 30 days"
+        },
+        "cancelPurge": {
+          "title": "Cancel deletion",
+          "text": "The workspace returns to \"Suspended\", data is kept.",
+          "ok": "Cancel deletion"
+        }
+      },
+      "done": {
+        "suspend": "Workspace suspended: sign-in closed, jobs stopped, data intact",
+        "resume": "Workspace resumed",
+        "purge": "Deletion scheduled. It can be cancelled before the date",
+        "cancelPurge": "Deletion cancelled, workspace stays suspended"
+      }
+    },
+    "plansPage": {
+      "hint": "The platform’s plan catalogue. Creating and editing plans is a separate screen (not implemented yet — view only).",
+      "name": "Plan",
+      "price": "Price, ₴/mo",
+      "state": "State",
+      "active": "Active",
+      "inactive": "Inactive",
+      "empty": "No plans yet"
+    },
+    "announcementsPage": {
+      "hint": "The second kind of \"news\": from Lola to spaces, read-only. Not company news — those are written by the space admin.",
+      "create": "Create announcement",
+      "created": "Announcement created",
+      "archiveConfirm": "Remove “{title}” from the spaces' feed?",
+      "f": {
+        "title": "Title",
+        "audience": "Audience",
+        "body": "Text",
+        "plans": "Plans",
+        "tenants": "Spaces",
+        "publish": "Publish right away"
+      },
+      "audience": {
+        "all": "All spaces",
+        "plans": "By plan",
+        "tenants": "Selected spaces"
+      },
+      "state": {
+        "draft": "Draft",
+        "published": "Published",
+        "archived": "Removed"
+      },
+      "readers": "read: {n}",
+      "publish": "Publish",
+      "archive": "Remove",
+      "empty": "No announcements yet"
+    },
+    "metricsPage": {
+      "hint": "Server-computed: activity, media volume, background job failures.",
+      "tenants_active": "active spaces",
+      "trials_ending": "trials ending",
+      "users_active": "active people",
+      "dau": "today",
+      "wau": "this week",
+      "attempts_today": "quizzes today",
+      "notifications_queued": "queued",
+      "notifications_failed_24h": "notification failures 24h",
+      "webhooks_failed_24h": "webhook failures 24h",
+      "media": "media"
+    },
+    "auditPage": {
+      "tenantId": "Company ID",
+      "limit": "Rows to show",
+      "apply": "Apply",
+      "when": "When",
+      "who": "Who",
+      "action": "Action",
+      "tenant": "Company",
+      "entity": "Entity",
+      "details": "details",
+      "empty": "No entries yet"
     }
   }
 }

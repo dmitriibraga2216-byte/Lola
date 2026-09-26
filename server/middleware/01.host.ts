@@ -1,4 +1,5 @@
 import { hostConfig, resolveTenantByHost, type ResolvedTenant } from '../services/tenantResolve'
+import { decideOpsHost, OPS_HOME, opsHostOf } from '../services/opsHost'
 
 /**
  * Резолв тенанта по `Host` — до сессии и до всего остального (docs/25 §16.1, docs/27 §27.3).
@@ -12,6 +13,17 @@ import { hostConfig, resolveTenantByHost, type ResolvedTenant } from '../service
 const EXEMPT = ['/api/v1/platform/', '/ops', '/health', '/ready', '/metrics', '/_nuxt/', '/__nuxt', '/favicon', '/tg/', '/api/v1/telegram/', '/c/', '/api/_']
 
 export default defineEventHandler(async (event) => {
+  // Отдельный хост консоли оператора (`OPS_HOST`, docs/25 §7 п. 6): решается раньше тенанта —
+  // `ops.<base>` иначе приняли бы за поддомен тенанта `ops`. Чужая половина — 404 без подробностей.
+  const ops = decideOpsHost(getHeader(event, 'host'), event.path, opsHostOf())
+  if (ops.kind === 'not_found') throw createError({ statusCode: 404, data: { code: 'not_found', message: 'Сторінку не знайдено' } })
+  if (ops.kind === 'ops_root') return sendRedirect(event, OPS_HOME, 302)
+  if (ops.kind === 'ops') {
+    event.context.opsHost = true
+    setHeader(event, 'X-Robots-Tag', 'noindex, nofollow')
+    return
+  }
+
   const cfg = hostConfig()
   if (!cfg.base) return
   const path = event.path.split('?')[0]!

@@ -1,5 +1,6 @@
 import { touchSession, validateSession } from '../services/session'
 import { TenantClosedError, tenantById, type ResolvedTenant } from '../services/tenantResolve'
+import { opsHostOf } from '../services/opsHost'
 
 export const SESSION_COOKIE = 'lola_sid'
 export const CSRF_COOKIE = 'lola_csrf'
@@ -31,6 +32,9 @@ export default defineEventHandler(async (event) => {
   if (!event.path.startsWith('/api/') && event.path !== '/ready') return
 
   if (event.path.startsWith('/api/v1/platform/')) {
+    // Cookie оператора действует только на хосте консоли (`OPS_HOST`, docs/25 §7 п. 6): на
+    // тенантском хосте `01.host` уже ответил 404, здесь — второй рубеж на случай иного порядка
+    if (opsHostOf() && !event.context.opsHost) return
     const ops = getCookie(event, PLATFORM_COOKIE)
     if (ops) {
       const { validatePlatformSession } = await import('../services/platform')
@@ -49,6 +53,9 @@ export default defineEventHandler(async (event) => {
     }
     return
   }
+
+  // На хосте консоли тенантская сессия и Bearer тенанта не читаются вовсе (docs/25 §7 п. 6)
+  if (event.context.opsHost) return
 
   const bearer = getHeader(event, 'authorization')
   if (bearer?.startsWith('Bearer ')) {

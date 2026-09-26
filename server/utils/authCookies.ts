@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { H3Event } from 'h3'
-import { CSRF_COOKIE, SESSION_COOKIE } from '../middleware/01.session'
+import { CSRF_COOKIE, PLATFORM_COOKIE, SESSION_COOKIE } from '../middleware/01.session'
+import { opsHostOf } from '../services/opsHost'
 
 const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60
 
@@ -29,6 +30,23 @@ export function setSessionCookies(event: H3Event, token: string): void {
     maxAge: THIRTY_DAYS_SEC,
     path: '/',
   })
+}
+
+/** Срок сессии оператора — 12 часов (docs/03 §3.12). */
+export const PLATFORM_SESSION_SEC = 12 * 3600
+
+/**
+ * Cookie оператора (docs/25 §7 п. 6): без `Domain` — host-only, на поддомены тенантов не
+ * уходит; `SameSite=Strict`; при отдельном хосте консоли (`OPS_HOST`) — всегда `Secure`
+ * (консоль живёт только за HTTPS). Без `OPS_HOST` — как у тенантской cookie, по протоколу.
+ */
+export function setPlatformCookie(event: H3Event, token: string): void {
+  const secure = process.env.COOKIE_SECURE === '0' ? false : (opsHostOf() ? true : isSecureRequest(event))
+  setCookie(event, PLATFORM_COOKIE, token, { httpOnly: true, secure, sameSite: 'strict', maxAge: PLATFORM_SESSION_SEC, path: '/' })
+}
+
+export function clearPlatformCookie(event: H3Event): void {
+  deleteCookie(event, PLATFORM_COOKIE, { path: '/' })
 }
 
 export function clearSessionCookies(event: H3Event): void {

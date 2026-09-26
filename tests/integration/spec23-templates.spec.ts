@@ -70,6 +70,27 @@ describe('Spec 23: {{#_tr}} — переклад фрази за локаллю 
     expect(N.renderTemplate(tpl, { name: 'Ivan' }, s => (s === 'Привіт' ? 'Hi' : s))).toBe('Hi, Ivan!')
   })
 
+  it('renderTemplate: код з RECIPIENT_TIME_CODES — дата й час у поясі отримувача (docs/v2/46-progress.md, «Что осталось»: summary_auto_send_scheduled показывал дату без часа); без коду чи для іншого коду — як і раніше, тільки день+місяць', () => {
+    const iso = '2026-09-27T14:30:00.000Z'
+    expect(N.RECIPIENT_TIME_CODES.has('summary_auto_send_scheduled')).toBe(true)
+    const kyiv = N.renderTemplate('Надіслано {{time}}', { time: iso }, undefined, 'uk', { code: 'summary_auto_send_scheduled', timezone: 'Europe/Kyiv' })
+    expect(kyiv).toContain('27 вересня')
+    expect(kyiv).toContain('17:30') // UTC+3 наприкінці вересня 2026
+    const tokyo = N.renderTemplate('Надіслано {{time}}', { time: iso }, undefined, 'uk', { code: 'summary_auto_send_scheduled', timezone: 'Asia/Tokyo' })
+    expect(tokyo).toContain('23:30') // UTC+9 — інший пояс отримувача, інша година
+    // та сама змінна `time`, але код не в RECIPIENT_TIME_CODES (або код не переданий) — формат без
+    // години, як в решти шаблонів: прив'язка до коду, а не до імені змінної, нікого не зачіпає
+    const withoutCode = N.renderTemplate('Надіслано {{time}}', { time: iso })
+    expect(withoutCode).toBe('Надіслано 27 вересня')
+    expect(withoutCode).not.toMatch(/\d{1,2}:\d{2}/)
+    const otherCode = N.renderTemplate('Надіслано {{time}}', { time: iso }, undefined, 'uk', { code: 'assignment_created', timezone: 'Europe/Kyiv' })
+    expect(otherCode).toBe('Надіслано 27 вересня')
+    // інша ISO-підстановка того самого коду — як і раніше, тільки день+місяць (не ламаємо чужі шаблони)
+    const withoutTime = N.renderTemplate('До {{until}}', { until: iso })
+    expect(withoutTime).toBe('До 27 вересня')
+    expect(withoutTime).not.toMatch(/\d{1,2}:\d{2}/)
+  })
+
   it('дедуп-таблиця translations як словник фраз: uk — оригінал, en — переклад, dispatch бере локаль отримувача', async () => {
     await admin`insert into notification_templates (tenant_id, code, channel, locale, body, is_enabled) values (${tenantId}, 's23_tr', 'telegram', 'uk', '{{#_tr}}Привіт{{/_tr}}, {{user.first_name}}!', true)`
     await admin`insert into translations (tenant_id, locale, key, value) values (${tenantId}, 'en', 'Привіт', 'Hi')`

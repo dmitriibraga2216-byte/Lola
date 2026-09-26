@@ -565,7 +565,20 @@ describe('Підсумок кандидата и авто-отправка (30 �
     expect(s!.state).toBe('ready')
     expect(new Date(s!.auto_send_due_at as Date).getTime()).toBe(t0.getTime() + 24 * H)
     expect(s!.auto_send_rule).toMatchObject({ scoreKind: 'recruiter', minScore: 60, trigger: { kind: 'recruiter', value: 61 } })
-    expect(await admin`select id from notifications where user_id = ${adminId} and code = 'summary_auto_send_scheduled' and ref_id = ${userId}`).toHaveLength(1)
+    const [scheduledNotice] = await admin`select payload from notifications where user_id = ${adminId} and code = 'summary_auto_send_scheduled' and ref_id = ${userId}`
+    expect(scheduledNotice).toBeTruthy()
+    // «Буде надіслано {{time}}» — дата без часу не давала зрозуміти, до якого моменту можна
+    // скасувати (`docs/v2/46-progress.md`, «Что осталось»): рендер має містити саме годину:хвилину,
+    // у поясі рекрутера (`RECIPIENT_TIME_CODES` — server/services/notifications.ts), а не UTC
+    const { renderTemplate, DEFAULT_TEMPLATES, RECIPIENT_TIME_CODES } = await import('../../server/services/notifications')
+    expect(RECIPIENT_TIME_CODES.has('summary_auto_send_scheduled')).toBe(true)
+    const rendered = renderTemplate(
+      DEFAULT_TEMPLATES.summary_auto_send_scheduled!,
+      { name: 'Тест', time: (scheduledNotice!.payload as { time: string }).time },
+      undefined, 'uk',
+      { code: 'summary_auto_send_scheduled', timezone: 'Europe/Kyiv' },
+    )
+    expect(rendered).toMatch(/\d{1,2}:\d{2}/)
 
     // Через 23 часа — ещё нет; через 24 — отправлен письмом, ссылка на 30 дней
     await summaryAutoSendScan(tenantId, new Date(t0.getTime() + 23 * H))

@@ -70,6 +70,17 @@ describe('Spec 23: {{#_tr}} — переклад фрази за локаллю 
     expect(N.renderTemplate(tpl, { name: 'Ivan' }, s => (s === 'Привіт' ? 'Hi' : s))).toBe('Hi, Ivan!')
   })
 
+  it('renderTemplate: {{time}} — дата й час (docs/v2/46-progress.md, «Что осталось»: summary_auto_send_scheduled показывал дату без часа); інші ISO-підстановки — як і раніше, тільки день+місяць', () => {
+    const iso = '2026-09-27T14:30:00.000Z'
+    const withTime = N.renderTemplate('Надіслано {{time}}', { time: iso })
+    expect(withTime).toContain('27 вересня')
+    expect(withTime).toMatch(/\d{1,2}:\d{2}/) // година:хвилина не губиться
+    // ключ, що не зветься `time`, — формат без години, як в решти шаблонів (не ламаємо їх)
+    const withoutTime = N.renderTemplate('До {{until}}', { until: iso })
+    expect(withoutTime).toBe('До 27 вересня')
+    expect(withoutTime).not.toMatch(/\d{1,2}:\d{2}/)
+  })
+
   it('дедуп-таблиця translations як словник фраз: uk — оригінал, en — переклад, dispatch бере локаль отримувача', async () => {
     await admin`insert into notification_templates (tenant_id, code, channel, locale, body, is_enabled) values (${tenantId}, 's23_tr', 'telegram', 'uk', '{{#_tr}}Привіт{{/_tr}}, {{user.first_name}}!', true)`
     await admin`insert into translations (tenant_id, locale, key, value) values (${tenantId}, 'en', 'Привіт', 'Hi')`

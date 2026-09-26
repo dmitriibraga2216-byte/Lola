@@ -13,7 +13,7 @@ import { tenantOverrides } from './translations'
 import type { Locale } from './translations'
 import { buildEmailHtml } from './emailRender'
 import { EMPLOYEES_ONLY } from './repo/people'
-import { formatDate } from '../../shared/domain/dateFormat'
+import { formatDate, formatDateTime } from '../../shared/domain/dateFormat'
 import { recipientLocale } from '../utils/formatLocale'
 import { managerIdOf, managerIdsOf } from './orgManager'
 import { personTimezone } from './activity'
@@ -358,7 +358,15 @@ export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (
     const v = vars[key]
     if (v === null || v === undefined) return ''
     if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      return formatDate(new Date(v), locale, { day: 'numeric', month: 'long' })
+      // `time` (PR-29, `summary_auto_send_scheduled` — `docs/v2/46-progress.md`, «Что осталось»):
+      // это момент отправки, а не просто дата — «дата без часа» ронял правило «скасувати
+      // можна до …», человек не знал, до какого часа. `formatDateTime` с тем же набором опций,
+      // что уже показывает дедлайны в интерфейсе (`app/pages/admin/events.vue`), даёт
+      // «27 вересня, 14:30». Остальные ISO-подстановки — как раньше, только день+місяць:
+      // менять формат чужих шаблонов вслепую нельзя.
+      return key === 'time'
+        ? formatDateTime(new Date(v), locale, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+        : formatDate(new Date(v), locale, { day: 'numeric', month: 'long' })
     }
     return String(v)
   })

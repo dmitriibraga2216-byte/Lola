@@ -1,4 +1,4 @@
-import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import {
   mediaAssets, planAddons, planChangeRequests, platformAudit, plans, tenantAddons, tenantLimits,
@@ -496,11 +496,43 @@ export interface PurgeReport {
   slug: string
   tables: Record<string, number>
   passes: number
-  s3: { deleted: number, error: string | null }
+  s3: { deleted: number }
   durationMs: number
 }
 
 const BATCH = 5000
+
+export interface S3PurgeReport {
+  deleted: number
+  failed: number
+  failures: { key: string, error: string }[]
+}
+
+type S3ObjectDeleter = (key: string) => Promise<void>
+
+const tenantS3RealDeleter: S3ObjectDeleter = async (key) => {
+  const { s3, S3_BUCKET } = await import('./media')
+  await s3().send(new DeleteObjectCommand({ Bucket: S3_BUCKET(), Key: key }))
+}
+
+let tenantS3Deleter: S3ObjectDeleter = tenantS3RealDeleter
+
+/** Подмена удаления объекта в тестах (отказ S3, по образцу `setAudioObjectDeleter`); `null` — настоящий S3. */
+export function setTenantS3ObjectDeleter(fn: S3ObjectDeleter | null): void {
+  tenantS3Deleter = fn ?? tenantS3RealDeleter
+}
+
+/**
+ * Незавершённое удаление S3-объекта (в т.ч. неудачный листинг префикса) — `tenant.purge` падает и
+ * повторяется через очередь (docs/25 §8); строка `tenants` остаётся до тех пор, пока каждый объект
+ * префикса не подтвердит удаление.
+ */
+export class TenantS3PurgeError extends Error {
+  constructor(public readonly tenantId: string, public readonly report: S3PurgeReport) {
+    super(`tenant.purge: не удалось удалить ${report.failed} об'єкт(ів) S3 тенанта ${tenantId}: ${report.failures[0]?.error ?? ''}`)
+    this.name = 'TenantS3PurgeError'
+  }
+}
 
 /** Таблицы с tenant_id (docs/25 §3.1) — всё, что принадлежит тенанту. */
 async function tenantTables(): Promise<string[]> {
@@ -512,32 +544,50 @@ async function tenantTables(): Promise<string[]> {
   return rows.map(r => r.t)
 }
 
-async function deleteS3Prefix(prefix: string): Promise<{ deleted: number, error: string | null }> {
-  try {
-    const { s3, S3_BUCKET } = await import('./media')
-    const client = s3()
-    let deleted = 0
-    let token: string | undefined
-    do {
-      const page = await client.send(new ListObjectsV2Command({ Bucket: S3_BUCKET(), Prefix: prefix, ContinuationToken: token }))
-      const keys = (page.Contents ?? []).map(o => ({ Key: o.Key! }))
-      if (keys.length) {
-        await client.send(new DeleteObjectsCommand({ Bucket: S3_BUCKET(), Delete: { Objects: keys, Quiet: true } }))
-        deleted += keys.length
+/**
+ * Удаление S3-объектов тенанта по одному `DeleteObjectCommand` (не пакетным `DeleteObjects` —
+ * тот падал на MinIO `MissingContentMD5`, новый AWS SDK шлёт CRC32 вместо `Content-MD5`, и ошибка
+ * глушилась молча). Отказ листинга страницы — тоже отказ: без него неизвестно, остались ли объекты.
+ */
+async function deleteS3Prefix(prefix: string): Promise<S3PurgeReport> {
+  const { s3, S3_BUCKET } = await import('./media')
+  const client = s3()
+  const bucket = S3_BUCKET()
+  const report: S3PurgeReport = { deleted: 0, failed: 0, failures: [] }
+  let token: string | undefined
+  do {
+    let page
+    try {
+      page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }))
+    }
+    catch (err) {
+      report.failures.push({ key: prefix, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) })
+      break
+    }
+    for (const o of page.Contents ?? []) {
+      const key = o.Key!
+      try {
+        await tenantS3Deleter(key)
+        report.deleted++
       }
-      token = page.IsTruncated ? page.NextContinuationToken : undefined
-    } while (token)
-    return { deleted, error: null }
-  }
-  catch (err) {
-    return { deleted: 0, error: err instanceof Error ? err.message : String(err) }
-  }
+      catch (err) {
+        report.failures.push({ key, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) })
+      }
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (token)
+  report.failed = report.failures.length
+  return report
 }
 
 /**
  * Необратимое удаление данных тенанта (docs/25 §8): партиями по BATCH строк, таблицы — в порядке зависимостей
- * (таблица, которую ещё держит внешний ключ, откладывается на следующий проход), затем строка `tenants`,
- * затем S3-префикс `t/<tenant_id>/`. Отчёт — в `platform_audit` (`tenant.purged`, subject_tenant_id уже null).
+ * (таблица, которую ещё держит внешний ключ, откладывается на следующий проход), затем S3-префикс
+ * `t/<tenant_id>/` и только потом строка `tenants` — если хоть один объект S3 не удалён, строка
+ * `tenants` остаётся (тенант не считается очищенным), отказ пишется в `platform_audit`
+ * (`tenant.purge_s3_failed`), задача `tenant.purge` падает и повторяется через очередь; повтор после
+ * починки S3 идемпотентен. Отчёт успешного удаления — в `platform_audit` (`tenant.purged`,
+ * subject_tenant_id уже null).
  */
 export async function purgeTenantData(tenantId: string, actor: PlatformAuth | null = null): Promise<PurgeReport> {
   const started = Date.now()
@@ -573,11 +623,20 @@ export async function purgeTenantData(tenantId: string, actor: PlatformAuth | nu
     pending = next
   }
   if (pending.length) throw new Error(`tenant.purge: остались таблицы ${pending.join(', ')}`)
-  await db.delete(tenants).where(eq(tenants.id, tenantId))
+
   const s3 = await deleteS3Prefix(`t/${tenantId}/`)
+  if (s3.failed) {
+    await db.insert(platformAudit).values({
+      adminId: actor?.adminId ?? null, adminEmail: actor?.email ?? 'worker', action: 'tenant.purge_s3_failed', subjectTenantId: tenantId,
+      entity: 'tenant', entityId: tenantId, before: null, after: { slug: t.slug, ...s3 }, requestContext: currentRequestContext(),
+    })
+    throw new TenantS3PurgeError(tenantId, s3)
+  }
+
+  await db.delete(tenants).where(eq(tenants.id, tenantId))
   invalidateTenant(tenantId)
   invalidateLimits(tenantId)
-  const report: PurgeReport = { tenantId, slug: t.slug, tables: Object.fromEntries(Object.entries(tables).filter(([, n]) => n > 0)), passes, s3, durationMs: Date.now() - started }
+  const report: PurgeReport = { tenantId, slug: t.slug, tables: Object.fromEntries(Object.entries(tables).filter(([, n]) => n > 0)), passes, s3: { deleted: s3.deleted }, durationMs: Date.now() - started }
   await db.insert(platformAudit).values({
     adminId: actor?.adminId ?? null, adminEmail: actor?.email ?? 'worker', action: 'tenant.purged', subjectTenantId: null,
     entity: 'tenant', entityId: tenantId, before: { slug: t.slug, name: t.name, archivedAt: t.archivedAt }, after: report, requestContext: currentRequestContext(),

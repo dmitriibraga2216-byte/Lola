@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
+import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import postgres from 'postgres'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { opsHttpLogin } from './_opsLogin'
 
 /**
@@ -17,13 +18,13 @@ process.env.ENCRYPTION_KEY ??= 'test-encryption-key'
 const { withTenant } = await import('../../server/utils/withTenant')
 const { db } = await import('../../server/db/client')
 const { createTenant, platformLogin, validatePlatformSession, ensureFirstAdmin, listTenants, checkPlanLimit, updateTenant } = await import('../../server/services/platform')
-const { suspendTenant, resumeTenant, schedulePurge, cancelPurge, setTenantLimits, getTenantLimits, runTenantPurge, listPlatformAudit, purgeAtOf } = await import('../../server/services/platformTenants')
+const { suspendTenant, resumeTenant, schedulePurge, cancelPurge, setTenantLimits, getTenantLimits, runTenantPurge, listPlatformAudit, purgeAtOf, setTenantS3ObjectDeleter, TenantS3PurgeError } = await import('../../server/services/platformTenants')
 const { roundRobinOrder, runPerTenant, withTenantSlot, activeJobsOf, resetRoundRobin } = await import('../../server/services/tenantQueue')
 const { decideHost, resolveTenantByHost, invalidateTenant, tenantById } = await import('../../server/services/tenantResolve')
 const { effectiveLimits, invalidateLimits, DEFAULT_ACTIVE_JOBS } = await import('../../server/services/tenantLimits')
 const { dispatchNotifications } = await import('../../server/services/notifications')
 const { createSession } = await import('../../server/services/session')
-const { getMedia } = await import('../../server/services/media')
+const { getMedia, s3, S3_BUCKET } = await import('../../server/services/media')
 const { tags } = await import('../../server/db/schema')
 
 const BUILT = existsSync('.output/server/index.mjs')
@@ -85,6 +86,8 @@ beforeAll(async () => {
   await admin`update users set status = 'active' where id in (${tenantA.adminUserId}, ${tenantB.adminUserId})`
   tenantTables = await tablesWithTenantId()
 }, 60_000)
+
+afterEach(() => setTenantS3ObjectDeleter(null))
 
 afterAll(async () => {
   // Что не удалено purge-тестом — вычищаем тем же сервисом (он и есть полный список таблиц)
@@ -393,6 +396,48 @@ describe('docs/25 §8 — purge через 30 дней с подтвержден
     expect((aud!.after as { tables: Record<string, number> }).tables.users).toBe(before.users)
     // повтор — идемпотентно
     expect(await runTenantPurge(tenantB.id)).toEqual({ purged: false, reason: 'not_found' })
+  })
+
+  it('отказ удалителя на объекте S3 держит строку tenants и пишет отказ в platform_audit; после починки повтор идемпотентно завершает purge', async () => {
+    const a = await createTenant({ slug: `tc-${stamp}`, name: 'Тенант В', adminPhone: '+380501000003', adminName: 'Адмін В', plan: 'network' }, opsAuth)
+    if (!a.ok) throw new Error('не удалось создать тестовый тенант')
+    const tenantC = { id: a.tenantId, slug: `tc-${stamp}` }
+    await suspendTenant(tenantC.id, null, opsAuth)
+    await schedulePurge(tenantC.id, tenantC.slug, opsAuth)
+    await admin`update tenants set archived_at = now() - interval '31 days' where id = ${tenantC.id}`
+    const s3Key = `t/${tenantC.id}/purge-${stamp}.png`
+    await admin`insert into media_assets (tenant_id, key, original_name, kind, mime, bytes, status, owner_user_id) values (${tenantC.id}, ${s3Key}, 'c.png', 'image', 'image/png', 10, 'ready', ${a.adminUserId})`
+    await s3().send(new PutObjectCommand({ Bucket: S3_BUCKET(), Key: s3Key, Body: 'purge-s3-test', ContentType: 'image/png' }))
+
+    // docs/v2/46-progress.md (deleteS3Prefix): удалитель отказывает на объекте — DeleteObjects
+    // раньше глушил такую ошибку молча; теперь она держит строку tenants и уходит в platform_audit
+    setTenantS3ObjectDeleter(async (key) => {
+      if (key === s3Key) { const e = new Error('MissingContentMD5: simulated'); e.name = 'MissingContentMD5'; throw e }
+    })
+    await expect(runTenantPurge(tenantC.id)).rejects.toBeInstanceOf(TenantS3PurgeError)
+    // данные тенанта в остальных таблицах уже удалены — держит только неудалённый объект S3
+    expect(await rowsOf(tenantC.id)).toEqual({})
+    expect((await admin`select status, archived_at from tenants where id = ${tenantC.id}`)[0]).toMatchObject({ status: 'archived' })
+    await expect(s3().send(new HeadObjectCommand({ Bucket: S3_BUCKET(), Key: s3Key }))).resolves.toBeDefined()
+    const [failAud] = await admin`select * from platform_audit where action = 'tenant.purge_s3_failed' and entity_id = ${tenantC.id} order by created_at desc limit 1`
+    expect(failAud).toBeDefined()
+    expect(failAud!.subject_tenant_id).toBe(tenantC.id)
+    expect(JSON.stringify(failAud!.after)).toContain('MissingContentMD5')
+    expect((failAud!.after as { failed: number, failures: { key: string }[] }).failed).toBe(1)
+    expect((failAud!.after as { failures: { key: string }[] }).failures[0]!.key).toBe(s3Key)
+
+    // задача padает и повторяется через очередь (retryLimit — server/services/queue.ts); повтор после починки S3 — успешен и идемпотентен
+    setTenantS3ObjectDeleter(null)
+    const r = await runTenantPurge(tenantC.id)
+    expect(r.purged).toBe(true)
+    expect(r.report!.s3.deleted).toBe(1)
+    expect((await admin`select id from tenants where id = ${tenantC.id}`).length).toBe(0)
+    await expect(s3().send(new HeadObjectCommand({ Bucket: S3_BUCKET(), Key: s3Key }))).rejects.toThrow()
+    const [aud] = await admin`select * from platform_audit where action = 'tenant.purged' and entity_id = ${tenantC.id}`
+    expect(aud).toBeDefined()
+    expect(aud!.subject_tenant_id).toBeNull()
+    // повтор — идемпотентно
+    expect(await runTenantPurge(tenantC.id)).toEqual({ purged: false, reason: 'not_found' })
   })
 })
 

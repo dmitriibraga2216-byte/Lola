@@ -13,7 +13,9 @@ import { apiData, apiError } from '../../../utils/apiResponse'
  * `409 candidate.duplicate` — найден тот же человек, форма показывает его карточку (§7.2);
  * `409 candidate.contact_taken` — контакт занят: повторный отклик ведётся в существующей
  *   карточке событием истории (§12.10), а не вторым профилем;
- * `409 limit_exceeded` (`axis=candidates_active`) — мест по тарифу нет (§7.1, критерий §13 к. 1).
+ * `409 limit_exceeded` (`axis=candidates_active`) — мест по тарифу нет (§7.1, критерий §13 к. 1);
+ *   проверка — в транзакции создания под блокировкой оси (fix-candidate-limit-race);
+ * `503 limit.check_failed` — лимит проверить не удалось, кандидат не создан (fail-closed).
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'candidate.edit')
@@ -32,7 +34,9 @@ export default defineEventHandler(async (event) => {
     case 'contact_taken':
       return apiError(event, 409, 'candidate.contact_taken', 'Такий номер або пошта вже є у кандидата чи співробітника', { duplicates: r.duplicates })
     case 'limit_exceeded':
-      return apiError(event, 409, 'limit_exceeded', 'Ліміт кандидатів за тарифом вичерпано', { axis: 'candidates_active', limit: r.limit, current: r.current })
+      // Текст — из словаря (`limitMessage`, `billing.limitConsequence.candidates_active`); `used` —
+      // как у единого отказа `LimitExceededError`, `current` — прежнее имя поля для клиента
+      return apiError(event, 409, 'limit_exceeded', r.message, { axis: 'candidates_active', used: r.current, limit: r.limit, current: r.current })
     case 'status_not_found':
       return apiError(event, 422, 'validation_failed', 'Колонку воронки не знайдено')
   }

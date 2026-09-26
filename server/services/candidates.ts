@@ -15,6 +15,7 @@ import { candidateOnly, candidates as candidatesQuery, personById } from './repo
 import { closeCandidateSessionsTx } from './candidateAccess'
 import { recordAudit } from './audit'
 import { splitName } from './people'
+import { LimitExceededError, assertCandidatesWithinLimit } from './tenantLimits'
 
 /**
  * Кандидат: карточка, статусы, оценки, комментарии (docs/v2/28-recruiting-candidates.md §3–§7,
@@ -482,7 +483,7 @@ export type CreateResult =
   | { ok: false, code: 'is_employee', duplicates: DuplicateHit[] }
   | { ok: false, code: 'duplicate', duplicates: DuplicateHit[] }
   | { ok: false, code: 'contact_taken', duplicates: DuplicateHit[] }
-  | { ok: false, code: 'limit_exceeded', limit: number | null, current: number }
+  | { ok: false, code: 'limit_exceeded', limit: number | null, current: number, message: string }
   | { ok: false, code: 'status_not_found' }
 
 /**
@@ -490,7 +491,10 @@ export type CreateResult =
  *
  * Порядок проверок — от самой дешёвой ошибки к самой дорогой: контакт → человек уже работает
  * (§12.1) → дубликат без подтверждения (§7.2) → лимит тарифа (§7.1). Лимит проверяется
- * последним, потому что он единственный обращается к оси и пополняет счётчик.
+ * последним и **внутри транзакции создания** (`createCandidateTx` → `assertCandidatesWithinLimit`):
+ * проверка отдельным подключением до транзакции пропускала два параллельных запроса на последнее
+ * место оба (fix-candidate-limit-race). Отказ по лимиту возвращается кодом `limit_exceeded`;
+ * сбой самой проверки — исключение `LimitCheckFailedError` (`503`), кандидат не создаётся.
  *
  * Согласие на обработку ПД проставляет сервер: `consent_given_at = now()`,
  * `consent_expires_at = +6 мес.` (§7.9). Клиент присылает только факт подтверждения — дату
@@ -499,18 +503,26 @@ export type CreateResult =
 export async function createCandidate(ctx: Ctx, input: CandidateCreateInput): Promise<CreateResult> {
   const blocked = await precheckCandidate(ctx, input)
   if (blocked) return blocked
-  return withTenant(ctx.tenantId, ctx.actorId, tx => createCandidateTx(tx, ctx, input))
+  try {
+    return await withTenant(ctx.tenantId, ctx.actorId, tx => createCandidateTx(tx, ctx, input))
+  }
+  catch (err) {
+    if (err instanceof LimitExceededError) return { ok: false, code: 'limit_exceeded', limit: err.details.limit, current: err.details.used, message: err.message }
+    throw err
+  }
 }
 
 /**
  * Проверки **до** транзакции: контакт, человек уже работает (§12.1), дубликат без
- * подтверждения (§7.2), лимит тарифа (§7.1). Возвращает отказ или `null`, если путь открыт.
+ * подтверждения (§7.2). Возвращает отказ или `null`, если путь открыт.
  *
  * Вынесено отдельно, потому что у создания кандидата два входа — форма рекрутера и отклик
  * по публичной ссылке (§7.20, PR-16), — и второй обязан идти **одной транзакцией** вместе
- * с назначением. Обе проверки, которые ходят мимо транзакции тенанта (`findDuplicates`
- * своим `withTenant`, лимит — подключением платформы), поэтому стоят перед ней, а не внутри:
- * вложенная транзакция другого подключения всё равно не откатилась бы вместе с внешней.
+ * с назначением. Поиск дубликатов ходит своим `withTenant`, поэтому стоит перед транзакцией.
+ *
+ * **Лимит тарифа (§7.1) здесь не проверяется** — только в `createCandidateTx()`, в транзакции
+ * самой записи и под блокировкой оси (fix-candidate-limit-race): число, посчитанное отдельным
+ * подключением, между проверкой и записью устаревает.
  */
 export async function precheckCandidate(ctx: Ctx, input: { phone?: string | null, email?: string | null, confirmDuplicate?: boolean }): Promise<Exclude<CreateResult, { ok: true }> | null> {
   const phone = input.phone?.trim() || null
@@ -526,16 +538,15 @@ export async function precheckCandidate(ctx: Ctx, input: { phone?: string | null
   // второй профиль с тем же контактом не создаётся никогда, и это не обход §7.2, а её же §12.10:
   // повторный отклик того же человека — событие в истории существующей карточки, а не новая.
   if (dups.some(d => d.matchedContact)) return { ok: false, code: 'contact_taken', duplicates: dups }
-
-  const { checkPlanLimit } = await import('./platform')
-  const limit = await checkPlanLimit(ctx.tenantId, 'candidates')
-  if (!limit.ok) return { ok: false, code: 'limit_exceeded', limit: limit.limit, current: limit.current }
   return null
 }
 
 /**
  * Тело создания кандидата в **уже открытой** транзакции тенанта. Единственная точка, где
  * появляется строка `users` с `kind = 'candidate'`; проверки перед ней — `precheckCandidate()`.
+ * Лимит оси `candidates_active` проверяется здесь, перед вставкой, в той же транзакции
+ * (`assertCandidatesWithinLimit`): исчерпана — `LimitExceededError` и откат всей транзакции
+ * вызывающего (у отклика — вместе с назначением), сбой проверки — `LimitCheckFailedError`.
  *
  * `opts.consentGivenAt` — единственное отступление от правила «дату согласия ставит сервер»:
  * отклик по публичной ссылке уже записал момент галочки в `vacancy_applications`
@@ -551,6 +562,8 @@ export async function createCandidateTx(tx: TenantTx, ctx: Ctx, input: Candidate
       ? (await tx.select().from(candidateStatuses).where(eq(candidateStatuses.id, input.statusId)))[0]
       : (await tx.select().from(candidateStatuses).where(eq(candidateStatuses.code, 'new')))[0]
     if (!status) return { ok: false, code: 'status_not_found' } as CreateResult
+
+    await assertCandidatesWithinLimit(tx, ctx.tenantId, 1)
 
     const parts = splitName({ lastName: input.lastName, firstName: input.firstName, middleName: input.middleName ?? null })
     // Срок стирания ПД считается **от момента согласия**, а не от момента записи (§7.9,
@@ -713,7 +726,10 @@ export function canMove(from: CandidateState, to: CandidateState): boolean {
  */
 export async function moveStatus(v: Viewer, id: string, input: CandidateStatusMoveInput): Promise<MoveResult> {
   return withTenant(v.tenantId, v.actorId, async (tx) => {
-    const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)) as unknown as CandidateRow[]
+    // `for update`: состояние, по которому решается «занимает ли перенос место», не должно
+    // устареть до записи — иначе параллельная архивация превращает перенос между активными
+    // колонками в возврат в воронку мимо проверки лимита (fix-candidate-limit-race)
+    const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)).for('update') as unknown as CandidateRow[]
     if (!row) return { ok: false, code: 'not_found' }
     const [status] = await tx.select().from(candidateStatuses).where(eq(candidateStatuses.id, input.statusId))
     if (!status || !status.isActive) return { ok: false, code: 'status_not_found' }
@@ -724,6 +740,9 @@ export async function moveStatus(v: Viewer, id: string, input: CandidateStatusMo
     // Отказ без причины не пишется: причина уходит в отчёт «Отказы по причинам» (§9) и в письмо
     // кандидату (§6.2), и восстановить её задним числом неоткуда.
     if (to === 'rejected' && !input.reasonCode && !input.reasonText) return { ok: false, code: 'reason_required' }
+    // Колонка с `maps_to = 'active'` из отказа, архива или самоотвода — тот же возврат в воронку,
+    // что `reopen` (§4.2, §7.1 п. 1): место в оси проверяется в этой транзакции и под блокировкой
+    if (to === 'active' && row.state !== 'active') await assertCandidatesWithinLimit(tx, v.tenantId, 1)
 
     await tx.update(users).set({
       candidateStatusId: status.id,

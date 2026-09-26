@@ -20,7 +20,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    await $fetch('/api/v1/platform/login', { method: 'POST', body: { email: form.email.trim(), password: form.password } })
+    await opsFetch('/api/v1/platform/login', { method: 'POST', body: { email: form.email.trim(), password: form.password } })
     await fetchMe()
     await navigateTo('/ops/two-factor')
   }

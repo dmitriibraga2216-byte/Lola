@@ -16,7 +16,8 @@ export interface OpsMe {
 }
 
 // Нетипизированный вызов: типизированные роуты Nitro при сотнях эндпоинтов дают TS2589
-const rawFetch = $fetch as unknown as <T>(url: string, opts?: unknown) => Promise<T>
+export const opsFetch = $fetch as unknown as <T>(url: string, opts?: unknown) => Promise<T>
+const rawFetch = opsFetch
 
 export function useOps() {
   const me = useState<OpsMe | null>('ops:me', () => null)

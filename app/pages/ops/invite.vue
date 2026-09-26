@@ -13,7 +13,7 @@ const busy = ref(false)
 const MIN = 12
 
 onMounted(async () => {
-  try { who.value = (await $fetch<{ data: { email: string, fullName: string } }>(`/api/v1/platform/invite/${encodeURIComponent(token.value)}`)).data }
+  try { who.value = (await opsFetch<{ data: { email: string, fullName: string } }>(`/api/v1/platform/invite/${encodeURIComponent(token.value)}`)).data }
   catch (err) { error.value = apiErrorOf(err).message }
 })
 
@@ -23,7 +23,7 @@ async function submit() {
   error.value = ''
   busy.value = true
   try {
-    await $fetch('/api/v1/platform/invite/accept', { method: 'POST', body: { token: token.value, password: password.value } })
+    await opsFetch('/api/v1/platform/invite/accept', { method: 'POST', body: { token: token.value, password: password.value } })
     done.value = true
   }
   catch (err) { error.value = apiErrorOf(err).message }

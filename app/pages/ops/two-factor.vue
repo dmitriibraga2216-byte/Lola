@@ -24,7 +24,7 @@ async function verify() {
   error.value = ''
   busy.value = true
   try {
-    await $fetch('/api/v1/platform/two-factor/verify', { method: 'POST', body: useRecovery.value ? { recoveryCode: recovery.value.trim() } : { code: code.value.trim() } })
+    await opsFetch('/api/v1/platform/two-factor/verify', { method: 'POST', body: useRecovery.value ? { recoveryCode: recovery.value.trim() } : { code: code.value.trim() } })
     await fetchMe()
     await navigateTo('/ops/companies')
   }

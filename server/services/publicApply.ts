@@ -22,7 +22,7 @@ import { createCandidateTx, precheckCandidate } from './candidates'
 import { enqueueNotification, tenantAdminIds } from './notifications'
 import { emitWebhook } from './webhooks'
 import { ensureBucket, s3, S3_BUCKET, tenantStorageBytes } from './media'
-import { effectiveLimits } from './tenantLimits'
+import { LimitCheckFailedError, LimitExceededError, effectiveLimits } from './tenantLimits'
 import { recordUsage } from './usageCounters'
 
 /**
@@ -592,9 +592,14 @@ async function convertIfClean(tenantId: string, ownerId: string | null, vacancyI
  *
  * Исчерпанная ось `candidates_active` не теряет отклик и не отвечает человеку отказом
  * (§12.2): отклик остаётся `pending_review` с причиной `limit`, рекрутер видит «Відгук не
- * створив кандидата: вичерпано ліміт тарифу». Проверка оси — `precheckCandidate()`, то есть
- * `checkLimit()` из `tenantLimits.ts`: сырых сравнений «использовано против лимита» в этом
- * файле нет ни одного.
+ * створив кандидата: вичерпано ліміт тарифу». Проверка оси — внутри `createCandidateTx()`,
+ * то есть `assertCandidatesWithinLimit()` из `tenantLimits.ts` **в этой же транзакции** и под
+ * блокировкой оси: два отклика на последнее место не становятся кандидатами оба
+ * (fix-candidate-limit-race). Отказ откатывает транзакцию целиком (кандидата и назначения нет),
+ * после отката отклик придерживается. Сбой самой проверки (`LimitCheckFailedError`) — отказ, а не
+ * пропуск: кандидат не создаётся, отклик остаётся как был, ошибка уходит вызывающему (`503`
+ * рекрутеру; автоконверсия после кода её журналирует). Сырых сравнений «использовано против
+ * лимита» в этом файле нет ни одного.
  */
 export async function convertApplication(
   tenantId: string,
@@ -625,13 +630,9 @@ export async function convertApplication(
   })
   if (!vacancy?.courseId) return { ok: false, code: 'no_course' }
 
-  // Проверки, ходящие мимо транзакции тенанта (дубликаты и ось тарифа), — до неё.
+  // Дубликаты ходят мимо транзакции тенанта — до неё. Ось тарифа — внутри (`createCandidateTx`).
   const blocked = await precheckCandidate(ctx, { phone: app.phone, email: app.email })
   if (blocked) {
-    if (blocked.code === 'limit_exceeded') {
-      await holdApplication(tenantId, ctx.actorId, applicationId, 'limit')
-      return { ok: false, code: 'limit' }
-    }
     // Человек уже есть в тенанте — кандидатом или сотрудником (§12.6, §12.10): повторный
     // отклик становится событием в его истории, а не вторым профилем.
     const existing = 'duplicates' in blocked ? blocked.duplicates[0] : undefined
@@ -716,7 +717,14 @@ export async function convertApplication(
     await emitWebhook(tx, tenantId, 'vacancy.application_received', { vacancyId, applicationId, receivedAt: app.createdAt.toISOString() })
 
     return { ok: true, state: 'accepted', candidateId: created.candidate.id, assignmentId: assigned.assignmentId }
-  }).catch((err) => {
+  }).catch(async (err) => {
+    // Мест в оси нет (§12.2): транзакция уже откатилась, отклик не теряется — ждёт рекрутера
+    if (err instanceof LimitExceededError) {
+      await holdApplication(tenantId, ctx.actorId, applicationId, 'limit')
+      return { ok: false, code: 'limit' } as ConvertResult
+    }
+    // Проверку лимита не удалось выполнить — fail-closed: не «failed» с тихим пропуском, а 503
+    if (err instanceof LimitCheckFailedError) throw err
     console.error('[vacancy.apply] транзакция §7.20 откатилась', applicationId, err)
     return { ok: false, code: 'failed' } as ConvertResult
   })

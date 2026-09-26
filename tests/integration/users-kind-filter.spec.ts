@@ -140,7 +140,7 @@ const ALLOWLIST: Record<string, string> = {
   // заглушки ИИ, у `HistoryRow` — строки собеседования. С 444 на 455 — в fix-candidate-access:
   // импорт закрытия сессий и третий случай `maskRow()` (наставнику контакты `null`, §2).
   // Сама выборка не менялась.
-  'server/services/candidates.ts:455':
+  'server/services/candidates.ts:456':
     'поиск дубликата перед созданием кандидата: ключ (tenant_id, phone/email) общий для обоих видов, §7.2 и §12.1 требуют межвидовой сверки',
 }
 

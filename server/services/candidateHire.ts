@@ -22,7 +22,7 @@ import { readSettings } from './settings'
 import { enterStageByCodeTx } from './lifecycleState'
 import { applyPositionRoles } from './positionRoleMap'
 import { redactInterviewData } from './interview/redaction'
-import { LimitExceededError, assertSeatsWithinLimit, seatText } from './tenantLimits'
+import { LimitExceededError, assertCandidatesWithinLimit, assertSeatsWithinLimit, seatText } from './tenantLimits'
 
 /**
  * Решения по кандидату: найм, отказ, архивация, самоотвод, повторное открытие
@@ -90,7 +90,9 @@ export async function changeState(
   opts: { reasonCode?: string | null, reasonText?: string | null, action: string, automatic?: boolean } ,
 ): Promise<DecisionResult> {
   return withTenant(v.tenantId, v.actorId, async (tx) => {
-    const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)) as unknown as CandidateRow[]
+    // `for update`: переход и проверка лимита решаются по состоянию, которое до записи не
+    // изменится параллельной операцией (fix-candidate-limit-race)
+    const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)).for('update') as unknown as CandidateRow[]
     if (!row) return { ok: false, code: 'not_found' }
     if (!canMove(row.state, to)) return { ok: false, code: 'not_allowed', from: row.state, to }
     // Возврат в воронку невозможен, если согласие на обработку ПД истекло (§4.2): человек,
@@ -98,6 +100,9 @@ export async function changeState(
     if (to === 'active' && row.consentExpiresAt && row.consentExpiresAt < new Date().toISOString().slice(0, 10)) {
       return { ok: false, code: 'consent_expired' }
     }
+    // Возврат в воронку занимает место оси `candidates_active` (§7.1 п. 1: «проверка — в момент
+    // создания и в момент `reopen`»): в этой транзакции и под блокировкой оси, как создание
+    if (to === 'active' && row.state !== 'active') await assertCandidatesWithinLimit(tx, v.tenantId, 1)
 
     const target = await statusForState(tx, to)
     await tx.update(users).set({
@@ -235,7 +240,9 @@ export async function hireCandidate(v: Viewer, id: string, input: CandidateHireI
 /** Транзакция найма: проверки, место сотрудника, смена вида и всё, что едет с ней (§7.6). */
 async function hireTx(v: Viewer, id: string, input: CandidateHireInput): Promise<HireResult> {
   return withTenant(v.tenantId, v.actorId, async (tx): Promise<HireResult> => {
-    const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)) as unknown as CandidateRow[]
+    // `for update`: нанимается кандидат, который до конца транзакции остаётся активным, — не
+    // заархивированный параллельно и не нанятый вторым запросом ещё раз (двойное место сотрудника)
+    const [row] = await candidatesQuery(tx, COLUMNS, eq(users.id, id), scopeCond(v)).for('update') as unknown as CandidateRow[]
     if (!row) return { ok: false, code: 'not_found' }
     if (row.state !== 'active') return { ok: false, code: 'not_active' }
 

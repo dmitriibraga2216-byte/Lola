@@ -326,7 +326,10 @@ export async function tenantUsers(tenantId: string) {
  *
  * `candidates` — кандидаты в состоянии воронки
  * `active` (`28` §7.1, `35` §7.1): отказ, архивация и найм освобождают место сразу, тенант не
- * платит за архив. Ось включается вместе с рекрутингом (`tenants.candidates_enabled`).
+ * платит за архив. Ось включается вместе с рекрутингом (`tenants.candidates_enabled`). Операции,
+ * которые занимают место кандидата (создание, отклик с вакансии, возврат в воронку, перенос в
+ * колонку `active`), зовут `assertCandidatesWithinLimit()` — по той же причине, что и места
+ * сотрудников (fix-candidate-limit-race).
  */
 export async function checkPlanLimit(tenantId: string, what: 'users' | 'candidates' = 'users'): Promise<{ ok: boolean, limit: number | null, current: number }> {
   const { checkLimit } = await import('./tenantLimits')

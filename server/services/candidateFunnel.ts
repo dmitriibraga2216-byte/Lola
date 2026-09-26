@@ -14,6 +14,7 @@ import type { CandidateRow, Viewer } from './candidates'
 import { closeCandidateSessionsTx } from './candidateAccess'
 import { frameJoins, frameSelect, frameWhere, periodSql } from './reportFrame'
 import { recordAudit } from './audit'
+import { assertCandidatesWithinLimit } from './tenantLimits'
 
 /**
  * Воронка: доска (канбан), массовая смена колонки и отчёт
@@ -217,6 +218,11 @@ export type BulkResult =
  * заставляет рекрутера искать их вручную. Найм пачкой не делается никогда — он меняет вид
  * человека, размещение и два лимита (§7.6), и колонка с `maps_to='hired'` здесь отклоняется
  * так же, как в одиночной смене.
+ *
+ * Пачка в колонку `maps_to = 'active'` возвращает в воронку всех, кто был в отказе, архиве или
+ * самоотводе, и занимает столько же мест оси `candidates_active` (`28` §7.1 п. 1). Проверка — одна
+ * на всю пачку, в этой транзакции и под блокировкой оси: мест меньше, чем возвращаемых, —
+ * `409 limit_exceeded`, не перенесён никто (как импорт, `28` §12 п. 9), а не «первые N».
  */
 export async function bulkStatus(v: Viewer, input: CandidateBulkStatusInput): Promise<BulkResult> {
   return withTenant(v.tenantId, v.actorId, async (tx) => {
@@ -224,7 +230,9 @@ export async function bulkStatus(v: Viewer, input: CandidateBulkStatusInput): Pr
     if (!status || !status.isActive) return { ok: false, code: 'status_not_found' }
     const to = status.mapsTo as CandidateState
 
-    const rows = await candidatesQuery(tx, COLUMNS, inArray(users.id, input.ids), scopeCond(v)) as unknown as CandidateRow[]
+    // `for update` в порядке `id`: состояния, по которым считается число возвращаемых в воронку,
+    // не устаревают до записи, а две пачки с общими карточками не блокируют друг друга крест-накрест
+    const rows = await candidatesQuery(tx, COLUMNS, inArray(users.id, input.ids), scopeCond(v)).orderBy(users.id).for('update') as unknown as CandidateRow[]
     const found = new Map(rows.map(r => [r.id, r]))
     const skipped: { id: string, reason: string }[] = []
     const movable: CandidateRow[] = []
@@ -238,6 +246,7 @@ export async function bulkStatus(v: Viewer, input: CandidateBulkStatusInput): Pr
       movable.push(row)
     }
     if (!movable.length) return { ok: true, changed: 0, skipped }
+    if (to === 'active') await assertCandidatesWithinLimit(tx, v.tenantId, movable.filter(r => r.state !== 'active').length)
 
     await tx.update(users).set({
       candidateStatusId: status.id,

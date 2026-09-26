@@ -321,8 +321,9 @@ async function impersonate() {
   if (!impFor.value) return
   error.value = ''
   try {
-    await ops(`/tenants/${impFor.value.id}/impersonate`, { method: 'POST', body: impForm })
-    window.open('/', '_blank')
+    // С отдельным хостом консоли (OPS_HOST) сервер отдаёт одноразовую ссылку на хост тенанта (docs/25 §7 п. 6)
+    const r = await ops<{ handoffUrl: string | null }>(`/tenants/${impFor.value.id}/impersonate`, { method: 'POST', body: impForm })
+    window.open(r.handoffUrl ?? '/', '_blank')
     impFor.value = null
   }
   catch (err) { error.value = apiErrorOf(err).message }

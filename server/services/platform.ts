@@ -146,6 +146,11 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
   const db = platformDb()
   const [taken] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, input.slug))
   if (taken) return { ok: false, code: 'slug_taken' }
+  // Поддомен консоли оператора (`OPS_HOST` = `<slug>.<base>`, docs/25 §7 п. 6) тенанту не выдаётся
+  const { opsHostOf } = await import('./opsHost')
+  const { hostConfig } = await import('./tenantResolve')
+  const base = hostConfig().base
+  if (base && opsHostOf() === `${input.slug}.${base}`) return { ok: false, code: 'slug_taken' }
   const planCode = input.plan ?? 'trial'
   const [plan] = await db.select().from(plans).where(eq(plans.code, planCode))
   if (!plan) return { ok: false, code: 'plan_unknown' }

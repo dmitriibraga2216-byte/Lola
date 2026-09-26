@@ -343,14 +343,30 @@ export const DEFAULT_TEMPLATE_CHANNELS: Record<string, { telegram: boolean, emai
 )
 
 /**
+ * Коди, для яких ISO-підстановки рендеряться з годиною:хвилиною, а не тільки датою (докс/v2/46,
+ * «Что осталось»: `summary_auto_send_scheduled` показував дату без часа — рекрутер не бачив, до
+ * якого моменту можна скасувати автовідправку, докс/v2/30). Прив'язка до **коду сповіщення**,
+ * а не до імені змінної (`time`, `starts`, …): інший код, що переиспользует ту саму назву
+ * змінної для значення, де досить дня, не постраждає, і додати сюди новий код — свідомий
+ * крок, а не випадковий збіг рядків. Формат інших шаблонів (`{{due}}`, `{{starts}}` у
+ * `meetup_reminder_*` тощо) лишається як був — його ніхто тут не чіпає.
+ */
+export const RECIPIENT_TIME_CODES = new Set(['summary_auto_send_scheduled'])
+
+/**
  * Мини-шаблонизатор: {{var}} и блоки {{#var}}…{{/var}} при непустом var. `{{#_tr}}текст{{/_tr}}`
  * (docs/23 §13.4) — особый блок: содержимое не условие, а фраза для перевода по локали получателя;
  * `tr` — резолвер (по умолчанию тождественный, фраза как есть). Резолвится до общих блоков,
  * иначе `_tr` попал бы под правило {{#var}} и пропал бы, если такой переменной нет.
  * `locale` (докс/28, долг PR-107) — локаль получателя для дат-переменных внутри тексту, за
  * замовчуванням `uk` (лист без явно переданої локалі — старий викликач, поведінка як була).
+ * `timezone` — пояс отримувача (`personTimezone()`, докс/v2/38 §7.10) для кодів з
+ * `RECIPIENT_TIME_CODES`: без нього година показувала б час серверного процесу (UTC), а не
+ * людини. Викликач вирішує, чи діставати пояс з БД (дорого при масовій розсилці) — саме тому
+ * тут не запит, а вже готовий рядок.
  */
-export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s, locale: Locale = 'uk'): string {
+export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s, locale: Locale = 'uk', ctx: { code?: string, timezone?: string } = {}): string {
+  const withHour = ctx.code != null && RECIPIENT_TIME_CODES.has(ctx.code)
   let out = tpl.replace(/\{\{#_tr\}\}([\s\S]*?)\{\{\/_tr\}\}/g, (_, phrase: string) => tr(phrase))
   out = out.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, inner: string) =>
     vars[key] ? inner : '')
@@ -358,14 +374,8 @@ export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (
     const v = vars[key]
     if (v === null || v === undefined) return ''
     if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      // `time` (PR-29, `summary_auto_send_scheduled` — `docs/v2/46-progress.md`, «Что осталось»):
-      // это момент отправки, а не просто дата — «дата без часа» ронял правило «скасувати
-      // можна до …», человек не знал, до какого часа. `formatDateTime` с тем же набором опций,
-      // что уже показывает дедлайны в интерфейсе (`app/pages/admin/events.vue`), даёт
-      // «27 вересня, 14:30». Остальные ISO-подстановки — как раньше, только день+місяць:
-      // менять формат чужих шаблонов вслепую нельзя.
-      return key === 'time'
-        ? formatDateTime(new Date(v), locale, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+      return withHour
+        ? formatDateTime(new Date(v), locale, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: ctx.timezone })
         : formatDate(new Date(v), locale, { day: 'numeric', month: 'long' })
     }
     return String(v)
@@ -649,7 +659,10 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       // {{#_tr}} (docs/23 §13.4): переклад фрази по локалі отримувача через ту саму таблицю `translations`
       const trMap = await tenantOverrides(tenantId, locale)
       const tr = (phrase: string) => trMap[phrase] ?? phrase
-      const text = renderTemplate(tpl.body, vars, tr, locale)
+      // Пояс — тільки для кодів з RECIPIENT_TIME_CODES: зайвий запит на кожне з решти сповіщень не потрібен
+      const timezone = RECIPIENT_TIME_CODES.has(n.code) ? (await personTimezone(tx, n.userId)).tz : undefined
+      const renderCtx = { code: n.code, timezone }
+      const text = renderTemplate(tpl.body, vars, tr, locale, renderCtx)
 
       // Правило выбора канала (docs/23 §4): Telegram → SMS (обязательные) → in-app
       let channel = n.channel
@@ -681,12 +694,12 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
       else {
         const { sendViaChannel } = await import('./channels')
         // docs/23 §13.4: заголовок листа з шаблону; body_mjml → HTML поверх обвʼязки тенанта (§13.5), інакше — лише текст
-        const subject = channel === 'email' && tpl.subject ? renderTemplate(tpl.subject, vars, tr, locale) : n.code
+        const subject = channel === 'email' && tpl.subject ? renderTemplate(tpl.subject, vars, tr, locale, renderCtx) : n.code
         const html = channel === 'email' && tpl.bodyMjml
           ? buildEmailHtml({
-              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr, locale),
+              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr, locale, renderCtx),
               fallbackText: text,
-              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr, locale) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr, locale) : '' },
+              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr, locale, renderCtx) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr, locale, renderCtx) : '' },
             })
           : undefined
         const res = await sendViaChannel(tenantId, channel as 'sms' | 'email' | 'push', { userId: n.userId, text, subject, html })
@@ -718,7 +731,8 @@ export async function inbox(ctx: { tenantId: string, actorId: string }) {
             const [tenantRow] = await tx.select({ locale: tenants.locale }).from(tenants).where(eq(tenants.id, ctx.tenantId))
             locale = recipientLocale(userRow?.locale, tenantRow?.locale)
           }
-          text = renderTemplate(tpl, { ...(await commonVars(tx, ctx.tenantId, ctx.actorId)), ...(n.payload as Record<string, unknown>) }, undefined, locale)
+          const timezone = RECIPIENT_TIME_CODES.has(n.code) ? (await personTimezone(tx, ctx.actorId)).tz : undefined
+          text = renderTemplate(tpl, { ...(await commonVars(tx, ctx.tenantId, ctx.actorId)), ...(n.payload as Record<string, unknown>) }, undefined, locale, { code: n.code, timezone })
         }
       }
       items.push({ id: n.id, code: n.code, text: text ?? n.code, createdAt: n.createdAt, readAt: n.readAt, url: refUrl(n) })

@@ -70,12 +70,22 @@ describe('Spec 23: {{#_tr}} — переклад фрази за локаллю 
     expect(N.renderTemplate(tpl, { name: 'Ivan' }, s => (s === 'Привіт' ? 'Hi' : s))).toBe('Hi, Ivan!')
   })
 
-  it('renderTemplate: {{time}} — дата й час (docs/v2/46-progress.md, «Что осталось»: summary_auto_send_scheduled показывал дату без часа); інші ISO-підстановки — як і раніше, тільки день+місяць', () => {
+  it('renderTemplate: код з RECIPIENT_TIME_CODES — дата й час у поясі отримувача (docs/v2/46-progress.md, «Что осталось»: summary_auto_send_scheduled показывал дату без часа); без коду чи для іншого коду — як і раніше, тільки день+місяць', () => {
     const iso = '2026-09-27T14:30:00.000Z'
-    const withTime = N.renderTemplate('Надіслано {{time}}', { time: iso })
-    expect(withTime).toContain('27 вересня')
-    expect(withTime).toMatch(/\d{1,2}:\d{2}/) // година:хвилина не губиться
-    // ключ, що не зветься `time`, — формат без години, як в решти шаблонів (не ламаємо їх)
+    expect(N.RECIPIENT_TIME_CODES.has('summary_auto_send_scheduled')).toBe(true)
+    const kyiv = N.renderTemplate('Надіслано {{time}}', { time: iso }, undefined, 'uk', { code: 'summary_auto_send_scheduled', timezone: 'Europe/Kyiv' })
+    expect(kyiv).toContain('27 вересня')
+    expect(kyiv).toContain('17:30') // UTC+3 наприкінці вересня 2026
+    const tokyo = N.renderTemplate('Надіслано {{time}}', { time: iso }, undefined, 'uk', { code: 'summary_auto_send_scheduled', timezone: 'Asia/Tokyo' })
+    expect(tokyo).toContain('23:30') // UTC+9 — інший пояс отримувача, інша година
+    // та сама змінна `time`, але код не в RECIPIENT_TIME_CODES (або код не переданий) — формат без
+    // години, як в решти шаблонів: прив'язка до коду, а не до імені змінної, нікого не зачіпає
+    const withoutCode = N.renderTemplate('Надіслано {{time}}', { time: iso })
+    expect(withoutCode).toBe('Надіслано 27 вересня')
+    expect(withoutCode).not.toMatch(/\d{1,2}:\d{2}/)
+    const otherCode = N.renderTemplate('Надіслано {{time}}', { time: iso }, undefined, 'uk', { code: 'assignment_created', timezone: 'Europe/Kyiv' })
+    expect(otherCode).toBe('Надіслано 27 вересня')
+    // інша ISO-підстановка того самого коду — як і раніше, тільки день+місяць (не ламаємо чужі шаблони)
     const withoutTime = N.renderTemplate('До {{until}}', { until: iso })
     expect(withoutTime).toBe('До 27 вересня')
     expect(withoutTime).not.toMatch(/\d{1,2}:\d{2}/)

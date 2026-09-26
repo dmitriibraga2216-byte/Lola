@@ -11,5 +11,6 @@ export default defineEventHandler(async (event) => {
   const r = await platformLogin(p.data.email, p.data.password)
   if (!r) return apiError(event, 401, 'auth_required', 'Невірний e-mail або пароль')
   setPlatformCookie(event, r.token)
-  return apiData({ ok: true })
+  // Второй фактор обязателен (docs/25 §7 п. 8): сессия промежуточная, дальше — экран кода или подключения
+  return apiData({ ok: true, twoFactor: r.twoFactorEnrolled ? 'verify' : 'enroll' })
 })

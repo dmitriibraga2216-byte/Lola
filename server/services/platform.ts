@@ -7,6 +7,7 @@ import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
 import { OWNER_ROLE_CODE, SYSTEM_ROLES } from '../../shared/domain/roles'
 import type { PlatformRole } from '../../shared/enums'
+import { TWO_FACTOR_SETUP_MINUTES } from '../../shared/domain/twoFactor'
 import { ensureTenantDefaults } from '../db/tenantDefaults'
 import { CANDIDATES_ONLY, EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
@@ -52,13 +53,14 @@ export const PLATFORM_SESSION_HOURS = 12
  * Вход оператора: e-mail и пароль — только первый шаг. Сессия всегда создаётся **промежуточной**
  * (`two_factor_pending`): второй фактор обязателен каждому оператору (docs/25 §7 п. 8). Настроенный
  * фактор — экран кода, ненастроенный — экран подключения; до этого консоль отвечает 401.
+ * Промежуточная сессия живёт 15 минут (окно подключения фактора), полная — 12 часов.
  */
 export async function platformLogin(email: string, password: string): Promise<{ token: string, twoFactorEnrolled: boolean } | null> {
   const db = platformDb()
   const [admin] = await db.select().from(platformAdmins).where(eq(platformAdmins.email, email.trim()))
   if (!admin || !admin.isActive || !admin.passwordHash || !await argonVerify(admin.passwordHash, password)) return null
   const token = randomBytes(32).toString('base64url')
-  await db.insert(platformSessions).values({ adminId: admin.id, tokenHash: hash(token), expiresAt: new Date(Date.now() + PLATFORM_SESSION_HOURS * 3_600_000), twoFactorPending: true })
+  await db.insert(platformSessions).values({ adminId: admin.id, tokenHash: hash(token), expiresAt: new Date(Date.now() + TWO_FACTOR_SETUP_MINUTES * 60_000), twoFactorPending: true })
   await db.update(platformAdmins).set({ lastLoginAt: new Date() }).where(eq(platformAdmins.id, admin.id))
   return { token, twoFactorEnrolled: !!admin.totpConfirmedAt }
 }

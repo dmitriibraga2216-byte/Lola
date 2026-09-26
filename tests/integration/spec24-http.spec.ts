@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import postgres from 'postgres'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { opsHttpLogin } from './_opsLogin'
 
 /**
  * Spec 24 по HTTP (по образцу scopes-http.spec.ts): скоупы настроек, модуль выключен → 403 module.disabled и скрыт
@@ -104,9 +105,8 @@ describe.skipIf(!BUILT)('Spec 24 по HTTP', () => {
   })
 
   it('impersonation: оператор входит с причиной — /auth/me показывает плашку, запрещённое действие → 403, выход → impersonation.ended', async () => {
-    const opsLogin = await fetch(`${BASE}/api/v1/platform/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: OPS_EMAIL, password: OPS_PASSWORD }) })
-    expect(opsLogin.status).toBe(200)
-    const opsCookie = opsLogin.headers.getSetCookie().map(c => c.split(';')[0]!).join('; ')
+    // Второй фактор оператора обязателен (docs/25 §7 п. 8) — вход через подключение фактора
+    const opsCookie = await opsHttpLogin({ fetch, base: BASE, email: OPS_EMAIL, password: OPS_PASSWORD, sql: admin })
     const noReason = await fetch(`${BASE}/api/v1/platform/tenants/${tenantId}/impersonate`, { method: 'POST', headers: { 'cookie': opsCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: employeeId, reason: 'коротко' }) })
     expect(noReason.status).toBe(400)
     const imp = await fetch(`${BASE}/api/v1/platform/tenants/${tenantId}/impersonate`, { method: 'POST', headers: { 'cookie': opsCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: employeeId, reason: 'Розбір скарги користувача — HTTP-тест' }) })

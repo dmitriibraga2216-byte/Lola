@@ -5,7 +5,15 @@
  * консоли, — заглушки со ссылкой на прежнюю панель `/ops`.
  */
 const { t } = useI18n()
-const { me, logout } = useOps()
+const { me, fetchMe, logout } = useOps()
+// Страховка к гарду `ops-auth`: данные консоли — только в браузере, и если гард на первой
+// загрузке не отработал на клиенте, каркас сам узнаёт оператора, а не висит на «Завантаження…»
+onMounted(async () => {
+  if (me.value) return
+  const who = await fetchMe()
+  if (!who) await navigateTo('/ops/login')
+  else if (who.twoFactor) await navigateTo('/ops/two-factor')
+})
 const route = useRoute()
 const open = ref(false)
 watch(() => route.path, () => { open.value = false })

@@ -86,6 +86,8 @@ export const KEYSETS = {
   candidateSummaries: ['at', 'uuid'],
   /** Очередь перепроверки качества ИИ (docs/v2/30 §7.16, §10 `GET /ai/quality-reviews`; PR-29): `created_at desc, id desc`. */
   aiQualityReviews: ['at', 'uuid'],
+  /** Компании в консоли оператора: `created_at desc, id desc` (docs/25 §7 п. 6, ops-console-1). */
+  platformTenants: ['at', 'uuid'],
 } as const satisfies Record<string, KeysetShape>
 
 /** Ровно такой текст отдаёт `keysetAt()`: UTC, ISO 8601, шесть знаков микросекунд. */

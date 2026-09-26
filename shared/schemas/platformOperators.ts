@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { PLATFORM_ROLES } from '../enums'
 import { TENANT_STATUSES } from './platform'
+import { keysetCursorSchema } from './keyset'
+import { KEYSETS } from '../domain/keyset'
 
 /** Контракты консоли оператора: операторы, приглашение, список компаний (docs/25 §7 п. 6–8). */
 
@@ -35,7 +37,7 @@ export const tenantListQuerySchema = z.object({
   plan: z.string().trim().max(40).optional(),
   status: z.enum(TENANT_STATUSES).optional(),
   flag: z.enum(TENANT_FLAGS).optional(),
-  cursor: z.string().max(400).optional(),
+  cursor: keysetCursorSchema(KEYSETS.platformTenants).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })
 export type TenantListQuery = z.infer<typeof tenantListQuerySchema>

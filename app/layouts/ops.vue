@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * Каркас консоли оператора платформы (docs/25 §7 п. 6): боковое меню, кто вошёл и с какой ролью,
- * выход. На узком экране (от 320px) меню сворачивается в кнопку. Разделы, которых ещё нет в новой
- * консоли, — заглушки со ссылкой на прежнюю панель `/ops`.
+ * выход. На узком экране (от 320px) меню сворачивается в кнопку. Со вторым PR (ops-console-2)
+ * все разделы полноценны; прежняя панель `/ops` осталась только редиректом на `/ops/companies`.
  */
 const { t } = useI18n()
 const { me, fetchMe, logout } = useOps()
@@ -42,7 +42,6 @@ const items = [
     <div class="ops-body">
       <nav id="ops-nav" class="ops-nav" :class="{ open }" :aria-label="t('opsConsole.menu')">
         <NuxtLink v-for="i in items" :key="i.to" :to="i.to" class="nav-item">{{ t(`opsConsole.nav.${i.key}`) }}</NuxtLink>
-        <NuxtLink to="/ops" class="nav-item legacy">{{ t('opsConsole.nav.legacy') }}</NuxtLink>
       </nav>
       <main class="ops-main">
         <slot v-if="me" />
@@ -69,9 +68,7 @@ const items = [
 .ops-nav { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-4); min-width: 200px; border-right: 1px solid var(--color-bg-line); }
 .nav-item { color: var(--color-ink); text-decoration: none; font-weight: 700; padding: var(--space-2) var(--space-3); border-radius: var(--radius-s); }
 .nav-item:hover, .nav-item:focus-visible { background: var(--color-bg-soft); }
-.nav-item.router-link-exact-active, .nav-item.router-link-active:not(.legacy) { background: var(--color-ink); color: var(--color-bg); }
-.nav-item.legacy { margin-top: var(--space-4); color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
-.nav-item.legacy.router-link-active { background: transparent; color: var(--color-ink-muted); }
+.nav-item.router-link-exact-active, .nav-item.router-link-active { background: var(--color-ink); color: var(--color-bg); }
 .ops-main { flex: 1; min-width: 0; padding: var(--space-4); }
 @media (max-width: 720px) {
   .menu-toggle { display: inline-flex; }

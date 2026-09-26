@@ -57,6 +57,35 @@ test('оператор: пароль → подключение 2FA → спис
   await expect(page.getByTestId('ops-companies').getByText('kappi', { exact: true })).toBeVisible()
   await page.getByPlaceholder('Пошук за назвою або slug').fill('zzz-нема-такої')
   await expect(page.getByText('Нічого не знайдено')).toBeVisible()
+  await page.getByPlaceholder('Пошук за назвою або slug').fill('')
+
+  // Створення компанії зі списку (docs/24 §4.3, ops-console-2)
+  const slug = `e2e-${Date.now()}`
+  await page.getByRole('button', { name: 'Створити компанію' }).first().click()
+  const createForm = page.getByTestId('ops-company-create')
+  await createForm.getByLabel('Назва компанії').fill('E2E Консоль Компанія')
+  await createForm.getByLabel('Slug').fill(slug)
+  await createForm.getByLabel('ПІБ адміністратора').fill('Оператор Тест')
+  await createForm.getByPlaceholder('__ ___ __ __').fill('501112233')
+  await createForm.getByRole('button', { name: 'Створити компанію' }).click()
+  await expect(page).toHaveURL(/\/ops\/companies\/[0-9a-f-]{36}$/)
+  const tenantId = page.url().split('/').pop()!
+
+  // Картка компанії: вкладки (docs/24 §4.2, §4.4–4.5)
+  for (const tab of ['Огляд', 'Ліміти', 'Тариф і оплата', 'Користувачі', 'Домен і пошта', 'Етапи', 'Дії']) {
+    await page.getByRole('button', { name: tab, exact: true }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  }
+
+  // Дія з причиною — продовження дат без платежу (docs/v2/35 §5.6, §7.10) — і слід у журналі
+  await page.getByRole('button', { name: 'Тариф і оплата', exact: true }).click()
+  const extendForm = page.getByTestId('ops-billing-extend')
+  await extendForm.getByLabel('Причина (для журналу платформи)').fill('E2E: перевірка продовження дат оператором')
+  await extendForm.getByRole('button', { name: 'Зберегти дати' }).click()
+  await expect(page.getByText('Дати продовжено')).toBeVisible()
+
+  await page.goto(`/ops/audit?tenantId=${tenantId}`)
+  await expect(page.getByTestId('ops-audit').getByText('tenant.extend')).toBeVisible()
 
   // Выход и повторный вход — уже экран кода, не подключения
   await page.request.post('/api/v1/platform/logout')

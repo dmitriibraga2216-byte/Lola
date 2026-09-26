@@ -149,7 +149,7 @@ export async function listTenants() {
 export async function getTenantCard(id: string): Promise<Record<string, unknown> | null> {
   const db = platformDb()
   const rows = await db.execute(sql`
-    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at,
+    select t.id, t.slug, t.name, t.status, t.plan, t.trial_ends_at, t.created_at, t.archived_at, t.custom_domain,
            (select count(*)::int from users u where u.tenant_id = t.id and u.status = 'active' and not u.is_blocked ${EMPLOYEES_ONLY()}) as active_users,
            (select count(*)::int from users u where u.tenant_id = t.id ${EMPLOYEES_ONLY()}) as total_users,
            (select count(distinct s.user_id)::int from sessions s where s.tenant_id = t.id and s.created_at >= now() - interval '7 days') as wau,

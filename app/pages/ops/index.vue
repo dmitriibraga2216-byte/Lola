@@ -197,7 +197,11 @@ async function ops<T>(path: string, opts: Record<string, unknown> = {}): Promise
 
 async function load() {
   try {
-    me.value = await ops<Me>('/me')
+    // Вход и второй фактор — экранами новой консоли (docs/25 §7 п. 8): своего входа у прежней панели больше нет
+    const who = await ops<Me & { twoFactor: string | null }>('/me').catch(() => null)
+    if (!who) return navigateTo('/ops/login')
+    if (who.twoFactor) return navigateTo('/ops/two-factor')
+    me.value = who
     ;[tenants.value, plans.value, metrics.value, announcements.value] = await Promise.all([ops<Tenant[]>('/tenants'), ops<Plan[]>('/plans'), ops<Record<string, unknown>>('/metrics'), ops<Announcement[]>('/announcements')])
   }
   catch { me.value = null }

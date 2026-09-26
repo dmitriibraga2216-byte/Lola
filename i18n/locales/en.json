@@ -7718,5 +7718,125 @@
     "coverage": "Coverage: {value}",
     "more": "Show more",
     "redacted": "Text erased together with the candidate’s records"
+  },
+  "opsConsole": {
+    "title": "Lola console",
+    "menu": "Menu",
+    "loading": "Loading…",
+    "soon": "This section of the new console arrives in the next update. Meanwhile it works in the previous panel:",
+    "roles": {
+      "owner": "Owner",
+      "admin": "Administrator",
+      "billing": "Billing",
+      "support": "Support",
+      "viewer": "Viewer"
+    },
+    "roleHints": {
+      "owner": "Everything, including operators and permanent deletion of companies.",
+      "admin": "All company actions except permanent deletion and managing operators.",
+      "billing": "Plan, limits, payments, access extension; everything else is read-only.",
+      "support": "View companies and users, sign in as a user, reset a user's 2FA. No money.",
+      "viewer": "Read-only."
+    },
+    "nav": {
+      "companies": "Companies",
+      "plans": "Plans",
+      "announcements": "Announcements",
+      "metrics": "Metrics",
+      "operators": "Operators",
+      "audit": "Log",
+      "legacy": "Previous panel"
+    },
+    "login": {
+      "title": "Operator sign-in",
+      "hint": "After the password the console asks for a code from your authenticator app.",
+      "email": "E-mail"
+    },
+    "twoFactor": {
+      "title": "Two-factor authentication",
+      "enrollHint": "It is mandatory for operators: the console is unavailable without it. Connect an authenticator app.",
+      "code": "Code from the app",
+      "recovery": "Recovery code",
+      "confirm": "Confirm",
+      "lost": "Lost your phone and recovery codes? Ask the platform owner to reset your second factor."
+    },
+    "invite": {
+      "title": "Console invitation",
+      "done": "Password saved. Sign in — the console will ask you to set up two-factor authentication.",
+      "for": "{name} · {email}",
+      "password": "Password (at least {n} characters)",
+      "repeat": "Repeat the password",
+      "mismatch": "Passwords do not match",
+      "save": "Save password"
+    },
+    "companies": {
+      "search": "Search by name or slug",
+      "plan": "Plan",
+      "anyPlan": "Any plan",
+      "status": "Status",
+      "anyStatus": "Any status",
+      "flag": "Flag",
+      "anyFlag": "All flags",
+      "name": "Company",
+      "users": "Active",
+      "created": "Created",
+      "empty": "Nothing found — change the search or filters."
+    },
+    "status": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "archived": "Pending deletion"
+    },
+    "flags": {
+      "payment_overdue": "Payment overdue",
+      "limit_near": "Limit almost reached",
+      "suspended": "Suspended"
+    },
+    "overview": {
+      "back": "← Companies",
+      "tabs": "Card sections",
+      "tab": "Overview",
+      "soon": "Other tabs coming soon",
+      "soonHint": "Settings, limits, billing, users and log arrive in the next update; meanwhile use the previous panel",
+      "state": "State",
+      "trialEnds": "Trial until",
+      "paidUntil": "Paid until",
+      "aiUntil": "AI until",
+      "people": "People and activity",
+      "activeUsers": "Active employees",
+      "totalUsers": "All employees",
+      "wau": "Visited in 7 days",
+      "completed30d": "Completed in 30 days",
+      "consumption": "Consumption",
+      "unlimited": "unlimited",
+      "recent": "Recent operator actions",
+      "noRecent": "No operator actions yet."
+    },
+    "operators": {
+      "invite": "Invite an operator",
+      "fullName": "Full name",
+      "role": "Role",
+      "send": "Send invitation",
+      "invited": "Invitation sent to {email}.",
+      "invitedNoMail": "Platform e-mail is not configured — pass the link to the operator yourself.",
+      "linkHint": "Link for the operator (valid 7 days):",
+      "roleChanged": "Role changed: {name}. Their sessions were ended.",
+      "activated": "Access restored: {name}.",
+      "deactivated": "Access disabled: {name}. Their sessions were ended.",
+      "resetDone": "Second factor reset: {name}. They will set it up again on next sign-in.",
+      "state": "State",
+      "lastLogin": "Last sign-in",
+      "active": "Active",
+      "inactive": "Disabled",
+      "pending": "Awaiting password",
+      "tfOn": "2FA on",
+      "tfOff": "2FA not set up",
+      "deactivate": "Disable access",
+      "activate": "Restore access",
+      "reset": "Reset 2FA",
+      "resetTitle": "Reset second factor: {name}",
+      "resetHint": "The operator lost their phone and recovery codes. Their sessions end and they set up 2FA again on sign-in. The reason is written to the log.",
+      "reason": "Reason (10–500 characters)"
+    }
   }
 }

@@ -9,7 +9,7 @@ import { apiData, apiError } from '../../../../../utils/apiResponse'
  * зміна пишеться в `platform_audit`.
  */
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'tenant.update')
   const p = z.object({ ignoreTlsErrors: z.boolean() }).safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Очікується ignoreTlsErrors: boolean')
   await setSmtpIgnoreTlsErrors(getRouterParam(event, 'id')!, p.data.ignoreTlsErrors, actor)

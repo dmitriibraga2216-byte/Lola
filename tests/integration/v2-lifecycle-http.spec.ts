@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import postgres from 'postgres'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { opsHttpLogin } from './_opsLogin'
 
 /**
  * Этапы жизненного цикла по HTTP (PR-05 пакета `docs/v2`, образец — `spec24-http.spec.ts`).
@@ -145,9 +146,8 @@ describe.skipIf(!BUILT)('Этапы жизненного цикла по HTTP', 
   })
 
   it('оператор платформы меняет возможности; неизвестный ключ и у него → 422', async () => {
-    const opsLogin = await fetch(`${BASE}/api/v1/platform/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: OPS_EMAIL, password: OPS_PASSWORD }) })
-    expect(opsLogin.status).toBe(200)
-    const ops = opsLogin.headers.getSetCookie().map(c => c.split(';')[0]!).join('; ')
+    // Второй фактор оператора обязателен (docs/25 §7 п. 8) — вход через подключение фактора
+    const ops = await opsHttpLogin({ fetch, base: BASE, email: OPS_EMAIL, password: OPS_PASSWORD, sql: admin })
     const [stage] = await admin`select id, capabilities from lifecycle_stages where tenant_id = ${tenantId} and code = 'knowledge'`
     const before = stage!.capabilities as Record<string, boolean>
 

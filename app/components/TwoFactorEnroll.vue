@@ -8,7 +8,9 @@
  */
 import QRCode from 'qrcode'
 
-const props = defineProps<{ mode: 'enroll' | 'replace' }>()
+// `endpoint` — чьи ручки: пользователя тенанта (по умолчанию) или оператора консоли
+// (`/platform/two-factor`, docs/25 §7 п. 8) — механизм и ответы у них одни
+const props = withDefaults(defineProps<{ mode: 'enroll' | 'replace', endpoint?: string }>(), { endpoint: '/auth/two-factor' })
 const emit = defineEmits<{ done: [signedIn: boolean], cancel: [] }>()
 const { t } = useI18n()
 const { api } = useApi()
@@ -39,7 +41,7 @@ async function start() {
   error.value = ''
   busy.value = true
   try {
-    const r = await api<{ secret: string, otpauthUrl: string }>('/auth/two-factor/setup', { method: 'POST', body: props.mode === 'replace' ? { code: current.value.trim() } : {} })
+    const r = await api<{ secret: string, otpauthUrl: string }>(`${props.endpoint}/setup`, { method: 'POST', body: props.mode === 'replace' ? { code: current.value.trim() } : {} })
     secret.value = r.secret
     qr.value = await QRCode.toDataURL(r.otpauthUrl, { width: 220, margin: 1 })
     step.value = 'scan'
@@ -53,7 +55,7 @@ async function confirm() {
   error.value = ''
   busy.value = true
   try {
-    const r = await api<{ recoveryCodes: string[], signedIn: boolean }>('/auth/two-factor/confirm', { method: 'POST', body: { code: code.value.trim() } })
+    const r = await api<{ recoveryCodes: string[], signedIn: boolean }>(`${props.endpoint}/confirm`, { method: 'POST', body: { code: code.value.trim() } })
     codes.value = r.recoveryCodes
     signedIn.value = r.signedIn
     // Ключ больше не нужен на экране — только коды

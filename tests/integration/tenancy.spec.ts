@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { opsHttpLogin } from './_opsLogin'
 
 /**
  * Spec 25 — критерии приёмки мультитенантности docs/25 §14, п. 1–10 (нумерация и названия — как в документе),
@@ -464,9 +465,8 @@ describe.skipIf(!BUILT)('docs/25 по HTTP (собранное приложен�
       catch { /* ещё поднимается */ }
       await new Promise(r => setTimeout(r, 500))
     }
-    const opsLogin = await hfetch(`${BASE}/api/v1/platform/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: OPS_EMAIL, password: OPS_PASSWORD }) })
-    if (!opsLogin.ok) throw new Error(`ops login → ${opsLogin.status}`)
-    opsCookie = opsLogin.headers.getSetCookie().map(c => c.split(';')[0]!).join('; ')
+    // Второй фактор оператора обязателен (docs/25 §7 п. 8) — вход через подключение фактора
+    opsCookie = await opsHttpLogin({ fetch: hfetch, base: BASE, email: OPS_EMAIL, password: OPS_PASSWORD, sql: admin })
   }, 90_000)
 
   afterAll(async () => {

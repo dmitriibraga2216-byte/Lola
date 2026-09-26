@@ -673,6 +673,13 @@
       "when": 1790235000000,
       "tag": "0098_fix_candidate_access",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1790235060000,
+      "tag": "0099_ops_operator_roles",
+      "breakpoints": true
     }
   ]
 }

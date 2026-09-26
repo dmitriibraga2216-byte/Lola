@@ -10,7 +10,7 @@ import { apiData, apiError } from '../../../../../utils/apiResponse'
  * считается от прежней `paid_until`, не от даты платежа — `recordTenantPayment`.
  */
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'billing.payments')
   const p = tenantPaymentSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 422, 'validation_failed', 'Перевірте суму, вид платежу та коментар (10–500 знаків)', { issues: p.error.issues })
   const r = await recordTenantPayment(getRouterParam(event, 'id')!, p.data, actor)

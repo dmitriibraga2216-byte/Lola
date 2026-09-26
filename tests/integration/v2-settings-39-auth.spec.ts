@@ -443,7 +443,7 @@ describe('Bearer: флаг sessionOnly на скоупе (docs/v2/44 В-20)', ()
       expect(e.context.auth, path).toBeUndefined()
       expect(e.context.tokenScopes, path).toBeUndefined()
       expect(e.context.platform, path).toBeUndefined()
-      const err = await thrown(async () => requirePlatform(e as never))
+      const err = await thrown(async () => requirePlatform(e as never, 'tenant.read'))
       expect(err?.statusCode, path).toBe(401)
     }
   })

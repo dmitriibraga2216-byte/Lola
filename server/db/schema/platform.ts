@@ -6,6 +6,7 @@ import {
 import { baseColumns, tenantId } from './_common'
 import { users } from './people'
 import { tenants } from './tenants'
+import type { PlatformRole } from '../../../shared/enums'
 
 const bytea = customType<{ data: Buffer }>({ dataType() { return 'bytea' } })
 
@@ -17,9 +18,23 @@ export const platformAdmins = pgTable('platform_admins', {
   ...baseColumns,
   email: text('email').notNull().unique(),
   fullName: text('full_name').notNull(),
-  passwordHash: text('password_hash').notNull(),
+  passwordHash: text('password_hash'), // null — приглашён, пароль ещё не задан (ссылка приглашения)
   isActive: boolean('is_active').notNull().default(true),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  // Роль оператора (docs/25 §7 п. 7, перечисление `platform_role`, CHECK в 0099); матрица — shared/domain/platformRoles.ts
+  role: text('role').$type<PlatformRole>().notNull().default('viewer'),
+  invitedBy: uuid('invited_by'), // FK на platform_admins в миграции 0099
+  inviteTokenHash: text('invite_token_hash').unique(),
+  inviteExpiresAt: timestamp('invite_expires_at', { withTimezone: true }),
+  deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
+  // Второй фактор оператора (docs/25 §7 п. 8): механизм `user_totp` (PR-39), вне тенантов — колонками здесь
+  totpSecretEncrypted: bytea('totp_secret_encrypted'),
+  totpSecretNonce: bytea('totp_secret_nonce'),
+  totpConfirmedAt: timestamp('totp_confirmed_at', { withTimezone: true }),
+  totpLastUsedStep: bigint('totp_last_used_step', { mode: 'number' }),
+  totpPendingEncrypted: bytea('totp_pending_encrypted'),
+  totpPendingNonce: bytea('totp_pending_nonce'),
+  totpPendingCreatedAt: timestamp('totp_pending_created_at', { withTimezone: true }),
 })
 
 export const platformSessions = pgTable('platform_sessions', {
@@ -28,7 +43,17 @@ export const platformSessions = pgTable('platform_sessions', {
   tokenHash: text('token_hash').notNull().unique(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  twoFactorPending: boolean('two_factor_pending').notNull().default(false), // пароль принят, второй фактор — нет
 })
+
+/** Резервные коды оператора — только хешами argon2id (как `user_totp_recovery_codes`). Без tenant_id и RLS. */
+export const platformAdminRecoveryCodes = pgTable('platform_admin_recovery_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  adminId: uuid('admin_id').notNull().references(() => platformAdmins.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [index('platform_admin_recovery_codes_admin_idx').on(t.adminId)])
 
 /**
  * Тарифы и лимиты (docs/02 §2.1 plan; docs/03 §3.12; docs/v2/35 §3.1). Платформенная таблица.

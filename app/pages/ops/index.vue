@@ -197,7 +197,11 @@ async function ops<T>(path: string, opts: Record<string, unknown> = {}): Promise
 
 async function load() {
   try {
-    me.value = await ops<Me>('/me')
+    // Вход и второй фактор — экранами новой консоли (docs/25 §7 п. 8): своего входа у прежней панели больше нет
+    const who = await ops<Me & { twoFactor: string | null }>('/me').catch(() => null)
+    if (!who) return navigateTo('/ops/login')
+    if (who.twoFactor) return navigateTo('/ops/two-factor')
+    me.value = who
     ;[tenants.value, plans.value, metrics.value, announcements.value] = await Promise.all([ops<Tenant[]>('/tenants'), ops<Plan[]>('/plans'), ops<Record<string, unknown>>('/metrics'), ops<Announcement[]>('/announcements')])
   }
   catch { me.value = null }
@@ -321,8 +325,9 @@ async function impersonate() {
   if (!impFor.value) return
   error.value = ''
   try {
-    await ops(`/tenants/${impFor.value.id}/impersonate`, { method: 'POST', body: impForm })
-    window.open('/', '_blank')
+    // С отдельным хостом консоли (OPS_HOST) сервер отдаёт одноразовую ссылку на хост тенанта (docs/25 §7 п. 6)
+    const r = await ops<{ handoffUrl: string | null }>(`/tenants/${impFor.value.id}/impersonate`, { method: 'POST', body: impForm })
+    window.open(r.handoffUrl ?? '/', '_blank')
     impFor.value = null
   }
   catch (err) { error.value = apiErrorOf(err).message }

@@ -2,7 +2,10 @@
 export default defineNuxtRouteMiddleware(async (to) => {
   // /invite — ссылка-приглашение (docs/01 §1.5 «для первого входу»): людина ще без сесії,
   // редірект на /login показав би форму входу замість завершення запрошення (PR-16 тут спіткнувся)
-  const publicPages = new Set(['/login', '/ops', '/invite'])
+  const publicPages = new Set(['/login', '/invite'])
+  // Консоль оператора (`/ops`, `/ops/*`) — своя сессия и свой гард (`ops-auth`); тенантская сессия
+  // ей не нужна, а на отдельном хосте консоли (`OPS_HOST`) тенантский `/auth/me` и вовсе 404
+  if (to.path === '/ops' || to.path.startsWith('/ops/')) return
   const { me, loaded, fetchMe } = useAuth()
 
   if (!loaded.value) await fetchMe()

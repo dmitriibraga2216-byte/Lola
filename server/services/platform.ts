@@ -6,6 +6,8 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import * as schema from '../db/schema'
 import { platformAdmins, platformSessions, plans, tenants } from '../db/schema'
 import { OWNER_ROLE_CODE, SYSTEM_ROLES } from '../../shared/domain/roles'
+import type { PlatformRole } from '../../shared/enums'
+import { TWO_FACTOR_SETUP_MINUTES } from '../../shared/domain/twoFactor'
 import { ensureTenantDefaults } from '../db/tenantDefaults'
 import { CANDIDATES_ONLY, EMPLOYEES_ONLY, employeeOnly } from './repo/people'
 
@@ -30,6 +32,11 @@ const hash = (t: string) => createHash('sha256').update(t).digest('hex')
 
 // ── Вход оператора ─────────────────────────────────────────────────────
 
+/**
+ * Первый оператор из окружения (`PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD`) — владелец
+ * платформы (`owner`, docs/25 §7 п. 7): без него некому пригласить остальных. Второй фактор он
+ * настраивает при первом входе, как любой оператор.
+ */
 export async function ensureFirstAdmin(): Promise<void> {
   const email = process.env.PLATFORM_ADMIN_EMAIL
   const password = process.env.PLATFORM_ADMIN_PASSWORD
@@ -37,28 +44,60 @@ export async function ensureFirstAdmin(): Promise<void> {
   const db = platformDb()
   const [existing] = await db.select({ id: platformAdmins.id }).from(platformAdmins).where(eq(platformAdmins.email, email))
   if (existing) return
-  await db.insert(platformAdmins).values({ email, fullName: 'Оператор Lola', passwordHash: await argonHash(password) })
+  await db.insert(platformAdmins).values({ email, fullName: 'Оператор Lola', passwordHash: await argonHash(password), role: 'owner' }).onConflictDoNothing()
 }
 
-export async function platformLogin(email: string, password: string): Promise<{ token: string } | null> {
+export const PLATFORM_SESSION_HOURS = 12
+
+/**
+ * Вход оператора: e-mail и пароль — только первый шаг. Сессия всегда создаётся **промежуточной**
+ * (`two_factor_pending`): второй фактор обязателен каждому оператору (docs/25 §7 п. 8). Настроенный
+ * фактор — экран кода, ненастроенный — экран подключения; до этого консоль отвечает 401.
+ * Промежуточная сессия живёт 15 минут (окно подключения фактора), полная — 12 часов.
+ */
+export async function platformLogin(email: string, password: string): Promise<{ token: string, twoFactorEnrolled: boolean } | null> {
   const db = platformDb()
-  const [admin] = await db.select().from(platformAdmins).where(eq(platformAdmins.email, email))
-  if (!admin || !admin.isActive || !await argonVerify(admin.passwordHash, password)) return null
+  const [admin] = await db.select().from(platformAdmins).where(eq(platformAdmins.email, email.trim()))
+  if (!admin || !admin.isActive || !admin.passwordHash || !await argonVerify(admin.passwordHash, password)) return null
   const token = randomBytes(32).toString('base64url')
-  await db.insert(platformSessions).values({ adminId: admin.id, tokenHash: hash(token), expiresAt: new Date(Date.now() + 12 * 3_600_000) })
+  await db.insert(platformSessions).values({ adminId: admin.id, tokenHash: hash(token), expiresAt: new Date(Date.now() + TWO_FACTOR_SETUP_MINUTES * 60_000), twoFactorPending: true })
   await db.update(platformAdmins).set({ lastLoginAt: new Date() }).where(eq(platformAdmins.id, admin.id))
-  return { token }
+  return { token, twoFactorEnrolled: !!admin.totpConfirmedAt }
 }
 
-export interface PlatformAuth { adminId: string, email: string, fullName: string }
+/** Кто действует от имени платформы — достаточно для журналов и сервисов. */
+export interface PlatformAuth {
+  adminId: string
+  email: string
+  fullName: string
+}
 
-export async function validatePlatformSession(token: string): Promise<PlatformAuth | null> {
+/** Сессия оператора консоли: роль и шаг второго фактора (docs/25 §7 п. 7–8). */
+export interface PlatformSession extends PlatformAuth {
+  role: PlatformRole
+  sessionId: string
+  /** Пароль принят, второй фактор ещё нет: открыт только экран 2FA, `me` и выход */
+  twoFactorPending: boolean
+  twoFactorEnrolled: boolean
+}
+
+export async function validatePlatformSession(token: string): Promise<PlatformSession | null> {
   const db = platformDb()
-  const [row] = await db.select({ adminId: platformSessions.adminId, expiresAt: platformSessions.expiresAt, revokedAt: platformSessions.revokedAt, email: platformAdmins.email, fullName: platformAdmins.fullName })
+  const [row] = await db.select({
+    sessionId: platformSessions.id, adminId: platformSessions.adminId, expiresAt: platformSessions.expiresAt, revokedAt: platformSessions.revokedAt,
+    pending: platformSessions.twoFactorPending, email: platformAdmins.email, fullName: platformAdmins.fullName, role: platformAdmins.role,
+    isActive: platformAdmins.isActive, totpConfirmedAt: platformAdmins.totpConfirmedAt,
+  })
     .from(platformSessions).innerJoin(platformAdmins, eq(platformAdmins.id, platformSessions.adminId))
     .where(eq(platformSessions.tokenHash, hash(token)))
-  if (!row || row.revokedAt || row.expiresAt < new Date()) return null
-  return { adminId: row.adminId, email: row.email, fullName: row.fullName }
+  // Деактивированный оператор выходит сразу, а не по истечении 12 часов
+  if (!row || row.revokedAt || row.expiresAt < new Date() || !row.isActive) return null
+  return { adminId: row.adminId, email: row.email, fullName: row.fullName, role: row.role, sessionId: row.sessionId, twoFactorPending: row.pending, twoFactorEnrolled: !!row.totpConfirmedAt }
+}
+
+/** Выход: сессия гаснет в базе, а не только cookie в браузере. */
+export async function revokePlatformSession(token: string): Promise<void> {
+  await platformDb().update(platformSessions).set({ revokedAt: new Date() }).where(eq(platformSessions.tokenHash, hash(token)))
 }
 
 // ── Тенанты ────────────────────────────────────────────────────────────
@@ -146,6 +185,11 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
   const db = platformDb()
   const [taken] = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, input.slug))
   if (taken) return { ok: false, code: 'slug_taken' }
+  // Поддомен консоли оператора (`OPS_HOST` = `<slug>.<base>`, docs/25 §7 п. 6) тенанту не выдаётся
+  const { opsHostOf } = await import('./opsHost')
+  const { hostConfig } = await import('./tenantResolve')
+  const base = hostConfig().base
+  if (base && opsHostOf() === `${input.slug}.${base}`) return { ok: false, code: 'slug_taken' }
   const planCode = input.plan ?? 'trial'
   const [plan] = await db.select().from(plans).where(eq(plans.code, planCode))
   if (!plan) return { ok: false, code: 'plan_unknown' }

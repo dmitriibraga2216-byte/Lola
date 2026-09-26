@@ -159,13 +159,43 @@ create table limit_notices (
 create unique index limit_notices_open_uidx on limit_notices (tenant_id, axis, level) where resolved_at is null;
 create index on limit_notices (tenant_id, raised_at desc);
 
+-- Операторы платформы (`03` §3.12, `25` §7 п. 6–8): платформенная, без tenant_id и RLS.
+-- Роль, приглашение и второй фактор — ops-console-1, миграция 0099_ops_operator_roles
+create table platform_admins (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique, full_name text not null,
+  password_hash text,                        -- null: приглашён, пароль задаётся по ссылке
+  is_active boolean not null default true, deactivated_at timestamptz, last_login_at timestamptz,
+  role text not null default 'viewer',       -- platform_role; CHECK; матрица — shared/domain/platformRoles.ts
+  invited_by uuid references platform_admins(id) on delete set null,
+  invite_token_hash text unique, invite_expires_at timestamptz, -- ссылка приглашения, 7 дней, хеш
+  -- второй фактор: механизм user_totp (PR-39) — секрет шифротекстом, новый ждёт первого кода
+  totp_secret_encrypted bytea, totp_secret_nonce bytea, totp_confirmed_at timestamptz, totp_last_used_step bigint,
+  totp_pending_encrypted bytea, totp_pending_nonce bytea, totp_pending_created_at timestamptz,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table platform_sessions (             -- cookie lola_ops: host-only, SameSite=Strict
+  id uuid primary key default gen_random_uuid(),
+  admin_id uuid not null references platform_admins(id) on delete cascade,
+  token_hash text not null unique, expires_at timestamptz not null, revoked_at timestamptz,
+  two_factor_pending boolean not null default false, -- пароль принят, второй фактор — нет (15 минут)
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table platform_admin_recovery_codes ( -- резервные коды оператора, только хешами argon2id
+  id uuid primary key default gen_random_uuid(),
+  admin_id uuid not null references platform_admins(id) on delete cascade,
+  code_hash text not null, used_at timestamptz, created_at timestamptz not null default now()
+);
+
 -- Журнал действий оператора платформы (`25` §3.1, §7 п. 5): платформенная, без tenant_id и RLS. Spec 25
 create table platform_audit (
   id bigserial primary key,
   admin_id uuid references platform_admins(id) on delete set null,
   admin_email text not null,                 -- 'worker' — запись фоновой задачи (tenant.purged)
   action text not null,                      -- tenant.create | tenant.update | tenant.suspend | tenant.resume |
-                                             -- tenant.purge_schedule | tenant.purge_cancel | tenant.purged | tenant.limits | platform.request
+                                             -- tenant.purge_schedule | tenant.purge_cancel | tenant.purged | tenant.limits | platform.request |
+                                             -- operator.login | operator.invite | operator.invite_accept | operator.role_change |
+                                             -- operator.activate | operator.deactivate | operator.two_factor_enable | operator.two_factor_reset
   subject_tenant_id uuid references tenants(id) on delete set null, -- после purge null, slug остаётся в after/before
   entity text not null, entity_id text,
   before jsonb, after jsonb,

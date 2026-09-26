@@ -480,6 +480,27 @@
 | POST | `/platform/announcements/:id/publish` | черновик — в ленту тенантов (повторная публикация ничего не меняет) |
 | POST | `/platform/announcements/:id/archive` | снять с ленты: тенанты больше не видят, история и счёт прочтений остаются |
 | POST | `/platform/tenants/:id/users/:userId/two-factor-reset` | `{reason 10–500}` — сброс второго фактора человеку тенанта (`24` §3.4, PR-39): последний способ вернуть вход администратору без телефона и кодов, когда другого нет; `two_factor.reset` (critical, с причиной) — в журнал безопасности тенанта, действие — в `platform_audit`; чужой или несуществующий человек — 404 |
+| POST | `/platform/login` | `{email, password}` — первый шаг: сессия всегда промежуточная (`two_factor_pending`, 15 минут), ответ `{twoFactor: verify\|enroll}` (`25` §7 п. 8). ops-console-1 |
+| POST | `/platform/logout` | сессия гаснет в базе, cookie снимается |
+| GET | `/platform/me` | оператор, `role`, `actions` (права роли — консоль прячет по ним кнопки), `twoFactor` (шаг промежуточной сессии), `hostBase` |
+| GET | `/platform/two-factor` | шаг и состояние второго фактора оператора |
+| POST | `/platform/two-factor/setup` | `{code?}` — новый ключ (QR и текстом); замена подключённого — только с текущим кодом |
+| POST | `/platform/two-factor/confirm` | `{code}` — фактор подключён, 10 резервных кодов один раз; на экране входа — полная сессия с новым токеном |
+| POST | `/platform/two-factor/verify` | `{code}\|{recoveryCode}` — завершение входа; 5 неверных — блокировка 15 минут и отзыв промежуточных сессий (`429 two_factor.blocked`) |
+| GET/POST | `/platform/operators` | список операторов (`operators.read`); приглашение `{email, fullName, role}` (`operators.manage`, только `owner`) — письмо платформенным SMTP, иначе `inviteUrl` в ответе; `409 operator.email_taken` |
+| PATCH | `/platform/operators/:id` | `{role?, isActive?}` (только `owner`); `409 operator.self` — свою роль и доступ не меняют; `409 operator.last_owner` — последнего активного владельца не понижают и не отключают; сессии оператора гаснут |
+| POST | `/platform/operators/:id/two-factor-reset` | `{reason 10–500}` — сброс второго фактора оператору (только `owner`), сессии гаснут, в `platform_audit` |
+| GET | `/platform/invite/:token` | без сессии: кого приглашают; `404 operator.invite_invalid` — ссылка неизвестна или истекла (7 дней) |
+| POST | `/platform/invite/accept` | без сессии: `{token, password ≥12}` — пароль по приглашению, ссылка гаснет |
+| GET | `/platform/companies` | `?q=&plan=&status=&flag=payment_overdue\|limit_near\|suspended&cursor=&limit=` — список компаний консоли, ключевой курсор `created_at desc, id desc`, у строки `flags[]`; «прострочена оплата» — только с `billing.read` |
+| GET | `/platform/tenants/:id/overview` | обзор карточки: статус, тариф, метки, подписка (только с `billing.read`), потребление по осям (`usageByAxis`), 10 последних действий операторов |
+
+**Права (ops-console-1, `25` §7 п. 7).** Каждая ручка раздела, кроме входа, выхода, `me`,
+`two-factor/*` и `invite/*`, проверяет право роли оператора `requirePlatform(event, action)`
+(одна функция `platformCan()`, `shared/domain/platformRoles.ts`): нет права — `403 platform.forbidden`,
+промежуточная сессия — `401 two_factor_required`. С `OPS_HOST` раздел открыт только на хосте консоли
+(на остальных — 404), `impersonate` отвечает `handoffUrl` — одноразовой ссылкой на хост тенанта
+(`GET /impersonate/go?h=…`, маршрут вне `/api`).
 
 ## 4.18 Вебхуки наружу
 

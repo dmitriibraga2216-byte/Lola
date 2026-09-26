@@ -193,7 +193,7 @@ create table platform_audit (
   admin_id uuid references platform_admins(id) on delete set null,
   admin_email text not null,                 -- 'worker' — запись фоновой задачи (tenant.purged)
   action text not null,                      -- tenant.create | tenant.update | tenant.suspend | tenant.resume |
-                                             -- tenant.purge_schedule | tenant.purge_cancel | tenant.purged | tenant.limits | platform.request |
+                                             -- tenant.purge_schedule | tenant.purge_cancel | tenant.purge_s3_failed | tenant.purged | tenant.limits | platform.request |
                                              -- operator.login | operator.invite | operator.invite_accept | operator.role_change |
                                              -- operator.activate | operator.deactivate | operator.two_factor_enable | operator.two_factor_reset
   subject_tenant_id uuid references tenants(id) on delete set null, -- после purge null, slug остаётся в after/before

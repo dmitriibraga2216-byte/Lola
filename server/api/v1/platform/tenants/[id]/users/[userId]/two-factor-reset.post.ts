@@ -14,7 +14,7 @@ import { twoFactorError } from '../../../../../../../utils/sessionAuth'
  * доходит вовсе (`01.session.ts` разбирает `/api/v1/platform/*` раньше ветки Bearer).
  */
 export default defineEventHandler(async (event) => {
-  const op = requirePlatform(event)
+  const op = requirePlatform(event, 'tenant.two_factor_reset')
   const p = twoFactorPlatformResetSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Опишіть причину — це побачить клієнт у своєму журналі', { issues: p.error.issues })
   const tenantId = getRouterParam(event, 'id')!

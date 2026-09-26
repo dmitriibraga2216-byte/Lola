@@ -9,7 +9,7 @@ export const tenantCreateSchema = z.object({
   adminPhone: phoneSchema, adminName: z.string().min(2).max(200), locationName: z.string().max(120).optional(), positionName: z.string().max(120).optional(),
 })
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'tenant.create')
   const p = tenantCreateSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Перевірте поля', { issues: p.error.issues })
   const r = await createTenant(p.data, actor)

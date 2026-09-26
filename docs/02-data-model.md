@@ -2996,6 +2996,12 @@ person_document_status: valid | expiring | expired | revoked
 -- «всем / по тарифу / конкретным тенантам»); списки — в plan_codes и tenant_ids той же строки
 announcement_audience: all | plans | tenants
 
+-- Роль оператора платформы (`platform_admins.role`, `25` §7 п. 7 [решение владельца, 26.09.2026]):
+-- owner — всё, управление операторами и окончательное удаление; admin — все действия с компаниями,
+-- кроме purge и операторов; billing — тариф, лимиты, платежи, продление; support — чтение, вход
+-- «від імені», сброс 2FA пользователю; viewer — только чтение. Матрица — `shared/domain/platformRoles.ts`
+platform_role: owner | admin | billing | support | viewer
+
 -- Уровень нормы отсутствий (`absence_norms.scope_type`, `v2/38` §3.6, §7.13): разрешение снизу
 -- вверх по каждому виду отдельно — человек → точка → компания → системный дефолт (24 и 5)
 absence_norm_scope: tenant | location | user

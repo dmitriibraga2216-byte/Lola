@@ -9,7 +9,7 @@ import { apiData, apiError } from '../../../../../utils/apiResponse'
  * «Продовжити ШІ». Только переданные поля меняются, остальные даты подписки не трогаются.
  */
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'billing.extend')
   const p = platformExtendSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 422, 'validation_failed', 'Перевірте дати та причину (10–500 знаків)', { issues: p.error.issues })
   const { comment: _comment, ...dates } = p.data

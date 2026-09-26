@@ -6,7 +6,7 @@ import { announcementError } from '../_errors'
 
 /** PATCH /platform/announcements/:id (docs/04 §4.17): правка текста и адресации; снятое со стрічки не правится. */
 export default defineEventHandler(async (event) => {
-  const op = requirePlatform(event)
+  const op = requirePlatform(event, 'announcements.manage')
   const p = announcementPatchSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Перевірте поля', { issues: p.error.issues })
   const r = await updateAnnouncement(op, getRouterParam(event, 'id')!, p.data)

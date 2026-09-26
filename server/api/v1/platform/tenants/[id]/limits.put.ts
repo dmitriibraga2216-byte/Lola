@@ -5,7 +5,7 @@ import { apiData, apiError } from '../../../../../utils/apiResponse'
 
 /** PUT /platform/tenants/:id/limits — переопределение лимитов тенанта; null — вернуть тариф. */
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'billing.limits')
   const p = tenantLimitsSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Ліміти — цілі числа від 0', { issues: p.error.issues })
   const r = await setTenantLimits(getRouterParam(event, 'id')!, p.data, actor)

@@ -11,7 +11,7 @@ import { requirePlatform } from '../../../../../../utils/platformGuard'
  * `422 validation_failed` (docs/v2/44 В-3), а не игнорируется.
  */
 export default defineEventHandler(async (event) => {
-  requirePlatform(event)
+  requirePlatform(event, 'tenant.update')
   const tenantId = getRouterParam(event, 'id')!
   const stageId = getRouterParam(event, 'stageId')!
   const p = stageCapabilitiesPatchSchema.safeParse(await readBody(event))

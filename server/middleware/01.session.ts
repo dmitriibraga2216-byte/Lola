@@ -24,6 +24,12 @@ export function openForPendingTwoFactor(path: string): boolean {
   return TWO_FACTOR_OPEN.some(p => clean === p || clean.startsWith(`${p}/`))
 }
 
+const PLATFORM_TWO_FACTOR_OPEN = ['/api/v1/platform/two-factor', '/api/v1/platform/me', '/api/v1/platform/logout', '/api/v1/platform/login', '/api/v1/platform/invite']
+export function openForPendingPlatform(path: string): boolean {
+  const clean = path.split('?')[0]!
+  return PLATFORM_TWO_FACTOR_OPEN.some(p => clean === p || clean.startsWith(`${p}/`))
+}
+
 async function assertTenantOpen(tenantId: string): Promise<void> {
   const t = await tenantById(tenantId)
   if (t && t.status !== 'active') throw new TenantClosedError()
@@ -39,13 +45,19 @@ export default defineEventHandler(async (event) => {
     if (ops) {
       const { validatePlatformSession } = await import('../services/platform')
       event.context.platform = await validatePlatformSession(ops)
+      // Второй фактор оператора обязателен (docs/25 §7 п. 8): промежуточной сессии открыты только
+      // экран 2FA, `me` и выход — закрытие здесь, а не в ручках, как у тенанта (`openForPendingTwoFactor`)
+      const p = event.context.platform as { twoFactorPending?: boolean } | null
+      if (p?.twoFactorPending && !openForPendingPlatform(event.path)) {
+        throw createError({ statusCode: 401, data: { code: 'two_factor_required', message: 'Спершу підтвердіть вхід другим фактором' } })
+      }
       // docs/25 §7 п. 5, долг «28» Spec 25 отк. (5): не каждый GET панели — только действия (не-GET)
       // и просмотр карточки конкретного тенанта (GET .../tenants/:id и .../tenants/:id/...); список
       // тенантов, планы, метрики, общий журнал — не пишутся, иначе журнал платформы захлёбывается
       // при росте числа операторов.
       const platformPath = event.path.split('?')[0]!
       const isTenantCardView = event.method === 'GET' && /^\/api\/v1\/platform\/tenants\/[0-9a-f-]{36}(\/|$)/.test(platformPath)
-      if (event.context.platform && !/^\/api\/v1\/platform\/(me|login|logout)$/.test(platformPath) && (event.method !== 'GET' || isTenantCardView)) {
+      if (event.context.platform && !p?.twoFactorPending && !/^\/api\/v1\/platform\/(me|login|logout)$/.test(platformPath) && (event.method !== 'GET' || isTenantCardView)) {
         const { recordPlatformAudit } = await import('../services/platformTenants')
         const tenantId = platformPath.match(/\/tenants\/([0-9a-f-]{36})/)?.[1] ?? null
         event.waitUntil(recordPlatformAudit(event.context.platform, { action: 'platform.request', tenantId, entity: 'request', entityId: `${event.method} ${platformPath}` }).catch(err => console.error('platform_audit', err)))

@@ -998,6 +998,14 @@ export const ANNOUNCEMENT_AUDIENCES = ['all', 'plans', 'tenants'] as const
 export type AnnouncementAudience = typeof ANNOUNCEMENT_AUDIENCES[number]
 
 /**
+ * Роль оператора платформы (`platform_admins.role`, docs/25 §7 п. 7, решение владельца продукта
+ * 26.09.2026): операторов несколько, права — по роли. Матрица «роль × действие» — одна функция
+ * `platformCan()` в `shared/domain/platformRoles.ts`, её зовёт каждая ручка `/api/v1/platform/*`.
+ */
+export const PLATFORM_ROLES = ['owner', 'admin', 'billing', 'support', 'viewer'] as const
+export type PlatformRole = typeof PLATFORM_ROLES[number]
+
+/**
  * Уровень нормы отсутствий (`absence_norms.scope_type`, docs/v2/38 §3.6, §7.13): компания,
  * точка, человек. Разрешение — снизу вверх, по каждому виду отдельно: человек → точка →
  * компания → системный дефолт (відпустка 24, лікарняний 5).
@@ -1347,6 +1355,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   person_note_category: PERSON_NOTE_CATEGORIES,
   person_document_status: PERSON_DOCUMENT_STATUSES,
   announcement_audience: ANNOUNCEMENT_AUDIENCES,
+  platform_role: PLATFORM_ROLES,
   absence_norm_scope: ABSENCE_NORM_SCOPES,
   absence_kind: ABSENCE_KINDS,
   absence_status: ABSENCE_STATUSES,

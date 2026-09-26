@@ -10,7 +10,7 @@ import { apiData, apiError } from '../../../../../utils/apiResponse'
  * PR, см. `docs/v2/46-progress.md`), а не решение оператора.
  */
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'billing.plan_change')
   const p = platformPlanChangeSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 422, 'validation_failed', 'Оберіть тариф, період і вкажіть причину (10–500 знаків)', { issues: p.error.issues })
   const r = await changeTenantPlan(getRouterParam(event, 'id')!, p.data, actor)

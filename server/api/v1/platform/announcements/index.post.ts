@@ -10,7 +10,7 @@ import { announcementError } from './_errors'
  * пространствам. Это не новость тенанта: тенант его только читает.
  */
 export default defineEventHandler(async (event) => {
-  const op = requirePlatform(event)
+  const op = requirePlatform(event, 'announcements.manage')
   const p = announcementCreateSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Перевірте заголовок, текст і адресацію', { issues: p.error.issues })
   const r = await createAnnouncement(op, p.data)

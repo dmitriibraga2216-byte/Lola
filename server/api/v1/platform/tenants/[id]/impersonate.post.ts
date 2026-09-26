@@ -15,7 +15,7 @@ import { setSessionCookies } from '../../../../../utils/authCookies'
  * тенанта, который сам ставит свою cookie (`/impersonate/go`, docs/25 §7 п. 6).
  */
 export default defineEventHandler(async (event) => {
-  const actor = requirePlatform(event)
+  const actor = requirePlatform(event, 'tenant.impersonate')
   const p = impersonateSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Опишіть причину — це побачить клієнт у своєму журналі (10–500 символів)')
   const tenantId = getRouterParam(event, 'id')!

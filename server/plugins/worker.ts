@@ -203,6 +203,11 @@ export default defineNitroPlugin(async () => {
       const s = await recalcTenantEngagement(tenantId)
       if (s.people) console.log(`[rating.recalc] ${tenantId}:`, s)
     }))
+    // docs/v2/38 §7.2 (person-card-tails): ретро-расчёт — по запуску администратора, один тенант
+    await perTenant<{ tenantId: string }>('rating.backfill', async (data) => {
+      const { backfillTenantEngagement } = await import('../services/engagementIndex')
+      console.log(`[rating.backfill] ${data.tenantId}:`, await backfillTenantEngagement(data.tenantId))
+    })
     // docs/v2/29 §11 (PR-17): публикация и генерация текста. Ретрай — по событию на строку
     // публикации (`enqueuePublishRetry`), здоровье аккаунтов и всплеск — сканы по тенантам.
     await perTenant<{ tenantId: string, publicationId: string }>('vacancy.publish_retry', data => attemptPublish(data.tenantId, data.publicationId))

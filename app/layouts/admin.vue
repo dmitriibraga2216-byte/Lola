@@ -128,6 +128,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/reports/summary', label: t('admin.nav.summaryReport'), show: hasScope('report.team'), group: t('admin.group.coreReports') },
     { to: '/admin/reports/builder', label: t('admin.nav.reportBuilder'), show: hasScope('report.builder'), group: t('admin.group.coreReports') },
     { to: '/admin/reports/people', label: t('admin.nav.peopleReport'), show: hasScope('report.team'), group: t('admin.group.coreReports') },
+    // «Індекс залученості» (docs/v2/38 §9 п. 5): тем, кто видит чужой индекс (§2), — без места в списке (§7.3)
+    { to: '/admin/reports/rating', label: t('admin.nav.ratingReport'), show: hasScope('person.rating.view_others'), group: t('admin.group.coreReports') },
     { to: '/admin/journals', label: t('admin.nav.journals'), show: hasScope('audit.view'), group: t('admin.group.coreReports') },
     { to: '/admin/reports/tasks/test', label: t('admin.nav.taskReports'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/reports/recruiting-funnel', label: t('admin.nav.funnelReport'), show: recruitingOn() && hasScope('candidate.view'), group: t('admin.group.moduleReports') },

@@ -158,6 +158,9 @@ const ORIGINAL_SHOW: Record<string, string> = {
   // PR-39 (docs/v2/39 П-21): объявления платформы — своя подгруппа «Від Lola» в «Налаштуваннях»,
   // а не рядом с «Новинами» компании: две ленты не смешиваются и в меню. Читает любой вошедший.
   '/admin/platform-announcements': "hasScope('learn.view')",
+  // person-card-tails (docs/v2/38 §9 п. 5): «Індекс залученості» в «Основних звітах» — тем, кто
+  // видит чужой индекс; в «Звітах модулів» уже десять пунктов
+  '/admin/reports/rating': "hasScope('person.rating.view_others')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

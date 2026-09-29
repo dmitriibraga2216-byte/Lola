@@ -289,6 +289,39 @@ export function mergedNotifyDue(reportsCount: number): boolean {
 /** Суточный предел `content_issue_merged` на одну карточку (§8: `max_per_day: 3, per_subject: true`). */
 export const MERGED_NOTIFY_MAX_PER_DAY = 3
 
+/**
+ * Ступени просрочки (§7.6, §8 `content_issue_overdue`): 1 день — ответственному, 3 — его
+ * руководителю, 7 — администратору с переназначением по §7.5 (д). Дни — календарные сутки
+ * от `due_at`: сам срок уже посчитан рабочими днями (`dueAtFor`), а «просрочено на 3 дн.»
+ * человек читает по календарю.
+ */
+export const OVERDUE_STEPS = [1, 3, 7] as const
+export type OverdueStep = typeof OVERDUE_STEPS[number]
+
+/** Полных суток просрочки; до срока и в первые сутки после — 0. */
+export function overdueDays(dueAt: Date, now: Date): number {
+  return Math.max(0, Math.floor((now.getTime() - dueAt.getTime()) / 86_400_000))
+}
+
+/** Ступени, до которых карточка уже дошла (по возрастанию). */
+export function overdueStepsReached(dueAt: Date, now: Date): OverdueStep[] {
+  const d = overdueDays(dueAt, now)
+  return OVERDUE_STEPS.filter(s => d >= s)
+}
+
+/**
+ * Статус «простыми словами» для заявителя (§5.5 «Мої повідомлення»): внутренние шесть
+ * статусов ему не нужны. «Відкладено» для него — тоже «Розглядається»: карточка жива.
+ */
+export type ReporterStatus = 'reviewing' | 'fixed' | 'not_confirmed'
+
+export function reporterStatusOf(status: ContentIssueStatus | (string & {}), resolution: ContentIssueResolution | (string & {}) | null): ReporterStatus {
+  if (status === 'rejected') return 'not_confirmed'
+  if (resolution && (REJECTING_RESOLUTIONS as readonly string[]).includes(resolution)) return 'not_confirmed'
+  if (status === 'fixed' || status === 'closed') return 'fixed'
+  return 'reviewing'
+}
+
 export interface RoutingRuleLite {
   id: string
   sort: number

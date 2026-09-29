@@ -10,7 +10,7 @@ import { currentRequestContext } from '../utils/requestContext'
 import { assignTx, authorIdsSql, derivedCourseIds, routeIssueTx, uuidArray } from './contentIssueRouting'
 import { notifyAssignee } from './contentIssueNotify'
 import {
-  checkRate, deadlineShiftFor, dedupeKeyOf, dueAtFor, nextReporterState, rateWindows, severityOf,
+  checkRate, deadlineShiftFor, dedupeKeyOf, dueAtFor, nextReporterState, rateWindows, reporterStatusOf, severityOf,
 } from '../../shared/domain/contentIssues'
 import type { ContentIssueTargetType } from '../../shared/enums'
 import type { ContentReportInput, ContentReportResult } from '../../shared/schemas/contentIssues'
@@ -467,9 +467,14 @@ async function routeNewIssue(tx: TenantTx, ctx: Ctx, issueId: string): Promise<v
   if (row?.severity === 'blocking') await notifyAssignee(tx, ctx.tenantId, issueId, 'content_issue_blocking')
 }
 
-/** Свои жалобы со статусами — «Мої повідомлення про помилки» (§5.5). */
+/**
+ * Свои жалобы со статусами — «Мої повідомлення про помилки» (§5.5): тип, элемент, дата,
+ * статус простыми словами (`reporterStatusOf`) и ответ автора — `resolution_comment`, тот же
+ * текст, что ушёл заявителю уведомлением. Ответственный, внутренние заметки и чужие жалобы
+ * на ту же карточку заявителю не отдаются.
+ */
 export async function myReports(ctx: Ctx, limit = 50) {
-  return withTenant(ctx.tenantId, ctx.actorId, async tx => tx
+  const rows = await withTenant(ctx.tenantId, ctx.actorId, async tx => tx
     .select({
       reportId: contentReports.id,
       createdAt: contentReports.createdAt,
@@ -487,4 +492,5 @@ export async function myReports(ctx: Ctx, limit = 50) {
     .where(and(eq(contentReports.tenantId, ctx.tenantId), eq(contentReports.userId, ctx.actorId)))
     .orderBy(sql`${contentReports.createdAt} desc`)
     .limit(limit))
+  return rows.map(r => ({ ...r, reporterStatus: reporterStatusOf(r.status, r.resolution) }))
 }

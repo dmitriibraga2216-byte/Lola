@@ -395,7 +395,8 @@ describe('«Якість моделі» и «Допомога перевіряю
     expect((await overrideCriterion(recruiter, userId, crit!.id as string, { humanValue: 1, humanComment: 'Жодного конкретного прикладу у відповіді немає', major: false, expectedHumanAt: null })).ok).toBe(true)
     const [{ prompt_version: version }] = await admin`select prompt_version from ai_calls where ref_id = ${sessionId} and purpose = 'interview_score' order by id desc limit 1` as unknown as [{ prompt_version: string }]
 
-    const today = new Date().toISOString().slice(0, 10)
+    // «Сегодня» — в поясе тенанта, как считает отчёт: с 21:00 до 24:00 UTC даты UTC и Киева расходятся
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
     const r = await aiQualityReport(hr(), aiReportQuerySchema.parse({ from: today, to: today }))
     const mine = r.criteria.filter(c => c.criterion.startsWith(name))
     expect(mine.find(c => c.criterion === name)).toMatchObject({ promptVersion: version, scores: 1, decided: 1, majorPct: 100, matchPct: 0, avgConfidence: 0.9, smallSample: true })
@@ -411,7 +412,8 @@ describe('«Якість моделі» и «Допомога перевіряю
 
   it('помощь проверяющему: проверки наставника, показанные подсказки, agreement, время с подсказкой', async () => {
     await updateAiSettings(hr(), { reviewHints: true })
-    const today = new Date().toISOString().slice(0, 10)
+    // «Сегодня» — в поясе тенанта, как считает отчёт: с 21:00 до 24:00 UTC даты UTC и Киева расходятся
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
     const before = (await aiReviewHelpReport(hr(), aiReportQuerySchema.parse({ from: today, to: today }))).rows.find(x => x.reviewerId === mentorId)
 
     const { quizId, questionIds } = await makeQuiz(1, [learnerId], { kind: 'quiz', criteria: ['температура зберігання продуктів', 'термін придатності кожної позиції'] })

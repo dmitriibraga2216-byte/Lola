@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { OVERDUE_STEPS, overdueDays, overdueStepsReached, reporterStatusOf } from '../../shared/domain/contentIssues'
+import { OVERDUE_STEPS, isSuspectQuestion, overdueDays, overdueStepsReached, pctOf, reporterStatusOf } from '../../shared/domain/contentIssues'
 
 /**
  * Хвосты обратной связи по контенту (docs/v2/36-content-feedback.md §5.5, §7.6):
@@ -48,5 +48,20 @@ describe('§5.5 статус простыми словами', () => {
       expect(reporterStatusOf('rejected', r)).toBe('not_confirmed')
       expect(reporterStatusOf('closed', r)).toBe('not_confirmed')
     }
+  })
+})
+
+describe('§9 отчёты: доли и «проблемний» вопрос', () => {
+  it('доля — с одним знаком, пустой знаменатель — null', () => {
+    expect(pctOf(1, 3)).toBe(33.3)
+    expect(pctOf(2, 2)).toBe(100)
+    expect(pctOf(0, 0)).toBeNull()
+  })
+
+  it('ошибок выше 80 % и есть жалобы — сломан; ровно 80 % или без жалоб — нет', () => {
+    expect(isSuspectQuestion(80.1, 1)).toBe(true)
+    expect(isSuspectQuestion(80, 3)).toBe(false)
+    expect(isSuspectQuestion(100, 0)).toBe(false)
+    expect(isSuspectQuestion(null, 5)).toBe(false)
   })
 })

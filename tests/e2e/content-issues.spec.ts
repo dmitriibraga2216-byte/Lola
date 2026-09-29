@@ -89,3 +89,15 @@ test('Жалоба из урока: флажок у блока, два тапа,
   await expect(mine).toContainText('Розглядається')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
+
+test('Звіти скарг (§9): чотири вкладки у адміністратора, 320 px без горизонтальної прокрутки сторінки', async ({ page }) => {
+  await loginViaUi(page, ADMIN_PHONE)
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.goto('/admin/reports/content-issues')
+  await expect(page.getByRole('heading', { name: 'Скарги: звіти' })).toBeVisible()
+  for (const tab of ['Скарги', 'Дисципліна авторів', 'Проблемні питання', 'Заявники']) {
+    await page.getByRole('tab', { name: tab }).click()
+    await expect(page.getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true')
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+})

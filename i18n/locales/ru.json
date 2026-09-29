@@ -168,7 +168,8 @@
       "storage": "Хранилище",
       "platformAnnouncements": "Объявления Lola",
       "interviews": "Сценарии собеседований",
-      "aiSettings": "Искусственный интеллект"
+      "aiSettings": "Искусственный интеллект",
+      "contentIssueReports": "Жалобы: отчёты"
     },
     "section": {
       "learning": "Обучение",
@@ -7890,5 +7891,64 @@
       "details": "детали",
       "empty": "Записей ещё нет"
     }
+  },
+  "contentIssueReports": {
+    "title": "Жалобы: отчёты",
+    "hint": "Выгрузка карточек, дисциплина ответственных, проблемные вопросы и заявители",
+    "tab": {
+      "complaints": "Жалобы",
+      "authors": "Дисциплина авторов",
+      "questions": "Проблемные вопросы",
+      "reporters": "Заявители"
+    },
+    "from": "С",
+    "to": "По",
+    "apply": "Показать",
+    "anyStatus": "Любой статус",
+    "exportXlsx": "Выгрузить XLSX",
+    "exportCsv": "Выгрузить CSV",
+    "empty": "По этим фильтрам ничего нет",
+    "loading": "Загрузка…",
+    "retry": "Попробовать ещё раз",
+    "unassigned": "Не назначен",
+    "inactive": "неактивен",
+    "yes": "да",
+    "no": "нет",
+    "suspect": "Почти наверняка сломан",
+    "trusted": "надёжный",
+    "overdueDays": "{n} дн.",
+    "col": {
+      "reportedAt": "Дата",
+      "type": "Тип",
+      "element": "Элемент",
+      "track": "Трек",
+      "version": "Версия",
+      "reporters": "Заявителей",
+      "status": "Статус",
+      "resolution": "Резолюция",
+      "assignee": "Ответственный",
+      "dueAt": "Срок",
+      "overdue": "Просрочка",
+      "rescore": "Пересчёт",
+      "open": "Открытых",
+      "overdueNow": "Просрочено",
+      "decided": "Решено за период",
+      "avgDays": "Дней до исправления",
+      "rejectedPct": "Доля отклонённых, %",
+      "question": "Вопрос",
+      "quizzes": "Тест",
+      "complaints": "Жалоб",
+      "answers": "Ответов",
+      "wrongPct": "Неверных, %",
+      "person": "ФИО",
+      "location": "Точка",
+      "reports": "Подано",
+      "confirmed": "Подтверждено",
+      "rejected": "Отклонено",
+      "spam": "Пустых",
+      "confirmedPct": "Подтверждено, %",
+      "muted": "Приостановлено до"
+    },
+    "rescoreMixed": "Разное"
   }
 }

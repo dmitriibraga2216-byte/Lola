@@ -43,7 +43,7 @@ async function remove(p: Plan) { if (!confirm(t('dev.deletePlanConfirm', { title
       <form class="modal" role="dialog" aria-modal="true" @submit.prevent="save">
         <h2>{{ form.id ? t('common.edit') : t('dev.newPlan') }}</h2>
         <label>{{ t('dev.planTitle') }}<input v-model="form.title" required minlength="3" maxlength="200"></label>
-        <div class="two"><label>{{ t('peopleReport.from') }}<input v-model="form.periodFrom" type="date" required></label><label>{{ t('peopleReport.to') }}<input v-model="form.periodTo" type="date" required></label></div>
+        <div class="two"><div class="date-label"><label for="dt-form-periodFrom">{{ t('peopleReport.from') }}</label><input id="dt-form-periodFrom" v-model="form.periodFrom" type="date" required></div><div class="date-label"><label for="dt-form-periodTo">{{ t('peopleReport.to') }}</label><input id="dt-form-periodTo" v-model="form.periodTo" type="date" required></div></div>
         <label>{{ t('person.orgUnit') }}<select v-model="form.orgUnitId"><option value="">{{ t('dev.wholeNetwork') }}</option><option v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</option></select></label>
         <label>{{ t('dev.budget') }}<input v-model="form.budget" type="number" min="0" step="100"></label>
         <label>{{ t('assign.col.status') }}<select v-model="form.status"><option v-for="s in ['draft', 'active', 'closed']" :key="s" :value="s">{{ t(`dev.planStatus.${s}`) }}</option></select></label>
@@ -71,7 +71,7 @@ h3 { margin: var(--space-2) 0 0; font-size: var(--font-size-body); color: var(--
 .short { width: 90px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; box-sizing: border-box; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
 .badge.active { background: var(--color-teal); color: var(--color-teal-deep); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }

@@ -415,8 +415,8 @@ const purgeAt = computed(() => data.value?.tenant.archivedAt ? fmt(new Date(new 
         <form v-if="can('billing.extend')" class="card" data-testid="ops-billing-extend" @submit.prevent="submitExtend">
           <h2>{{ t('opsConsole.billing.extendTitle') }}</h2>
           <div class="row">
-            <label class="field-wrap"><span class="label">{{ t('opsConsole.billing.paidUntil') }}</span><input v-model="extendForm.paidUntil" class="field" type="date"></label>
-            <label class="field-wrap"><span class="label">{{ t('opsConsole.billing.aiUntil') }}</span><input v-model="extendForm.aiUntil" class="field" type="date"></label>
+            <div class="field-wrap date-label"><label for="dt-extendForm-paidUntil"><span class="label">{{ t('opsConsole.billing.paidUntil') }}</span></label><input id="dt-extendForm-paidUntil" v-model="extendForm.paidUntil" class="field" type="date"></div>
+            <div class="field-wrap date-label"><label for="dt-extendForm-aiUntil"><span class="label">{{ t('opsConsole.billing.aiUntil') }}</span></label><input id="dt-extendForm-aiUntil" v-model="extendForm.aiUntil" class="field" type="date"></div>
           </div>
           <label class="field-wrap"><span class="label">{{ t('opsConsole.actionsTab.reason') }}</span><input v-model="extendForm.comment" class="field" maxlength="500" placeholder="10–500"></label>
           <div class="chips"><button type="submit" class="btn primary" :disabled="!extendReady || busy">{{ t('opsConsole.billing.extendOk') }}</button></div>

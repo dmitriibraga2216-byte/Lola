@@ -235,9 +235,9 @@ const revokedNote = (d: Doc) => d.replacedBy
               <tr v-if="editing?.id === d.id">
                 <td colspan="7">
                   <form class="inline" @submit.prevent="saveEdit">
-                    <label v-if="editing.mode === 'extend'" class="label">{{ t('personDocs.expires') }}
-                      <input v-model="editing.expiresAt" type="date" class="field">
-                    </label>
+                    <div v-if="editing.mode === 'extend'" class="label date-label"><label for="dt-editing-expiresAt">{{ t('personDocs.expires') }}</label>
+                      <input id="dt-editing-expiresAt" v-model="editing.expiresAt" type="date" class="field">
+                    </div>
                     <label v-else class="label grow">{{ t('personDocs.revokeReason') }}
                       <input v-model="editing.reason" class="field" maxlength="300">
                       <span class="help">{{ t('personDocs.revokeHint') }}</span>
@@ -310,14 +310,14 @@ const revokedNote = (d: Doc) => d.replacedBy
             <span id="doc-number-hint" class="help">{{ t('personDocs.numberHint') }}</span>
             <span v-if="formErrors.number" class="error-text small">{{ formErrors.number }}</span>
           </label>
-          <label class="label">{{ t('personDocs.issued') }}
-            <input v-model="form.issuedAt" type="date" class="field" :max="today()" :aria-invalid="!!formErrors.issuedAt">
+          <div class="label date-label"><label for="dt-form-issuedAt">{{ t('personDocs.issued') }}</label>
+            <input id="dt-form-issuedAt" v-model="form.issuedAt" type="date" class="field" :max="today()" :aria-invalid="!!formErrors.issuedAt">
             <span v-if="formErrors.issuedAt" class="error-text small">{{ formErrors.issuedAt }}</span>
-          </label>
-          <label class="label">{{ t('personDocs.expires') }}
-            <input v-model="form.expiresAt" type="date" class="field" :aria-invalid="!!formErrors.expiresAt">
+          </div>
+          <div class="label date-label"><label for="dt-form-expiresAt">{{ t('personDocs.expires') }}</label>
+            <input id="dt-form-expiresAt" v-model="form.expiresAt" type="date" class="field" :aria-invalid="!!formErrors.expiresAt">
             <span v-if="formErrors.expiresAt" class="error-text small">{{ formErrors.expiresAt }}</span>
-          </label>
+          </div>
         </div>
         <label class="label">{{ t('personDocs.note') }}
           <input v-model="form.note" class="field" :maxlength="PERSON_DOCUMENT_LIMITS.noteMax">

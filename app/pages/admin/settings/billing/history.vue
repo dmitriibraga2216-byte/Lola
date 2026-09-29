@@ -55,8 +55,8 @@ const period = (p: Payment) => (p.periodFrom && p.periodTo ? `${fmtDate(p.period
     <PageHeader :title="t('billing.history.title')" :crumbs="[{ label: t('admin.section.settings') }, { label: t('billing.screen.title'), to: '/admin/settings/billing' }, { label: t('billing.history.title') }]" />
 
     <div class="filters">
-      <label class="field"><span>{{ t('billing.history.from') }}</span><input v-model="filters.from" type="date"></label>
-      <label class="field"><span>{{ t('billing.history.to') }}</span><input v-model="filters.to" type="date"></label>
+      <div class="field date-label"><label for="dt-filters-from"><span>{{ t('billing.history.from') }}</span></label><input id="dt-filters-from" v-model="filters.from" type="date"></div>
+      <div class="field date-label"><label for="dt-filters-to"><span>{{ t('billing.history.to') }}</span></label><input id="dt-filters-to" v-model="filters.to" type="date"></div>
       <label class="field"><span>{{ t('billing.history.kind') }}</span>
         <select v-model="filters.kind">
           <option value="">{{ t('billing.history.anyKind') }}</option>

@@ -209,9 +209,9 @@ const isActive = (s: OffboardingState) => s !== 'done' && s !== 'cancelled'
         <label v-if="form.reasonCode === 'other'">{{ t('offboarding.reasonText') }}
           <input v-model="form.reasonText" minlength="10" maxlength="500" required>
         </label>
-        <label>{{ t('offboarding.col.lastDay') }}
-          <input v-model="form.lastWorkingDay" type="date" required :aria-describedby="'lwd-hint'">
-        </label>
+        <div class="date-label"><label for="dt-form-lastWorkingDay">{{ t('offboarding.col.lastDay') }}</label>
+          <input id="dt-form-lastWorkingDay" v-model="form.lastWorkingDay" type="date" required :aria-describedby="'lwd-hint'">
+        </div>
         <p id="lwd-hint" class="sub">{{ t('offboarding.lastDayHint') }}</p>
         <label>{{ t('offboarding.col.responsible') }}
           <select v-model="form.responsibleId" required>

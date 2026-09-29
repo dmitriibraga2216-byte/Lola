@@ -214,10 +214,10 @@ const fmtDate = (d: string | null) => d ? formatShortDate(new Date(d)) : '—'
       <label>{{ t('people.col.location') }}<select v-model="filter.locationId"><option value="">{{ t('people.anyOption') }}</option><option v-for="r in refs.locations" :key="r.id" :value="r.id">{{ r.name }}</option></select></label>
       <label>{{ t('person.role') }}<select v-model="filter.role"><option value="">{{ t('people.anyOption') }}</option><option v-for="r in refs.roles" :key="r.code" :value="r.code">{{ r.name }}</option></select></label>
       <label>{{ t('people.col.tags') }}<select v-model="filter.tag"><option value="">{{ t('people.anyOption') }}</option><option v-for="r in refs.tags" :key="r.id" :value="r.name">{{ r.name }}</option></select></label>
-      <label>{{ t('people.registeredFrom') }}<input v-model="filter.registeredFrom" type="date"></label>
-      <label>{{ t('people.registeredTo') }}<input v-model="filter.registeredTo" type="date"></label>
-      <label>{{ t('people.activeFrom') }}<input v-model="filter.activeFrom" type="date"></label>
-      <label>{{ t('people.activeTo') }}<input v-model="filter.activeTo" type="date"></label>
+      <div class="date-label"><label for="dt-filter-registeredFrom">{{ t('people.registeredFrom') }}</label><input id="dt-filter-registeredFrom" v-model="filter.registeredFrom" type="date"></div>
+      <div class="date-label"><label for="dt-filter-registeredTo">{{ t('people.registeredTo') }}</label><input id="dt-filter-registeredTo" v-model="filter.registeredTo" type="date"></div>
+      <div class="date-label"><label for="dt-filter-activeFrom">{{ t('people.activeFrom') }}</label><input id="dt-filter-activeFrom" v-model="filter.activeFrom" type="date"></div>
+      <div class="date-label"><label for="dt-filter-activeTo">{{ t('people.activeTo') }}</label><input id="dt-filter-activeTo" v-model="filter.activeTo" type="date"></div>
       <label class="check"><input v-model="filter.includeHidden" type="checkbox"> {{ t('people.includeHidden') }}</label>
       <template v-if="canRating">
         <label>{{ t('people.ratingGte') }}<input v-model="filter.ratingGte" type="number" min="0" max="130" step="1" inputmode="numeric"></label>
@@ -355,7 +355,7 @@ h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-body); font-weight: 
 .count { background: var(--color-ink); color: var(--color-bg-soft); border-radius: var(--radius-pill); font-size: var(--font-size-body-s); padding: 0 var(--space-2); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); margin-bottom: var(--space-3); }
 .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-2) var(--space-3); }
-.filters label, .modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.filters label, .filters .date-label, .modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .columns { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
 .check { display: flex !important; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 select, input[type="date"], input[type="text"], input:not([type]) { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; }

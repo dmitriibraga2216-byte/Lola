@@ -124,8 +124,8 @@ const fmtCell = (v: unknown) => v === null || v === undefined ? '—' : typeof v
       <div class="presets" role="group">
         <button v-for="p in (['today', '7d', '30d', 'quarter', 'custom'] as const)" :key="p" :class="['chip', { on: preset === p }]" @click="applyPreset(p)">{{ t(`reports.preset.${p}`) }}</button>
       </div>
-      <label>{{ t('reports.from') }} <input v-model="filters.from" type="date" @change="preset = 'custom'; load()"></label>
-      <label>{{ t('reports.to') }} <input v-model="filters.to" type="date" @change="preset = 'custom'; load()"></label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('reports.from') }}</label> <input id="dt-filters-from" v-model="filters.from" type="date" @change="preset = 'custom'; load()"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('reports.to') }}</label> <input id="dt-filters-to" v-model="filters.to" type="date" @change="preset = 'custom'; load()"></div>
       <label v-if="report === 'progress'">{{ t('reports.subject') }}
         <select v-model="subject"><option v-for="s in ['course', 'program', 'quiz', 'workshop', 'meetup', 'survey']" :key="s" :value="s">{{ t(`reports.subjects.${s}`) }}</option></select>
       </label>
@@ -249,7 +249,7 @@ h2 { margin: var(--space-4) 0 var(--space-2); font-weight: 800; font-size: var(-
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .filters { display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; margin-bottom: var(--space-4); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-3); background: var(--color-bg-soft); color: var(--color-ink); }
 .export { margin-left: auto; font-weight: 800; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); text-decoration: none; }
 .kpis { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }

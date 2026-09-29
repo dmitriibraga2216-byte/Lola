@@ -123,9 +123,9 @@ async function submit(extra: { transferPrimary?: boolean, isPrimary?: boolean } 
         </select>
       </label>
 
-      <label>{{ t('orgStructure.startedAt') }}
-        <input v-model="form.startedAt" class="field" type="date">
-      </label>
+      <div class="date-label"><label for="dt-form-startedAt">{{ t('orgStructure.startedAt') }}</label>
+        <input id="dt-form-startedAt" v-model="form.startedAt" class="field" type="date">
+      </div>
 
       <fieldset v-if="asksNamed" class="group">
         <legend>{{ t('orgStructure.makeNamed') }}</legend>
@@ -155,7 +155,7 @@ async function submit(extra: { transferPrimary?: boolean, isPrimary?: boolean } 
 .overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--color-ink) 45%, transparent); display: grid; place-items: center; padding: var(--space-3); z-index: 30; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); width: min(480px, 100%); box-sizing: border-box; }
 .modal h2 { margin: 0; font-weight: 900; overflow-wrap: anywhere; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .modal .check { display: flex; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 .modal .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0; }
 .group { border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); display: grid; gap: var(--space-2); margin: 0; }

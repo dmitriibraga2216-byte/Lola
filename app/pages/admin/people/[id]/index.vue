@@ -357,7 +357,7 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
         </select>
         <select v-if="roleForm.scopeType === 'location'" v-model="roleForm.scopeId" :aria-label="t('person.location')"><option value="" disabled>{{ t('person.location') }}</option><option v-for="l in refsData.locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>
         <select v-if="roleForm.scopeType === 'org_unit'" v-model="roleForm.scopeId" :aria-label="t('person.orgUnitScope')"><option value="" disabled>{{ t('person.orgUnitScope') }}</option><option v-for="u in refsData.units" :key="u.id" :value="u.id">{{ u.name }}</option></select>
-        <label class="field"><span>{{ t('person.validUntil') }}</span><input v-model="roleForm.validUntil" type="date"></label>
+        <div class="field date-label"><label for="dt-roleForm-validUntil"><span>{{ t('person.validUntil') }}</span></label><input id="dt-roleForm-validUntil" v-model="roleForm.validUntil" type="date"></div>
         <label class="field grow"><span>{{ t('person.reason') }}</span><input v-model="roleForm.reason" type="text" maxlength="500" :placeholder="t('person.reasonHint')"></label>
         <button type="submit" class="btn primary" :disabled="!roleForm.roleCode || busy">{{ t('person.addRole') }}</button>
       </form>
@@ -458,7 +458,7 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
       <form class="modal" role="dialog" aria-modal="true" @submit.prevent="archiveConfirm">
         <h2>{{ t('person.archiveTitle') }}</h2>
         <label>{{ t('person.archiveReason') }}<select v-model="archiveForm.reason"><option v-for="r in ['dismissal', 'transfer', 'mistake', 'other']" :key="r" :value="r">{{ t(`person.reasons.${r}`) }}</option></select></label>
-        <label>{{ t('person.archiveDate') }}<input v-model="archiveForm.date" type="date"></label>
+        <div class="date-label"><label for="dt-archiveForm-date">{{ t('person.archiveDate') }}</label><input id="dt-archiveForm-date" v-model="archiveForm.date" type="date"></div>
         <label>{{ t('person.comment') }}<input v-model="archiveForm.comment" maxlength="500"></label>
         <label class="check"><input v-model="archiveForm.closeSessions" type="checkbox"> {{ t('person.archiveClose') }}</label>
         <label class="check"><input v-model="archiveForm.cancelLearning" type="checkbox"> {{ t('person.archiveCancel') }}</label>
@@ -545,7 +545,7 @@ td { padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--colo
 .invite-url { font-size: var(--font-size-body-s); word-break: break-all; }
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 40%); display: grid; place-items: center; padding: var(--space-3); z-index: 20; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); width: min(440px, 100%); box-sizing: border-box; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .modal .check { display: flex; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 .modal-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }
 </style>

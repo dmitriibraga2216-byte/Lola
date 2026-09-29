@@ -130,8 +130,8 @@ const title = computed(() => report.value?.task?.title ?? report.value?.subject?
         <div class="chips" role="group" :aria-label="t('taskReport.preset.label')">
           <button v-for="p in (['all', '7d', '30d', 'quarter'] as const)" :key="p" :class="['chip', { on: preset === p }]" @click="applyPreset(p)">{{ t(`taskReport.preset.${p}`) }}</button>
         </div>
-        <label class="field">{{ t('reports.from') }} <input v-model="filters.from" type="date" @input="preset = 'all'"></label>
-        <label class="field">{{ t('reports.to') }} <input v-model="filters.to" type="date" @input="preset = 'all'"></label>
+        <div class="field date-label"><label for="dt-filters-from">{{ t('reports.from') }}</label> <input id="dt-filters-from" v-model="filters.from" type="date" @input="preset = 'all'"></div>
+        <div class="field date-label"><label for="dt-filters-to">{{ t('reports.to') }}</label> <input id="dt-filters-to" v-model="filters.to" type="date" @input="preset = 'all'"></div>
         <label class="field">{{ t('reports.col.location') }}
           <select v-model="filters.locationId"><option value="">{{ t('reports.allLocations') }}</option><option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>
         </label>

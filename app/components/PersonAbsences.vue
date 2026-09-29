@@ -345,12 +345,12 @@ async function saveExtend() {
                 <option v-for="k in ABSENCE_KINDS" :key="k" :value="k">{{ t(`absence.kind.${k}`) }}</option>
               </select>
             </label>
-            <label class="label">{{ t('absence.record.from') }}
-              <input v-model="recordForm.dateFrom" type="date" class="field" required :aria-invalid="!!rangeError">
-            </label>
-            <label class="label">{{ t('absence.record.to') }}
-              <input v-model="recordForm.dateTo" type="date" class="field" required :min="recordForm.dateFrom || undefined" :aria-invalid="!!rangeError">
-            </label>
+            <div class="label date-label"><label for="dt-recordForm-dateFrom">{{ t('absence.record.from') }}</label>
+              <input id="dt-recordForm-dateFrom" v-model="recordForm.dateFrom" type="date" class="field" required :aria-invalid="!!rangeError">
+            </div>
+            <div class="label date-label"><label for="dt-recordForm-dateTo">{{ t('absence.record.to') }}</label>
+              <input id="dt-recordForm-dateTo" v-model="recordForm.dateTo" type="date" class="field" required :min="recordForm.dateFrom || undefined" :aria-invalid="!!rangeError">
+            </div>
             <label class="label">{{ t('absence.record.status') }}
               <select v-model="recordForm.status" class="field">
                 <!-- Подтверждённое не становится снова «Заплановано» (§4) -->
@@ -413,9 +413,9 @@ async function saveExtend() {
               <span><b>{{ m.title }}</b> — {{ t('absence.missed.line', { due: formatShortDate(m.dueAt), from: fmtDate(m.absence.dateFrom), to: fmtDate(m.absence.dateTo) }) }}</span>
               <button v-if="card.can.extend && extending?.enrollmentId !== m.enrollmentId" type="button" class="btn ghost small" @click="startExtend(m.enrollmentId)">{{ t('absence.missed.move') }}</button>
               <form v-if="extending?.enrollmentId === m.enrollmentId" class="inline" @submit.prevent="saveExtend">
-                <label class="label">{{ t('absence.missed.newDate') }}
-                  <input v-model="extending.dueAt" type="date" class="field" required>
-                </label>
+                <div class="label date-label"><label for="dt-extending-dueAt">{{ t('absence.missed.newDate') }}</label>
+                  <input id="dt-extending-dueAt" v-model="extending.dueAt" type="date" class="field" required>
+                </div>
                 <label class="label grow">{{ t('absence.missed.reason') }}
                   <input v-model="extending.reason" class="field" maxlength="300">
                 </label>

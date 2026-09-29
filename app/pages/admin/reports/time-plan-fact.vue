@@ -111,8 +111,8 @@ const typeLabel = (s: LearningTimeSubjectType) => t(`timeNorms.type.${s}`)
       <label>{{ t('timeNorms.filter.minSample') }}
         <input v-model="filters.minSample" class="field narrow" type="number" min="0" step="1" inputmode="numeric">
       </label>
-      <label>{{ t('timeNorms.filter.from') }} <input v-model="filters.from" class="field" type="date"></label>
-      <label>{{ t('timeNorms.filter.to') }} <input v-model="filters.to" class="field" type="date"></label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('timeNorms.filter.from') }}</label> <input id="dt-filters-from" v-model="filters.from" class="field" type="date"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('timeNorms.filter.to') }}</label> <input id="dt-filters-to" v-model="filters.to" class="field" type="date"></div>
       <button class="btn primary" type="submit" :disabled="busy">{{ t('timeNorms.filter.apply') }}</button>
       <button v-if="filters.subjectId" class="btn ghost" type="button" @click="resetElement">{{ t('timeNorms.editor.close') }}</button>
     </form>
@@ -187,7 +187,7 @@ const typeLabel = (s: LearningTimeSubjectType) => t(`timeNorms.type.${s}`)
 <style scoped>
 .banner { margin-bottom: var(--space-3); }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .filters .field { width: auto; min-width: 140px; padding: var(--space-2) var(--space-3); }
 .filters .field.narrow { min-width: 0; width: 96px; }
 .tiles { margin-bottom: var(--space-2); }

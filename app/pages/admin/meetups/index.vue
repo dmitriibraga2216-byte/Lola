@@ -67,8 +67,8 @@ const missing = computed(() => [
         <input v-model="form.tags" class="field grow" :placeholder="t('mt.tagsPh')">
       </div>
       <div class="row">
-        <label class="sub">{{ t('mt.start') }} <input v-model="form.startsAt" class="field" type="datetime-local" data-testid="mt-start"></label>
-        <label class="sub">{{ t('mt.end') }} <input v-model="form.endsAt" class="field" type="datetime-local" data-testid="mt-end"></label>
+        <div class="sub date-label"><label for="dt-form-startsAt">{{ t('mt.start') }}</label> <input id="dt-form-startsAt" v-model="form.startsAt" class="field" type="datetime-local" data-testid="mt-start"></div>
+        <div class="sub date-label"><label for="dt-form-endsAt">{{ t('mt.end') }}</label> <input id="dt-form-endsAt" v-model="form.endsAt" class="field" type="datetime-local" data-testid="mt-end"></div>
       </div>
       <div v-if="form.kind !== 'webinar'" class="row">
         <select v-model="form.locationId" class="field"><option value="">{{ t('mt.noLocation') }}</option><option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>

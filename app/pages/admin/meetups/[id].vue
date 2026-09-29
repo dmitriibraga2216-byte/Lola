@@ -115,8 +115,8 @@ const fmt = (d: string | null) => d ? formatTime(new Date(d), { hour: '2-digit',
         <details open>
           <summary class="sub">{{ t('mt.newSession') }}</summary>
           <div class="row">
-            <label class="sub">{{ t('mt.start') }} <input v-model="sForm.startsAt" class="field" type="datetime-local"></label>
-            <label class="sub">{{ t('mt.end') }} <input v-model="sForm.endsAt" class="field" type="datetime-local"></label>
+            <div class="sub date-label"><label for="dt-sForm-startsAt">{{ t('mt.start') }}</label> <input id="dt-sForm-startsAt" v-model="sForm.startsAt" class="field" type="datetime-local"></div>
+            <div class="sub date-label"><label for="dt-sForm-endsAt">{{ t('mt.end') }}</label> <input id="dt-sForm-endsAt" v-model="sForm.endsAt" class="field" type="datetime-local"></div>
           </div>
           <div class="row">
             <select v-model="sForm.locationId" class="field"><option value="">{{ t('mt.noLocation') }}</option><option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option></select>

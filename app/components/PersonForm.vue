@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { isIanaTimezone } from '#shared/domain/activity'
+import { PLACEMENT_FIX_LINK, placementHints, type PlacementField } from '#shared/domain/personPlacement'
 
 /** Форма человека (docs/16 §6.1): создание — с размещением, редактирование — только профиль. */
 const props = defineProps<{ initial?: Record<string, unknown> | null, mode: 'create' | 'edit', busy?: boolean }>()
@@ -31,14 +32,20 @@ const form = reactive({
 const timezones = computed(() => typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [])
 const errors = ref<Record<string, string>>({})
 
+/**
+ * Справочники грузятся независимо: раньше один упавший запрос в Promise.all оставлял пустыми
+ * все списки, а catch молчал (замечание 27.09). Неудавшийся — помечается, форма это говорит.
+ */
+const failed = reactive<Record<'cities' | 'units' | 'locations' | 'positions', boolean>>({ cities: false, units: false, locations: false, positions: false })
+const loaded = ref(false)
 onMounted(async () => {
-  try {
-    const [cities, levels, positions, locations, tags, tree] = await Promise.all([
-      api<Ref[]>('/refs/cities'), api<Ref[]>('/refs/position-levels'), api<Ref[]>('/refs/positions'), api<Loc[]>('/refs/locations'), api<Ref[]>('/refs/tags?scope=user'), api<{ units: Unit[] }>('/org/tree'),
-    ])
-    Object.assign(refs, { cities, levels, positions, locations, tags, units: tree.units })
-  }
-  catch { /* справочники не загрузились — селекты пустые */ }
+  const [cities, levels, positions, locations, tags, tree] = await Promise.allSettled([
+    api<Ref[]>('/refs/cities'), api<Ref[]>('/refs/position-levels'), api<Ref[]>('/refs/positions'), api<Loc[]>('/refs/locations'), api<Ref[]>('/refs/tags?scope=user'), api<{ units: Unit[] }>('/org/tree'),
+  ])
+  const ok = <T,>(r: PromiseSettledResult<T>, fallback: T): T => (r.status === 'fulfilled' ? r.value : fallback)
+  Object.assign(refs, { cities: ok(cities, []), levels: ok(levels, []), positions: ok(positions, []), locations: ok(locations, []), tags: ok(tags, []), units: ok(tree, { units: [] }).units })
+  Object.assign(failed, { cities: cities.status === 'rejected', positions: positions.status === 'rejected', locations: locations.status === 'rejected', units: tree.status === 'rejected' })
+  loaded.value = true
 })
 const flatUnits = computed(() => {
   const out: { id: string, name: string, depth: number }[] = []
@@ -47,6 +54,16 @@ const flatUnits = computed(() => {
   return out
 })
 const unitLocations = computed(() => form.orgUnitId ? refs.locations.filter(l => l.orgUnitId === form.orgUnitId) : refs.locations)
+/** Почему список обязательного поля пуст и где его заполнить (docs/16 §6.1). */
+const hints = computed(() => (loaded.value && props.mode === 'create'
+  ? placementHints({ failed, cities: refs.cities.length, units: flatUnits.value.length, locations: refs.locations.length, unitLocations: unitLocations.value.length, orgUnitSelected: !!form.orgUnitId, positions: refs.positions.length })
+  : {}))
+const unitName = computed(() => flatUnits.value.find(u => u.id === form.orgUnitId)?.name ?? '')
+function hintText(field: PlacementField): string {
+  const h = hints.value[field]
+  if (h === 'unit_has_no_locations') return t('person.placementHint.unitHasNoLocations', { unit: unitName.value })
+  return h ? t(`person.placementHint.${h}.${field}`) : ''
+}
 watch(() => form.locationId, (id) => { const l = refs.locations.find(x => x.id === id); if (l && !form.cityId && l.cityId) form.cityId = l.cityId })
 
 const today = new Date().toISOString().slice(0, 10)
@@ -126,11 +143,11 @@ function submit() {
 
     <fieldset>
       <legend>{{ t('person.placements') }}</legend>
-      <label>{{ t('person.city') }} <template v-if="mode === 'create'">*</template><select v-model="form.cityId" :aria-invalid="!!errors.cityId"><option value="">—</option><option v-for="r in refs.cities" :key="r.id" :value="r.id">{{ r.name }}</option></select><small v-if="errors.cityId" class="err">{{ errors.cityId }}</small></label>
+      <label>{{ t('person.city') }} <template v-if="mode === 'create'">*</template><select v-model="form.cityId" :aria-invalid="!!errors.cityId"><option value="">—</option><option v-for="r in refs.cities" :key="r.id" :value="r.id">{{ r.name }}</option></select><small v-if="errors.cityId" class="err">{{ errors.cityId }}</small><small v-if="hints.cityId" class="hint" :data-hint="hints.cityId">{{ hintText('cityId') }}<NuxtLink v-if="hints.cityId !== 'load_failed'" :to="PLACEMENT_FIX_LINK.cityId">{{ t(PLACEMENT_FIX_LINK.cityId.startsWith('/admin/org') ? 'person.placementHint.toOrg' : 'person.placementHint.toRefs') }}</NuxtLink></small></label>
       <template v-if="mode === 'create'">
-        <label>{{ t('person.orgUnit') }} *<select v-model="form.orgUnitId" :aria-invalid="!!errors.orgUnitId"><option value="">—</option><option v-for="u in flatUnits" :key="u.id" :value="u.id">{{ '· '.repeat(u.depth) }}{{ u.name }}</option></select><small v-if="errors.orgUnitId" class="err">{{ errors.orgUnitId }}</small></label>
-        <label>{{ t('person.location') }} *<select v-model="form.locationId" :aria-invalid="!!errors.locationId"><option value="">—</option><option v-for="l in unitLocations" :key="l.id" :value="l.id">{{ l.name }}</option></select><small v-if="errors.locationId" class="err">{{ errors.locationId }}</small></label>
-        <label>{{ t('person.position') }} *<select v-model="form.positionId" :aria-invalid="!!errors.positionId"><option value="">—</option><option v-for="r in refs.positions" :key="r.id" :value="r.id">{{ r.name }}</option></select><small v-if="errors.positionId" class="err">{{ errors.positionId }}</small></label>
+        <label>{{ t('person.orgUnit') }} *<select v-model="form.orgUnitId" :aria-invalid="!!errors.orgUnitId"><option value="">—</option><option v-for="u in flatUnits" :key="u.id" :value="u.id">{{ '· '.repeat(u.depth) }}{{ u.name }}</option></select><small v-if="errors.orgUnitId" class="err">{{ errors.orgUnitId }}</small><small v-if="hints.orgUnitId" class="hint" :data-hint="hints.orgUnitId">{{ hintText('orgUnitId') }}<NuxtLink v-if="hints.orgUnitId !== 'load_failed'" :to="PLACEMENT_FIX_LINK.orgUnitId">{{ t(PLACEMENT_FIX_LINK.orgUnitId.startsWith('/admin/org') ? 'person.placementHint.toOrg' : 'person.placementHint.toRefs') }}</NuxtLink></small></label>
+        <label>{{ t('person.location') }} *<select v-model="form.locationId" :aria-invalid="!!errors.locationId"><option value="">—</option><option v-for="l in unitLocations" :key="l.id" :value="l.id">{{ l.name }}</option></select><small v-if="errors.locationId" class="err">{{ errors.locationId }}</small><small v-if="hints.locationId" class="hint" :data-hint="hints.locationId">{{ hintText('locationId') }}<NuxtLink v-if="hints.locationId !== 'load_failed'" :to="PLACEMENT_FIX_LINK.locationId">{{ t(PLACEMENT_FIX_LINK.locationId.startsWith('/admin/org') ? 'person.placementHint.toOrg' : 'person.placementHint.toRefs') }}</NuxtLink></small></label>
+        <label>{{ t('person.position') }} *<select v-model="form.positionId" :aria-invalid="!!errors.positionId"><option value="">—</option><option v-for="r in refs.positions" :key="r.id" :value="r.id">{{ r.name }}</option></select><small v-if="errors.positionId" class="err">{{ errors.positionId }}</small><small v-if="hints.positionId" class="hint" :data-hint="hints.positionId">{{ hintText('positionId') }}<NuxtLink v-if="hints.positionId !== 'load_failed'" :to="PLACEMENT_FIX_LINK.positionId">{{ t(PLACEMENT_FIX_LINK.positionId.startsWith('/admin/org') ? 'person.placementHint.toOrg' : 'person.placementHint.toRefs') }}</NuxtLink></small></label>
         <label>{{ t('person.level') }}<select v-model="form.positionLevelId"><option value="">—</option><option v-for="r in refs.levels" :key="r.id" :value="r.id">{{ r.name }}</option></select></label>
       </template>
       <label>{{ t('person.externalId') }}<input v-model="form.externalId" maxlength="100"></label>
@@ -165,6 +182,8 @@ input, select, textarea { font: inherit; border: 1px solid var(--color-bg-line);
 input[type="checkbox"], input[type="radio"] { width: auto; }
 input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--color-coral); }
 .err { color: var(--color-coral-ink); }
+.hint { color: var(--color-ink-muted); display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.hint a { color: var(--color-ink); font-weight: 700; }
 .sub { color: var(--color-ink-faint); }
 .actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }
 .btn { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: var(--color-bg-soft); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }

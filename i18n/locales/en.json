@@ -294,6 +294,23 @@
     "year": "Year"
   },
   "person": {
+    "placementHint": {
+      "empty": {
+        "cityId": "The city list is empty — add a city first.",
+        "orgUnitId": "No departments yet — create one in the org structure.",
+        "locationId": "No locations yet — add one in the org structure.",
+        "positionId": "The position list is empty — add a position first."
+      },
+      "load_failed": {
+        "cityId": "Could not load cities — reload the page.",
+        "orgUnitId": "Could not load departments — reload the page.",
+        "locationId": "Could not load locations — reload the page.",
+        "positionId": "Could not load positions — reload the page."
+      },
+      "unitHasNoLocations": "Department “{unit}” has no locations — pick another department or add a location.",
+      "toRefs": "Open dictionaries →",
+      "toOrg": "Open org structure →"
+    },
     "profile": "Profile",
     "phone": "Phone",
     "hiredAt": "Hired",

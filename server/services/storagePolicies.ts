@@ -15,9 +15,9 @@ import { recordAudit } from './audit'
  * доказательства при запуске функции нельзя». Здесь же живёт срок корзины — `trash_days`
  * (docs/v2/44 §8: предварительно 30 дней, строкой, а не константой в коде).
  *
- * Исполнение политик по расписанию (`storage.retention_scan`, §11) в PR-36 не входит — план
- * называет только `storage.purge`. Экран, сохранение и сухой прогон работают уже сейчас:
- * включённая политика ждёт задачи, а не наоборот.
+ * Ночной `storage.retention_scan` (§11, `storageScans.ts`) политики **не исполняет**, а
+ * прогоняет всухую и пишет отчёт (`docs/v2/44` §11 Р-S1): безвозвратное удаление ждёт решения
+ * владельца продукта (`44` §8).
  */
 
 export interface Ctx { tenantId: string, actorId: string }
@@ -82,6 +82,20 @@ export async function trashDaysFor(tx: TenantTx, tenantId: string, origin: strin
   return (await read()) ?? DEFAULT_TRASH_DAYS
 }
 
+/**
+ * Точка отсчёта срока файла `m` (§3.3 `anchor`) — одна для сухого прогона на экране и для
+ * ночного `storage.retention_scan` (`storageScans.ts`): иначе экран и отчёт задачи разошлись бы.
+ */
+export function retentionAnchorSql(anchor: StorageRetentionAnchor) {
+  return anchor === 'created_at'
+    ? sql`m.created_at`
+    : anchor === 'last_accessed_at'
+      ? sql`coalesce(m.last_accessed_at, m.created_at)`
+      : sql`(select max(s.reviewed_at) from workshop_submissions s
+              where s.status in ('accepted', 'rejected')
+                and jsonb_path_exists(s.files, 'lax $[*] ? (@.mediaId == $id)', jsonb_build_object('id', m.id::text)))`
+}
+
 export interface DryRunResult { files: number, bytes: number, evidenceCount: number }
 
 /**
@@ -96,13 +110,7 @@ export interface DryRunResult { files: number, bytes: number, evidenceCount: num
 export async function retentionDryRun(ctx: Ctx, input: RetentionDryRun): Promise<DryRunResult> {
   if (input.action === 'notify_only' || input.keepMonths == null) return { files: 0, bytes: 0, evidenceCount: 0 }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
-    const anchor = input.anchor === 'created_at'
-      ? sql`m.created_at`
-      : input.anchor === 'last_accessed_at'
-        ? sql`coalesce(m.last_accessed_at, m.created_at)`
-        : sql`(select max(s.reviewed_at) from workshop_submissions s
-                where s.status in ('accepted', 'rejected')
-                  and jsonb_path_exists(s.files, 'lax $[*] ? (@.mediaId == $id)', jsonb_build_object('id', m.id::text)))`
+    const anchor = retentionAnchorSql(input.anchor)
     const [r] = await tx.execute(sql`
       select count(*)::int as files, coalesce(sum(m.bytes), 0)::bigint as bytes,
              count(*) filter (where m.is_evidence)::int as evidence

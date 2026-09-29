@@ -91,7 +91,18 @@ function resetFilters() {
   loadFiles()
 }
 
-onMounted(() => { loadSummary(); loadFiles() })
+/** Отчёты ночных задач (§7.4 п. 2, §7.6 п. 3) — сухой прогон, ничего не помечено и не удалено (`44` §11 Р-S1). */
+interface Scans {
+  orphans: { at: string, report: { found: number, bytes: number } } | null
+  objects: { at: string, report: { unregistered: { files: number, bytes: number }, missing: { files: number, bytes: number } } } | null
+}
+const scans = ref<Scans | null>(null)
+async function loadScans() {
+  try { scans.value = await api<Scans>('/storage/scans') }
+  catch { scans.value = null } // отчёты — подсказка, без них экран работает
+}
+
+onMounted(() => { loadSummary(); loadFiles(); loadScans() })
 
 // ── Сводка ──
 const GIB = 1024 ** 3
@@ -205,6 +216,14 @@ const showIncrease = ref(false)
       <p v-if="summary.otherShare > 0.05" class="note sun">{{ t('storage.otherShareHigh', { pct: otherPct }) }}</p>
       <p v-if="summary.otherFiles" class="help">{{ t('storage.unclassified', { n: summary.otherFiles }) }}</p>
       <p v-if="summary.trash.files" class="help">{{ t('storage.trashSummary', { n: summary.trash.files, size: formatBytes(summary.trash.bytes) }) }}</p>
+      <p v-if="scans?.orphans?.report.found" class="help">
+        {{ t('storage.scans.orphans', { n: scans.orphans.report.found, size: formatBytes(scans.orphans.report.bytes) }) }}
+        <small>· {{ t('storage.scans.dryRunAt', { date: formatDateTime(scans.orphans.at) }) }}</small>
+      </p>
+      <p v-if="scans?.objects && (scans.objects.report.unregistered.files || scans.objects.report.missing.files)" class="help">
+        {{ t('storage.scans.objects', { extra: scans.objects.report.unregistered.files, missing: scans.objects.report.missing.files }) }}
+        <small>· {{ t('storage.scans.dryRunAt', { date: formatDateTime(scans.objects.at) }) }}</small>
+      </p>
     </section>
     <p v-else-if="summaryError" class="error-text" role="alert">{{ summaryError }}</p>
 

@@ -403,6 +403,7 @@
 | POST | `/storage/deletions/:id/confirm`, `/cancel` | `{acknowledged:true, reason?, confirmPhrase?}` — при доказательствах причина 10–500 и «ВИДАЛИТИ» (422 `reason_required`, 422 `confirm_phrase_mismatch`); исполняет заявку, сертификаты — в `skipped` с `not_deletable`; 409 `deletion.not_draft` |
 | GET/PUT | `/storage/retention-policies` | строка на `origin`, скоуп `storage.policy`; первое включение удаляющей политики — только с `dryRunConfirmed` (422 `dry_run_required`), `keepEvidence=false` — с `acknowledgeEvidence` (422 `evidence_ack_required`) |
 | POST | `/storage/retention-policies/dry-run` | `{origin, keepMonths, anchor, action, keepEvidence}` → `{files, bytes, evidenceCount}` — «Буде звільнено приблизно {size}» |
+| GET | `/storage/scans` | последние отчёты ночных задач `storage.retention_scan`, `.orphan_scan`, `.object_reconcile` → `{retention, orphans, objects}` (каждый `{at, report}` или `null`); все три — сухой прогон, ничего не удаляют и не помечают (`v2/44` §11 Р-S1); скоуп `storage.view` |
 
 Ограничения (`11` Г-11.4): изображение ≤ 10 МБ, документ ≤ 50 МБ, аудио ≤ 100 МБ,
 видео ≤ 500 МБ, на ресурс суммарно ≤ 1 ГБ; mime — allowlist; ключ — uuid,

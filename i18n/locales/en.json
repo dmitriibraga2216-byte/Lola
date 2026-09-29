@@ -6969,7 +6969,7 @@
     },
     "policies": {
       "intro": "All policies stay off until you turn them on. Turning one on for the first time requires a dry run and confirming the volume.",
-      "notScheduled": "Settings are saved already; running the policies on a schedule comes with a separate update — until then no files are deleted by policy.",
+      "notScheduled": "Every night the policies run as a dry run: the report below shows what they would delete. No files are deleted by policy yet — permanent deletion awaits the product owner’s decision.",
       "enabled": "On",
       "keep": "Keep, months",
       "keepError": "From 1 to 120 months",
@@ -6998,6 +6998,16 @@
       "dryRunRequired": "Run a dry run first and confirm the volume",
       "evidenceAckRequired": "Confirm you understand that grade evidence will be deleted",
       "confirmVolume": "I have checked the dry run volume"
+    },
+    "scans": {
+      "retentionTitle": "Policy dry run {date}",
+      "retentionTotal": "The policies would delete {n} files ({size}). Nothing was deleted.",
+      "retentionPolicy": "{n} files ({size}), {batch} per run; {upcoming} more are due soon",
+      "drafts": "Submission drafts older than 30 days: {n} files ({size})",
+      "staleUploads": "Unfinished uploads older than a day: {n} files ({size})",
+      "orphans": "Found {n} files without an owner, {size}. Review them in the registry — they are not deleted automatically.",
+      "objects": "Storage check: {extra} objects without a record, {missing} records without an object. Nothing was changed — contact platform support.",
+      "dryRunAt": "dry run {date}"
     }
   },
   "tables": {

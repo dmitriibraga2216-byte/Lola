@@ -829,6 +829,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | POST | `/content-reporters/:userId/mute` \| `/unmute` | приостановить и вернуть приём жалоб (`content_issue.mute`): `{until, reason}`; снятие обнуляет серию `spam` |
 | POST | `/content-reporters/:userId/unmute` | `[дополнено, PR-40, по факту кода]` вернуть приём жалоб (`content_issue.mute`), тела нет → `{ok: true}`; не-uuid и чужой человек — `404`. Отдельной строкой, потому что ячейку `…/mute` \| `/unmute` выше разбор путей `routes-parity` читает как один `…/mute` |
 | GET | `/reports/content-quality` | «Якість контенту» (`content_issue.view`): `groupBy=element\|course`, фильтры §9, `drillKey` — заявители строки единым каркасом, `format=xlsx` (`report.export`) |
+| GET | `/reports/content-issues/:kind` | `[дополнено, content-feedback-tails]` остальные четыре отчёта `36` §9: `complaints` «Скарги», `authors` «Дисципліна авторів», `questions` «Проблемні питання» (`content_issue.view`, керівник — по своим точкам) и `reporters` «Заявники» (`content_issue.mute`, только администратор). Фильтры `from`, `to`, `issueType`, `targetType`, `categoryId`, `status`, `locationId`; `format=xlsx` у всех, `format=csv` — только у «Скарг» (`report.export`). Ответ — `{rows}`; неизвестный `:kind` — `404` |
 
 Контекст жалобы собирает **сервер** (`36` §7.1): клиент присылает только то, чего сервер знать
 не может (позиция плеера, прокрутка, вьюпорт, время на устройстве), а версию материала, версию

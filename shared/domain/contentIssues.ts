@@ -417,3 +417,16 @@ export function availableActions(i: {
     && (i.rescoreState === 'needed' || i.rescoreState === 'in_progress')) out.push('rescore')
   return out
 }
+
+/** Доля в процентах с одним знаком; пустой знаменатель — `null`, а не 0 (нечего делить). */
+export function pctOf(part: number, whole: number): number | null {
+  if (!whole) return null
+  return Math.round(part / whole * 1000) / 10
+}
+
+/** Порог «проблемного вопроса» отчёта §9: доля ошибок выше 80 % при жалобах — почти наверняка сломан. */
+export const SUSPECT_WRONG_PCT = 80
+
+export function isSuspectQuestion(wrongPct: number | null, complaints: number): boolean {
+  return complaints > 0 && wrongPct !== null && wrongPct > SUSPECT_WRONG_PCT
+}

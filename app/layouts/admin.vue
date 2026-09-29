@@ -136,6 +136,7 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/development/reports', label: t('admin.nav.devReports'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/knowledge/report', label: t('admin.nav.kbReport'), show: hasScope('knowledge.manage'), group: t('admin.group.moduleReports') },
     { to: '/admin/reports/content-quality', label: t('admin.nav.contentQuality'), show: hasScope('content_issue.view'), group: t('admin.group.moduleReports') },
+    { to: '/admin/reports/content-issues', label: t('admin.nav.contentIssueReports'), show: hasScope('content_issue.view'), group: t('admin.group.moduleReports') },
     // «План і факт часу» (docs/v2/37 §9.3, §5.3): обезличенный отчёт и нормы времени — автору и тем, кто видит отклонение (§2)
     { to: '/admin/reports/time-plan-fact', label: t('admin.nav.timePlanFact'), show: hasScope('time.metrics.view') || hasScope('course.edit'), group: t('admin.group.moduleReports') },
   ] },

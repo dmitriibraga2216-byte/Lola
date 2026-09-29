@@ -168,7 +168,8 @@
       "storage": "Storage",
       "platformAnnouncements": "Lola announcements",
       "interviews": "Interview scenarios",
-      "aiSettings": "Artificial intelligence"
+      "aiSettings": "Artificial intelligence",
+      "contentIssueReports": "Content issues: reports"
     },
     "section": {
       "learning": "Learning",
@@ -7890,5 +7891,64 @@
       "details": "details",
       "empty": "No entries yet"
     }
+  },
+  "contentIssueReports": {
+    "title": "Content issues: reports",
+    "hint": "Card export, assignee discipline, problem questions and reporters",
+    "tab": {
+      "complaints": "Issues",
+      "authors": "Author discipline",
+      "questions": "Problem questions",
+      "reporters": "Reporters"
+    },
+    "from": "From",
+    "to": "To",
+    "apply": "Show",
+    "anyStatus": "Any status",
+    "exportXlsx": "Export XLSX",
+    "exportCsv": "Export CSV",
+    "empty": "Nothing matches these filters",
+    "loading": "Loading…",
+    "retry": "Try again",
+    "unassigned": "Unassigned",
+    "inactive": "inactive",
+    "yes": "yes",
+    "no": "no",
+    "suspect": "Almost certainly broken",
+    "trusted": "trusted",
+    "overdueDays": "{n} d",
+    "col": {
+      "reportedAt": "Date",
+      "type": "Type",
+      "element": "Item",
+      "track": "Track",
+      "version": "Version",
+      "reporters": "Reporters",
+      "status": "Status",
+      "resolution": "Resolution",
+      "assignee": "Assignee",
+      "dueAt": "Due",
+      "overdue": "Overdue",
+      "rescore": "Rescore",
+      "open": "Open",
+      "overdueNow": "Overdue",
+      "decided": "Decided in period",
+      "avgDays": "Days to fix",
+      "rejectedPct": "Rejected, %",
+      "question": "Question",
+      "quizzes": "Test",
+      "complaints": "Complaints",
+      "answers": "Answers",
+      "wrongPct": "Wrong, %",
+      "person": "Name",
+      "location": "Location",
+      "reports": "Submitted",
+      "confirmed": "Confirmed",
+      "rejected": "Rejected",
+      "spam": "Empty",
+      "confirmedPct": "Confirmed, %",
+      "muted": "Muted until"
+    },
+    "rescoreMixed": "Mixed"
   }
 }

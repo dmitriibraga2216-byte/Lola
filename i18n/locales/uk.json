@@ -168,7 +168,8 @@
       "storage": "Сховище",
       "platformAnnouncements": "Оголошення Lola",
       "interviews": "Сценарії співбесід",
-      "aiSettings": "Штучний інтелект"
+      "aiSettings": "Штучний інтелект",
+      "contentIssueReports": "Скарги: звіти"
     },
     "section": {
       "learning": "Навчання",
@@ -7890,5 +7891,64 @@
       "details": "деталі",
       "empty": "Записів ще немає"
     }
+  },
+  "contentIssueReports": {
+    "title": "Скарги: звіти",
+    "hint": "Вивантаження карточок, дисципліна відповідальних, проблемні питання й заявники",
+    "tab": {
+      "complaints": "Скарги",
+      "authors": "Дисципліна авторів",
+      "questions": "Проблемні питання",
+      "reporters": "Заявники"
+    },
+    "from": "З",
+    "to": "По",
+    "apply": "Показати",
+    "anyStatus": "Будь-який статус",
+    "exportXlsx": "Вивантажити XLSX",
+    "exportCsv": "Вивантажити CSV",
+    "empty": "За цими фільтрами нічого немає",
+    "loading": "Завантаження…",
+    "retry": "Спробувати ще раз",
+    "unassigned": "Не призначено",
+    "inactive": "неактивний",
+    "yes": "так",
+    "no": "ні",
+    "suspect": "Майже напевно зламане",
+    "trusted": "надійний",
+    "overdueDays": "{n} дн.",
+    "col": {
+      "reportedAt": "Дата",
+      "type": "Тип",
+      "element": "Елемент",
+      "track": "Трек",
+      "version": "Версія",
+      "reporters": "Заявників",
+      "status": "Статус",
+      "resolution": "Резолюція",
+      "assignee": "Відповідальний",
+      "dueAt": "Термін",
+      "overdue": "Прострочення",
+      "rescore": "Перерахунок",
+      "open": "Відкритих",
+      "overdueNow": "Прострочено",
+      "decided": "Вирішено за період",
+      "avgDays": "Днів до виправлення",
+      "rejectedPct": "Частка відхилених, %",
+      "question": "Питання",
+      "quizzes": "Тест",
+      "complaints": "Скарг",
+      "answers": "Відповідей",
+      "wrongPct": "Невірних, %",
+      "person": "ПІБ",
+      "location": "Точка",
+      "reports": "Подано",
+      "confirmed": "Підтверджено",
+      "rejected": "Відхилено",
+      "spam": "Порожніх",
+      "confirmedPct": "Підтверджено, %",
+      "muted": "Призупинено до"
+    },
+    "rescoreMixed": "Різне"
   }
 }

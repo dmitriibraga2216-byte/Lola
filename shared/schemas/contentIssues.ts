@@ -368,3 +368,85 @@ export interface ContentQualityReport {
   /** Детализация строки единым каркасом колонок (docs/22 §13.3): кто пожаловался. */
   people: Record<string, unknown>[] | null
 }
+
+// ── Четыре отчёта модуля (§9): «Скарги», «Дисципліна авторів», «Проблемні питання», «Заявники» ──
+
+export const CONTENT_ISSUE_REPORT_KINDS = ['complaints', 'authors', 'questions', 'reporters'] as const
+export type ContentIssueReportKind = typeof CONTENT_ISSUE_REPORT_KINDS[number]
+
+export const contentIssueReportQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  categoryId: z.string().uuid().optional(),
+  issueType: z.enum(CONTENT_ISSUE_TYPES).optional(),
+  targetType: z.enum(CONTENT_ISSUE_TARGET_TYPES).optional(),
+  status: z.enum(CONTENT_ISSUE_STATUSES).optional(),
+  locationId: z.string().uuid().optional(),
+  includeArchived: queryBool.optional(),
+  /** «Скарги» — CSV и XLSX (§9); остальные три — XLSX, как «Якість контенту». */
+  format: z.enum(['json', 'csv', 'xlsx']).default('json'),
+})
+export type ContentIssueReportQuery = z.infer<typeof contentIssueReportQuerySchema>
+
+/** «Скарги» — плоская выгрузка карточек (§9). */
+export interface ComplaintRow {
+  id: string
+  reportedAt: string
+  issueType: ContentIssueType
+  targetType: ContentIssueTargetType
+  title: string
+  tracks: IssueTrack[]
+  contentVersion: number
+  reporters: number
+  status: ContentIssueStatus
+  resolution: ContentIssueResolution | null
+  assignee: string | null
+  dueAt: string | null
+  /** Полных суток просрочки у открытой карточки; 0 — в срок, null — срока нет или закрыта. */
+  overdueDays: number | null
+  rescoreState: ContentIssueRescoreState
+}
+
+/** «Дисципліна авторів» — строка на ответственного (§9). */
+export interface AuthorDisciplineRow {
+  assigneeId: string | null
+  name: string | null
+  active: boolean | null
+  open: number
+  overdue: number
+  decided: number
+  avgDaysToFix: number | null
+  /** Доля отклонённых среди решённых за период, %. */
+  rejectedPct: number | null
+}
+
+/** «Проблемні питання» — только `bad_question`/`wrong_key` на вопрос (§9). */
+export interface ProblemQuestionRow {
+  questionId: string
+  title: string
+  quizzes: IssueTrack[]
+  complaints: number
+  cards: number
+  answers: number
+  /** Доля неверных ответов, % — по проверенным ответам всех попыток. */
+  wrongPct: number | null
+  rescoreState: ContentIssueRescoreState | 'mixed'
+  /** Доля ошибок выше 80 % и есть жалобы — «почти наверняка сломан» (§9). */
+  suspect: boolean
+}
+
+/** «Заявники» — только администратору (§9). */
+export interface ReporterRow {
+  userId: string
+  fullName: string
+  location: string | null
+  reports: number
+  confirmed: number
+  rejected: number
+  spam: number
+  confirmedPct: number | null
+  trusted: boolean
+  mutedUntil: string | null
+}
+
+export interface ContentIssueReport<R> { rows: R[] }

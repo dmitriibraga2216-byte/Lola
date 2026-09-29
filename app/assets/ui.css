@@ -74,6 +74,15 @@
 /* Формы */
 .field { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); background: var(--color-bg); color: var(--color-ink); padding: var(--space-3) var(--space-4); }
 .field:focus { outline: 2px solid var(--color-ink); outline-offset: 0; }
+/*
+ * Поля даты и времени (iPad/iPhone Safari). У пустого поля даты в Safari нет плейсхолдера, а с ним —
+ * и собственной ширины и высоты: во flex-строке фильтров оно сжимается в пустую «таблетку», дата
+ * после выбора видна обрезанной, а время у datetime-local не помещается вовсе. Минимум — по ширине
+ * значения; через vw, а не %, потому что поле обычно внутри <label> без своей ширины, и процент
+ * считается от самого поля. На 320px две даты «з — по» всё ещё встают в строку (2 × 40vw).
+ */
+input[type="date"], input[type="month"] { min-width: min(9em, 40vw); min-height: 2.75em; }
+input[type="datetime-local"] { min-width: min(13em, 80vw); min-height: 2.75em; }
 .label { display: block; font-weight: 800; font-size: var(--font-size-body-s); margin: 0 0 var(--space-1); }
 .help { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: var(--space-1) 0 0; }
 

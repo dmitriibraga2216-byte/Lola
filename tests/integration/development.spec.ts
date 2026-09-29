@@ -174,6 +174,19 @@ describe('этап 7: компетенции, профиль должности,
     await req.decideRequest(asAdmin(), 'external', small.id, 'approve', { isHr: false })
     expect(await req.decideRequest(asAdmin(), 'external', small.id, 'approve', { isHr: true })).toMatchObject({ ok: true, status: 'approved' })
   })
+
+  it('очередь «Заявки» (GET /development/requests/pending) открывается у руководителя, HR и администратора — без 500', async () => {
+    const r = await req.createExternalRequest(asBarista(), { title: 'Черга заявок iPad', format: 'online', cost: 100 })
+    for (const opts of [{ isHr: false }, { isHr: true }, { isHr: true, isAdmin: true }]) {
+      const q = await req.pendingRequests(asAdmin(), opts)
+      expect(q.external.map(x => x.id)).toContain(r.id)
+      expect(Array.isArray(q.career)).toBe(true)
+    }
+    await req.decideRequest(asAdmin(), 'external', r.id, 'approve', { isHr: false })
+    // manager_approved — уже не очередь руководителя, но очередь HR
+    expect((await req.pendingRequests(asAdmin(), { isHr: false })).external.map(x => x.id)).not.toContain(r.id)
+    expect((await req.pendingRequests(asAdmin(), { isHr: true })).external.map(x => x.id)).toContain(r.id)
+  })
 })
 
 describe('docs/19 часть 2: матрица, курс → компетенция, закрытие ИПР, профиль → люди, согласование целей', () => {

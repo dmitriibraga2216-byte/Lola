@@ -32,7 +32,7 @@ const people = ref<{ id: string, fullName: string }[]>([])
 const creating = ref(false)
 const form = reactive({ userId: '', periodFrom: '', periodTo: '', summary: '' })
 async function openCreate() {
-  if (!people.value.length) people.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 300 } }).catch(() => [])
+  if (!people.value.length) people.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).catch(() => [])
   Object.assign(form, { userId: '', periodFrom: '', periodTo: '', summary: '' })
   creating.value = true
 }

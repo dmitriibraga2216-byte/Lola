@@ -173,7 +173,8 @@ watch(tab, (v) => { if (v === 'schedule') loadSchedule() })
           <button type="button" :class="['chip', { on: scopeFilter === 'custom' }]" @click="scopeFilter = 'custom'">{{ t('ntpl.scopePlural.custom') }} · {{ scopeCounts.custom }}</button>
         </div>
         <div class="row"><input v-model="search" class="field grow" :placeholder="t('ntpl.search')"><label class="check"><input v-model="onlyChanged" type="checkbox"> {{ t('ntpl.onlyChanged') }}</label></div>
-        <table class="table">
+        <!-- шесть колонок шаблонов шире портретного iPad (834px) — прокрутка таблицы, а не всей страницы -->
+        <div class="table-wrap"><table class="table">
           <thead><tr><th>{{ t('ntpl.code') }}</th><th>{{ t('ntpl.col.email') }}</th><th>{{ t('ntpl.col.telegram') }}</th><th>{{ t('ntpl.scopeCol') }}</th><th>{{ t('ntpl.col.updated') }}</th><th /></tr></thead>
           <tbody>
             <tr v-for="c in codes" :key="c" :class="{ on: editing === c }">
@@ -193,7 +194,7 @@ watch(tab, (v) => { if (v === 'schedule') loadSchedule() })
               <td><button class="chip" @click="edit(c)">{{ t('common.edit') }}</button></td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </section>
       <aside v-if="editing" class="card editor">
         <h2><code>{{ form.code }}</code></h2>

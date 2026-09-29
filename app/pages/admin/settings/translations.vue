@@ -129,7 +129,8 @@ const pages = computed(() => Math.max(1, Math.ceil(total.value / PER)))
 .filters { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-3); }
 .short { width: auto; }
 .grow { flex: 1 1 200px; }
-.hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+/* overflow + clip: у WebKit поле файла не сжимается до 1px — без обрезки кнопка «Вибрати файл» выходит за правый край и на iPad страница едет вбок */
+.hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); }
 .cell-btn { font: inherit; border: none; background: transparent; text-align: left; cursor: pointer; color: var(--color-ink); padding: 0; }
 tr.changed td:first-child { border-left: 3px solid var(--color-teal); }
 .acts { white-space: nowrap; }

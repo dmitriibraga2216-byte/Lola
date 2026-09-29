@@ -53,7 +53,7 @@ onMounted(async () => {
   await load()
   if (!canEdit.value) return
   const [p, r, c] = await Promise.all([
-    api<{ id: string, fullName: string }[]>('/people', { query: { limit: 300 } }).catch(() => []),
+    api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).catch(() => []),
     api<{ id: string, name: string }[]>('/settings/roles').catch(() => []),
     api<{ id: string, name: string }[]>('/course-categories').catch(() => []),
   ])

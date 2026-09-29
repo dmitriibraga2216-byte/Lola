@@ -30,6 +30,13 @@ async function create() {
   } catch (err) { error.value = apiErrorOf(err).message }
 }
 const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', timeStyle: 'short' })
+/** Чего не хватает, чтобы «Зберегти» стала активной: пять условий, и без подсказки не угадать, какое не выполнено. */
+const missing = computed(() => [
+  form.title.length < 3 && t('mt.need.title'),
+  form.kind !== 'event' && !form.announcement.trim() && t('mt.need.announcement'),
+  (!form.startsAt || !form.endsAt) && t('mt.need.time'),
+  !form.trainerIds.length && t('mt.need.trainer'),
+].filter(Boolean).join(', '))
 </script>
 <template>
   <div>
@@ -88,7 +95,8 @@ const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', tim
         <select v-if="form.requiresFeedback" v-model="form.feedbackSurveyId" class="field"><option value="">{{ t('mt.defaultSurvey') }}</option><option v-for="s in surveys" :key="s.id" :value="s.id">{{ s.title }}</option></select>
       </div>
       <textarea v-model="form.program" class="field" rows="3" :placeholder="t('mt.programPh')" />
-      <button class="primary" :disabled="form.title.length < 3 || !form.startsAt || !form.endsAt || !form.trainerIds.length || (form.kind !== 'event' && !form.announcement.trim())" data-testid="mt-create" @click="create">{{ t('common.save') }}</button>
+      <button class="primary" :disabled="!!missing" :aria-describedby="missing ? 'mt-missing' : undefined" data-testid="mt-create" @click="create">{{ t('common.save') }}</button>
+      <p v-if="missing" id="mt-missing" class="sub" data-testid="mt-missing">{{ t('common.fillToContinue', { fields: missing }) }}</p>
     </section>
   </div>
 </template>

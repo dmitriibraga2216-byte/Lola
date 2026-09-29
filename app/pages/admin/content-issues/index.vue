@@ -67,7 +67,7 @@ async function load() {
 async function loadOptions() {
   const [c, p, l] = await Promise.all([
     api<{ id: string, title: string }[]>('/courses').catch(() => []),
-    api<{ id: string, fullName: string }[]>('/people', { query: { limit: 300 } }).catch(() => []),
+    api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).catch(() => []),
     api<{ id: string, name: string }[]>('/refs/locations').catch(() => []),
   ])
   courses.value = c.map(x => ({ id: x.id, name: x.title }))

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { careerRequests, externalTrainingRequests, positions, users } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -64,9 +64,9 @@ export async function pendingRequests(ctx: Ctx, opts: { isHr: boolean, isAdmin?:
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const st = opts.isAdmin ? ['new', 'manager_approved', 'hr_approved'] : opts.isHr ? ['new', 'manager_approved'] : ['new']
     const external = await tx.select({ r: externalTrainingRequests, fullName: users.fullName }).from(externalTrainingRequests).innerJoin(users, eq(users.id, externalTrainingRequests.userId))
-      .where(sql`${externalTrainingRequests.status} = any(${st})`).orderBy(desc(externalTrainingRequests.createdAt))
+      .where(inArray(externalTrainingRequests.status, st)).orderBy(desc(externalTrainingRequests.createdAt))
     const career = await tx.select({ r: careerRequests, fullName: users.fullName, targetPosition: positions.name }).from(careerRequests).innerJoin(users, eq(users.id, careerRequests.userId)).innerJoin(positions, eq(positions.id, careerRequests.targetPositionId))
-      .where(sql`${careerRequests.status} = any(${st})`).orderBy(desc(careerRequests.createdAt))
+      .where(inArray(careerRequests.status, st)).orderBy(desc(careerRequests.createdAt))
     return { external: external.map(x => ({ ...x.r, fullName: x.fullName })), career: career.map(x => ({ ...x.r, fullName: x.fullName, targetPosition: x.targetPosition })) }
   })
 }

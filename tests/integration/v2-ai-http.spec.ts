@@ -116,4 +116,45 @@ describe.skipIf(!BUILT)('ИИ: профили и журнал по HTTP', () => 
     expect(Array.isArray(body.data.items)).toBe(true)
     expect((await send(adm, 'GET', '/ai/calls?cursor=not-a-cursor')).status).toBe(400)
   })
+
+  it('журнал: фильтр стоимости, выгрузка файлом; отчёты ШИ — только с ai.audit (30 §5.6, §9.3–§9.5)', async () => {
+    const emp = await login(EMPLOYEE_PHONE)
+    for (const path of ['/ai/calls/export', '/reports/ai/quality', '/reports/ai/review-help', '/reports/ai/cost']) {
+      expect((await send(emp, 'GET', path)).status, path).toBe(403)
+    }
+    const adm = await login(ADMIN_PHONE)
+    expect((await send(adm, 'GET', '/ai/calls?costMin=100')).status).toBe(200)
+    expect((await send(adm, 'GET', '/ai/calls?costMin=-5')).status).toBe(400)
+    const xlsx = await send(adm, 'GET', '/ai/calls/export?format=xlsx')
+    expect(xlsx.status).toBe(200)
+    expect(xlsx.headers.get('content-type')).toContain('spreadsheetml')
+    const csv = await send(adm, 'GET', '/reports/ai/cost?format=csv')
+    expect(csv.status).toBe(200)
+    expect(csv.headers.get('content-type')).toContain('text/csv')
+    for (const name of ['quality', 'review-help', 'cost']) {
+      const res = await send(adm, 'GET', `/reports/ai/${name}?from=2026-01-01`)
+      expect(res.status, name).toBe(200)
+      expect(((await res.json()) as { data: { rows: unknown[] } }).data.rows).toEqual(expect.any(Array))
+    }
+    expect((await send(adm, 'GET', '/reports/ai/unknown')).status).toBe(404)
+    expect((await send(adm, 'GET', '/reports/ai/cost?from=вчора')).status).toBe(422)
+  })
+
+  it('переоценка: без interview.override — 403; причина обязательна — 422; нет кандидата — 404 (30 §10)', async () => {
+    const emp = await login(EMPLOYEE_PHONE)
+    expect((await send(emp, 'POST', '/candidates/00000000-0000-0000-0000-000000000000/interview/rescore', { reason: 'Оновили промпт оцінки' })).status).toBe(403)
+    // Маршруты кандидатов гасятся вместе с рекрутингом (`candidates.disabled`) — включаем на время проверки
+    const was = (await admin`select candidates_enabled from tenants where id = ${tenantId}`)[0]!.candidates_enabled as boolean
+    await admin`update tenants set candidates_enabled = true where id = ${tenantId}`
+    try {
+      const adm = await login(ADMIN_PHONE)
+      const bad = await send(adm, 'POST', '/candidates/00000000-0000-0000-0000-000000000000/interview/rescore', { reason: 'ні' })
+      expect(bad.status).toBe(422)
+      const missing = await send(adm, 'POST', '/candidates/00000000-0000-0000-0000-000000000000/interview/rescore', { reason: 'Оновили промпт оцінки' })
+      expect(missing.status).toBe(404)
+    }
+    finally {
+      await admin`update tenants set candidates_enabled = ${was} where id = ${tenantId}`
+    }
+  })
 })

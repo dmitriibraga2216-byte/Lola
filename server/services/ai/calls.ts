@@ -3,7 +3,8 @@ import { aiCalls, aiProviders } from '../../db/schema'
 import { withTenant, type TenantTx } from '../../utils/withTenant'
 import { keysetAfter, keysetAt } from '../../utils/keyset'
 import { KEYSETS, encodeKeyset } from '../../../shared/domain/keyset'
-import type { AiCallsQuery } from '../../../shared/schemas/ai'
+import type { AiCallsExportQuery, AiCallsQuery } from '../../../shared/schemas/ai'
+import { recordAudit } from '../audit'
 
 /**
  * Журнал ИИ-вызовов тенанта (`docs/v2/30` §2, §5.6, §10 `GET /ai/calls`; план `45` PR-27) и
@@ -43,6 +44,17 @@ export interface AiCallRow {
   output: unknown
 }
 
+/** Фильтры журнала — одни для экрана и выгрузки (`30` §5.6). */
+function callsFilter(q: Omit<AiCallsQuery, 'cursor' | 'limit'>) {
+  return and(
+    q.purpose ? eq(aiCalls.purpose, q.purpose) : undefined,
+    q.status ? eq(aiCalls.status, q.status) : undefined,
+    q.from ? gte(aiCalls.createdAt, sql`${q.from}::date`) : undefined,
+    q.to ? lt(aiCalls.createdAt, sql`(${q.to}::date + 1)`) : undefined,
+    q.costMin !== undefined ? gte(aiCalls.costMinor, q.costMin) : undefined,
+  )
+}
+
 export async function listAiCalls(ctx: { tenantId: string, actorId: string }, q: AiCallsQuery): Promise<{ items: AiCallRow[], nextCursor: string | null }> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const after = keysetAfter(KEYSETS.aiCalls, q.cursor, [aiCalls.createdAt, sql`${aiCalls.id}::text`], 'desc')
@@ -56,13 +68,7 @@ export async function listAiCalls(ctx: { tenantId: string, actorId: string }, q:
       billed: aiCalls.billed, tryNo: aiCalls.tryNo, output: aiCalls.output, cursorAt: keysetAt(aiCalls.createdAt),
     }).from(aiCalls)
       .leftJoin(aiProviders, eq(aiProviders.id, aiCalls.providerId))
-      .where(and(
-        q.purpose ? eq(aiCalls.purpose, q.purpose) : undefined,
-        q.status ? eq(aiCalls.status, q.status) : undefined,
-        q.from ? gte(aiCalls.createdAt, sql`${q.from}::date`) : undefined,
-        q.to ? lt(aiCalls.createdAt, sql`(${q.to}::date + 1)`) : undefined,
-        after,
-      ))
+      .where(and(callsFilter(q), after))
       .orderBy(desc(aiCalls.createdAt), desc(sql`${aiCalls.id}::text`))
       .limit(q.limit + 1)
     const page = rows.slice(0, q.limit)
@@ -72,6 +78,46 @@ export async function listAiCalls(ctx: { tenantId: string, actorId: string }, q:
         ...r, createdAt: createdAt.toISOString(), finishedAt: finishedAt?.toISOString() ?? null,
       })),
       nextCursor: last ? encodeKeyset(KEYSETS.aiCalls, [last.cursorAt, String(last.id)]) : null,
+    }
+  })
+}
+
+/** Сколько строк уходит в один файл журнала: больше — сузьте период (`docs/22` §7). */
+export const AI_CALLS_EXPORT_MAX = 10_000
+
+/**
+ * «Вивантажити журнал» (`30` §5.6): те же фильтры, что у экрана, новые сверху, не больше
+ * `AI_CALLS_EXPORT_MAX` строк. **Выхода модели в файле нет** — в нём обоснования и цитаты
+ * ответов кандидатов, а файл живёт вне системы и обезличиванию (`30` §7.9) не подчиняется;
+ * экран показывает выход там, где его можно стереть. Факт выгрузки — в `audit_log` с числом строк
+ * (как у выгрузки собеседований, `30` §9.6).
+ */
+export async function exportAiCalls(ctx: { tenantId: string, actorId: string }, q: AiCallsExportQuery): Promise<{ rows: Record<string, unknown>[], truncated: boolean }> {
+  return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const rows = await tx.select({
+      id: aiCalls.id, createdAt: aiCalls.createdAt, finishedAt: aiCalls.finishedAt, purpose: aiCalls.purpose, promptKey: aiCalls.promptKey,
+      promptVersion: aiCalls.promptVersion, providerName: aiProviders.name, modelName: aiCalls.modelName, modelVersion: aiCalls.modelVersion,
+      refKind: aiCalls.refKind, refId: aiCalls.refId, status: aiCalls.status, errorCode: aiCalls.errorCode, httpStatus: aiCalls.httpStatus,
+      latencyMs: aiCalls.latencyMs, tokensIn: aiCalls.tokensIn, tokensOut: aiCalls.tokensOut, costMinor: aiCalls.costMinor, currency: aiCalls.currency,
+      usageAxis: aiCalls.usageAxis, billed: aiCalls.billed, tryNo: aiCalls.tryNo,
+    }).from(aiCalls)
+      .leftJoin(aiProviders, eq(aiProviders.id, aiCalls.providerId))
+      .where(callsFilter(q))
+      .orderBy(desc(aiCalls.createdAt), desc(aiCalls.id))
+      .limit(AI_CALLS_EXPORT_MAX + 1)
+    const page = rows.slice(0, AI_CALLS_EXPORT_MAX)
+    await recordAudit(tx, {
+      tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'ai.calls.export', entity: 'ai_calls', entityId: null,
+      after: { rows: page.length, format: q.format, filters: { purpose: q.purpose ?? null, status: q.status ?? null, from: q.from ?? null, to: q.to ?? null, costMin: q.costMin ?? null } },
+    })
+    return {
+      truncated: rows.length > AI_CALLS_EXPORT_MAX,
+      rows: page.map(r => ({
+        id: r.id, created_at: r.createdAt.toISOString(), finished_at: r.finishedAt?.toISOString() ?? null, purpose: r.purpose,
+        prompt_key: r.promptKey, prompt_version: r.promptVersion, provider: r.providerName, model_name: r.modelName, model_version: r.modelVersion,
+        ref_kind: r.refKind, ref_id: r.refId, status: r.status, error_code: r.errorCode, http_status: r.httpStatus, latency_ms: r.latencyMs,
+        tokens_in: r.tokensIn, tokens_out: r.tokensOut, cost_minor: r.costMinor, currency: r.currency, usage_axis: r.usageAxis, billed: r.billed, try_no: r.tryNo,
+      })),
     }
   })
 }

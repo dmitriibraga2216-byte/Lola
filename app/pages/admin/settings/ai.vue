@@ -2,16 +2,36 @@
 /**
  * «Налаштування → Штучний інтелект» (docs/v2/30-ai-interview.md §5.6, §7.13, §7.16; план `45` PR-29).
  *
- * Два блоки: перемикач функції «Підказка ШІ для перевіряючих» (вимкнена за замовчуванням —
- * вмикаючи її, простір вирішує надсилати відповіді співробітників моделі) і черга вибіркової
- * перевірки якості: висновок програми поруч із рішенням людини, вердикт — про програму, а не про
- * людину. Профілі провайдерів і журнал викликів мають API (PR-27), їхній екран — окремо.
+ * Три вкладки (§5.6): «Функції» — строк ШІ-підписки (`ai_until`, `35`), перемикач «Підказка ШІ
+ * для перевіряючих» (вимкнена за замовчуванням — вмикаючи її, простір вирішує надсилати відповіді
+ * співробітників моделі) і черга вибіркової перевірки якості: висновок програми поруч із
+ * рішенням людини, вердикт — про програму, а не про людину; «Профілі провайдерів»
+ * (`AiProvidersPanel`) і «Журнал викликів» (`AiCallsPanel`). Вкладка — у `?tab=`, щоб посилання
+ * на журнал відкривало журнал. Звіти ШІ (§9.3–§9.5) — `/admin/reports/ai`.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'ai.audit' })
 
 const { t } = useI18n()
 const { api } = useApi()
-const { formatDateTime } = useFormat()
+const { hasScope } = useAuth()
+const { formatDate, formatDateTime } = useFormat()
+const route = useRoute()
+const router = useRouter()
+
+const TABS = ['features', 'providers', 'calls'] as const
+type Tab = typeof TABS[number]
+const tab = computed<Tab>({
+  get: () => (TABS as readonly string[]).includes(String(route.query.tab)) ? route.query.tab as Tab : 'features',
+  set: v => router.replace({ query: { ...route.query, tab: v === 'features' ? undefined : v } }),
+})
+
+/** Строк ШІ-підписки — з тарифу (`35`); бачить той, кому відкрито «Тариф» (`billing.view`). */
+const subscription = ref<{ aiUntil: string | null, aiStatus: string } | null>(null)
+async function loadSubscription() {
+  if (!hasScope('billing.view')) return
+  try { subscription.value = (await api<{ subscription: { aiUntil: string | null, aiStatus: string } }>('/billing/summary')).subscription }
+  catch { subscription.value = null }
+}
 
 interface Item {
   id: string
@@ -53,7 +73,7 @@ async function loadQueue(more = false) {
 }
 
 onMounted(async () => {
-  await loadSettings()
+  await Promise.all([loadSettings(), loadSubscription()])
   await loadQueue()
 })
 watch(status, () => loadQueue())
@@ -87,8 +107,23 @@ const quoteOf = (item: Item) => ((s(item).evidence as { quote?: string }[] | und
   <div>
     <PageHeader :title="t('aiSettings.title')" :subtitle="t('aiSettings.hint')" />
 
+    <div class="chips tabs" role="tablist" :aria-label="t('aiSettings.title')">
+      <button v-for="k in TABS" :key="k" role="tab" type="button" :aria-selected="tab === k" :class="['chip', { on: tab === k }]" @click="tab = k">{{ t(`aiSettings.tab.${k}`) }}</button>
+    </div>
+
+    <AiProvidersPanel v-if="tab === 'providers'" />
+    <AiCallsPanel v-else-if="tab === 'calls'" />
+    <template v-else>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+
+    <section v-if="subscription" class="panel form">
+      <h2 class="h2">{{ t('aiSettings.subscription.title') }}</h2>
+      <p>{{ subscription.aiUntil ? t('aiSettings.subscription.until', { date: formatDate(subscription.aiUntil) }) : t('aiSettings.subscription.none') }}</p>
+      <p class="sub">{{ t(`aiSettings.subscription.status.${subscription.aiStatus}`) }} · <NuxtLink to="/admin/settings/billing">{{ t('aiSettings.subscription.manage') }}</NuxtLink></p>
+    </section>
+
+    <p class="sub reports-link"><NuxtLink to="/admin/reports/ai">{{ t('aiSettings.reportsLink') }}</NuxtLink></p>
 
     <section class="panel form">
       <label class="row">
@@ -127,6 +162,7 @@ const quoteOf = (item: Item) => ((s(item).evidence as { quote?: string }[] | und
       </article>
       <button v-if="cursor" class="btn ghost small" type="button" @click="loadQueue(true)">{{ t('aiSettings.more') }}</button>
     </section>
+    </template>
   </div>
 </template>
 
@@ -138,6 +174,8 @@ const quoteOf = (item: Item) => ((s(item).evidence as { quote?: string }[] | und
 .h2 { margin: 0 0 var(--space-1); font-size: var(--font-size-body); font-weight: 900; }
 .sub { margin: 0; color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
 .chips { margin: var(--space-3) 0; }
+.tabs { margin-top: 0; }
+.reports-link { margin-bottom: var(--space-3); }
 .item { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
 .item p { margin: 0; }
 .quote { font-style: italic; }

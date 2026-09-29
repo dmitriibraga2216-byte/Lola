@@ -73,6 +73,32 @@ function jump(e: Evidence) {
 
 const confidenceText = (w: string | null) => (w ? t(`interview.card.confidenceWord.${w}`) : '—')
 
+// ── «Переоцінити» (§10 `POST …/interview/rescore`): модель дивиться ще раз, рішення — за людиною ──
+// Лише остання сесія: людина ще не оспорювала жодного критерію (інакше новий бал зсунув би те, з
+// чим вона не погодилась), згоду не відкликано. Не вдалося — попередня оцінка лишається.
+const rescoring = ref(false)
+const rescoreForm = reactive({ reason: '', error: '', busy: false })
+const rescoreNotice = ref('')
+
+function canRescore(s: Session, i: number): boolean {
+  return i === 0 && hasScope('interview.override') && !s.redactedAt && ['scored', 'needs_human'].includes(s.state)
+    && s.degradedReason !== 'consent_withdrawn' && !s.criteria.some(c => c.humanAt)
+}
+
+async function saveRescore() {
+  rescoreForm.error = ''
+  rescoreForm.busy = true
+  try {
+    const r = await api<{ state: string }>(`/candidates/${props.candidateId}/interview/rescore`, { method: 'POST', body: { reason: rescoreForm.reason } })
+    rescoreNotice.value = t(r.state === 'scored' ? 'interview.card.rescore.done' : 'interview.card.rescore.doneNeedsHuman')
+    rescoring.value = false
+    rescoreForm.reason = ''
+    await load()
+  }
+  catch (err) { rescoreForm.error = apiErrorOf(err).message }
+  finally { rescoreForm.busy = false }
+}
+
 // ── «Не погоджуюсь» (§6.4, §7.3, §12 п. 6): балл человека рядом с оценкой програми ──────────
 interface OverrideForm { value: number | null, comment: string, major: boolean, error: string, busy: boolean }
 const overriding = ref<string | null>(null)
@@ -130,7 +156,7 @@ async function saveOverride(c: Criterion) {
         {{ t('interview.history.declined') }}: {{ d.alternative ? t(`interview.history.alternative.${d.alternative}`) : '—' }} · {{ formatDate(d.decidedAt) }}
       </p>
 
-      <article v-for="s in data.sessions" :key="s.id" class="card stack">
+      <article v-for="(s, si) in data.sessions" :key="s.id" class="card stack">
         <header class="row between">
           <div>
             <h3 class="h3">{{ s.scenarioName }}</h3>
@@ -153,6 +179,22 @@ async function saveOverride(c: Criterion) {
           {{ t('interview.card.needsHuman') }}<template v-if="s.needsHumanReason">: {{ s.needsHumanReason }}</template>
         </p>
         <p v-if="s.redactedAt" class="note sun">{{ t('interview.card.redacted', { date: formatDate(s.redactedAt) }) }}</p>
+        <p v-if="si === 0 && rescoreNotice" class="note teal" role="status">{{ rescoreNotice }}</p>
+        <template v-if="canRescore(s, si)">
+          <button v-if="!rescoring" class="btn ghost small self-start" type="button" @click="rescoring = true; rescoreNotice = ''">{{ t('interview.card.rescore.open') }}</button>
+          <form v-else class="override" @submit.prevent="saveRescore">
+            <strong>{{ t('interview.card.rescore.title') }}</strong>
+            <p class="sub">{{ t('interview.card.rescore.hint') }}</p>
+            <label>{{ t('interview.card.rescore.reason') }}
+              <textarea v-model="rescoreForm.reason" class="field" rows="3" minlength="10" maxlength="1000" required />
+            </label>
+            <p v-if="rescoreForm.error" class="error-text" role="alert">{{ rescoreForm.error }}</p>
+            <div class="row">
+              <button class="btn primary small" type="submit" :disabled="rescoreForm.busy">{{ rescoreForm.busy ? t('interview.card.rescore.busy') : t('interview.card.rescore.save') }}</button>
+              <button class="btn ghost small" type="button" :disabled="rescoreForm.busy" @click="rescoring = false">{{ t('interview.card.rescore.cancel') }}</button>
+            </div>
+          </form>
+        </template>
 
         <section v-if="s.criteria.some(c => c.value !== null)" class="stack">
           <h4 class="h4">{{ t('interview.card.criteria') }}</h4>
@@ -258,5 +300,6 @@ audio { width: 100%; }
 .override { display: grid; gap: var(--space-2); border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-3); }
 .override label { display: grid; gap: var(--space-1); }
 .override .row { display: flex; }
+.self-start { justify-self: start; align-self: flex-start; }
 .num { max-width: 8rem; }
 </style>

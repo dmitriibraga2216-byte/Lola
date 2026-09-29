@@ -84,16 +84,42 @@ export const aiProviderUpdateSchema = z.object({
 }).strict()
 export type AiProviderUpdateInput = z.infer<typeof aiProviderUpdateSchema>
 
-/** Фильтры журнала ИИ-вызовов (`30` §5.6: назначение, статус, период). */
-export const aiCallsQuerySchema = z.object({
+/**
+ * Фильтры журнала ИИ-вызовов (`30` §5.6: назначение, статус, период, стоимость). Стоимость —
+ * нижняя граница `cost_minor` в минорных единицах валюты вызова («дорожче за …»).
+ */
+const aiCallsFilter = {
   purpose: z.enum(AI_PURPOSES).optional(),
   status: z.enum(AI_CALL_STATUSES).optional(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
+  costMin: z.number().int().min(0).max(100_000_000).optional(),
+}
+export const aiCallsQuerySchema = z.object({
+  ...aiCallsFilter,
   cursor: keysetCursorSchema(KEYSETS.aiCalls).optional(),
   limit: z.number().int().min(1).max(100).default(50),
 })
 export type AiCallsQuery = z.infer<typeof aiCallsQuerySchema>
+
+/** «Вивантажити журнал» (`30` §5.6) — те же фильтры, файл целиком без выхода модели. */
+export const aiCallsExportSchema = z.object({
+  ...aiCallsFilter,
+  format: z.enum(['xlsx', 'csv']).default('xlsx'),
+})
+export type AiCallsExportQuery = z.infer<typeof aiCallsExportSchema>
+
+/**
+ * Фильтры отчётов ИИ (`30` §9.3–§9.5): период по дате вызова или решения; у «Стоимости» —
+ * ещё роль вызова. Формат `json` — экран, `xlsx`/`csv` — те же строки файлом (`docs/22` §7).
+ */
+export const aiReportQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  purpose: z.enum(AI_PURPOSES).optional(),
+  format: z.enum(['json', 'xlsx', 'csv']).default('json'),
+}).strict()
+export type AiReportQuery = z.infer<typeof aiReportQuerySchema>
 
 // ── Перепроверка качества ИИ (`30` §7.16, §10 `/ai/quality-reviews`; план `45` PR-29) ────────
 

@@ -652,8 +652,9 @@
   воронка: канбан, найм, автоматика, отчёт, флаг тенанта» → «Что осталось».
 - `30`: `POST /interview-scenarios/:id/criteria/generate` — «2026-09-25 · Фаза 3, PR-28 —
   сценарий, согласие, прохождение собеседования…» → «Что осталось» (предложение критериев ИИ,
-  `30` §6.2); `POST /candidates/:id/interview/rescore` — «2026-09-25 · Фаза 3, PR-29 — Підсумок,
-  подсказки ментору, качество…» → «Что осталось».
+  `30` §6.2); ~~`POST /candidates/:id/interview/rescore` — «2026-09-25 · Фаза 3, PR-29 — Підсумок,
+  подсказки ментору, качество…» → «Что осталось»~~ — реализована ai-settings-screens (29.09, `v2/44`
+  Р-AI.2); нереализованных после неё 17.
 - `32`: `GET /org-structure/nodes/:id` — в `46` не упомянута; узел с держателями (`holders`)
   отдаёт `GET /org-structure/tree`.
 - `34`: `GET`/`POST /storage/addons` — «2026-09-24 · Фаза 3, PR-36 — квота, корзина, сроки
@@ -1008,7 +1009,9 @@ HR и администратор — весь тенант). Кандидат и
 | POST | `/ai/providers` | новый профиль (`ai.audit`), например запасной для цепочки `30` §7.12; `201`. Ошибки — как у `PUT` |
 | GET | `/ai/providers/:id` | профиль; чужой тенант — `404` |
 | PUT | `/ai/providers/:id` | правка переданных полей (`ai.audit`); `apiKey` — только на запись, `null` снимает свой ключ. `422 provider.retention_unknown` — расшифровка с неизвестным сроком хранения у поставщика (сквозная проверка 18); `422 provider.endpoint_required` \| `endpoint_invalid` (только `https`, не внутренняя сеть); `422 provider.region_comment_required`; `422 provider.fallback_self` \| `fallback_not_found` \| `fallback_purpose` \| `fallback_cycle` \| `fallback_depth`; `409 provider.code_taken` |
-| GET | `/ai/calls` | журнал вызовов модели (`ai.audit`): модель, версия промпта, статус, задержка, токены, стоимость, ось, выход; фильтры `purpose`, `status`, `from`, `to`; ключевой курсор (§4.1) |
+| GET | `/ai/calls` | журнал вызовов модели (`ai.audit`): модель, версия промпта, статус, задержка, токены, стоимость, ось, выход; фильтры `purpose`, `status`, `from`, `to`, `costMin` (нижняя граница `cost_minor`, минорные единицы); ключевой курсор (§4.1) |
+| GET | `/ai/calls/export` | «Вивантажити журнал» (`ai.audit` + `report.export`, `v2/30` §5.6): те же фильтры, `format=xlsx\|csv`, до 10 000 новейших строк (обрезанный — заголовок `X-Lola-Truncated: 1`); **без выхода модели**; факт выгрузки — `audit_log` `ai.calls.export` с числом строк (`v2/44` Р-AI.7) |
+| GET | `/reports/ai/:name` | отчёты ИИ (`ai.audit`, `v2/30` §9.3–§9.5): `quality` — по версии промпта и критерию, доли `match`/`minor`/`major` от решений человека, средняя уверенность, доля `needs_human`; `review-help` — по наставнику: проверок, подсказок, раскрыто, `agreement`, минуты с подсказкой и без; `cost` — по роли и дню: вызовы, токены, `cost_minor` по валютам, задержка, доля ошибок. Фильтры `from`, `to` (пояс тенанта), у `cost` — `purpose`; `format=json\|xlsx\|csv` (файл — `report.export`). Неизвестный отчёт — `404` (`v2/44` Р-AI.3…Р-AI.6) |
 
 Каждый вызов модели в продукте идёт через шлюз `server/services/ai/gateway.ts` и пишет строку
 `ai_calls` — в том числе «Створити з AI» вакансии и эмбеддинги поиска. Ручка, которая вызывает
@@ -1058,6 +1061,7 @@ HR и администратор — весь тенант). Кандидат и
 | Метод | Путь | Что делает |
 |---|---|---|
 | POST | `/candidates/:id/interview/criteria/:criterionId/override` | «Не погоджуюсь» (`interview.override`): `{humanValue, humanComment, major, expectedHumanAt}` — балл человека рядом с оценкой ИИ, расхождение `agreement`, новая `candidate_scores.kind = 'manual'` (строка `kind = 'ai'` не меняется), `major` или отметка — в `ai_quality_reviews`. Нет оценки ИИ — `409 session.not_scored`; чужое несогласие позже увиденного — `409 conflict` с `details.current`; вне шкалы — `422` |
+| POST | `/candidates/:id/interview/rescore` | переоценка собеседования (`interview.override`, `v2/30` §10): `{reason}` (10–1000 знаков, в `audit_log`). Последняя сессия кандидата в `scored`/`needs_human`; синхронно — ответ `{sessionId, aiCallId, state, aiScore, aiConfidence, charged}`; новая `candidate_scores.kind = 'ai'`, прежняя — в истории. Не удалась — прежняя оценка на месте: `503 ai.provider_failed`, `409 session.rescore_unexplained`, `409 limit_exceeded` (`details.axis`), `409 ai.unavailable`. `409 session.scoring` — модель в работе; `409 session.human_checked` — человек уже оспорил критерий; `409 session.not_rescorable`; невидимый кандидат — `404`. После нашего сбоя бесплатно, повтор состоявшейся оценки — одна операция `ai_interview_ops` (`v2/44` Р-AI.2) |
 | GET | `/candidate-summaries` | Підсумки (`summary.view`): фильтры `candidateId`, `state`, ключевой курсор (§4.1); роль с областью «точка» — только по своему кандидату |
 | POST | `/candidate-summaries` | «Сформувати» (`summary.edit`): `{candidateId, sections?}` — новая версия; прежняя отправленная по ссылке закрывается. Собирать не из чего — `409 summary.no_data` |
 | GET | `/candidate-summaries/:id` | документ, версия, состояние, план авто-отправки; ссылка кандидата — только с `summary.send` |

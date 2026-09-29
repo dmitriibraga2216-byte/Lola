@@ -6,6 +6,10 @@
  * добирає наступну сторінку **однієї** колонки, не перебудовуючи дошку (критерій §13 к. 12 —
  * 250 карток у колонці). Рахує теж сервер: скільки днів у статусі, чи маскувати контакти,
  * скільки місць лишилось за тарифом (CLAUDE.md п. 3).
+ *
+ * Список — теж сторінками за ключовим курсором (`meta.nextCursor`, docs/04-api.md §4.1), а фільтр
+ * за вакансією (§5.1, §5.2) діє і на дошку, і на список; вакансія — в адресі, щоб посилання
+ * «кандидати цієї вакансії» відкривалось уже відфільтрованим.
  */
 import type { CandidateState } from '#shared/enums'
 const { formatDate } = useFormat()
@@ -26,6 +30,7 @@ interface Card {
   statusId: string | null
   source: string | null
   recruiterName: string | null
+  vacancyTitle: string | null
   accessUntil: string | null
   daysInStatus: number | null
   scores: Record<string, string | null>
@@ -41,13 +46,19 @@ interface Column {
   cards: Card[]
   nextCursor: string | null
 }
-interface Meta { current: number, limit: number | null, limitLeft: number | null }
+interface Meta { current: number, limit: number | null, limitLeft: number | null, total?: number, nextCursor?: string | null }
 
 const view = ref<'board' | 'list'>(route.query.view === 'list' ? 'list' : 'board')
 const columns = ref<Column[]>([])
 const rows = ref<Card[]>([])
 const meta = ref<Meta | null>(null)
 const q = ref('')
+const vacancyId = ref(/^[0-9a-f-]{36}$/i.test(String(route.query.vacancyId ?? '')) ? String(route.query.vacancyId) : '')
+/** Вакансії для фільтра — лише тим, кому видно вакансії (`vacancy.view`); без права фільтра немає. */
+const vacancies = ref<{ id: string, title: string }[]>([])
+const nextCursor = ref<string | null>(null)
+const total = ref(0)
+const filters = () => ({ ...(q.value ? { q: q.value } : {}), ...(vacancyId.value ? { vacancyId: vacancyId.value } : {}) })
 const error = ref('')
 const busy = ref('')
 
@@ -56,25 +67,50 @@ async function load() {
   busy.value = 'load'
   try {
     if (view.value === 'board') {
-      const res = await api<{ columns: Column[], meta: Meta }>('/candidates/board', { query: { ...(q.value ? { q: q.value } : {}) } })
+      const res = await api<{ columns: Column[], meta: Meta }>('/candidates/board', { query: filters() })
       columns.value = res.columns
       meta.value = res.meta
     }
     else {
-      const res = await api<{ items: Card[], meta: Meta }>('/candidates', { query: { ...(q.value ? { q: q.value } : {}) } })
+      const res = await api<{ items: Card[], meta: Meta }>('/candidates', { query: filters() })
       rows.value = res.items
       meta.value = res.meta
+      nextCursor.value = res.meta.nextCursor ?? null
+      total.value = res.meta.total ?? res.items.length
     }
   }
   catch (err) { error.value = apiErrorOf(err).message }
   finally { busy.value = '' }
 }
-onMounted(load)
+onMounted(async () => {
+  await load()
+  vacancies.value = await api<{ items: { id: string, title: string }[] }>('/vacancies', { query: { limit: 200 } })
+    .then(r => r.items).catch(() => [])
+})
 
 watch(view, (v) => {
   router.replace({ query: { ...route.query, view: v } })
   load()
 })
+
+watch(vacancyId, (v) => {
+  router.replace({ query: { ...route.query, vacancyId: v || undefined } })
+  load()
+})
+
+/** «Показати ще» у списку — наступна сторінка за курсором сервера. */
+async function loadMoreRows() {
+  if (!nextCursor.value) return
+  busy.value = 'rows'
+  try {
+    const res = await api<{ items: Card[], meta: Meta }>('/candidates', { query: { ...filters(), cursor: nextCursor.value } })
+    rows.value = [...rows.value, ...res.items]
+    nextCursor.value = res.meta.nextCursor ?? null
+    total.value = res.meta.total ?? total.value
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
 
 /** «Показати ще» — наступна сторінка однієї колонки за курсором (§5.2). */
 async function loadMore(col: Column) {
@@ -82,7 +118,7 @@ async function loadMore(col: Column) {
   busy.value = col.statusId
   try {
     const page = await api<{ cards: Card[], nextCursor: string | null, total: number }>('/candidates/board', {
-      query: { statusId: col.statusId, cursor: col.nextCursor, ...(q.value ? { q: q.value } : {}) },
+      query: { statusId: col.statusId, cursor: col.nextCursor, ...filters() },
     })
     col.cards = [...col.cards, ...page.cards]
     col.nextCursor = page.nextCursor
@@ -123,6 +159,12 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
       <label class="grow">{{ t('common.search') }}
         <input v-model="q" maxlength="200" @keyup.enter="load">
       </label>
+      <label v-if="vacancies.length">{{ t('candidates.vacancy') }}
+        <select v-model="vacancyId">
+          <option value="">{{ t('candidates.allVacancies') }}</option>
+          <option v-for="v in vacancies" :key="v.id" :value="v.id">{{ v.title }}</option>
+        </select>
+      </label>
       <button class="btn" type="button" :disabled="busy === 'load'" @click="load">{{ t('candidates.apply') }}</button>
       <div class="tabs" role="tablist">
         <button role="tab" :aria-selected="view === 'board'" :class="['tab', { on: view === 'board' }]" @click="view = 'board'">{{ t('candidates.board') }}</button>
@@ -144,6 +186,7 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
           @dragstart="dragging = c.id"
         >
           <NuxtLink class="link" :to="`/admin/candidates/${c.id}`">{{ c.fullName }}</NuxtLink>
+          <div v-if="c.vacancyTitle" class="sub">{{ c.vacancyTitle }}</div>
           <div class="sub">{{ c.recruiterName ?? t('candidates.noRecruiter') }}</div>
           <div class="sub">
             <span v-for="(v, k) in c.scores" :key="k" class="score">{{ v ?? '—' }}</span>
@@ -161,12 +204,13 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
       </section>
     </div>
 
-    <section v-else class="panel">
+    <section v-else class="panel scroll">
       <table class="table">
         <thead>
           <tr>
             <th>{{ t('candidates.col.name') }}</th>
             <th>{{ t('candidates.col.phone') }}</th>
+            <th>{{ t('candidates.col.vacancy') }}</th>
             <th>{{ t('candidates.col.state') }}</th>
             <th>{{ t('candidates.col.recruiter') }}</th>
             <th>{{ t('candidates.col.added') }}</th>
@@ -176,13 +220,23 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
           <tr v-for="c in rows" :key="c.id">
             <td><NuxtLink class="link" :to="`/admin/candidates/${c.id}`">{{ c.fullName }}</NuxtLink></td>
             <td>{{ c.phone ?? '—' }}</td>
+            <td>{{ c.vacancyTitle ?? '—' }}</td>
             <td>{{ t(`candidate.state.${c.state}`) }}</td>
             <td>{{ c.recruiterName ?? '—' }}</td>
             <td>{{ dateOf(c.createdAt) }}</td>
           </tr>
-          <tr v-if="!rows.length"><td colspan="5" class="sub">{{ t('candidates.empty') }}</td></tr>
+          <tr v-if="!rows.length"><td colspan="6" class="sub">{{ t('candidates.empty') }}</td></tr>
         </tbody>
       </table>
+      <div v-if="rows.length" class="more">
+        <span class="sub">{{ rows.length }} / {{ total }}</span>
+        <button
+          v-if="nextCursor" class="btn ghost" type="button"
+          :disabled="busy === 'rows'" @click="loadMoreRows"
+        >
+          {{ t('common.loadMore') }}
+        </button>
+      </div>
     </section>
   </div>
 </template>
@@ -199,7 +253,9 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
 .col-head { display: flex; justify-content: space-between; align-items: center; padding: var(--space-1) var(--space-2); border-radius: var(--radius-pill); }
 .kcard { background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-2); display: grid; gap: var(--space-1); }
 .score { margin-right: var(--space-1); }
+.more { display: flex; gap: var(--space-2); align-items: center; justify-content: space-between; margin-top: var(--space-2); }
 .empty { padding: var(--space-2); }
+.scroll { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--color-bg-line); }
 .tone-sun { background: var(--color-sun-soft); }

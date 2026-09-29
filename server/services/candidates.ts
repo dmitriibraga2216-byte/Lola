@@ -5,6 +5,8 @@ import {
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { currentRequestContext } from '../utils/requestContext'
+import { keysetAfter, keysetAt } from '../utils/keyset'
+import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
 import { CANDIDATE_CONSENT_MONTHS } from '../../shared/enums'
 import type { CandidateScoreKind, CandidateState } from '../../shared/enums'
 import type {
@@ -271,8 +273,24 @@ export function scopeCond(v: Viewer) {
   return eq(users.recruiterId, v.actorId)
 }
 
-/** Список кандидатов (`28` §5.1, §10 `GET /candidates`). Всегда через репозиторный слой. */
-export async function listCandidates(v: Viewer, filter: CandidateListFilter): Promise<CandidateRow[]> {
+export interface CandidatePage {
+  items: CandidateRow[]
+  /** Всего строк под фильтром — `meta.total` (§10), а не длина страницы. */
+  total: number
+  /** Курсор следующей страницы или `null`, если показано всё. */
+  nextCursor: string | null
+}
+
+/**
+ * Список кандидатов (`28` §5.1, §10 `GET /candidates`). Всегда через репозиторный слой.
+ *
+ * Страница — ключевым курсором по `(created_at, id)` (`KEYSETS.candidates`, docs/04-api.md §4.1),
+ * как доска и остальные списки: реестр на массовом найме — тысячи строк, а `offset` при
+ * добавлении кандидатов во время просмотра дублирует или теряет строки на стыке страниц.
+ * Сортировка — `created_at desc, id desc`: id разводит кандидатов, созданных в одну микросекунду
+ * (импорт пачкой), иначе курсор по одной дате пропускал бы соседей.
+ */
+export async function listCandidates(v: Viewer, filter: CandidateListFilter): Promise<CandidatePage> {
   return withTenant(v.tenantId, v.actorId, async (tx) => {
     const q = filter.q?.trim()
     const conds = [
@@ -286,10 +304,17 @@ export async function listCandidates(v: Viewer, filter: CandidateListFilter): Pr
       filter.to ? lte(users.createdAt, new Date(`${filter.to}T23:59:59Z`)) : undefined,
       q ? or(sql`${users.fullName} ilike ${`%${q}%`}`, sql`${users.phone} ilike ${`%${q}%`}`, sql`${users.email} ilike ${`%${q}%`}`) : undefined,
     ]
-    const rows = await candidatesQuery(tx, COLUMNS, ...conds)
-      .orderBy(desc(users.createdAt))
-      .limit(filter.limit) as unknown as CandidateRow[]
-    return rows.map(r => maskRow(v, r))
+    const rows = await candidatesQuery(tx, { ...COLUMNS, cursorAt: keysetAt(users.createdAt) }, ...conds,
+      keysetAfter(KEYSETS.candidates, filter.cursor, [users.createdAt, users.id], 'desc'))
+      .orderBy(desc(users.createdAt), desc(users.id))
+      .limit(filter.limit + 1) as unknown as (CandidateRow & { cursorAt: string })[]
+    const [count] = await candidatesQuery(tx, { n: sql<number>`count(*)::int` }, ...conds) as unknown as { n: number }[]
+    const last = rows.length > filter.limit ? rows[filter.limit - 1] : undefined
+    return {
+      items: rows.slice(0, filter.limit).map(({ cursorAt: _, ...r }) => maskRow(v, r)),
+      total: Number(count?.n ?? 0),
+      nextCursor: last ? encodeKeyset(KEYSETS.candidates, [last.cursorAt, last.id]) : null,
+    }
   })
 }
 

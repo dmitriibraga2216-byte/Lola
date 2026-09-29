@@ -396,6 +396,11 @@ withdrawn ──reopen─────→ active
 
 Пустое состояние вкладки «Проходження»: «Кандидату ще нічого не призначено» + кнопка.
 
+> [уточнено, candidates-tails (`docs/28-implementation-notes.md` §28.26)] Вкладка грузится своей ручкой
+> `GET /candidates/:id/progress`; кнопка пустого состояния — «Призначити контент», форма назначения с аудиторией
+> «этот кандидат». Ссылок на результат попытки нет: экрана результата попытки для администратора в продукте нет.
+> «⋮ → видалити» — `DELETE /candidates/:id`; «скопировать ссылку для входа» не сделано намеренно (`v2/44` Р-CT.3).
+
 ### 5.4 Настройка воронки — `/settings/candidate-statuses`
 
 Список статусов с drag-сортировкой, цвет, `maps_to`, признак системного, счётчик кандидатов
@@ -589,6 +594,12 @@ withdrawn ──reopen─────→ active
 | GET | `/reports/recruiting-funnel` | фильтры | агрегаты | — |
 
 Чужой тенант по любому пути — `404`, не `403`.
+
+> [уточнено, candidates-tails (`v2/44` Р-CT.1…Р-CT.6)] `POST /candidates/:id/invite` отвечает
+> `{sent_at, channels, skipped}` без ссылки; `429 invite.too_often` — и на паузу в сутки, и на исчерпанные пять;
+> `422 contact.missing` — только когда адреса нет ни под один выбранный канал; закрытый вход — `409
+> candidate.not_active` / `409 candidate.access_expired`. `DELETE /candidates/:id` — обезличивание §7.9, повтор —
+> `204`. `GET /candidates` отдаёт в `meta` ещё `next_cursor`, а `total` — число под фильтром.
 
 **Вебхук `candidate.hired`** (докс/v2/44 В-18, реализован в PR-37): `POST /candidates/:id/hire`
 шлёт наружу событие `candidate.hired` с `payload.data = {userId, vacancyId, hiredAt}` —

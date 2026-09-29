@@ -2,8 +2,9 @@
 /**
  * Картка кандидата — `/admin/candidates/:id` (docs/v2/28-recruiting-candidates.md §5.3).
  *
- * Чотири вкладки з п'яти: «Огляд», «Оцінки», «Коментарі», «Історія». «Проходження» і
- * «Співбесіда» приходять разом із призначеннями кандидату і авто-співбесідою (PR-14, PR-27).
+ * Вкладки §5.3: «Огляд», «Проходження» (`CandidateProgress`), «Оцінки», «Співбесіда», «Підсумок»,
+ * «Коментарі», «Історія». Кнопки «⋮» §5.3: запрошення (`POST /candidates/:id/invite`) і
+ * видалення за правом на забуття (`DELETE /candidates/:id`) — обидва рішення ухвалює сервер.
  *
  * Усі рішення ухвалює сервер (CLAUDE.md п. 3): які переходи дозволені, чи маскувати контакти,
  * скільки днів у статусі — рахує `server/services/candidates.ts`. Екран лише показує.
@@ -12,6 +13,8 @@
  */
 import { CANDIDATE_REJECT_REASONS, CANDIDATE_SCORE_KINDS } from '#shared/enums'
 import type { CandidateScoreKind, CandidateState } from '#shared/enums'
+import { CANDIDATE_INVITE_CHANNELS } from '#shared/schemas/candidates'
+import type { CandidateInviteChannel } from '#shared/schemas/candidates'
 const { formatDate } = useFormat()
 
 /**
@@ -75,13 +78,13 @@ interface Card {
 }
 interface Status { id: string, nameUk: string, color: string, mapsTo: CandidateState, isActive: boolean }
 
-type Tab = 'overview' | 'scores' | 'interview' | 'summary' | 'comments' | 'history'
+type Tab = 'overview' | 'progress' | 'scores' | 'interview' | 'summary' | 'comments' | 'history'
 /**
  * «Співбесіда» (docs/v2/30 §5.3) — лише з `interview.view`: оцінки ШІ, розшифровка, флаги.
  * «Підсумок» (§5.4, PR-29) — лише з `summary.view`: документ, його версії, надсилання кандидату.
  */
 const TABS = computed<Tab[]>(() => [
-  'overview', 'scores',
+  'overview', 'progress', 'scores',
   ...(hasScope('interview.view') ? ['interview' as const] : []),
   ...(hasScope('summary.view') ? ['summary' as const] : []),
   // Коментарі рекрутерів — лише з `candidate.view` (§3.5): наставнику сервер їх не віддає, і
@@ -247,6 +250,40 @@ async function reject() {
   finally { busy.value = '' }
 }
 
+/** Запрошення (§7.12, §8): частоту, контакти й закритий вхід перевіряє сервер. */
+const inviteOpen = ref(false)
+const inviteChannels = ref<CandidateInviteChannel[]>(['email', 'telegram', 'sms'])
+async function invite() {
+  busy.value = 'invite'
+  error.value = ''
+  notice.value = ''
+  try {
+    const r = await api<{ channels: CandidateInviteChannel[], skipped: CandidateInviteChannel[] }>(`/candidates/${id}/invite`, { method: 'POST', body: { channels: inviteChannels.value } })
+    const names = (list: CandidateInviteChannel[]) => list.map(c => t(`candidate.invite.channel.${c}`)).join(', ')
+    notice.value = [t('candidate.invite.sent', { channels: names(r.channels) }), ...(r.skipped.length ? [t('candidate.invite.skipped', { channels: names(r.skipped) })] : [])].join(' · ')
+    inviteOpen.value = false
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+/** Видалення за правом на забуття (§2, §7.9): знеособлення, безповоротне, з причиною. */
+const eraseOpen = ref(false)
+const eraseReason = ref('')
+async function erase() {
+  busy.value = 'erase'
+  error.value = ''
+  try {
+    await api(`/candidates/${id}`, { method: 'DELETE', body: { reasonText: eraseReason.value } })
+    eraseOpen.value = false
+    eraseReason.value = ''
+    notice.value = t('candidate.erase.done')
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
 async function archive() {
   busy.value = 'archive'
   error.value = ''
@@ -300,7 +337,47 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
         >
           {{ t('candidate.archive') }}
         </button>
+        <button
+          v-if="hasScope('candidate.assign') && card.state === 'active'" class="btn ghost" type="button"
+          @click="inviteOpen = !inviteOpen"
+        >
+          {{ t('candidate.invite.button') }}
+        </button>
+        <button
+          v-if="hasScope('candidate.delete') && card.state !== 'hired'" class="btn ghost" type="button"
+          @click="eraseOpen = !eraseOpen"
+        >
+          {{ t('candidate.erase.button') }}
+        </button>
       </div>
+
+      <form v-if="inviteOpen" class="panel form" @submit.prevent="invite">
+        <h2 class="title">{{ t('candidate.invite.title') }}</h2>
+        <p class="help">{{ t('candidate.invite.hint') }}</p>
+        <fieldset class="onboarding">
+          <legend>{{ t('candidate.invite.channels') }}</legend>
+          <label v-for="c in CANDIDATE_INVITE_CHANNELS" :key="c" class="row">
+            <input v-model="inviteChannels" type="checkbox" :value="c">
+            <span>{{ t(`candidate.invite.channel.${c}`) }}</span>
+          </label>
+        </fieldset>
+        <div class="row">
+          <button class="btn" type="submit" :disabled="!inviteChannels.length || busy === 'invite'">{{ t('candidate.invite.send') }}</button>
+          <button class="btn ghost" type="button" @click="inviteOpen = false">{{ t('common.cancel') }}</button>
+        </div>
+      </form>
+
+      <form v-if="eraseOpen" class="panel form" @submit.prevent="erase">
+        <h2 class="title">{{ t('candidate.erase.title') }}</h2>
+        <p class="help">{{ t('candidate.erase.hint') }}</p>
+        <label>{{ t('candidate.erase.reason') }}
+          <input v-model="eraseReason" minlength="3" maxlength="500" required>
+        </label>
+        <div class="row">
+          <button class="btn danger" type="submit" :disabled="eraseReason.trim().length < 3 || busy === 'erase'">{{ t('candidate.erase.confirm') }}</button>
+          <button class="btn ghost" type="button" @click="eraseOpen = false">{{ t('common.cancel') }}</button>
+        </div>
+      </form>
 
       <form v-if="hireOpen" class="panel form" @submit.prevent="hire">
         <h2 class="title">{{ t('candidate.hireTitle') }}</h2>
@@ -398,6 +475,10 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
         </dl>
         <p v-if="card.pdMasked" class="sub">{{ t('candidate.masked') }}</p>
         <p class="sub">{{ t('candidate.accessHint') }}</p>
+      </section>
+
+      <section v-else-if="tab === 'progress'" class="panel">
+        <CandidateProgress :candidate-id="id" :can-assign="hasScope('candidate.assign')" />
       </section>
 
       <section v-else-if="tab === 'scores'" class="panel">

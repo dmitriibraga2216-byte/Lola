@@ -45,6 +45,8 @@ export interface BoardCard {
   source: string | null
   recruiterId: string | null
   recruiterName: string | null
+  vacancyId: string | null
+  vacancyTitle: string | null
   accessUntil: string | null
   /** Дней в текущей колонке — от последней записи истории (§7.11), не от создания. */
   daysInStatus: number | null
@@ -75,11 +77,14 @@ const CARD = {
   state: users.candidateState,
   source: users.source,
   recruiterId: users.recruiterId,
+  vacancyId: users.vacancyId,
   accessUntil: users.accessUntil,
   createdAt: users.createdAt,
   // Позиция карточки для курсора — текстом из базы, с микросекундами; наружу не отдаётся.
   cursorAt: keysetAt(users.createdAt),
   recruiterName: sql<string | null>`(select u2.full_name from users u2 where u2.id = ${users.recruiterId})`,
+  // Карточка доски показывает вакансию (§5.2); имя внешней колонки — полным, как в `COLUMNS`
+  vacancyTitle: sql<string | null>`(select v.title from vacancies v where v.id = ${sql.raw('users.vacancy_id')})`,
   // «Днів у статусі» — от последней записи истории (§7.11). Подзапрос, а не соединение:
   // карточек на странице полсотни, а соединение с историей дало бы дубли строк.
   statusSince: sql<Date | null>`(select max(h.created_at) from candidate_status_history h where h.candidate_id = ${users.id})`,
@@ -98,6 +103,8 @@ type CardRow = {
   source: string | null
   recruiterId: string | null
   recruiterName: string | null
+  vacancyId: string | null
+  vacancyTitle: string | null
   accessUntil: string | null
   createdAt: Date
   cursorAt: string
@@ -125,6 +132,8 @@ function toCard(v: Viewer, r: CardRow): BoardCard {
     source: r.source,
     recruiterId: r.recruiterId,
     recruiterName: r.recruiterName,
+    vacancyId: r.vacancyId,
+    vacancyTitle: r.vacancyTitle,
     accessUntil: r.accessUntil,
     daysInStatus: r.statusSince ? Math.max(0, Math.floor((Date.now() - new Date(r.statusSince).getTime()) / 86_400_000)) : null,
     scores: { manual: r.scoreManual, task: r.scoreTask, recruiter: r.scoreRecruiter },
@@ -138,6 +147,8 @@ function boardFilters(v: Viewer, f: CandidateBoardFilter) {
     scopeCond(v),
     eq(users.candidateState, 'active' as CandidateState),
     f.recruiterId ? eq(users.recruiterId, f.recruiterId) : undefined,
+    // Вакансия отклика (§5.1 «вакансія», §5.2): одна колонка `users.vacancy_id` (PR-15)
+    f.vacancyId ? eq(users.vacancyId, f.vacancyId) : undefined,
     f.source ? eq(users.source, f.source) : undefined,
     q ? or(sql`${users.fullName} ilike ${`%${q}%`}`, sql`${users.phone} ilike ${`%${q}%`}`, sql`${users.email} ilike ${`%${q}%`}`) : undefined,
   ]

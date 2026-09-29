@@ -391,7 +391,7 @@ describe('транзакция найма: та же запись users, обе 
   })
 
   it('нанятый исчез из воронки и не вернётся в неё ни одним переходом (критерий §13 к. 11)', async () => {
-    const list = await listCandidates(hr, { limit: 200 })
+    const list = (await listCandidates(hr, { limit: 200 })).items
     expect(list.some(c => c.id === candidateId)).toBe(false)
     const back = await reopenCandidate(hr, candidateId, { reasonText: 'помилка найму' })
     expect(back.ok).toBe(false)

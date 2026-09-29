@@ -56,6 +56,16 @@ onMounted(async () => {
       api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).then(r => r.map(x => ({ id: x.id, name: x.fullName }))),
     ])
     Object.assign(refs, { positions: p, locations: l, orgUnits: o, roles: r, tags: tg, people: ppl })
+    // «Призначити контент» з вкладки «Проходження» кандидата (docs/v2/28 §5.3): аудиторія — цей
+    // кандидат. У `/people` кандидатів немає (інваріант 17), тож його імʼя додаємо окремо з картки
+    const candidateId = String(route.query.candidateId ?? '')
+    if (/^[0-9a-f-]{36}$/i.test(candidateId)) {
+      const c = await api<{ id: string, fullName: string }>(`/candidates/${candidateId}`).catch(() => null)
+      if (c) {
+        refs.people = [{ id: c.id, name: c.fullName }, ...refs.people]
+        form.rules.push({ type: 'user', ids: [c.id], values: [], codes: [], locationIds: [] })
+      }
+    }
   }
   catch (err) {
     error.value = apiErrorOf(err).message

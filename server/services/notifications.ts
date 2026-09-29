@@ -158,6 +158,13 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // docs/24 §8, docs/25 §10, докс/33 D-054: 80% ліміту тарифу — попередження, 100% і більше — перевищення
   limit_warning: 'Використано {{pct}}% ліміту тарифу: {{resource}} ({{used}} з {{limit}})',
   limit_exceeded: 'Перевищено ліміт тарифу: {{resource}} ({{used}} з {{limit}}). Зверніться до підтримки Lola, щоб підвищити тариф',
+  // docs/v2/35 §8, §13 к. 5, к. 7: підписка. Коди — `snake_case`, як у документі; тексти — з таблиці §8.
+  // `plan_grace_started` і `plan_readonly` шле задача `billing.grace_scan` (раз на епізод прострочки),
+  // `plan_changed` — `billing.plan_change_apply`, `plan_change_blocked` — заявка власника на тариф нижче
+  plan_grace_started: 'Строк оплати минув. Пільговий період до {{grace_until}}.',
+  plan_readonly: 'Простір переведено в режим лише читання. Навчання доступне, зміни заблоковані.',
+  plan_changed: 'Тариф змінено на {{plan_name}} з {{effective_at}}.',
+  plan_change_blocked: 'Перехід на {{plan_name}} неможливий: перевищено {{axes}}.',
   // docs/v2/28 §8 (PR-14): воронка кандидатов. Коды — в принятом здесь виде `snake_case`
   // (в документе они записаны через точку, `candidate.hired`): точка в коде уведомления
   // означала бы второе соглашение об именах рядом с полусотней существующих кодов, а
@@ -329,6 +336,8 @@ export function emailDefaultEnabled(code: string): boolean {
     || /^interview_(declined|completed|needs_human|consent_withdrawn|abandoned|abandoned_recruiter)$/.test(code)
     // docs/v2/30 §8 (PR-29): Підсумок кандидату — e-mail; розбіжність ШІ з людиною — «email, in-app» адміну
     || code === 'interview_result_ready' || code === 'ai_quality_degraded'
+    // docs/v2/35 §8: початок пільгового періоду, режим лише читання і застосований тариф — «email» у каналах
+    || /^plan_(grace_started|readonly|changed)$/.test(code)
     || eventClassOf(code) === 'managerDigest'
     || /^(scheduled_report|report_export_)/.test(code)
 }

@@ -3515,7 +3515,11 @@
       "interview_result_ready": "Interview summary sent to the candidate",
       "summary_auto_send_scheduled": "Summary will be sent automatically",
       "ai_review_hint_failed": "AI hint is not generated",
-      "ai_quality_degraded": "AI–human disagreement has grown"
+      "ai_quality_degraded": "AI–human disagreement has grown",
+      "plan_grace_started": "Grace period started",
+      "plan_readonly": "Workspace is read-only",
+      "plan_changed": "Plan changed",
+      "plan_change_blocked": "Plan change is not possible"
     }
   },
   "ntpl": {
@@ -5056,7 +5060,8 @@
       "addonsEmpty": "No add-ons",
       "buyAddon": "Buy an add-on",
       "until": "until {date}",
-      "historyLink": "Payment history"
+      "historyLink": "Payment history",
+      "scheduledNotice": "The plan changes on {date}: “{plan}”."
     },
     "status": {
       "trial": "Trial",
@@ -5102,6 +5107,57 @@
       "purposeSubscription": "Plan payment «{plan}»",
       "purposeAddon": "Add-on «{addon}»",
       "purposeAdjustment": "Adjustment"
+    },
+    "readonlyBlocked": "The workspace is read-only: changes are blocked, learning is available. To resume work, the workspace owner needs to renew the plan.",
+    "plans": {
+      "title": "Change plan",
+      "back": "Back to plan",
+      "monthly": "Monthly",
+      "yearly": "Yearly",
+      "saving": "Save {n} %",
+      "perMonth": "{price} / mo.",
+      "connect": "Switch",
+      "connected": "Current",
+      "exceeded": "Exceeded: {axis} {used} of {limit}",
+      "action": {
+        "users_active": {
+          "one": "block {n} employee",
+          "few": "block {n} employees",
+          "many": "block {n} employees",
+          "other": "block {n} employees"
+        },
+        "candidates_active": {
+          "one": "archive {n} candidate",
+          "few": "archive {n} candidates",
+          "many": "archive {n} candidates",
+          "other": "archive {n} candidates"
+        },
+        "storage_bytes": {
+          "one": "delete {n} GB of files",
+          "few": "delete {n} GB of files",
+          "many": "delete {n} GB of files",
+          "other": "delete {n} GB of files"
+        }
+      },
+      "blockedHint": "To switch to this plan, reduce usage to the new limits.",
+      "recalc": "Recalculate",
+      "confirmDown": "Downgrade confirmation: I have reviewed the new limits",
+      "confirmRequired": "Confirm that you have reviewed the new limits",
+      "availableFrom": "The switch is available from {date} — the first day of the next period.",
+      "scheduled": "The plan changes on {date}.",
+      "cancel": "Cancel the switch",
+      "upgradeHint": "Your Lola manager enables a higher plan after payment — please contact them.",
+      "empty": "No plans to choose from",
+      "limit": {
+        "users": "Employees",
+        "candidates": "Candidates",
+        "storage": "Storage",
+        "aiGenerate": "AI generations",
+        "aiReview": "AI reviews",
+        "aiInterview": "AI interviews"
+      },
+      "gb": "{n} GB",
+      "noAccess": "Only the workspace owner can change the plan."
     }
   },
   "offboarding": {

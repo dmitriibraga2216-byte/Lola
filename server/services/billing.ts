@@ -1,6 +1,6 @@
 import { and, desc, eq, getTableColumns, gte, lt, lte, or, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { planAddons, planPrices, plans, tenantAddons, tenantPayments, tenants } from '../db/schema'
+import { planAddons, planChangeRequests, planPrices, plans, tenantAddons, tenantPayments, tenants } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { keysetAfter, keysetAt } from '../utils/keyset'
 import { KEYSETS, encodeKeyset } from '../../shared/domain/keyset'
@@ -23,6 +23,8 @@ export interface BillingSummary {
   subscription: Awaited<ReturnType<typeof effectiveLimits>>['subscription']
   ai: { status: 'active' | 'expired' | 'off', until: string | null, termDays: number | null, included: boolean }
   addons: { addonCode: string, name: string, axis: string, qty: number, unitStep: number, validUntil: string | null }[]
+  /** Назначенный переход вниз — строка «Тариф зміниться DD.MM.YYYY» в карточке (`35` §7.6 п. 2). */
+  scheduledChange: { id: string, toPlanCode: string, planName: string, effectiveAt: string | null } | null
 }
 
 export async function billingSummary(tenantId: string, withPrice: boolean): Promise<BillingSummary> {
@@ -51,7 +53,15 @@ export async function billingSummary(tenantId: string, withPrice: boolean): Prom
       or(sql`${tenantAddons.validUntil} is null`, gte(tenantAddons.validUntil, sql`current_date`)),
     )))
 
+  const [scheduled] = await withTenant(tenantId, null, tx => tx
+    .select({ id: planChangeRequests.id, toPlanCode: planChangeRequests.toPlanCode, effectiveAt: planChangeRequests.effectiveAt, name: plans.name, titleUk: plans.titleUk })
+    .from(planChangeRequests)
+    .innerJoin(plans, eq(plans.code, planChangeRequests.toPlanCode))
+    .where(and(eq(planChangeRequests.tenantId, tenantId), eq(planChangeRequests.status, 'scheduled')))
+    .orderBy(desc(planChangeRequests.createdAt)).limit(1))
+
   return {
+    scheduledChange: scheduled ? { id: scheduled.id, toPlanCode: scheduled.toPlanCode, planName: scheduled.titleUk ?? scheduled.name, effectiveAt: scheduled.effectiveAt } : null,
     plan: { code: t?.plan ?? 'trial', name: plan?.name ?? t?.plan ?? 'trial', titleUk: plan?.titleUk ?? null, tier: plan?.tier ?? 0 },
     priceMinor,
     currency: eff.subscription.currency,

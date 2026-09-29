@@ -53,3 +53,21 @@ test('owner бачить посилання на історію платежів
   await expect(page).toHaveURL(/\/admin\/settings\/billing\/history$/)
   await expect(page.getByText('Платежів ще не було')).toBeVisible()
 })
+
+test('owner: «Змінити тариф» веде на екран тарифів — поточний «Підключено», вищий — через менеджера (docs/v2/35 §5.2)', async ({ page }) => {
+  await loginViaUi(page, ADMIN_PHONE)
+  await page.goto('/admin/people')
+  await switchToOwner(page)
+
+  await page.goto('/admin/settings/billing')
+  await page.getByRole('link', { name: 'Змінити тариф' }).click()
+  await expect(page).toHaveURL(/\/admin\/settings\/billing\/plans$/)
+  await expect(page.getByRole('radio', { name: 'Помісячно' })).toBeVisible()
+
+  // Сид: «Каппі» на тарифі trial — його картка «Підключено», решта — вищі (sort)
+  const current = page.locator('[data-plan="trial"]')
+  await expect(current.getByText('Підключено')).toBeVisible()
+  const higher = page.locator('[data-plan="point"]')
+  await higher.getByRole('button', { name: 'Підключити' }).click()
+  await expect(higher.getByText(/підключає ваш менеджер Lola/)).toBeVisible()
+})

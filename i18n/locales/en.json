@@ -169,7 +169,8 @@
       "platformAnnouncements": "Lola announcements",
       "interviews": "Interview scenarios",
       "aiSettings": "Artificial intelligence",
-      "contentIssueReports": "Content issues: reports"
+      "contentIssueReports": "Content issues: reports",
+      "aiReports": "AI reports"
     },
     "section": {
       "learning": "Learning",
@@ -7400,6 +7401,17 @@
           "minor": "small difference",
           "major": "large difference"
         }
+      },
+      "rescore": {
+        "open": "Rescore",
+        "title": "Ask the software to score again",
+        "hint": "The new score is added as a new entry and the previous one stays in history. A person still makes the decision about the candidate. If rescoring fails, the previous score remains.",
+        "reason": "Why rescoring is needed",
+        "save": "Rescore",
+        "busy": "Scoring…",
+        "cancel": "Cancel",
+        "done": "The new score has been saved",
+        "doneNeedsHuman": "The software scored with low confidence — please evaluate the answers yourself"
       }
     },
     "history": {
@@ -7610,7 +7622,133 @@
     "rationale": "Rationale",
     "coverage": "Coverage: {value}",
     "more": "Show more",
-    "redacted": "Text erased together with the candidate’s records"
+    "redacted": "Text erased together with the candidate’s records",
+    "loading": "Loading…",
+    "reportsLink": "AI reports: model quality, reviewer assistance, cost →",
+    "subscription": {
+      "title": "AI subscription",
+      "until": "AI features are active until {date}",
+      "none": "No AI subscription end date is set",
+      "manage": "Manage in “Plan”",
+      "status": {
+        "active": "Active",
+        "expired": "Expired — AI features are unavailable until it is renewed",
+        "off": "Turned off for this space — contact Lola support"
+      }
+    },
+    "tab": {
+      "features": "Features",
+      "providers": "Provider profiles",
+      "calls": "Call log"
+    },
+    "purpose": {
+      "transcribe": "Transcription",
+      "interview_score": "Interview scoring",
+      "review_hint": "Reviewer hint",
+      "summary": "Candidate summary",
+      "generate": "Text generation",
+      "embed": "Search (embeddings)"
+    },
+    "driver": {
+      "openai_compatible": "OpenAI-compatible API",
+      "http_custom": "Custom HTTP",
+      "self_hosted": "Self-hosted",
+      "stub": "Stub (no model)"
+    },
+    "region": {
+      "eu": "EU",
+      "other": "Outside the EU"
+    },
+    "retention": {
+      "none": "Does not store",
+      "ephemeral": "Stores briefly",
+      "unknown": "Unknown"
+    },
+    "callStatus": {
+      "queued": "Queued",
+      "running": "Running",
+      "ok": "Succeeded",
+      "failed": "Failed",
+      "timeout": "Timed out",
+      "refused": "Refused",
+      "degraded": "Without AI (limit)"
+    },
+    "providers": {
+      "title": "Provider profiles",
+      "hint": "Each profile performs one role. If the main profile does not respond, the call goes to a fallback of the same role. The API key is only shown as “saved”.",
+      "add": "New profile",
+      "newTitle": "New profile",
+      "editTitle": "Profile “{name}”",
+      "edit": "Edit",
+      "editAria": "Edit profile “{name}”",
+      "save": "Save profile",
+      "cancel": "Cancel",
+      "saved": "Profile saved",
+      "empty": "No profiles yet",
+      "active": "On",
+      "inactive": "Off",
+      "ownKey": "Own key saved",
+      "platformKey": "Platform key",
+      "stubHint": "The stub answers without a model: its scores must not be used as grounds for decisions. Connect a provider to make AI work.",
+      "updated": "Updated {date}",
+      "f": {
+        "code": "Code",
+        "codeHint": "Lowercase Latin letters, digits, “-” and “_”; cannot be changed later",
+        "name": "Name",
+        "purpose": "Role",
+        "driver": "Connection type",
+        "endpoint": "API address",
+        "apiKey": "API key",
+        "key": "Key",
+        "keySaved": "Own key saved — enter a new one to replace it",
+        "keyPlatform": "Empty — platform key (platform address only)",
+        "dropKey": "Remove own key",
+        "model": "Model",
+        "modelVersion": "Model version",
+        "temperature": "Temperature (0–2)",
+        "maxTokens": "Response token limit",
+        "region": "Where data is processed",
+        "regionComment": "Why data will be processed outside the EU",
+        "regionCommentHint": "At least 10 characters; the comment goes to the audit log",
+        "retention": "How long the provider keeps data",
+        "retentionTranscribe": "“Unknown” is not allowed for transcription: voice must not be sent where retention is unknown",
+        "latency": "Timeout, s",
+        "priority": "Priority",
+        "priorityHint": "Lower number — the main profile of the role",
+        "fallback": "Fallback profile",
+        "noFallback": "No fallback",
+        "active": "Profile is on"
+      }
+    },
+    "calls": {
+      "title": "AI call log",
+      "hint": "Every model call: role, model and prompt version, status, latency, tokens and cost",
+      "exportXlsx": "Export log (Excel)",
+      "exportCsv": "CSV",
+      "purpose": "Purpose",
+      "status": "Status",
+      "any": "All",
+      "from": "From",
+      "to": "To",
+      "costMin": "Cost from",
+      "apply": "Show",
+      "empty": "No calls match these filters",
+      "try": "try {n}",
+      "billed": "counted against the limit",
+      "showOutput": "Show",
+      "hideOutput": "Hide",
+      "col": {
+        "at": "When",
+        "purpose": "Purpose",
+        "model": "Model",
+        "status": "Status",
+        "latency": "Latency, ms",
+        "tokens": "Tokens (in / out)",
+        "cost": "Cost",
+        "output": "Model output"
+      },
+      "exportLimit": "The file contains up to 10,000 of the most recent calls matching the filter, without model output — narrow the period for more"
+    }
   },
   "opsConsole": {
     "title": "Lola console",
@@ -8006,5 +8144,66 @@
       "muted": "Muted until"
     },
     "rescoreMixed": "Mixed"
+  },
+  "aiReports": {
+    "title": "AI reports",
+    "hint": "About how the software performs, not about people: a person always makes the decision",
+    "tab": {
+      "quality": "Model quality",
+      "review-help": "Reviewer assistance",
+      "cost": "AI cost"
+    },
+    "about": {
+      "quality": "How closely the software’s scores match human decisions — by prompt version and by criterion. Prompt versions are not compared with each other.",
+      "review-help": "Does the hint speed up reviewing: review time with the hint opened and without it.",
+      "cost": "Calls, tokens, cost, latency and error rate by role and day."
+    },
+    "from": "From",
+    "to": "To",
+    "purpose": "Purpose",
+    "anyPurpose": "All",
+    "apply": "Show",
+    "exportXlsx": "Export to Excel",
+    "exportCsv": "CSV",
+    "empty": "No data for this period",
+    "unknownVersion": "version not recorded",
+    "smallSample": "too few decisions — draw no conclusions",
+    "ofSessions": "of {n} sessions",
+    "agreementSplit": "match {match} · minor {minor} · major {major}",
+    "callsCount": "calls: {n}",
+    "quality": {
+      "note": "Shares are calculated from scores a person has checked. An unchecked score is neither a match nor a mismatch.",
+      "byVersion": "By prompt version",
+      "byCriterion": "By criterion — which criterion the model understands worse"
+    },
+    "help": {
+      "note": "“With hint” — the mentor opened the panel; “without” — there was no hint or it was not opened. Time runs from taking the work to the decision."
+    },
+    "col": {
+      "promptVersion": "Prompt version",
+      "scores": "Scores",
+      "decided": "Checked by a person",
+      "match": "Match",
+      "minor": "Minor mismatch",
+      "major": "Major mismatch",
+      "confidence": "Average confidence",
+      "needsHuman": "Needs a person",
+      "criterion": "Criterion",
+      "reviewer": "Mentor",
+      "reviews": "Reviews",
+      "hints": "Hints",
+      "shown": "Opened",
+      "agreement": "Match with decision",
+      "notShown": "Decided without hint",
+      "withHint": "Min. with hint",
+      "withoutHint": "Min. without hint",
+      "day": "Day",
+      "purpose": "Purpose",
+      "calls": "Calls",
+      "tokens": "Tokens (in / out)",
+      "cost": "Cost",
+      "latency": "Avg latency, ms",
+      "errors": "Errors"
+    }
   }
 }

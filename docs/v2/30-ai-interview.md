@@ -428,6 +428,14 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 
 **5.6 Настройки — `/settings/interviews`, `/settings/ai`.** Список сценариев: название, трек, критериев, собеседований проведено, доля `needs_human`, среднее расхождение с человеком. `/settings/ai`: профили провайдеров, срок ИИ-подписки (`ai_until` из `35`), переключатели трёх функций, журнал ИИ-вызовов с фильтрами (назначение, статус, период, стоимость), «Вивантажити журнал».
 
+> [дополнено, ai-settings-screens 29.09] `/admin/settings/ai` — три вкладки: «Функції» (срок ИИ-подписки
+> для `billing.view`, подсказка ИИ, очередь перепроверки качества), «Профілі провайдерів» (список и форма
+> профиля поверх API PR-27: роль, драйвер, адрес, свой ключ только на запись, модель, регион с
+> комментарием, срок хранения у поставщика, задержка, приоритет, запасной той же роли) и «Журнал
+> викликів» (фильтры назначение · статус · период · стоимость от, выход модели — по кнопке,
+> «Вивантажити журнал» xlsx/csv без выхода модели). «Переключателей трёх функций» нет: флаг у тенанта
+> один, `reviewHints` (`44` Р-AI.1). Отчёты §9.3–§9.5 — `/admin/reports/ai`.
+
 ---
 
 ## 6. Формы
@@ -622,6 +630,15 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 5. **Стоимость ИИ.** По `purpose` и по дням: вызовов, токенов, `cost_minor`, средняя задержка, доля ошибок. CSV/XLSX.
 6. **Выгрузка собеседований.** Кандидат, сценарий, дата, длительность, баллы по критериям, уверенность, флаги, `agreement`. **Расшифровки и ссылки на аудио в выгрузку не попадают никогда** — выноса голосовых ответов из системы не предусмотрено. Факт выгрузки пишется в `audit_log` с числом строк.
 
+> [дополнено, ai-settings-screens 29.09] Отчёты 3–5 реализованы ручкой `GET /reports/ai/:name`
+> (`quality | review-help | cost`, `ai.audit`) и экраном `/admin/reports/ai`, выгрузка xlsx/csv теми же
+> строками (`report.export`). В конструктор выгрузок не зарегистрированы — там их видел бы
+> `report.builder` (`44` Р-AI.3). Определения: доли качества — от решений человека, `needs_human` — по
+> версии промпта последнего вызова оценки, «мало рішень» при < 10 (Р-AI.4); проверка — закрытая работа
+> очереди `quiz_open_answer`/`workshop`, время — `claimed_at → completed_at`, «с подсказкой» —
+> `shown_at` (Р-AI.5); ошибки — `failed` + `timeout`, валюты раздельно, дни — в поясе тенанта (Р-AI.6).
+> Отчёты 1, 2, 6 — не в этой задаче.
+
 ---
 
 ## 10. API
@@ -698,6 +715,16 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 > `GET /ai/quality-reviews` (ключевой курсор, `status=pending|reviewed|all`, `refKind`),
 > `GET /ai/quality-reviews/:id`, `POST /ai/quality-reviews/:id` `{verdict, notes}` (`ai.audit`);
 > `GET|PATCH /settings/ai` `{reviewHints}` (`ai.audit`). `/candidate-summaries*` гасится вместе с рекрутингом.
+
+> [дополнено, ai-settings-screens 29.09] `POST /candidates/:id/interview/rescore` `{reason}`
+> (`interview.override`): последняя сессия в `scored`/`needs_human`, синхронно, ответ `{aiCallId, state,
+> aiScore, aiConfidence, charged}`; новый результат — новой строкой `candidate_scores.kind = 'ai'`.
+> Не удалась — прежняя оценка на месте (`503 ai.provider_failed`, `409 session.rescore_unexplained`,
+> `409 limit_exceeded`, `409 ai.unavailable`); `409 session.scoring`, `409 session.human_checked` (человек
+> уже оспорил критерий — переоценка сдвинула бы то, с чем он спорил), `409 session.not_rescorable`.
+> После нашего сбоя — бесплатно, повтор состоявшейся оценки — одна операция `ai_interview_ops` (§7.12;
+> `44` Р-AI.2). Сверх таблицы: `GET /ai/calls/export`, `GET /reports/ai/:name`; `GET /ai/calls` —
+> фильтр `costMin`.
 
 ---
 

@@ -2,7 +2,9 @@ import { and, asc, eq, sql } from 'drizzle-orm'
 import { attemptAnswers, interviewCriteria, interviewCriterionScores, interviewScenarios, interviewSessions, interviewTurns, mediaAssets, users } from '../../db/schema'
 import { withTenant, type TenantTx } from '../../utils/withTenant'
 import { recordAudit } from '../audit'
-import { callModel, releaseSessionOp } from '../ai/gateway'
+import { callModel, releaseSessionOp, type AiFailCode } from '../ai/gateway'
+import type { AiUnavailableReason } from '../ai/policy'
+import type { LimitCheck } from '../tenantLimits'
 import { INTERVIEW_SCORE_PROMPT, INTERVIEW_TRANSCRIBE_PROMPT, type InterviewScoreInput } from '../ai/prompts'
 import { writeAiScoreTx } from '../candidates'
 import { personById } from '../repo/people'
@@ -203,8 +205,10 @@ async function summaryAfterInterview(tenantId: string, sessionId: string): Promi
   await enqueueSummaryBuild(tenantId, s.candidateId)
 }
 
-async function scoreSessionOnce(tenantId: string, sessionId: string, tryNo: number): Promise<ScoreOutcome> {
-  const loaded = await withTenant(tenantId, null, async (tx) => {
+type Loaded = { session: Session, scenario: typeof interviewScenarios.$inferSelect, criteria: (typeof interviewCriteria.$inferSelect)[], turns: (typeof interviewTurns.$inferSelect)[] }
+
+export async function loadForScoring(tenantId: string, sessionId: string): Promise<Loaded | null> {
+  return withTenant(tenantId, null, async (tx) => {
     const [s] = await tx.select().from(interviewSessions).where(eq(interviewSessions.id, sessionId))
     if (!s || s.state !== 'scoring' || s.redactedAt) return null
     const [scenario] = await tx.select().from(interviewScenarios).where(eq(interviewScenarios.id, s.scenarioId))
@@ -212,17 +216,34 @@ async function scoreSessionOnce(tenantId: string, sessionId: string, tryNo: numb
     const turns = await tx.select().from(interviewTurns).where(eq(interviewTurns.sessionId, sessionId)).orderBy(asc(interviewTurns.ordinal))
     return { session: s, scenario: scenario!, criteria, turns }
   })
-  if (!loaded) return 'skipped'
+}
+
+/** Доказательством бывает только надёжный текст: письменный ответ или расшифровка выше порога. */
+export function reliableTurns<T extends { transcriptStatus: string, transcript: string | null }>(turns: T[]): T[] {
+  return turns.filter(t => (t.transcriptStatus === 'ok' || t.transcriptStatus === 'not_needed') && !!t.transcript?.trim())
+}
+
+export type ModelScores
+  = | { ok: true, scores: ValidScore[], callId: number, stub: boolean, aiScore: number, aiConfidence: number }
+    | { ok: false, kind: 'no_text', reason: InterviewDegradedReason }
+    | { ok: false, kind: 'call', code: AiFailCode, callId: number | null, check?: LimitCheck, reason?: AiUnavailableReason }
+    | { ok: false, kind: 'unexplained', problems: ScoreProblem[] }
+
+type ValidScore = Extract<ReturnType<typeof validateScores>, { ok: true }>['scores'][number]
+
+/**
+ * Вызов модели и проверка ответа (`30` §7.2, §7.11, §12 п. 5) — общий для фоновой оценки и
+ * переоценки по просьбе человека (`rescore.ts`). В базу ничего не пишет: итог применяет
+ * `applyScoresTx()` или разбирает вызывающий. Вызовы не тарифицируются: у фоновой оценки
+ * операция списана резервом на старте (`30` §7.12), переоценка списывает свою сама — вместе с
+ * применённым результатом, а не за вызов.
+ */
+export async function modelScores(tenantId: string, loaded: Loaded, o: { tryNo: number, actorId: string | null }): Promise<ModelScores> {
   const { session, scenario, criteria, turns } = loaded
-
-  // Доказательством бывает только надёжный текст: письменный ответ или расшифровка выше порога
-  const reliable = turns.filter(t => (t.transcriptStatus === 'ok' || t.transcriptStatus === 'not_needed') && t.transcript?.trim())
+  const reliable = reliableTurns(turns)
   if (!reliable.length) {
-    const reason: InterviewDegradedReason = turns.some(t => t.transcriptStatus === 'low_confidence') ? 'low_confidence' : 'transcribe_failed'
-    await withTenant(tenantId, null, tx => toNeedsHuman(tx, tenantId, session, reason))
-    return 'needs_human'
+    return { ok: false, kind: 'no_text', reason: turns.some(t => t.transcriptStatus === 'low_confidence') ? 'low_confidence' : 'transcribe_failed' }
   }
-
   const lang = resolveLocale(scenario.transcribeLang) as 'uk' | 'en' | 'ru'
   const input = (strict: boolean): InterviewScoreInput => ({
     lang,
@@ -230,67 +251,97 @@ async function scoreSessionOnce(tenantId: string, sessionId: string, tryNo: numb
     criteria: criteria.map(c => ({ id: c.id, name: c.nameUk, description: c.description, scaleMax: Number(c.scaleMax) })),
     turns: reliable.map(t => ({ turnId: t.id, ordinal: t.ordinal, question: t.promptText ?? '', answer: t.transcript! })),
   })
-  const ctx = { tenantId, actorId: SYSTEM.actorId }
-  const opts = { ref: { kind: 'interview_session' as const, id: sessionId }, subjectUserId: session.candidateId, tryNo }
+  const ctx = { tenantId, actorId: o.actorId }
+  const opts = { ref: { kind: 'interview_session' as const, id: session.id }, subjectUserId: session.candidateId, tryNo: o.tryNo }
+  const failed = (c: Extract<Awaited<ReturnType<typeof callModel>>, { ok: false }>): ModelScores => ({ ok: false, kind: 'call', code: c.code, callId: c.callId, check: c.check, reason: c.reason })
 
   let call = await callModel(ctx, INTERVIEW_SCORE_PROMPT, input(false), opts)
-  if (!call.ok) return providerTrouble(tenantId, session, tryNo, call.code)
+  if (!call.ok) return failed(call)
   const criteriaIn = criteria.map(c => ({ id: c.id, name: c.nameUk, scaleMax: Number(c.scaleMax) }))
   const turnsIn = reliable.map(t => ({ turnId: t.id, ordinal: t.ordinal, answer: t.transcript! }))
   let checked = validateScores(criteriaIn, turnsIn, call.output.criteria)
   if (!checked.ok) {
     // `30` §12 п. 5: один повтор с усиленной инструкцией
     call = await callModel(ctx, INTERVIEW_SCORE_PROMPT, input(true), opts)
-    if (!call.ok) return providerTrouble(tenantId, session, tryNo, call.code)
+    if (!call.ok) return failed(call)
     checked = validateScores(criteriaIn, turnsIn, call.output.criteria)
   }
-  if (!checked.ok) {
-    const problems = [...new Set(checked.problems.map(p => p.problem))] as ScoreProblem[]
-    await withTenant(tenantId, null, tx => toNeedsHuman(tx, tenantId, session, 'unexplained', `${NEEDS_HUMAN_TEXT.unexplained} (${problems.join(', ')})`))
-    return 'needs_human'
-  }
+  if (!checked.ok) return { ok: false, kind: 'unexplained', problems: [...new Set(checked.problems.map(p => p.problem))] as ScoreProblem[] }
 
   const scores = checked.scores
   const byId = new Map(criteria.map(c => [c.id, c]))
-  const aiScore = weightedScore(scores.map(x => ({ value: x.value, scaleMax: Number(byId.get(x.criterionId)!.scaleMax), weight: Number(byId.get(x.criterionId)!.weight) })))!
-  const aiConfidence = sessionConfidence(scores.map(x => x.confidence))!
-  const callId = call.callId
-  const stub = session.aiStub || call.model.driver === 'stub'
+  return {
+    ok: true,
+    scores,
+    callId: call.callId,
+    stub: session.aiStub || call.model.driver === 'stub',
+    aiScore: weightedScore(scores.map(x => ({ value: x.value, scaleMax: Number(byId.get(x.criterionId)!.scaleMax), weight: Number(byId.get(x.criterionId)!.weight) })))!,
+    aiConfidence: sessionConfidence(scores.map(x => x.confidence))!,
+  }
+}
+
+/**
+ * Применить объяснённые баллы к сессии, заблокированной вызывающим (`for update`, состояние
+ * проверено): строки `interview_criterion_scores`, итог и уверенность сессии; уверенность не
+ * ниже порога — `scored` и одна строка `candidate_scores.kind = 'ai'`, ниже — `needs_human`.
+ */
+export async function applyScoresTx(tx: TenantTx, tenantId: string, s: Session, minConfidence: number, r: Extract<ModelScores, { ok: true }>, o: { notify: boolean }): Promise<'scored' | 'needs_human'> {
+  for (const x of r.scores) {
+    await tx.insert(interviewCriterionScores).values({
+      tenantId,
+      sessionId: s.id,
+      criterionId: x.criterionId,
+      value: String(x.value),
+      confidence: String(x.confidence),
+      rationale: x.rationale,
+      evidence: x.evidence,
+      aiCallId: r.callId,
+    }).onConflictDoUpdate({
+      target: [interviewCriterionScores.tenantId, interviewCriterionScores.sessionId, interviewCriterionScores.criterionId],
+      set: { value: String(x.value), confidence: String(x.confidence), rationale: x.rationale, evidence: x.evidence, aiCallId: r.callId, updatedAt: new Date() },
+    })
+  }
+  const base = { aiScore: String(r.aiScore), aiConfidence: String(r.aiConfidence), aiStub: r.stub, updatedAt: new Date() }
+  if (r.aiConfidence < minConfidence) {
+    // `30` §12 п. 3: оценка с низкой уверенностью — баллы с обоснованием человеку, числа в карточке нет
+    await tx.update(interviewSessions).set(base).where(eq(interviewSessions.id, s.id))
+    await toNeedsHuman(tx, tenantId, { ...s, ...base } as Session, 'low_confidence')
+    return 'needs_human'
+  }
+  const scoreId = await writeAiScoreTx(tx, tenantId, s.candidateId, { value: r.aiScore, sourceId: s.id, aiStub: r.stub })
+  await tx.update(interviewSessions).set({ ...base, state: 'scored', degradedReason: null, needsHumanReason: null, candidateScoreId: scoreId }).where(eq(interviewSessions.id, s.id))
+  if (o.notify) {
+    const [person] = await personById(tx, { fullName: users.fullName, recruiterId: users.recruiterId }, s.candidateId) as unknown as { fullName: string, recruiterId: string | null }[]
+    const recipients = await recruitingRecipients(tx, tenantId, person?.recruiterId ?? null)
+    await notifyAll(tx, tenantId, recipients, 'interview_completed', { name: person?.fullName ?? '', score: r.aiScore, stub: r.stub }, s.id, s.candidateId)
+  }
+  await recordAudit(tx, { tenantId, actorId: null, action: 'interview.scored', entity: 'interview_session', entityId: s.id, after: { aiScore: r.aiScore, aiConfidence: r.aiConfidence, aiStub: r.stub, aiCallId: r.callId } })
+  return 'scored'
+}
+
+async function scoreSessionOnce(tenantId: string, sessionId: string, tryNo: number): Promise<ScoreOutcome> {
+  const loaded = await loadForScoring(tenantId, sessionId)
+  if (!loaded) return 'skipped'
+  const { session, scenario } = loaded
+
+  // Вызовы внутри сессии не тарифицируются (операция списана резервом на старте, `30` §7.12)
+  const r = await modelScores(tenantId, loaded, { tryNo, actorId: SYSTEM.actorId })
+  if (!r.ok) {
+    if (r.kind === 'no_text') {
+      await withTenant(tenantId, null, tx => toNeedsHuman(tx, tenantId, session, r.reason))
+      return 'needs_human'
+    }
+    if (r.kind === 'call') return providerTrouble(tenantId, session, tryNo, r.code)
+    await withTenant(tenantId, null, tx => toNeedsHuman(tx, tenantId, session, 'unexplained', `${NEEDS_HUMAN_TEXT.unexplained} (${r.problems.join(', ')})`))
+    return 'needs_human'
+  }
 
   try {
     return await withTenant(tenantId, null, async (tx): Promise<ScoreOutcome> => {
       const [s] = await tx.select().from(interviewSessions).where(eq(interviewSessions.id, sessionId)).for('update')
       // Пока модель думала, кандидат отозвал согласие — оценка не формируется (`30` §7.6)
       if (!s || s.state !== 'scoring' || s.redactedAt) return 'skipped'
-      for (const x of scores) {
-        await tx.insert(interviewCriterionScores).values({
-          tenantId,
-          sessionId,
-          criterionId: x.criterionId,
-          value: String(x.value),
-          confidence: String(x.confidence),
-          rationale: x.rationale,
-          evidence: x.evidence,
-          aiCallId: callId,
-        }).onConflictDoUpdate({
-          target: [interviewCriterionScores.tenantId, interviewCriterionScores.sessionId, interviewCriterionScores.criterionId],
-          set: { value: String(x.value), confidence: String(x.confidence), rationale: x.rationale, evidence: x.evidence, aiCallId: callId, updatedAt: new Date() },
-        })
-      }
-      const base = { aiScore: String(aiScore), aiConfidence: String(aiConfidence), aiStub: stub, updatedAt: new Date() }
-      if (aiConfidence < Number(scenario.minConfidence)) {
-        // `30` §12 п. 3: оценка с низкой уверенностью — баллы с обоснованием человеку, числа в карточке нет
-        await tx.update(interviewSessions).set(base).where(eq(interviewSessions.id, sessionId))
-        await toNeedsHuman(tx, tenantId, { ...s, ...base } as Session, 'low_confidence')
-        return 'needs_human'
-      }
-      const scoreId = await writeAiScoreTx(tx, tenantId, s.candidateId, { value: aiScore, sourceId: sessionId, aiStub: stub })
-      await tx.update(interviewSessions).set({ ...base, state: 'scored', candidateScoreId: scoreId }).where(eq(interviewSessions.id, sessionId))
-      const [person] = await personById(tx, { fullName: users.fullName, recruiterId: users.recruiterId }, s.candidateId) as unknown as { fullName: string, recruiterId: string | null }[]
-      const recipients = await recruitingRecipients(tx, tenantId, person?.recruiterId ?? null)
-      await notifyAll(tx, tenantId, recipients, 'interview_completed', { name: person?.fullName ?? '', score: aiScore, stub }, sessionId, s.candidateId)
-      await recordAudit(tx, { tenantId, actorId: null, action: 'interview.scored', entity: 'interview_session', entityId: sessionId, after: { aiScore, aiConfidence, aiStub: stub, aiCallId: callId } })
-      return 'scored'
+      return applyScoresTx(tx, tenantId, s, Number(scenario.minConfidence), r, { notify: true })
     })
   }
   catch (err) {

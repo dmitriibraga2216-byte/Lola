@@ -227,3 +227,14 @@ export const interviewOverrideSchema = z.object({
 }).strict()
 
 export type InterviewOverrideInput = z.infer<typeof interviewOverrideSchema>
+
+/**
+ * `POST /candidates/:id/interview/rescore` — переоценка собеседования по просьбе человека
+ * (`docs/v2/30` §10: `{reason}`). Причина обязательна: она уходит в `audit_log` рядом с тем,
+ * кто попросил модель посмотреть ещё раз.
+ */
+export const interviewRescoreSchema = z.object({
+  reason: z.string().trim().min(10, 'Поясніть, чому потрібна переоцінка (від 10 символів)').max(1000, 'До 1000 символів'),
+}).strict()
+
+export type InterviewRescoreInput = z.infer<typeof interviewRescoreSchema>

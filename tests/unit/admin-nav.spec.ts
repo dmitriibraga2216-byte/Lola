@@ -68,6 +68,7 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/reports/content-quality': "hasScope('content_issue.view')",
   // content-feedback-tails (docs/v2/36 §9): остальные четыре отчёта модуля жалоб
   '/admin/reports/content-issues': "hasScope('content_issue.view')",
+  '/admin/reports/ai': "hasScope('ai.audit')",
   // PR-22 (docs/v2/37 §9.3, §5.3, §2): «План і факт часу» — обезличенный отчёт и нормы времени;
   // видят те, кому §2 показывает отклонение план/факт: наставник и руководитель — по
   // `time.metrics.view`, автор и администратор — по `course.edit`.

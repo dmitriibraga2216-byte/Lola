@@ -137,6 +137,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/knowledge/report', label: t('admin.nav.kbReport'), show: hasScope('knowledge.manage'), group: t('admin.group.moduleReports') },
     { to: '/admin/reports/content-quality', label: t('admin.nav.contentQuality'), show: hasScope('content_issue.view'), group: t('admin.group.moduleReports') },
     { to: '/admin/reports/content-issues', label: t('admin.nav.contentIssueReports'), show: hasScope('content_issue.view'), group: t('admin.group.moduleReports') },
+    // Звіти ШІ (docs/v2/30 §9.3–§9.5): якість моделі, допомога перевіряючому, вартість — тим, хто бачить журнал ШІ (§2)
+    { to: '/admin/reports/ai', label: t('admin.nav.aiReports'), show: hasScope('ai.audit'), group: t('admin.group.moduleReports') },
     // «План і факт часу» (docs/v2/37 §9.3, §5.3): обезличенный отчёт и нормы времени — автору и тем, кто видит отклонение (§2)
     { to: '/admin/reports/time-plan-fact', label: t('admin.nav.timePlanFact'), show: hasScope('time.metrics.view') || hasScope('course.edit'), group: t('admin.group.moduleReports') },
   ] },

@@ -53,6 +53,11 @@ async function create() {
   } catch (err) { error.value = apiErrorOf(err).message }
 }
 const fmt = (d: string) => formatShortDate(new Date(d))
+/** Чего не хватает, чтобы «Далі» / «Створити і запустити» стали активными, — подпись под кнопкой. */
+const missing = computed(() => (step.value === 1
+  ? [form.title.length < 3 && t('assess.need.title'), !form.formId && t('assess.need.form'), (!form.periodFrom || !form.periodTo) && t('assess.need.period')]
+  : step.value === 5 ? [(!form.startsAt || !form.endsAt) && t('assess.need.window'), !form.raterKinds.length && t('assess.need.raters')] : []
+).filter(Boolean).join(', '))
 </script>
 <template>
   <div>
@@ -76,7 +81,8 @@ const fmt = (d: string) => formatShortDate(new Date(d))
       <h2>{{ t('assess.newCycle') }} — {{ t('assess.step', { n: step }) }}: {{ t(`assess.steps.${step}`) }}</h2>
       <div v-if="step === 1" class="grid">
         <input v-model="form.title" class="field" :placeholder="t('assess.cycleTitle')" data-testid="cycle-title">
-        <select v-model="form.formId" class="field"><option v-for="f in forms" :key="f.id" :value="f.id">{{ f.title }}</option></select>
+        <select v-if="forms.length" v-model="form.formId" class="field"><option v-for="f in forms" :key="f.id" :value="f.id">{{ f.title }}</option></select>
+        <p v-else class="sub" data-testid="cycle-no-forms">{{ t('assess.noForms') }}: <NuxtLink to="/admin/assessment/forms" class="link">{{ t('assess.forms') }}</NuxtLink></p>
         <label class="sub">{{ t('assess.period') }} <input v-model="form.periodFrom" class="field" type="date"> — <input v-model="form.periodTo" class="field" type="date"></label>
       </div>
       <div v-if="step === 2" class="grid">
@@ -115,9 +121,10 @@ const fmt = (d: string) => formatShortDate(new Date(d))
       </div>
       <div class="row">
         <button v-if="step > 1" class="chip" @click="step--">{{ t('common.back') }}</button>
-        <button v-if="step < 5" class="primary" :disabled="step === 1 && (form.title.length < 3 || !form.formId || !form.periodFrom || !form.periodTo)" data-testid="cycle-next" @click="step++">{{ t('common.next') }}</button>
-        <button v-else class="primary" :disabled="!form.startsAt || !form.endsAt || !form.raterKinds.length" data-testid="cycle-start" @click="create">{{ t('assess.createStart') }}</button>
+        <button v-if="step < 5" class="primary" :disabled="!!missing" :aria-describedby="missing ? 'cycle-missing' : undefined" data-testid="cycle-next" @click="step++">{{ t('common.next') }}</button>
+        <button v-else class="primary" :disabled="!!missing" :aria-describedby="missing ? 'cycle-missing' : undefined" data-testid="cycle-start" @click="create">{{ t('assess.createStart') }}</button>
       </div>
+      <p v-if="missing" id="cycle-missing" class="sub" data-testid="cycle-missing">{{ t('common.fillToContinue', { fields: missing }) }}</p>
     </section>
   </div>
 </template>

@@ -35,6 +35,12 @@ onMounted(load)
 const canEdit = computed(() => hasScope('course.publish'))
 const posName = (id: string) => positions.value.find(p => p.id === id)?.name ?? '?'
 const courseName = (id: string) => courses.value.find(c => c.id === id)?.title ?? '?'
+/** Чего не хватает, чтобы «Створити» стала активной, — показывается под кнопкой, а не угадывается. */
+const missing = computed(() => [
+  form.name.length < 2 && t('profiles.need.name'),
+  !form.positionIds.length && t('profiles.need.position'),
+  !form.items.some(it => it.subjectId) && t('profiles.need.course'),
+].filter(Boolean).join(', '))
 
 async function create() {
   error.value = ''
@@ -104,8 +110,11 @@ async function apply(p: Profile) {
         <label class="check"><input v-model="it.isMandatory" type="checkbox"> {{ t('assign.mandatory') }}</label>
         <button class="chip danger" @click="form.items.splice(i, 1)">✕</button>
       </div>
-      <button class="chip" @click="form.items.push({ subjectId: courses[0]?.id ?? '', dueDays: 14, isMandatory: true })">+ {{ t('profiles.addCourse') }}</button>
-      <button class="primary" :disabled="form.name.length < 2 || !form.positionIds.length || !form.items.length" @click="create">{{ t('course.create') }}</button>
+      <!-- У свежего тенанта опубликованных курсов нет: «+ Курс» добавлял строку с пустым выбором, и сервер отвечал «Перевірте профіль» -->
+      <p v-if="!courses.length" class="sub" data-testid="profiles-no-courses">{{ t('profiles.noCourses') }} <NuxtLink to="/admin/courses" class="link">{{ t('profiles.toCourses') }}</NuxtLink></p>
+      <button v-else class="chip" @click="form.items.push({ subjectId: courses[0]?.id ?? '', dueDays: 14, isMandatory: true })">+ {{ t('profiles.addCourse') }}</button>
+      <button class="primary" :disabled="!!missing" :aria-describedby="missing ? 'profile-missing' : undefined" @click="create">{{ t('course.create') }}</button>
+      <p v-if="missing" id="profile-missing" class="sub" data-testid="profiles-missing">{{ t('common.fillToContinue', { fields: missing }) }}</p>
     </section>
   </div>
 </template>
@@ -118,10 +127,10 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .card-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .courses { margin: 0; padding-left: var(--space-5); }
 .actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
-.row { display: flex; gap: var(--space-2); align-items: center; }
+.row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .row select { flex: 1; }
 .num { width: 70px; }
-input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
+input, select { max-width: 100%; box-sizing: border-box; font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .check { display: flex; gap: var(--space-1); align-items: center; font-size: var(--font-size-body-s); white-space: nowrap; }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; justify-self: start; }
 .chip.danger { color: var(--color-coral-ink); }

@@ -38,7 +38,7 @@ async function saveEdit() {
 }
 
 const people = ref<{ id: string, fullName: string }[]>([])
-async function ensurePeople() { if (!people.value.length) people.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 300 } }).catch(() => []) }
+async function ensurePeople() { if (!people.value.length) people.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).catch(() => []) }
 const mentorEditing = ref(false)
 const mentorId = ref('')
 async function openMentor() { await ensurePeople(); mentorId.value = card.value?.plan.mentorId ?? ''; mentorEditing.value = true }

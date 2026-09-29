@@ -47,7 +47,7 @@ const flat = computed(() => {
 })
 
 const people = ref<{ id: string, fullName: string }[]>([])
-async function ensurePeople() { if (!people.value.length) people.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 300 } }).catch(() => []) }
+async function ensurePeople() { if (!people.value.length) people.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).catch(() => []) }
 
 const editing = ref(false)
 const form = reactive({ id: '', parentId: null as string | null, title: '', userId: '', dueAt: '', progressPct: 0 })

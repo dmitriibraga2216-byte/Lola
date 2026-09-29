@@ -21,7 +21,8 @@
     "search": "Search",
     "yes": "Yes",
     "no": "No",
-    "actions": "Actions"
+    "actions": "Actions",
+    "fillToContinue": "To continue, fill in: {fields}"
   },
   "login": {
     "phoneLabel": "Phone number",
@@ -1505,7 +1506,14 @@
     "empty": "No profiles yet",
     "new": "New profile",
     "name": "Name (e.g. Barista)",
-    "addCourse": "Course"
+    "addCourse": "Course",
+    "need": {
+      "name": "a name (2+ characters)",
+      "position": "a position",
+      "course": "at least one course"
+    },
+    "noCourses": "No published courses yet — nothing for the profile to assign.",
+    "toCourses": "Create a course"
   },
   "reports": {
     "readiness": "Shift readiness",
@@ -2486,7 +2494,14 @@
     "raterWeight": "Weight",
     "raterAnonymous": "Anonymous",
     "weightedTotal": "Weighted total by roles",
-    "byProfile": "Items come from the position profile requirements"
+    "byProfile": "Items come from the position profile requirements",
+    "need": {
+      "title": "a title (3+ characters)",
+      "form": "a form",
+      "period": "the review period",
+      "window": "review start and end",
+      "raters": "who rates"
+    }
   },
   "cl": {
     "title": "Checklists",
@@ -2749,6 +2764,12 @@
     "presence": {
       "came": "Present",
       "missed": "Absent"
+    },
+    "need": {
+      "title": "a title (3+ characters)",
+      "announcement": "an announcement",
+      "time": "start and end",
+      "trainer": "a trainer"
     }
   },
   "cx": {

@@ -77,7 +77,7 @@ function open(p: Panel) {
   if (p === 'fix') form.resolution = confirmResolutions.value[0]!
   if (p === 'reject') form.resolution = 'not_an_error'
   if (p === 'assign' && !people.value.length) {
-    api<{ id: string, fullName: string }[]>('/people', { query: { limit: 300 } }).then((r) => { people.value = r }).catch(() => {})
+    api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100 } }).then((r) => { people.value = r }).catch(() => {})
   }
   if (p === 'rescore') openRescore()
 }

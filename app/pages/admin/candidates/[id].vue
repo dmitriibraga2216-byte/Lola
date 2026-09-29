@@ -25,7 +25,7 @@ const { formatDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredAnyScope: ['candidate.view', 'review.queue'] })
 
 const { t } = useI18n()
-const { api } = useApi()
+const { api, apiRaw } = useApi()
 const { hasScope } = useAuth()
 const route = useRoute()
 const id = route.params.id as string
@@ -274,7 +274,8 @@ async function erase() {
   busy.value = 'erase'
   error.value = ''
   try {
-    await api(`/candidates/${id}`, { method: 'DELETE', body: { reasonText: eraseReason.value } })
+    // `204` без тела: `api()` разворачивает `.data` и упал бы на пустом ответе — берём сырой вызов
+    await apiRaw(`/candidates/${id}`, { method: 'DELETE', body: { reasonText: eraseReason.value } })
     eraseOpen.value = false
     eraseReason.value = ''
     notice.value = t('candidate.erase.done')

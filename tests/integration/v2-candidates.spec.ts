@@ -414,7 +414,7 @@ describe('доступ к карточке (§2, §7.10; критерии §13 �
     // У областной роли этот кандидат не свой: ответственным назначен другой человек.
     await admin`update users set recruiter_id = ${adminId} where id = ${created[0]!}`
     expect(await getCandidate(manager, created[0]!)).toBeNull()
-    expect((await listCandidates(manager, { limit: 50 } as never)).map(c => c.id)).not.toContain(created[0]!)
+    expect((await listCandidates(manager, { limit: 50 } as never)).items.map(c => c.id)).not.toContain(created[0]!)
   })
 
   it('свой кандидат областной роли виден, но с маскированными контактами (§2 «✓ маскировано»)', async () => {
@@ -469,7 +469,7 @@ describe('доступ к карточке (§2, §7.10; критерии §13 �
   it('чужой тенант — пусто и «не найдено» (CLAUDE.md п. 15)', async () => {
     const foreign = viewerOf({ userId: adminId, tenantId: otherTenantId, grants: [{ scopes: ['candidate.view', 'candidate.edit'], scopeType: 'tenant', scopeId: null }] })
     expect(await getCandidate(foreign, created[0]!)).toBeNull()
-    expect((await listCandidates(foreign, { limit: 50 } as never)).length).toBe(0)
+    expect((await listCandidates(foreign, { limit: 50 } as never)).items.length).toBe(0)
     expect((await listStatuses({ tenantId: otherTenantId, actorId: adminId })).some(s => createdStatuses.includes(s.id))).toBe(false)
     const upd = await updateCandidate(foreign, created[0]!, { commLanguage: 'en' })
     expect(upd.ok).toBe(false)

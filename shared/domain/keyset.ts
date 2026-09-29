@@ -36,6 +36,8 @@ export type KeysetValues<S extends KeysetShape> = { -readonly [K in keyof S]: Va
 export const KEYSETS = {
   /** Канбан воронки, колонка: `created_at desc, id desc` (docs/v2/28 §5.2). */
   candidateBoard: ['at', 'uuid'],
+  /** Реестр кандидатов `GET /candidates`: `created_at desc, id desc` (docs/v2/28 §5.1, §10). */
+  candidates: ['at', 'uuid'],
   /** Люди: `created_at desc, id desc` (docs/16 §5.1). */
   people: ['at', 'uuid'],
   /**

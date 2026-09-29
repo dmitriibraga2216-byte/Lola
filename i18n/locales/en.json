@@ -5248,7 +5248,8 @@
       "comments": "Comments",
       "history": "History",
       "interview": "Interview",
-      "summary": "Summary"
+      "summary": "Summary",
+      "progress": "Progress"
     },
     "state": {
       "active": "In selection",
@@ -5318,7 +5319,47 @@
     "reasonCode": "Reason",
     "notifyRejected": "Notify the candidate",
     "onboardingCourses": "Onboarding courses",
-    "noDefaultCourses": "The position has no default courses — set them in the positions dictionary"
+    "noDefaultCourses": "The position has no default courses — set them in the positions dictionary",
+    "progress": {
+      "empty": "Nothing has been assigned to this candidate yet",
+      "assign": "Assign content",
+      "title": "Title",
+      "status": "Status",
+      "progress": "Progress",
+      "attempts": "Attempts",
+      "content": "Time on content",
+      "attempt": "Time on trial",
+      "due": "Due",
+      "attemptsTitle": "Attempt history",
+      "no": "#",
+      "score": "Score",
+      "date": "Date",
+      "minutes": "{n} min",
+      "passed": "passed",
+      "notPassed": "not passed"
+    },
+    "invite": {
+      "button": "Send invitation",
+      "title": "Invite the candidate",
+      "hint": "The candidate gets a one-time sign-in link. At most once a day and no more than 5 times.",
+      "channels": "Channels",
+      "channel": {
+        "email": "E-mail",
+        "telegram": "Telegram",
+        "sms": "SMS"
+      },
+      "send": "Send",
+      "sent": "Invitation sent: {channels}",
+      "skipped": "No contact, skipped: {channels}"
+    },
+    "erase": {
+      "button": "Delete",
+      "title": "Delete candidate data",
+      "hint": "Name, phone, e-mail, CV and comments will be irreversibly anonymised. Progress and scores stay for statistics.",
+      "reason": "Reason for deletion",
+      "confirm": "Delete permanently",
+      "done": "Candidate data anonymised"
+    }
   },
   "candidates": {
     "title": "Candidates",
@@ -5335,8 +5376,11 @@
       "phone": "Phone",
       "state": "State",
       "recruiter": "Recruiter",
-      "added": "Added"
-    }
+      "added": "Added",
+      "vacancy": "Vacancy"
+    },
+    "vacancy": "Vacancy",
+    "allVacancies": "All vacancies"
   },
   "recruitingSettings": {
     "title": "Recruiting",

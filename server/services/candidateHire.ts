@@ -398,13 +398,14 @@ async function notifyHired(v: Viewer, id: string, input: CandidateHireInput): Pr
 // ── Стирание ПД по истёкшему согласию (§7.9) ───────────────────────────────────────────────
 
 /**
- * Обезличивание одной записи — тело `candidate.consent_sweep` и ручка «відкликав згоду» (§12.7).
+ * Обезличивание одной записи — тело `candidate.consent_sweep`, ручка «відкликав згоду» (§12.7) и
+ * удаление по праву на забвение (`DELETE /candidates/:id`, `candidateInvite.ts`).
  *
  * Что уходит: ФИО, телефон, e-mail, резюме, комментарии рекрутеров. Что остаётся: прохождение,
  * оценки и история статусов — они уже не персональные данные, а статистика воронки, и без них
  * отчёт по найму задним числом разваливается. Операция необратима и пишется в `audit_log`.
  */
-export async function anonymizeCandidate(tx: TenantTx, tenantId: string, id: string, actorId: string | null, reason: string): Promise<boolean> {
+export async function anonymizeCandidate(tx: TenantTx, tenantId: string, id: string, actorId: string | null, reason: string, reasonText: string | null = null): Promise<boolean> {
   const short = id.slice(0, 8)
   const [row] = await tx.update(users).set({
     fullName: `Кандидат №${short}`,
@@ -440,7 +441,8 @@ export async function anonymizeCandidate(tx: TenantTx, tenantId: string, id: str
     action: 'candidate.anonymized',
     entity: 'user',
     entityId: id,
-    after: { reason },
+    // `reasonText` — объяснение человека при ручном удалении (`DELETE /candidates/:id`, §10)
+    after: reasonText ? { reason, reasonText } : { reason },
   })
   return true
 }

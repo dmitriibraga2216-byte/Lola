@@ -652,8 +652,8 @@
 
 **Не реализовано (18) — где отложено** (`docs/v2/46-progress.md`, «заголовок записи» → раздел):
 
-- `28`: `POST /candidates/:id/invite`, `DELETE /candidates/:id` — «2026-09-23 · Фаза 3, PR-14 —
-  воронка: канбан, найм, автоматика, отчёт, флаг тенанта» → «Что осталось».
+- ~~`28`: `POST /candidates/:id/invite`, `DELETE /candidates/:id`~~ — реализованы candidates-tails
+  (`docs/v2/46-progress.md`, «2026-09-29 · candidates-tails»).
 - `30`: `POST /interview-scenarios/:id/criteria/generate` — «2026-09-25 · Фаза 3, PR-28 —
   сценарий, согласие, прохождение собеседования…» → «Что осталось» (предложение критериев ИИ,
   `30` §6.2); ~~`POST /candidates/:id/interview/rescore` — «2026-09-25 · Фаза 3, PR-29 — Підсумок,
@@ -749,7 +749,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/candidates` | реестр: фильтры `q`, `statusId`, `state`, `recruiterId`, `source`, `from`, `to`, `limit` (`candidate.view`); в `meta` — счётчик «Кандидатів: N із M» по общей формуле лимита |
+| GET | `/candidates` | реестр: фильтры `q`, `statusId`, `state`, `recruiterId`, `vacancyId`, `source`, `from`, `to`, `cursor`, `limit` (`candidate.view`); страницы — ключевым курсором `created_at desc, id desc` (`KEYSETS.candidates`, §4.1), в `meta` — `total` под фильтром, `nextCursor` и счётчик «Кандидатів: N із M» по общей формуле лимита |
 | POST | `/candidates` | создание по форме `28` §6.1 (`candidate.edit`); `400 candidate.contact_required`, `409 candidate.is_employee`, `409 candidate.duplicate` (в деталях — карточка найденного), `409 candidate.contact_taken`, `409 limit_exceeded` (`axis=candidates_active`) |
 | GET | `/candidates/duplicates` | поиск того же человека по телефону и почте до сохранения (`candidate.edit`); контакты найденного в ответ не отдаются |
 | GET | `/candidates/:id` | карточка (`candidate.view` или `review.queue` — наставнику без контактов, резюме и комментариев); чужой тенант и чужая область — `404` |
@@ -758,9 +758,12 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | GET | `/candidates/:id/history` | лента смен колонки: кто, когда, почему (`candidate.view`) |
 | GET/POST | `/candidates/:id/scores` | четыре независимых вида оценки, `?history=true` — вместе со снятыми; вид `ai` ставит только авто-собеседование |
 | GET/POST | `/candidates/:id/comments` | тред рекрутеров; кандидату не виден никогда |
+| GET | `/candidates/:id/progress` | вкладка «Проходження» (`28` §5.3): назначения со статусом, прогрессом, числом попыток, «Час на контент» и «Час на випробування», плюс история попыток (`candidate.view` или `review.queue` — как карточка); чужой — `404` |
+| POST | `/candidates/:id/invite` | приглашение `{channels[]}` из `email`/`telegram`/`sms` (`candidate.assign`): одноразовая ссылка входа на 48 ч и `candidate_invited` по каналам, где есть адрес; ответ `{sentAt, channels, skipped}`, **без ссылки**. `429 invite.too_often` (`details.reason`: `interval` — раньше суток, с `retryAt`; `total` — уже пять), `422 contact.missing` (ни одного адреса, `details.missing`), `409 candidate.not_active`, `409 candidate.access_expired`, чужой — `404` (`v2/44` Р-CT.1…Р-CT.3) |
+| DELETE | `/candidates/:id` | право на забвение `{reasonText}` (`candidate.delete`, HR/админ): обезличивание, как у `candidate.consent_sweep` — прохождение и оценки остаются; `204`, повтор — тоже `204`; `409 candidate.hired`, `422 validation_failed` без причины, чужой — `404` (`v2/44` Р-CT.4) |
 | GET/POST | `/candidate-statuses` | справочник колонок канбана со счётчиком кандидатов; создание — `candidate.status.manage`, `409 code.exists` |
 | PATCH/DELETE | `/candidate-statuses/:id` | правка и удаление; `403 status.system`, `409 candidate_status.in_use` со списком кандидатов внутри |
-| GET | `/candidates/board` | канбан: активные колонки, в каждой страница по 50 карточек, общее число и курсор; с `statusId` и `cursor` — следующая страница **одной** колонки (`candidate.view`); чужая колонка — `404` |
+| GET | `/candidates/board` | канбан: активные колонки, в каждой страница по 50 карточек, общее число и курсор; фильтры `recruiterId`, `vacancyId`, `source`, `q`; с `statusId` и `cursor` — следующая страница **одной** колонки (`candidate.view`); чужая колонка — `404` |
 | POST | `/candidates/:id/hire` | найм одной транзакцией: `kind='employee'`, размещение, наставник, этап онбординга, курсы (`candidate.hire`); `409 candidate.not_active`, `409 limit_exceeded` с `details.axis=users_active` (в деталях — ещё продлённое на 14 дней право входа `accessUntil`, `28` §12.5; прежний `limit.users_exceeded` отменён `v2/44` В-16), `503 limit.check_failed` |
 | POST | `/candidates/:id/reject` | отказ с причиной из перечня (`candidate.decide`); `422 reason.required`, `409 candidate.not_active` |
 | POST | `/candidates/:id/archive` | архивация вручную; `?withdraw=true` — самоотвод кандидата (`candidate.decide`) |

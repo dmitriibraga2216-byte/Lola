@@ -91,7 +91,7 @@ export const candidateListSchema = z
     source: z.enum(CANDIDATE_SOURCES).optional(),
     from: z.string().date().optional(),
     to: z.string().date().optional(),
-    cursor: z.string().uuid().optional(),
+    cursor: keysetCursorSchema(KEYSETS.candidates).optional(), // позиция последней показанной строки, выдаёт сервер
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
   .strict()
@@ -213,6 +213,7 @@ export const candidateBoardSchema = z
   .object({
     statusId: z.string().uuid().optional(),
     recruiterId: z.string().uuid().optional(),
+    vacancyId: z.string().uuid().optional(), // фильтр доски по вакансии отклика (`28` §5.1, §5.2)
     source: z.enum(CANDIDATE_SOURCES).optional(),
     q: z.string().trim().max(200).optional(),
     cursor: keysetCursorSchema(KEYSETS.candidateBoard).optional(), // позиция последней показанной карточки, выдаёт сервер
@@ -300,3 +301,28 @@ export const candidateStatusUpdateSchema = z
   .strict()
 
 export type CandidateStatusUpdateInput = z.infer<typeof candidateStatusUpdateSchema>
+
+/**
+ * Каналы приглашения кандидата (`28` §8 `candidate.invited`: e-mail, Telegram, SMS). Не новое
+ * перечисление, а подмножество каналов `notifications.channel` (`telegram | sms | email`), которые
+ * §8 называет для этого события.
+ */
+export const CANDIDATE_INVITE_CHANNELS = ['email', 'telegram', 'sms'] as const
+export type CandidateInviteChannel = typeof CANDIDATE_INVITE_CHANNELS[number]
+
+/** Приглашение кандидата (`28` §10 `POST /candidates/:id/invite`, частота — §7.12). */
+export const candidateInviteSchema = z
+  .object({ channels: z.array(z.enum(CANDIDATE_INVITE_CHANNELS)).min(1).max(3) })
+  .strict()
+
+export type CandidateInviteInput = z.infer<typeof candidateInviteSchema>
+
+/**
+ * Удаление по праву на забвение (`28` §10 `DELETE /candidates/:id`). Причина обязательна: операция
+ * необратима, и `audit_log` должен объяснить, почему запись обезличена раньше срока согласия.
+ */
+export const candidateDeleteSchema = z
+  .object({ reasonText: z.string().trim().min(3).max(500) })
+  .strict()
+
+export type CandidateDeleteInput = z.infer<typeof candidateDeleteSchema>

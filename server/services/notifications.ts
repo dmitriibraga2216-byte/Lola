@@ -182,7 +182,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // `candidate.invited`/`candidate.reminder` в PR-14 не завелись (там были только найм,
   // відмова, дайджести). `candidate.hired.internal` уже покрыт `candidate_hired_manager`,
   // `candidate.limit_warning` схлопнут в `limit_warning` (докс/v2/39 П-23) — новых кодов нет.
-  candidate_invited: 'Вітаємо! Для участі у відборі на посаду «{{vacancy}}» пройдіть матеріали за посиланням: {{url}}{{#until}}. Доступ до {{until}}{{/until}}',
+  // Вакансия у кандидата бывает не указана (добавлен вручную, `28` §6.1) — тогда без «на посаду «»»
+  candidate_invited: 'Вітаємо! Для участі у відборі{{#vacancy}} на посаду «{{vacancy}}»{{/vacancy}} пройдіть матеріали за посиланням: {{url}}{{#until}}. Доступ до {{until}}{{/until}}',
   candidate_reminder: 'Залишилось {{days}} дн., щоб завершити відбір на посаду «{{vacancy}}»',
   // docs/v2/29 §8 (PR-16): отклик по публичной ссылке. Кандидату — только приветствие со
   // ссылкой на отбор; о том, что его отклик задержала проверка §7.7, он не узнаёт никогда.

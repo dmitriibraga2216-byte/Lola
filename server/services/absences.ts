@@ -23,6 +23,7 @@ import { managerIdOf } from './orgManager'
 import { cardSubject, isUuid } from './personCard'
 import type { CardSubject } from './personCard'
 import { subjectStage } from './taskParams'
+import { ACTIVE_EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Отсутствия человека (docs/v2/38-people-extensions.md §3.6, §4, §5.1, §6.3–6.4, §7.12–7.14; PR-33).
@@ -596,4 +597,80 @@ export async function peopleAbsentOn(tx: TenantTx, tenantId: string, now = new D
       and (${now.toISOString()}::timestamptz at time zone z.tz)::date between r.date_from and r.date_to
       ${userIds ? sql`and r.user_id in (${sql.join(userIds.map(id => sql`${id}::uuid`), sql`, `)})` : sql``}`) as unknown as { user_id: string }[]
   return new Set(rows.map(r => r.user_id))
+}
+
+// ── Остатки (§7.13, §8, §11 `absence.balance_scan`) ─────────────────────────────────────────
+
+export interface BalanceScanStats { negative: number, notified: number }
+
+/** HR отсутствий — носители `person.absence.manage` на весь тенант (§2: «hr — носитель скоупов … в области тенанта»). */
+async function absenceHr(tx: TenantTx): Promise<string[]> {
+  const rows = await tx.execute(sql`
+    select distinct ur.user_id from user_roles ur
+    join roles r on r.id = ur.role_id
+    join users u on u.id = ur.user_id
+    where ur.scope_type = 'tenant' and r.scopes @> array['person.absence.manage']::text[]
+      and (ur.valid_until is null or ur.valid_until > now())
+      ${ACTIVE_EMPLOYEES_ONLY('u')}`) as unknown as { user_id: string }[]
+  return rows.map(r => r.user_id)
+}
+
+/**
+ * `absence.balance_scan` — ежесуточно 05:00 (§11): остаток каждого вида с нормой (отпуск,
+ * больничный) за текущий год у действующих сотрудников — тем же расчётом, что блок карточки
+ * (`getAbsenceCard()`): норма по `resolveAbsenceNorms()` снизу вверх, использовано — только
+ * `approved`, дни внутри года. Отрицательный остаток — `absence_norm_exceeded` HR (§8);
+ * автосписания нет, обучение не блокируется (§12). `[решение]` Р-38.2: ключ дедупликации —
+ * человек, вид, год и **величина** остатка: каждый новый перерасход (−3 → −5) — новое
+ * сообщение, тот же остаток назавтра — тишина, а исправленная норма молча снимает вопрос.
+ */
+export async function absenceBalanceScanTenant(tenantId: string, forYear?: number): Promise<BalanceScanStats> {
+  return withTenant(tenantId, null, async (tx) => {
+    const stats: BalanceScanStats = { negative: 0, notified: 0 }
+    const year = forYear ?? await currentYear(tx, tenantId)
+    const normKinds = sql.join(ABSENCE_NORM_KINDS.map(k => sql`${k}`), sql`, `)
+    const people = await tx.execute(sql`
+      select u.id, u.full_name,
+             (select up.location_id from user_placements up where up.user_id = u.id and up.is_primary and up.ended_at is null
+              order by up.started_at desc limit 1) as location_id
+      from users u
+      where exists (select 1 from absence_records r where r.user_id = u.id and r.status = 'approved'
+                      and r.kind in (${normKinds})
+                      and r.date_from <= make_date(${year}, 12, 31) and r.date_to >= make_date(${year}, 1, 1))
+        ${ACTIVE_EMPLOYEES_ONLY('u')}`) as unknown as { id: string, full_name: string, location_id: string | null }[]
+    if (!people.length) return stats
+    const records = await tx.select({ userId: absenceRecords.userId, kind: absenceRecords.kind, dateFrom: absenceRecords.dateFrom, dateTo: absenceRecords.dateTo })
+      .from(absenceRecords)
+      .where(and(
+        eq(absenceRecords.status, 'approved'),
+        inArray(absenceRecords.userId, people.map(p => p.id)),
+        sql`${absenceRecords.dateFrom} <= make_date(${year}, 12, 31) and ${absenceRecords.dateTo} >= make_date(${year}, 1, 1)`,
+      ))
+    let hr: string[] | null = null
+    for (const p of people) {
+      const norms = await resolveAbsenceNorms(tx, { year, userId: p.id, locationId: p.location_id })
+      for (const kind of ABSENCE_NORM_KINDS) {
+        const used = records.filter(r => r.userId === p.id && r.kind === kind)
+          .reduce((sum, r) => sum + daysInYear(r.dateFrom as IsoDate, r.dateTo as IsoDate, year), 0)
+        const remaining = remainingDays(norms[kind].value, used)
+        if (remaining >= 0) continue
+        stats.negative++
+        hr ??= await absenceHr(tx)
+        for (const to of hr) {
+          if (to === p.id) continue
+          const sent = await enqueueNotification(tx, {
+            tenantId,
+            userId: to,
+            code: 'absence_norm_exceeded',
+            payload: { person: p.full_name, [kind]: true, kind, days: remaining, year, personId: p.id },
+            dedupKey: `absence_norm_exceeded:${p.id}:${kind}:${year}:${remaining}:${to}`,
+            refType: 'user',
+            refId: p.id,
+          })
+          if (sent) stats.notified++
+        }
+      }
+    }
+    return stats
+  })
 }

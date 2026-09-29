@@ -213,6 +213,10 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   person_document_expired: 'Документ «{{type}}»{{#person}} ({{person}}){{/person}} прострочено {{date}}. Потрібно оновити.',
   person_note_shared: 'Керівник поділився з вами нотаткою.',
   person_note_flagged: 'Нотатку про {{person}} збережено з ознаками чутливого змісту.',
+  // docs/v2/38 §8, §11 (person-card-tails): обязательный документ не внесён через 7 дней после
+  // приёма (`documents.missing_scan`) и отрицательный остаток отсутствий (`absence.balance_scan`)
+  person_document_missing: 'У {{person}} немає обовʼязкового документа «{{type}}».',
+  absence_norm_exceeded: 'У {{person}} залишок «{{#vacation}}відпустка{{/vacation}}{{#sick}}лікарняні{{/sick}}» відʼємний: {{days}} дн.',
   // docs/v2/38 §8 (PR-33): срок обязательного назначения сдвинут с дней отсутствия (§7.14).
   // Человеку — «ви у відсутності», руководителю — с именем того, чей срок ({{person}})
   absence_deadline_shifted: 'Дедлайн «{{course}}»{{#person}} ({{person}}){{/person}} перенесено на {{date}}: {{#self}}ви у відсутності{{/self}}{{#person}}співробітник у відсутності{{/person}}.',

@@ -19,7 +19,7 @@ import { enqueueNotification } from './notifications'
 import { managerIdOf } from './orgManager'
 import { cardSubject, isUuid } from './personCard'
 import type { CardSubject } from './personCard'
-import { EMPLOYEES_ONLY } from './repo/people'
+import { ACTIVE_EMPLOYEES_ONLY, EMPLOYEES_ONLY } from './repo/people'
 
 /**
  * Документы человека (docs/v2/38-people-extensions.md §3.5, §4, §6.2, §7.7, §7.8; PR-32).
@@ -552,6 +552,66 @@ export async function documentsExpiryScanTenant(tenantId: string, now = new Date
           refId: d.id,
         })
         if (sent) stats.notified++
+      }
+    }
+    return stats
+  })
+}
+
+// ── Отсутствующие обязательные документы (`38` §11 `documents.missing_scan`, §7.8, §8) ────
+
+/** Сколько дней после приёма обязательный документ может отсутствовать без уведомления (§8). */
+export const DOCUMENT_MISSING_GRACE_DAYS = 7
+
+export interface MissingScanStats { missing: number, notified: number }
+
+/**
+ * `documents.missing_scan` — ежесуточно 06:10 (§11): у действующего сотрудника нет документа
+ * обязательного типа, подходящего его посадам (`documentRequiredFor()` — то же правило, что у
+ * строки-заглушки карточки), и с приёма прошло 7 дней (§8). `person_document_missing` —
+ * руководителю точки (если тип ему виден, §2) и HR; самому человеку — нет, §8 его не называет.
+ * `[решение]` Р-38.1: одно уведомление на человека, тип и адресата — ключ дедупликации без даты;
+ * ежедневный повтор бесконечен, а бесконечное напоминание игнорируется (§7.8). Дата приёма —
+ * `users.hired_at`, без неё — дата заведения записи.
+ */
+export async function documentsMissingScanTenant(tenantId: string, now = new Date()): Promise<MissingScanStats> {
+  return withTenant(tenantId, null, async (tx) => {
+    const today = await tenantToday(tx, tenantId, now)
+    const stats: MissingScanStats = { missing: 0, notified: 0 }
+    const types = await tx.select().from(personDocumentTypes)
+      .where(and(eq(personDocumentTypes.isRequired, true), eq(personDocumentTypes.isActive, true)))
+    if (!types.length) return stats
+    const people = await tx.execute(sql`
+      select u.id, u.full_name,
+             coalesce(array_agg(distinct up.position_id) filter (where up.position_id is not null), '{}') as position_ids,
+             coalesce(array_agg(distinct d.type_id) filter (where d.type_id is not null), '{}') as present
+      from users u
+      left join user_placements up on up.user_id = u.id and up.ended_at is null
+      left join person_documents d on d.user_id = u.id and d.status <> 'revoked'
+      where coalesce(u.hired_at, u.created_at::date) <= ${today}::date - ${DOCUMENT_MISSING_GRACE_DAYS}::int
+        ${ACTIVE_EMPLOYEES_ONLY('u')}
+      group by u.id, u.full_name`) as unknown as { id: string, full_name: string, position_ids: string[], present: string[] }[]
+    let hr: string[] | null = null
+    for (const p of people) {
+      const absent = types.filter(t => !p.present.includes(t.id) && documentRequiredFor(t, p.position_ids))
+      if (!absent.length) continue
+      hr ??= await documentHr(tx)
+      const manager = absent.some(t => t.visibleToManager) ? await managerIdOf(tx, p.id) : null
+      for (const t of absent) {
+        stats.missing++
+        const recipients = [...new Set([...(t.visibleToManager && manager ? [manager] : []), ...hr])].filter(id => id !== p.id)
+        for (const to of recipients) {
+          const sent = await enqueueNotification(tx, {
+            tenantId,
+            userId: to,
+            code: 'person_document_missing',
+            payload: { person: p.full_name, type: t.name, personId: p.id, typeId: t.id },
+            dedupKey: `person_document_missing:${p.id}:${t.id}:${to}`,
+            refType: 'user',
+            refId: p.id,
+          })
+          if (sent) stats.notified++
+        }
       }
     }
     return stats

@@ -1,7 +1,9 @@
-import { archiveNotesTenant } from '../services/personNotes'
-import { documentsExpiryScanTenant } from '../services/personDocuments'
-import type { ExpiryScanStats } from '../services/personDocuments'
-import { absenceDeadlineGuardTenant } from '../services/absences'
+import { archiveNotesTenant, sensitiveScreenTenant } from '../services/personNotes'
+import type { SensitiveScreenStats } from '../services/personNotes'
+import { documentsExpiryScanTenant, documentsMissingScanTenant } from '../services/personDocuments'
+import type { ExpiryScanStats, MissingScanStats } from '../services/personDocuments'
+import { absenceBalanceScanTenant, absenceDeadlineGuardTenant } from '../services/absences'
+import type { BalanceScanStats } from '../services/absences'
 
 /**
  * Ночные задачи карточки человека одного тенанта (docs/v2/38-people-extensions.md §11,
@@ -26,4 +28,19 @@ export async function documentsExpiryScan(tenantId: string): Promise<ExpiryScanS
  */
 export async function absenceDeadlineGuard(tenantId: string): Promise<number> {
   return absenceDeadlineGuardTenant(tenantId)
+}
+
+/** `documents.missing_scan` — ежесуточно 06:10: обязательный документ не внесён 7 дней после приёма (§8). */
+export async function documentsMissingScan(tenantId: string): Promise<MissingScanStats> {
+  return documentsMissingScanTenant(tenantId)
+}
+
+/** `absence.balance_scan` — ежесуточно 05:00: отрицательный остаток отпуска или больничного — HR (§8). */
+export async function absenceBalanceScan(tenantId: string): Promise<BalanceScanStats> {
+  return absenceBalanceScanTenant(tenantId)
+}
+
+/** `notes.sensitive_screen` — еженедельная переборка заметок по текущему словарю скрина (§7.5, §11). */
+export async function notesSensitiveScreen(tenantId: string): Promise<SensitiveScreenStats> {
+  return sensitiveScreenTenant(tenantId)
 }

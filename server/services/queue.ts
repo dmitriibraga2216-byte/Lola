@@ -68,6 +68,11 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('documents.expiry_scan', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/38 §11 (PR-33): сдвиг сроков обязательных назначений с дней отсутствия
       await b.createQueue('absence.deadline_guard', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/38 §11 (person-card-tails): недостающие обязательные документы, остатки
+      // отсутствий и еженедельная переборка заметок по словарю скрина
+      await b.createQueue('documents.missing_scan', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('absence.balance_scan', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('notes.sensitive_screen', { retryLimit: 2, expireInSeconds: 1800 })
       // docs/v2/38 §11 (PR-34): лента активности — уборка событий старше 400 дней и секунды дня
       // из сегментов учёта времени в суточный агрегат
       await b.createQueue('activity.purge', { retryLimit: 2, expireInSeconds: 900 })
@@ -169,6 +174,11 @@ export async function getBoss(): Promise<PgBoss> {
       // Сроки и отсутствия (docs/v2/38 §11): в 05:30 — раньше напоминаний due.scan (08:00), чтобы
       // сдвинутый срок успел лечь до них
       await b.schedule('absence.deadline_guard', '30 5 * * *', {}, { singletonKey: 'absence.deadline_guard', tz: 'Europe/Kyiv' })
+      // Остатки отсутствий — 05:00, недостающие документы — 06:10 (после сроков документов в
+      // 06:00), переборка заметок — по воскресеньям в 02:30, после архива заметок (02:00)
+      await b.schedule('absence.balance_scan', '0 5 * * *', {}, { singletonKey: 'absence.balance_scan', tz: 'Europe/Kyiv' })
+      await b.schedule('documents.missing_scan', '10 6 * * *', {}, { singletonKey: 'documents.missing_scan', tz: 'Europe/Kyiv' })
+      await b.schedule('notes.sensitive_screen', '30 2 * * 0', {}, { singletonKey: 'notes.sensitive_screen', tz: 'Europe/Kyiv' })
       // Лента активности (docs/v2/38 §11): события старше 400 дней — в 03:00, агрегат при этом
       // не трогается (критерий 12). Секунды дня — ежечасно по окну в 2 часа и раз в сутки по окну
       // в 48 часов: второй проход и есть «финальный пересчёт дня» §7.10 — догоняет поздно

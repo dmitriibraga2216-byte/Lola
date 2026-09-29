@@ -157,6 +157,8 @@ export const archiveSchema = z.object({
 })
 export const mergeSchema = z.object({ primaryId: z.string().uuid(), duplicateId: z.string().uuid() })
 export const gdprEraseSchema = z.object({ userId: z.string().uuid(), reason: z.string().min(3, 'Вкажіть підставу').max(500) })
+/** Выгрузка ПД по запросу субъекта (docs/v2/38 §7.4, §12): основание — номер и дата запроса, в `audit_log`. */
+export const personalDataExportSchema = z.object({ reason: z.string().trim().min(3, 'Вкажіть підставу — запит людини').max(500) })
 export const chiefSchema = z.object({
   userId: z.string().uuid(),
   chiefId: z.string().uuid(),

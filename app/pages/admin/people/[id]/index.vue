@@ -177,6 +177,25 @@ const archiveConfirm = () => act(async () => {
 const mergeId = ref('')
 const merge = () => act(async () => { await api('/people/merge', { method: 'POST', body: { primaryId: id, duplicateId: mergeId.value.trim() } }); mergeId.value = '' }, t('person.merged'))
 const gdprReason = ref('')
+// Выгрузка ПД по запросу субъекта (docs/v2/38 §7.4, §12): файл JSON, основание — в журнал
+const pdReason = ref('')
+const exportPersonalData = () => act(async () => {
+  const m = document.cookie.match(/(?:^|;\s*)lola_csrf=([^;]*)/)
+  const res = await fetch(`/api/v1/people/${id}/personal-data`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: pdReason.value.trim() }),
+    headers: { 'Content-Type': 'application/json', ...(m ? { 'x-csrf-token': decodeURIComponent(m[1]!) } : {}) },
+  })
+  // Конверт ошибки — тот же, что у `api()`: `apiErrorOf()` в `act()` достанет текст сервера
+  if (!res.ok) throw Object.assign(new Error('personal_data_export'), { data: await res.json().catch(() => null) })
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `lola-personal-data-${id}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  pdReason.value = ''
+}, t('person.personalDataDone'))
 const gdpr = () => { if (confirm(t('person.gdprConfirm'))) act(() => api('/people/gdpr-erase', { method: 'POST', body: { userId: id, reason: gdprReason.value } }), t('person.gdprDone')) }
 
 const fmt = (d: unknown) => d ? formatShortDate(new Date(String(d))) : '—'
@@ -316,6 +335,14 @@ const primary = computed(() => person.value?.placements.find(p => p.isPrimary &&
               <button class="btn danger" :disabled="gdprReason.length < 3 || busy" @click="gdpr">{{ t('person.gdpr') }}</button>
             </div>
           </template>
+        </div>
+        <div v-if="hasScope('settings.tenant')" class="card" data-testid="personal-data-export">
+          <h2>{{ t('person.personalData') }}</h2>
+          <p class="sub">{{ t('person.personalDataHint') }}</p>
+          <div class="form-row">
+            <input v-model="pdReason" :placeholder="t('person.personalDataReason')" :aria-label="t('person.personalDataReason')">
+            <button class="btn" :disabled="pdReason.trim().length < 3 || busy" :title="pdReason.trim().length < 3 ? t('person.personalDataReasonHint') : undefined" @click="exportPersonalData">{{ t('person.personalDataExport') }}</button>
+          </div>
         </div>
       </div>
       <!-- Згорнуті секції зі счётчиками (docs/v2/38 §5.1): розгорнути нотатки = прочитати, це пишеться в журнал -->

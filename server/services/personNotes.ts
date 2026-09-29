@@ -277,14 +277,14 @@ async function pinnedLimitReached(tx: TenantTx, personId: string, exceptNoteId?:
 }
 
 /** Администраторы заметок — адресаты `person_note_flagged` (§8: «внутреннее, admin»). */
-async function noteAdmins(tx: TenantTx, exceptUserId: string): Promise<string[]> {
+async function noteAdmins(tx: TenantTx, exceptUserId: string | null): Promise<string[]> {
   const rows = await tx.execute(sql`
     select distinct ur.user_id from user_roles ur
     join roles r on r.id = ur.role_id
     join users u on u.id = ur.user_id
     where ur.scope_type = 'tenant' and r.scopes @> array['person.note.write', 'audit.view']::text[]
       and (ur.valid_until is null or ur.valid_until > now())
-      and u.status = 'active' and not u.is_blocked and ur.user_id <> ${exceptUserId}::uuid
+      and u.status = 'active' and not u.is_blocked and ur.user_id is distinct from ${exceptUserId}::uuid
       ${EMPLOYEES_ONLY('u')}`) as unknown as { user_id: string }[]
   return rows.map(r => r.user_id)
 }
@@ -467,5 +467,42 @@ export async function archiveNotesTenant(tenantId: string, now = new Date()): Pr
       })
     }
     return rows.length
+  })
+}
+
+/** Итог еженедельной переборки: сколько заметок проверено и сколько получили отметку впервые. */
+export interface SensitiveScreenStats { screened: number, flagged: number }
+
+/**
+ * `notes.sensitive_screen` — еженедельная переборка (§11) действующих заметок по текущему
+ * словарю (`screenNoteText()`): словарь пополняется релизами, и заметка, сохранённая до
+ * пополнения, иначе не получила бы отметку никогда. Скрин при сохранении — в
+ * `createPersonNote()`/`updatePersonNote()`. `[решение]` Р-38.3: переборка только **ставит**
+ * `flagged_at` (и дописывает `flagged_terms`) и уведомляет администраторов заметок
+ * `person_note_flagged` — снимает отметку лишь правка текста автором: сужение словаря не
+ * отменяет того, что человек уже увидел подтверждение. Архивные заметки и заметки об
+ * уволенных не перебираются — они только для чтения (§7.6).
+ */
+export async function sensitiveScreenTenant(tenantId: string, now = new Date()): Promise<SensitiveScreenStats> {
+  return withTenant(tenantId, null, async (tx) => {
+    const rows = await tx.execute(sql`
+      select n.id, n.user_id, n.body, u.full_name from user_notes n
+      join users u on u.id = n.user_id
+      where n.archived_at is null and n.flagged_at is null and u.status <> 'archived'
+        ${EMPLOYEES_ONLY('u')}`) as unknown as { id: string, user_id: string, body: string, full_name: string }[]
+    const stats: SensitiveScreenStats = { screened: rows.length, flagged: 0 }
+    let admins: string[] | null = null
+    for (const n of rows) {
+      const screen = screenNoteText(n.body)
+      if (!screen.signs.length) continue
+      await tx.update(userNotes).set({ flaggedAt: now, flaggedTerms: screen.terms }).where(eq(userNotes.id, n.id))
+      await recordAudit(tx, { tenantId, actorId: null, action: 'person_note.flag', entity: 'user_notes', entityId: n.id, after: { userId: n.user_id, signs: screen.signs, source: 'sensitive_screen' } })
+      stats.flagged++
+      admins ??= await noteAdmins(tx, null)
+      for (const adminId of admins) {
+        await enqueueNotification(tx, { tenantId, userId: adminId, code: 'person_note_flagged', payload: { person: n.full_name }, dedupKey: `person_note_flagged:${n.id}:${adminId}`, refType: 'user', refId: n.user_id })
+      }
+    }
+    return stats
   })
 }

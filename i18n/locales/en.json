@@ -288,6 +288,11 @@
     "exportRating": "Include engagement index",
     "exportRatingConfirm": "The index is a reference figure and is not meant for HR decisions. Export the list with it?"
   },
+  "dateSelect": {
+    "day": "Day",
+    "month": "Month",
+    "year": "Year"
+  },
   "person": {
     "profile": "Profile",
     "phone": "Phone",

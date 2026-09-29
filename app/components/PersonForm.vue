@@ -50,6 +50,7 @@ const unitLocations = computed(() => form.orgUnitId ? refs.locations.filter(l =>
 watch(() => form.locationId, (id) => { const l = refs.locations.find(x => x.id === id); if (l && !form.cityId && l.cityId) form.cityId = l.cityId })
 
 const today = new Date().toISOString().slice(0, 10)
+const thisYear = new Date().getFullYear()
 function validate(): boolean {
   const e: Record<string, string> = {}
   if (!form.lastName.trim()) e.lastName = t('person.err.lastName')
@@ -103,7 +104,8 @@ function submit() {
       <label>{{ t('person.latinName') }}<input v-model="form.latinName" maxlength="120" :aria-invalid="!!errors.latinName"><small v-if="errors.latinName" class="err">{{ errors.latinName }}</small></label>
       <label>{{ t('person.phone') }} <template v-if="mode === 'create'">*</template><input v-model="form.phone" type="tel" placeholder="+380" :aria-invalid="!!errors.phone"><small v-if="errors.phone" class="err">{{ errors.phone }}</small></label>
       <label>{{ t('person.email') }}<input v-model="form.email" type="email" :aria-invalid="!!errors.email"><small v-if="errors.email" class="err">{{ errors.email }}</small></label>
-      <label>{{ t('person.birthDate') }}<input v-model="form.birthDate" type="date" :aria-invalid="!!errors.birthDate"><small v-if="errors.birthDate" class="err">{{ errors.birthDate }}</small></label>
+      <!-- Три списка вместо input[type=date]: в iPad Safari день не выбирался (замечание 27.09) -->
+      <DateSelect v-model="form.birthDate" :label="t('person.birthDate')" :min-year="1920" :max-year="thisYear - 14" :invalid="!!errors.birthDate" data-field="birthDate"><small v-if="errors.birthDate" class="err">{{ errors.birthDate }}</small></DateSelect>
       <div class="radio-group" role="radiogroup" :aria-label="t('person.gender')">
         <span class="lbl">{{ t('person.gender') }}</span>
         <label v-for="g in ['male', 'female', 'unspecified']" :key="g" class="inline"><input v-model="form.gender" type="radio" :value="g"> {{ t(`person.genders.${g}`) }}</label>
@@ -132,8 +134,8 @@ function submit() {
         <label>{{ t('person.level') }}<select v-model="form.positionLevelId"><option value="">—</option><option v-for="r in refs.levels" :key="r.id" :value="r.id">{{ r.name }}</option></select></label>
       </template>
       <label>{{ t('person.externalId') }}<input v-model="form.externalId" maxlength="100"></label>
-      <label>{{ t('person.hiredAt') }}<input v-model="form.hiredAt" type="date" :max="today" :aria-invalid="!!errors.hiredAt"><small v-if="errors.hiredAt" class="err">{{ errors.hiredAt }}</small></label>
-      <label>{{ t('person.positionSince') }}<input v-model="form.positionSince" type="date" :aria-invalid="!!errors.positionSince"><small v-if="errors.positionSince" class="err">{{ errors.positionSince }}</small></label>
+      <DateSelect v-model="form.hiredAt" :label="t('person.hiredAt')" :min-year="1950" :max-year="thisYear" :invalid="!!errors.hiredAt" data-field="hiredAt"><small v-if="errors.hiredAt" class="err">{{ errors.hiredAt }}</small></DateSelect>
+      <DateSelect v-model="form.positionSince" :label="t('person.positionSince')" :min-year="1950" :max-year="thisYear + 1" :invalid="!!errors.positionSince" data-field="positionSince"><small v-if="errors.positionSince" class="err">{{ errors.positionSince }}</small></DateSelect>
     </fieldset>
 
     <fieldset>

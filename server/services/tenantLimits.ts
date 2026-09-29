@@ -140,16 +140,16 @@ async function addonsByAxis(tenantId: string): Promise<Partial<Record<LimitAxis,
   return out
 }
 
-export async function effectiveLimits(tenantId: string): Promise<EffectiveLimits> {
-  const hit = cache.get(tenantId)
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.v
-  const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId))
-  const [p] = t ? await db.select().from(plans).where(eq(plans.code, t.plan)) : []
-  const [o] = await withTenant(tenantId, null, tx => tx.select().from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId)))
-  const addons = await addonsByAxis(tenantId)
+type PlanRow = typeof plans.$inferSelect
+type OverrideRow = Partial<Record<LimitColumn, number | null>>
 
-  // Один проход по осям — одна формула. Ниже из `axes` раскладываются поля колонок, чтобы
-  // прежние потребители (media, channels, webhooks, apiTokens, tenantQueue) не менялись.
+/**
+ * Сама формула §7.3 по осям — без чтения базы: тариф, переопределения оператора и доплаты
+ * передаются готовыми. Её зовут и `effectiveLimits()` (действующий тариф), и предпросмотр
+ * смены тарифа (`projectedLimits()`, §7.6: «по каждой оси `current` против нового
+ * `effective`») — второй формулы для «лимита после перехода» нет.
+ */
+function axesFor(p: PlanRow | undefined, o: OverrideRow | undefined, addons: Partial<Record<LimitAxis, number>>): Record<LimitAxis, number | null> {
   const axes = {} as Record<LimitAxis, number | null>
   for (const axis of LIMIT_AXES) {
     const col = AXIS_COLUMN[axis]
@@ -162,6 +162,33 @@ export async function effectiveLimits(tenantId: string): Promise<EffectiveLimits
     if (base != null && axis === 'storage_bytes') base *= GIB
     axes[axis] = base == null ? null : base + (addons[axis] ?? 0)
   }
+  return axes
+}
+
+/**
+ * Эффективный лимит по осям **после перехода** на тариф `planCode` (§7.6 п. 1): тот же
+ * `axesFor()`, что у действующего, с тем же переопределением оператора и теми же доплатами —
+ * «при переходе вниз аддоны сохраняются и учитываются в предпросмотре превышений» (§7.8 п. 1).
+ * `null` — тарифа с таким кодом нет.
+ */
+export async function projectedLimits(tenantId: string, planCode: string): Promise<Record<LimitAxis, number | null> | null> {
+  const [p] = await db.select().from(plans).where(eq(plans.code, planCode))
+  if (!p) return null
+  const [o] = await withTenant(tenantId, null, tx => tx.select().from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId)))
+  return axesFor(p, o, await addonsByAxis(tenantId))
+}
+
+export async function effectiveLimits(tenantId: string): Promise<EffectiveLimits> {
+  const hit = cache.get(tenantId)
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.v
+  const [t] = await db.select({ plan: tenants.plan }).from(tenants).where(eq(tenants.id, tenantId))
+  const [p] = t ? await db.select().from(plans).where(eq(plans.code, t.plan)) : []
+  const [o] = await withTenant(tenantId, null, tx => tx.select().from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId)))
+  const addons = await addonsByAxis(tenantId)
+
+  // Один проход по осям — одна формула. Ниже из `axes` раскладываются поля колонок, чтобы
+  // прежние потребители (media, channels, webhooks, apiTokens, tenantQueue) не менялись.
+  const axes = axesFor(p, o, addons)
 
   const overridden = LIMIT_COLUMNS.filter(k => o?.[k] != null)
   const v: EffectiveLimits = {

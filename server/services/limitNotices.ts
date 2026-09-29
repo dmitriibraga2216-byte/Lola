@@ -137,6 +137,19 @@ export async function dismissNotice(ctx: { tenantId: string, actorId: string }, 
 }
 
 /**
+ * Кому уходят уведомления о тарифе (`35` §8, столбец «Кому»: owner, admin) — действующие
+ * `admin` и `owner` тенанта, только сотрудники, не заблокированные. Одна выборка на все коды
+ * тарифа: `limit_*` здесь и `plan_*` в `subscriptionStatus.ts` / `planChange.ts`.
+ */
+export async function billingRecipients(tx: TenantTx, roles: readonly ('admin' | 'owner')[] = ['admin', 'owner']): Promise<{ user_id: string }[]> {
+  return await tx.execute(sql`
+    select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
+    where r.code in ${sql.raw(`(${roles.map(r => `'${r}'`).join(', ')})`)} and (ur.valid_until is null or ur.valid_until > now())
+      and a.status = 'active' and not a.is_blocked ${EMPLOYEES_ONLY('a')}
+  `) as unknown as { user_id: string }[]
+}
+
+/**
  * Уведомление админам тенанта и запись оператору платформы. Коды те же (`24` §8, `35` §8);
  * payload — `{axis, resource, used, limit, pct}`, где `axis` машинный (В-16), а `resource`,
  * `used`, `limit` — готовые строки для шаблона. Дедуп — сутки на связку `(код, ось, человек)`.
@@ -155,12 +168,7 @@ async function notifyAdmins(tenantId: string, axis: LimitAxis, level: LimitNotic
   }
   const day = new Date().toISOString().slice(0, 10)
   await withTenant(tenantId, null, async (tx: TenantTx) => {
-    const admins = await tx.execute(sql`
-      select distinct ur.user_id from user_roles ur join roles r on r.id = ur.role_id join users a on a.id = ur.user_id
-      where r.code in ('admin', 'owner') and (ur.valid_until is null or ur.valid_until > now())
-        and a.status = 'active' and not a.is_blocked ${EMPLOYEES_ONLY('a')}
-    `) as unknown as { user_id: string }[]
-    for (const a of admins) {
+    for (const a of await billingRecipients(tx)) {
       // Ключ дедупликации — на оси, а не на локализуемой подписи (В-16)
       await enqueueNotification(tx, { tenantId, userId: a.user_id, code, payload, dedupKey: `${code}:${axis}:${tenantId}:${day}:${a.user_id}` })
     }

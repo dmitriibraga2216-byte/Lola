@@ -93,6 +93,19 @@ export default defineNitroPlugin(async () => {
       const n = await limitScanAll()
       if (n) console.log(`[billing.limit_scan] поднято предупреждений: ${n}`)
     })
+    // docs/v2/35 §11, §13 к. 5: `paid_until` прошёл — grace, `grace_until` прошёл — только чтение.
+    // Даты ведёт оператор вручную (решение по вопросу 17, docs/v2/44 В-21), статус опускается сам
+    await work('billing.grace_scan', () => runPerTenant('billing.grace_scan', async (tenantId) => {
+      const { graceScan } = await import('../services/subscriptionStatus')
+      const steps = await graceScan(tenantId)
+      if (steps.length) console.log(`[billing.grace_scan] ${tenantId}:`, steps.map(s => `${s.from}→${s.to}`).join(', '))
+    }))
+    // docs/v2/35 §11, §7.6: назначенный переход вниз — с первого дня нового периода; `blocked` старше 30 дней — отмена
+    await work('billing.plan_change_apply', () => runPerTenant('billing.plan_change_apply', async (tenantId) => {
+      const { applyScheduledPlanChanges } = await import('../services/planChange')
+      const r = await applyScheduledPlanChanges(tenantId)
+      if (r.applied || r.blocked || r.expired) console.log(`[billing.plan_change_apply] ${tenantId}:`, r)
+    }))
     // docs/v2/28 §11: воронка кандидатов — только у тенантов с включённым рекрутингом
     // (`tenants.candidates_enabled`). Круг строится по ним, а не по всем активным: у
     // остальных кандидатов нет вовсе, и проход по ним — пустая работа каждую ночь.

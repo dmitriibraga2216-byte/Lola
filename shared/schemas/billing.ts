@@ -60,3 +60,29 @@ export const platformExtendSchema = z.object({
   comment: z.string().trim().min(10).max(500),
 })
 export type PlatformExtendInput = z.infer<typeof platformExtendSchema>
+
+/**
+ * Самообслуживание смены тарифа владельцем (`35` §6.1, §7.6, §10 `POST /billing/plan-change*`).
+ * `planCode`, а не `plan_id` документа: у `plans` нет колонки `id`, PK — `code` (В-5, то же
+ * исправление, что у `plan_prices` и `plan_change_requests`). Предпросмотр — тот же вход без
+ * подтверждения; «Перерахувати» — повторный предпросмотр той же заявки.
+ */
+export const planChangePreflightSchema = z.object({
+  planCode: z.string().trim().min(1).max(60),
+  billingPeriod: z.enum(['month', 'year']),
+})
+export type PlanChangePreflightInput = z.infer<typeof planChangePreflightSchema>
+
+/** «Підтвердження переходу вниз» (§6.1) — обязательный чекбокс: без него `422`. */
+export const planChangeSchema = planChangePreflightSchema.extend({
+  confirm: z.literal(true, { errorMap: () => ({ message: 'Підтвердьте, що ознайомились із новими лімітами' }) }),
+})
+export type PlanChangeInput = z.infer<typeof planChangeSchema>
+
+/** Превышение по оси (`plan_change_requests.blockers`, §3.5): `[{axis, current, new_limit, excess}]`. */
+export interface PlanChangeBlocker {
+  axis: 'users_active' | 'candidates_active' | 'storage_bytes'
+  current: number
+  newLimit: number
+  excess: number
+}

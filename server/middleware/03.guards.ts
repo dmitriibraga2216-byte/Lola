@@ -1,6 +1,8 @@
 import type { AuthContext } from '../services/session'
 import { isModuleEnabled, isRecruitingEnabled, isRecruitingRoute, moduleLock, moduleOfRoute } from '../services/modules'
 import { forbiddenFor } from '../services/impersonation'
+import { effectiveLimits } from '../services/tenantLimits'
+import { readonlyBlocks, readonlyError } from '../services/subscriptionStatus'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const PREVIEW_EXIT_PATH = '/api/v1/settings/roles/preview-as'
@@ -14,6 +16,9 @@ const PREVIEW_EXIT_PATH = '/api/v1/settings/roles/preview-as'
  *    интеграций — 403 `impersonation_forbidden`.
  * 4. «Переглянути систему як роль» (docs/24 §3.5, докс/33 D-052): у цьому режимі дозволено лише читання
  *    (GET/HEAD) і сама кнопка «Вихід» — решта 403 `preview_forbidden`.
+ * 5. Підписка в режимі «лише читання» (docs/v2/35 §7.8 п. 4, §13 к. 5): зміни — 409 `tenant.readonly`,
+ *    крім входу, проходження вже призначеного, ручної перевірки, вивантажень і екрана тарифу
+ *    (`READONLY_ALLOWED` у `subscriptionStatus.ts`). Стосується і Bearer-токена — «запис через API».
  */
 export default defineEventHandler(async (event) => {
   if (!event.path.startsWith('/api/v1/')) return
@@ -33,6 +38,11 @@ export default defineEventHandler(async (event) => {
     if (what) {
       throw createError({ statusCode: 403, data: { code: 'impersonation_forbidden', message: 'У режимі «від імені» ця дія заборонена. Вийдіть з режиму і виконайте її від свого імені', details: { what } } })
     }
+  }
+
+  if (!SAFE_METHODS.has(event.method) && readonlyBlocks(event.method, event.path)) {
+    const { subscription } = await effectiveLimits(auth.tenantId)
+    if (subscription.status === 'readonly') throw readonlyError()
   }
 
   // Рекрутинг выключен у тенанта (docs/v2/28, флаг `tenants.candidates_enabled`): маршруты

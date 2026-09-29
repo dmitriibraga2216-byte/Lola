@@ -5,11 +5,10 @@
  * осями — на `/admin/settings/usage` (PR-09); тут — компактна плитка з тим самим числом,
  * а не другим підрахунком (docs/v2/44 В-5).
  *
- * Самообслуговування («Продовжити тариф», «Змінити тариф») в цьому PR не працює як форма —
- * платіжний провайдер не підключений (`44` §8, `HANDOFF` §6): кнопки ведуть на підказку
- * звернутися до менеджера, який приймає платіж вручну (`POST /platform/tenants/:id/payments`).
- * Повноцінний self-service (preflight/blocked, екран §5.2, форма §6.1) — окремий PR
- * (`docs/v2/46-progress.md`).
+ * «Продовжити тариф» і докупівля опцій не працюють як форма — платіжного провайдера немає, дати
+ * оплати веде оператор вручну (рішення власника, docs/v2/44 В-21): кнопки ведуть на підказку
+ * звернутися до менеджера (`POST /platform/tenants/:id/payments`). «Змінити тариф» веде на екран
+ * §5.2 (`/admin/settings/billing/plans`): перехід вниз власник планує сам, вгору — через менеджера.
  */
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'billing.view' })
 const { t, locale } = useI18n()
@@ -26,6 +25,7 @@ interface Summary {
   subscription: Subscription
   ai: AiBlock
   addons: Addon[]
+  scheduledChange: { id: string, toPlanCode: string, planName: string, effectiveAt: string | null } | null
 }
 
 const summary = ref<Summary | null>(null)
@@ -82,9 +82,10 @@ const statusTone = (s: string) => (s === 'active' ? 'teal' : s === 'grace' ? 'su
           <dt>{{ t('billing.screen.paidUntil') }}</dt>
           <dd>{{ fmtDate(summary.subscription.paidUntil) }}<span v-if="daysLeft(summary.subscription.paidUntil) !== null" class="sub"> · {{ t('billing.screen.daysLeft', { n: daysLeft(summary.subscription.paidUntil) }) }}</span></dd>
         </dl>
+        <p v-if="summary.scheduledChange" class="note teal">{{ t('billing.screen.scheduledNotice', { date: fmtDate(summary.scheduledChange.effectiveAt), plan: summary.scheduledChange.planName }) }}</p>
         <div class="actions">
           <button type="button" class="btn primary" @click="showContactHint = true">{{ t('billing.screen.extend') }}</button>
-          <button v-if="hasScope('billing.manage')" type="button" class="btn ghost" @click="showContactHint = true">{{ t('billing.screen.change') }}</button>
+          <NuxtLink v-if="hasScope('billing.manage')" to="/admin/settings/billing/plans" class="btn ghost">{{ t('billing.screen.change') }}</NuxtLink>
         </div>
         <p v-if="showContactHint" class="note teal">{{ t('billing.screen.contactManager') }}</p>
       </section>

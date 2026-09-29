@@ -91,8 +91,8 @@ const version = (v: string) => v || t('aiReports.unknownVersion')
     <p class="sub">{{ t(`aiReports.about.${name}`) }}</p>
 
     <form class="filters" @submit.prevent="load">
-      <label>{{ t('aiReports.from') }} <input v-model="filters.from" class="field" type="date"></label>
-      <label>{{ t('aiReports.to') }} <input v-model="filters.to" class="field" type="date"></label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('aiReports.from') }}</label> <input id="dt-filters-from" v-model="filters.from" class="field" type="date"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('aiReports.to') }}</label> <input id="dt-filters-to" v-model="filters.to" class="field" type="date"></div>
       <label v-if="name === 'cost'">{{ t('aiReports.purpose') }}
         <select v-model="filters.purpose" class="field">
           <option value="">{{ t('aiReports.anyPurpose') }}</option>
@@ -247,7 +247,7 @@ const version = (v: string) => v || t('aiReports.unknownVersion')
 .h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--font-size-body); font-weight: 900; }
 .strong { font-weight: 900; }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin: var(--space-3) 0; }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .filters .field { width: auto; min-width: 9rem; }
 .tiles { margin-bottom: var(--space-4); }
 @media (max-width: 30rem) {

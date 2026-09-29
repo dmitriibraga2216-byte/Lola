@@ -99,8 +99,8 @@ const failed = (s: string) => ['failed', 'timeout', 'refused', 'degraded'].inclu
           <option v-for="s in AI_CALL_STATUSES" :key="s" :value="s">{{ t(`aiSettings.callStatus.${s}`) }}</option>
         </select>
       </label>
-      <label>{{ t('aiSettings.calls.from') }} <input v-model="filters.from" class="field" type="date"></label>
-      <label>{{ t('aiSettings.calls.to') }} <input v-model="filters.to" class="field" type="date"></label>
+      <div class="date-label"><label for="dt-ai-calls-from">{{ t('aiSettings.calls.from') }}</label> <input id="dt-ai-calls-from" v-model="filters.from" class="field" type="date"></div>
+      <div class="date-label"><label for="dt-ai-calls-to">{{ t('aiSettings.calls.to') }}</label> <input id="dt-ai-calls-to" v-model="filters.to" class="field" type="date"></div>
       <label>{{ t('aiSettings.calls.costMin') }}
         <input v-model.number="filters.cost" class="field" type="number" min="0" step="0.01" inputmode="decimal">
       </label>
@@ -163,7 +163,7 @@ const failed = (s: string) => ['failed', 'timeout', 'refused', 'degraded'].inclu
 .sub { margin: 0; color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
 .block { display: block; }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .filters .field { width: auto; min-width: 9rem; }
 .linkish { font: inherit; font-weight: 700; color: var(--color-teal-ink); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
 .drill td { background: var(--color-bg); }

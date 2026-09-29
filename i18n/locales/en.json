@@ -945,6 +945,7 @@
     "caption": "Caption",
     "calloutTitle": "Callout title",
     "checklistHint": "One item per line",
+    "checklistCount": "Items: {n}",
     "requireAll": "All items must be checked",
     "author": "Author",
     "videoId": "Video ID",

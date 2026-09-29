@@ -945,6 +945,7 @@
     "caption": "Підпис",
     "calloutTitle": "Заголовок виноски",
     "checklistHint": "По пункту на рядок",
+    "checklistCount": "Пунктів: {n}",
     "requireAll": "Потрібно позначити всі пункти",
     "author": "Автор",
     "videoId": "ID відео",

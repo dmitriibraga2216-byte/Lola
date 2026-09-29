@@ -58,5 +58,6 @@ export interface ApiErrorBody {
 export function apiErrorOf(err: unknown): { code: string, message: string, details?: Record<string, unknown> } {
   const data = (err as { data?: ApiErrorBody })?.data
   if (data?.error) return data.error
-  return { code: 'internal', message: 'Щось пішло не так. Спробуйте ще раз' }
+  // Ответ без конверта ошибки: сеть, прокси, таймаут. Текст говорит, что делать (замечание 27.09)
+  return { code: 'internal', message: 'Сервер не відповів. Перевірте зʼєднання з інтернетом і спробуйте ще раз — якщо повторюється, оновіть сторінку' }
 }

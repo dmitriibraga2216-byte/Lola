@@ -13,7 +13,15 @@ export const blockSchema = z.discriminatedUnion('type', [
   z.object({ ...blockBase, type: z.literal('video'), mediaId: z.string().uuid(), allowSeek: z.boolean().default(true) }),
   z.object({ ...blockBase, type: z.literal('file'), mediaId: z.string().uuid(), name: z.string().max(300) }),
   z.object({ ...blockBase, type: z.literal('callout'), tone: z.enum(['info', 'warn', 'danger', 'success']), title: z.string().max(200).optional(), text: z.string().max(2000) }),
-  z.object({ ...blockBase, type: z.literal('checklist'), items: z.array(z.string().min(1).max(500)).min(1).max(30), requireAll: z.boolean().default(false) }),
+  // Тексты ошибок говорят, что делать (замечание 27.09: вместо них было «Щось пішло не так» / английский zod)
+  z.object({
+    ...blockBase,
+    type: z.literal('checklist'),
+    items: z.array(z.string().trim().min(1, 'Чек-лист: порожній пункт — впишіть текст або видаліть рядок').max(500, 'Чек-лист: пункт довший за 500 символів — скоротіть його'))
+      .min(1, 'Чек-лист без пунктів — впишіть хоча б один пункт (по пункту на рядок) або видаліть блок')
+      .max(30, 'Чек-лист: не більше 30 пунктів — розділіть його на два блоки'),
+    requireAll: z.boolean().default(false),
+  }),
   z.object({ ...blockBase, type: z.literal('quote'), text: z.string().max(2000), author: z.string().max(200).optional() }),
   z.object({ ...blockBase, type: z.literal('embed'), provider: z.enum(['youtube', 'vimeo']), videoId: z.string().max(100), startSec: z.number().int().min(0).optional() }),
   z.object({ ...blockBase, type: z.literal('divider') }),

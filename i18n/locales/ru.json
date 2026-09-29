@@ -945,6 +945,7 @@
     "caption": "Подпись",
     "calloutTitle": "Заголовок выноски",
     "checklistHint": "По пункту на строку",
+    "checklistCount": "Пунктов: {n}",
     "requireAll": "Нужно отметить все пункты",
     "author": "Автор",
     "videoId": "ID видео",

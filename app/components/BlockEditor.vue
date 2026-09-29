@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../shared/schemas/content'
+import { checklistItemsFromText } from '#shared/domain/contentBlocks'
 
 const props = defineProps<{ modelValue: ContentBlock[] }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: ContentBlock[]): void }>()
@@ -10,6 +11,17 @@ const { api } = useApi()
 
 const uploadingFor = ref('')
 const root = ref<HTMLElement | null>(null)
+/**
+ * Сырой текст textarea чек-листа по id блока. Раньше textarea рисовалась из `items.join('\n')`
+ * после `filter(Boolean)` — перевод строки сразу съедался, второй пункт склеивался с первым
+ * (замечание 27.09). Пункты в модели — уже очищенные, текст поля — как набран.
+ */
+const checklistText = reactive<Record<string, string>>({})
+
+function onChecklistInput(index: number, id: string, text: string) {
+  checklistText[id] = text
+  update(index, { items: checklistItemsFromText(text) } as Partial<ContentBlock>)
+}
 const uploadError = ref('')
 
 function newId() {
@@ -45,7 +57,7 @@ function add(type: ContentBlock['type']) {
       case 'video': return { id, type, mediaId: '', allowSeek: true }
       case 'file': return { id, type, mediaId: '', name: '' }
       case 'callout': return { id, type, tone: 'info', text: '' }
-      case 'checklist': return { id, type, items: [''], requireAll: true }
+      case 'checklist': return { id, type, items: [], requireAll: true }
       case 'quote': return { id, type, text: '' }
       case 'embed': return { id, type, provider: 'youtube', videoId: '' }
       default: return { id, type: 'divider' }
@@ -160,11 +172,13 @@ const blockTypes: ContentBlock['type'][] = ['heading', 'text', 'image', 'video',
 
       <template v-else-if="block.type === 'checklist'">
         <textarea
-          :value="block.items.join('\n')"
+          :value="checklistText[block.id] ?? block.items.join('\n')"
           rows="4"
           :placeholder="t('blocks.checklistHint')"
-          @input="update(index, { items: ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean) })"
+          :aria-label="t('blocks.checklistHint')"
+          @input="onChecklistInput(index, block.id, ($event.target as HTMLTextAreaElement).value)"
         />
+        <p class="sub">{{ t('blocks.checklistCount', { n: block.items.length }) }}</p>
         <label class="check">
           <input type="checkbox" :checked="block.requireAll" @change="update(index, { requireAll: ($event.target as HTMLInputElement).checked })">
           {{ t('blocks.requireAll') }}

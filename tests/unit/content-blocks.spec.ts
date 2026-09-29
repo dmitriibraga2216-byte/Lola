@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compactBody, isBlockEmpty } from '../../shared/domain/contentBlocks'
+import { checklistItemsFromText, compactBody, isBlockEmpty } from '../../shared/domain/contentBlocks'
 import { bodySchema, type ContentBlock } from '../../shared/schemas/content'
 
 /**
@@ -46,5 +46,38 @@ describe('compactBody — пустые блоки не сохраняются', 
     ]
     expect(bodySchema.safeParse(body).success).toBe(true)
     expect(bodySchema.safeParse(compactBody(body)).success).toBe(true)
+  })
+})
+
+/**
+ * Замечание 27.09, п. 2: пункт чек-листа ввели в textarea — при сохранении «Щось пішло не так».
+ * Причины: перевод строки съедался (пункты склеивались), пустой пункт/чек-лист без пунктов
+ * падал на zod с английским текстом, без подсказки, что делать.
+ */
+describe('чек-лист — пункты из textarea и понятные ошибки', () => {
+  it('по пункту на строку; пустые строки и пробелы по краям отбрасываются, перевод строки не склеивает пункты', () => {
+    expect(checklistItemsFromText('Пункт один\n')).toEqual(['Пункт один'])
+    expect(checklistItemsFromText('Пункт один\n\n  Пункт два  \n')).toEqual(['Пункт один', 'Пункт два'])
+    expect(checklistItemsFromText('')).toEqual([])
+  })
+
+  it('compactBody: пустой чек-лист исчезает, у заполненного — только непустые пункты', () => {
+    const body: ContentBlock[] = [
+      { id: 'c0', type: 'checklist', items: [''], requireAll: true },
+      { id: 'c1', type: 'checklist', items: [' Каса ', '', 'Термінал'], requireAll: true },
+    ]
+    expect(compactBody(body)).toEqual([{ id: 'c1', type: 'checklist', items: ['Каса', 'Термінал'], requireAll: true }])
+    expect(bodySchema.safeParse(compactBody(body)).success).toBe(true)
+  })
+
+  it('ошибки схемы — по-украински и говорят, что сделать', () => {
+    const msg = (items: string[]) => {
+      const r = bodySchema.safeParse([{ id: 'c', type: 'checklist', items, requireAll: true }])
+      return r.success ? '' : r.error.issues[0]!.message
+    }
+    expect(msg([])).toMatch(/впишіть хоча б один пункт.*або видаліть блок/)
+    expect(msg(['  '])).toMatch(/порожній пункт/)
+    expect(msg(['x'.repeat(501)])).toMatch(/скоротіть/)
+    expect(msg(Array.from({ length: 31 }, (_, i) => `п${i}`))).toMatch(/не більше 30/)
   })
 })

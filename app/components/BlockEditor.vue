@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../shared/schemas/content'
+import { checklistItemsFromText } from '#shared/domain/contentBlocks'
 
 const props = defineProps<{ modelValue: ContentBlock[] }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: ContentBlock[]): void }>()
@@ -9,6 +10,18 @@ const { api } = useApi()
 
 
 const uploadingFor = ref('')
+const root = ref<HTMLElement | null>(null)
+/**
+ * Сырой текст textarea чек-листа по id блока. Раньше textarea рисовалась из `items.join('\n')`
+ * после `filter(Boolean)` — перевод строки сразу съедался, второй пункт склеивался с первым
+ * (замечание 27.09). Пункты в модели — уже очищенные, текст поля — как набран.
+ */
+const checklistText = reactive<Record<string, string>>({})
+
+function onChecklistInput(index: number, id: string, text: string) {
+  checklistText[id] = text
+  update(index, { items: checklistItemsFromText(text) } as Partial<ContentBlock>)
+}
 const uploadError = ref('')
 
 function newId() {
@@ -44,13 +57,19 @@ function add(type: ContentBlock['type']) {
       case 'video': return { id, type, mediaId: '', allowSeek: true }
       case 'file': return { id, type, mediaId: '', name: '' }
       case 'callout': return { id, type, tone: 'info', text: '' }
-      case 'checklist': return { id, type, items: [''], requireAll: true }
+      case 'checklist': return { id, type, items: [], requireAll: true }
       case 'quote': return { id, type, text: '' }
       case 'embed': return { id, type, provider: 'youtube', videoId: '' }
       default: return { id, type: 'divider' }
     }
   })()
   emit('update:modelValue', [...props.modelValue, block])
+  // Новый блок — в поле ввода: на iPad он появлялся ниже экрана, и «Заголовок» нажимали ещё раз (замечание 27.09)
+  nextTick(() => {
+    const el = root.value?.querySelector<HTMLElement>(`[data-block-id="${id}"]`)
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    el?.querySelector<HTMLElement>('input:not([type="file"]):not([type="checkbox"]), textarea')?.focus({ preventScroll: true })
+  })
 }
 
 /** Presigned PUT напрямую в хранилище, затем complete → обработка (docs/11 §7.6). */
@@ -83,24 +102,34 @@ const blockTypes: ContentBlock['type'][] = ['heading', 'text', 'image', 'video',
 </script>
 
 <template>
-  <div class="editor">
-    <div v-for="(block, index) in modelValue" :key="block.id" class="block">
+  <div ref="root" class="editor">
+    <div v-for="(block, index) in modelValue" :key="block.id" class="block" :data-block-id="block.id">
       <div class="block-head">
         <span class="type">{{ t(`blocks.${block.type}`) }}</span>
         <div class="tools">
-          <button :disabled="index === 0" @click="move(index, -1)">↑</button>
-          <button :disabled="index === modelValue.length - 1" @click="move(index, 1)">↓</button>
-          <button class="danger" @click="remove(index)">✕</button>
+          <button type="button" :disabled="index === 0" :aria-label="t('blocks.moveUp')" @click="move(index, -1)">↑</button>
+          <button type="button" :disabled="index === modelValue.length - 1" :aria-label="t('blocks.moveDown')" @click="move(index, 1)">↓</button>
+          <button type="button" class="danger" :aria-label="t('blocks.remove')" @click="remove(index)">✕</button>
         </div>
       </div>
 
-      <template v-if="block.type === 'heading'">
-        <select :value="block.level" @change="update(index, { level: Number(($event.target as HTMLSelectElement).value) as 2 | 3 })">
-          <option :value="2">H2</option>
-          <option :value="3">H3</option>
-        </select>
-        <input :value="block.text" :placeholder="t('blocks.headingText')" @input="update(index, { text: ($event.target as HTMLInputElement).value })">
-      </template>
+      <div v-if="block.type === 'heading'" class="heading-row">
+        <div class="levels" role="radiogroup" :aria-label="t('blocks.headingLevel')">
+          <button
+            v-for="lvl in ([2, 3] as const)"
+            :key="lvl"
+            type="button"
+            role="radio"
+            :aria-checked="block.level === lvl"
+            :class="{ on: block.level === lvl }"
+            :title="t(`blocks.level${lvl}`)"
+            @click="update(index, { level: lvl })"
+          >
+            H{{ lvl }}
+          </button>
+        </div>
+        <input :value="block.text" :placeholder="t('blocks.headingText')" :aria-label="t('blocks.headingText')" @input="update(index, { text: ($event.target as HTMLInputElement).value })">
+      </div>
 
       <textarea
         v-else-if="block.type === 'text'"
@@ -143,11 +172,13 @@ const blockTypes: ContentBlock['type'][] = ['heading', 'text', 'image', 'video',
 
       <template v-else-if="block.type === 'checklist'">
         <textarea
-          :value="block.items.join('\n')"
+          :value="checklistText[block.id] ?? block.items.join('\n')"
           rows="4"
           :placeholder="t('blocks.checklistHint')"
-          @input="update(index, { items: ($event.target as HTMLTextAreaElement).value.split('\n').filter(Boolean) })"
+          :aria-label="t('blocks.checklistHint')"
+          @input="onChecklistInput(index, block.id, ($event.target as HTMLTextAreaElement).value)"
         />
+        <p class="sub">{{ t('blocks.checklistCount', { n: block.items.length }) }}</p>
         <label class="check">
           <input type="checkbox" :checked="block.requireAll" @change="update(index, { requireAll: ($event.target as HTMLInputElement).checked })">
           {{ t('blocks.requireAll') }}
@@ -172,7 +203,7 @@ const blockTypes: ContentBlock['type'][] = ['heading', 'text', 'image', 'video',
 
     <div class="add">
       <span class="sub">+</span>
-      <button v-for="type in blockTypes" :key="type" class="chip" @click="add(type)">
+      <button v-for="type in blockTypes" :key="type" type="button" class="chip" @click="add(type)">
         {{ t(`blocks.${type}`) }}
       </button>
     </div>
@@ -244,6 +275,37 @@ select {
 
 textarea {
   resize: vertical;
+}
+
+.heading-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.levels {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--color-bg-line);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.levels button {
+  font: inherit;
+  font-size: var(--font-size-body-s);
+  font-weight: 700;
+  border: none;
+  background: var(--color-bg);
+  color: var(--color-ink-muted);
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.levels button.on {
+  background: var(--color-sun);
+  color: var(--color-ink);
 }
 
 .upload-row {

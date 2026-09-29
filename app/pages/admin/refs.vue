@@ -9,7 +9,9 @@ const { hasScope } = useAuth()
 const kinds = ['cities', 'positions', 'position-groups', 'position-levels', 'org-units', 'locations'] as const
 type Kind = typeof kinds[number]
 
-const kind = ref<Kind>('cities')
+// `?kind=positions` — прямая ссылка на вкладку (подсказки формы человека, замечание 27.09)
+const route = useRoute()
+const kind = ref<Kind>((kinds as readonly string[]).includes(String(route.query.kind)) ? route.query.kind as Kind : 'cities')
 const rows = ref<Record<string, unknown>[]>([])
 const newName = ref('')
 const error = ref('')

@@ -288,7 +288,29 @@
     "exportRating": "Include engagement index",
     "exportRatingConfirm": "The index is a reference figure and is not meant for HR decisions. Export the list with it?"
   },
+  "dateSelect": {
+    "day": "Day",
+    "month": "Month",
+    "year": "Year"
+  },
   "person": {
+    "placementHint": {
+      "empty": {
+        "cityId": "The city list is empty — add a city first.",
+        "orgUnitId": "No departments yet — create one in the org structure.",
+        "locationId": "No locations yet — add one in the org structure.",
+        "positionId": "The position list is empty — add a position first."
+      },
+      "load_failed": {
+        "cityId": "Could not load cities — reload the page.",
+        "orgUnitId": "Could not load departments — reload the page.",
+        "locationId": "Could not load locations — reload the page.",
+        "positionId": "Could not load positions — reload the page."
+      },
+      "unitHasNoLocations": "Department “{unit}” has no locations — pick another department or add a location.",
+      "toRefs": "Open dictionaries →",
+      "toOrg": "Open org structure →"
+    },
     "profile": "Profile",
     "phone": "Phone",
     "hiredAt": "Hired",
@@ -945,9 +967,16 @@
     "caption": "Caption",
     "calloutTitle": "Callout title",
     "checklistHint": "One item per line",
+    "checklistCount": "Items: {n}",
     "requireAll": "All items must be checked",
     "author": "Author",
-    "videoId": "Video ID"
+    "videoId": "Video ID",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove block",
+    "headingLevel": "Heading level",
+    "level2": "Section heading (H2)",
+    "level3": "Subheading (H3)"
   },
   "quiz": {
     "questionOf": "Question {n} of {total}",
@@ -1608,6 +1637,8 @@
     "none": "No ratings yet"
   },
   "kb": {
+    "titleHint": "Title — at least {n} characters",
+    "titleTooShort": "Enter an article title of at least {n} characters, then press “Create”",
     "title": "Knowledge base",
     "short": "Guide",
     "searchHint": "e.g. fish temperature",

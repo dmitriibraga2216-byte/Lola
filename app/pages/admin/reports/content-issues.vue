@@ -82,8 +82,8 @@ const rescoreLabel = (s: string) => s === 'mixed' ? t('contentIssueReports.resco
     </div>
 
     <form class="filters" @submit.prevent="load">
-      <label>{{ t('contentIssueReports.from') }} <input v-model="filters.from" class="field" type="date"></label>
-      <label>{{ t('contentIssueReports.to') }} <input v-model="filters.to" class="field" type="date"></label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('contentIssueReports.from') }}</label> <input id="dt-filters-from" v-model="filters.from" class="field" type="date"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('contentIssueReports.to') }}</label> <input id="dt-filters-to" v-model="filters.to" class="field" type="date"></div>
       <label>{{ t('contentIssues.filter.type') }}
         <select v-model="filters.issueType" class="field">
           <option value="">{{ t('contentIssues.filter.anyType') }}</option>
@@ -236,7 +236,7 @@ const rescoreLabel = (s: string) => s === 'mixed' ? t('contentIssueReports.resco
 <style scoped>
 .tabs { margin-bottom: var(--space-3); }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .filters .field { width: auto; min-width: 140px; padding: var(--space-2) var(--space-3); }
 .coral { color: var(--color-coral-deep); font-weight: 800; }
 .badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 0 var(--space-2); margin-left: var(--space-1); white-space: nowrap; }

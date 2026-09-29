@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ContentBlock } from '../../../../shared/schemas/content'
 import { COVER_MIMES, RESOURCE_KINDS } from '#shared/schemas/resources'
+import { compactBody } from '#shared/domain/contentBlocks'
 const { formatShortDate } = useFormat()
 
 /**
@@ -109,7 +110,7 @@ function payload() {
     title: form.title.trim(),
     kind: form.kind,
     summary: form.summary.trim() || null,
-    body: form.body,
+    body: compactBody(form.body), // пустые блоки не сохраняются (замечание 27.09)
     mediaId: form.mediaId,
     externalUrl: form.externalUrl.trim() || null,
     categoryIds: form.categoryIds,

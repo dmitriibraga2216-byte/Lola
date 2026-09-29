@@ -947,7 +947,13 @@
     "checklistHint": "One item per line",
     "requireAll": "All items must be checked",
     "author": "Author",
-    "videoId": "Video ID"
+    "videoId": "Video ID",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Remove block",
+    "headingLevel": "Heading level",
+    "level2": "Section heading (H2)",
+    "level3": "Subheading (H3)"
   },
   "quiz": {
     "questionOf": "Question {n} of {total}",

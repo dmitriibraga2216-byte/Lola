@@ -243,14 +243,14 @@ const showIncrease = ref(false)
           <option v-for="k in STORAGE_STAGE_KEYS" :key="k" :value="k">{{ stageLabel(k) }}</option>
         </select>
       </label>
-      <label class="filter">
-        <span>{{ t('storage.filters.from') }}</span>
-        <input v-model="filters.from" type="date" class="field">
-      </label>
-      <label class="filter">
-        <span>{{ t('storage.filters.to') }}</span>
-        <input v-model="filters.to" type="date" class="field">
-      </label>
+      <div class="filter date-label">
+        <label for="dt-filters-from"><span>{{ t('storage.filters.from') }}</span></label>
+        <input id="dt-filters-from" v-model="filters.from" type="date" class="field">
+      </div>
+      <div class="filter date-label">
+        <label for="dt-filters-to"><span>{{ t('storage.filters.to') }}</span></label>
+        <input id="dt-filters-to" v-model="filters.to" type="date" class="field">
+      </div>
       <label class="filter">
         <span>{{ t('storage.filters.status') }}</span>
         <select v-model="filters.status" class="field">

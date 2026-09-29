@@ -252,12 +252,12 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
           <option value="candidate">{{ t('reviewQueue.filter.subjectCandidate') }}</option>
         </select>
       </label>
-      <label>{{ t('reviewQueue.filter.from') }}
-        <input v-model="filters.from" type="date" class="field small">
-      </label>
-      <label>{{ t('reviewQueue.filter.to') }}
-        <input v-model="filters.to" type="date" class="field small">
-      </label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('reviewQueue.filter.from') }}</label>
+        <input id="dt-filters-from" v-model="filters.from" type="date" class="field small">
+      </div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('reviewQueue.filter.to') }}</label>
+        <input id="dt-filters-to" v-model="filters.to" type="date" class="field small">
+      </div>
       <label class="check">
         <input v-model="filters.overdue" type="checkbox">
         {{ t('reviewQueue.filter.overdue') }}
@@ -447,7 +447,7 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
 .chips { margin-bottom: var(--space-3); }
 .chip .badge { margin-left: var(--space-2); }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .filters .check { display: flex; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 .bulk { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-3); }
 .state { display: grid; gap: var(--space-2); justify-items: start; color: var(--color-ink-muted); }
@@ -462,7 +462,7 @@ tr.late td { background: var(--color-coral-soft); }
 .modal h2 { margin: 0; font-weight: 900; }
 .modal h3 { margin: 0; font-size: var(--font-size-body); }
 .modal ul, .modal ol { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .modal .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0; display: block; }
 .answer { white-space: pre-wrap; margin: 0; }
 .chain li { display: grid; gap: var(--space-1); }

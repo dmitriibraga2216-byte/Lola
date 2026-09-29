@@ -200,12 +200,12 @@ function presence(r: Row) {
             <option v-for="k in REVIEWER_ABSENCE_KINDS" :key="k" :value="k">{{ t(`reviewAbsence.kinds.${k}`) }}</option>
           </select>
         </label>
-        <label>{{ t('reviewAbsence.from') }}
-          <input v-model="absenceForm.startsOn" class="field" type="date" required>
-        </label>
-        <label v-if="absenceForm.kind !== 'dismissal'">{{ t('reviewAbsence.to') }}
-          <input v-model="absenceForm.endsOn" class="field" type="date" :min="absenceForm.startsOn" required>
-        </label>
+        <div class="date-label"><label for="dt-absenceForm-startsOn">{{ t('reviewAbsence.from') }}</label>
+          <input id="dt-absenceForm-startsOn" v-model="absenceForm.startsOn" class="field" type="date" required>
+        </div>
+        <div v-if="absenceForm.kind !== 'dismissal'" class="date-label"><label for="dt-absenceForm-endsOn">{{ t('reviewAbsence.to') }}</label>
+          <input id="dt-absenceForm-endsOn" v-model="absenceForm.endsOn" class="field" type="date" :min="absenceForm.startsOn" required>
+        </div>
         <p v-else class="sub">{{ t('reviewAbsence.toHint') }}</p>
         <label>{{ t('reviewAbsence.substitute') }}
           <select v-model="absenceForm.substituteId" class="field">
@@ -252,7 +252,7 @@ function presence(r: Row) {
 
 <style scoped>
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .load { display: block; width: calc(var(--space-7) * 2); height: var(--space-2); border-radius: var(--radius-pill); background: var(--color-bg-line-soft); overflow: hidden; margin-bottom: var(--space-1); }
 .load-fill { display: block; height: 100%; background: var(--color-teal); }
@@ -261,7 +261,7 @@ function presence(r: Row) {
 .overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--color-ink) 45%, transparent); display: grid; place-items: center; padding: var(--space-3); z-index: 20; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); width: min(480px, 100%); box-sizing: border-box; }
 .modal h2 { margin: 0; font-weight: 900; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .modal .check { display: flex; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 .modal .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0; }
 .modal-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }

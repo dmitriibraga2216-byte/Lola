@@ -109,10 +109,10 @@ async function submit() {
         <span id="reason-hint" class="sub">{{ t('reviewDelegate.reasonTextHint') }}</span>
       </label>
 
-      <label>{{ t('reviewDelegate.due') }}
-        <input v-model="form.dueAt" class="field" type="datetime-local" :min="minDue" :max="maxDue" required :aria-describedby="'due-hint'">
+      <div class="date-label"><label for="dt-form-dueAt">{{ t('reviewDelegate.due') }}</label>
+        <input id="dt-form-dueAt" v-model="form.dueAt" class="field" type="datetime-local" :min="minDue" :max="maxDue" required :aria-describedby="'due-hint'">
         <span v-if="slaDueAt" id="due-hint" class="sub">{{ t('reviewDelegate.dueHint', { date: formatDateTime(slaDueAt) }) }}</span>
-      </label>
+      </div>
 
       <label class="check">
         <input v-model="form.notify" type="checkbox">
@@ -132,7 +132,7 @@ async function submit() {
 .overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--color-ink) 45%, transparent); display: grid; place-items: center; padding: var(--space-3); z-index: 30; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); width: min(480px, 100%); box-sizing: border-box; }
 .modal h2 { margin: 0; font-weight: 900; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .modal .check { display: flex; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 .modal .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0; }
 .modal-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }

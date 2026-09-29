@@ -94,8 +94,8 @@ const kindCount = (k: 'external' | 'career') => allRows.value.filter(r => r.kind
           <option value="">{{ t('dev.allStatuses') }}</option>
           <option v-for="s in STATUSES" :key="s" :value="s">{{ t(`dev.reqStatus.${s}`) }}</option>
         </select>
-        <label class="sub">{{ t('reports.from') }} <input v-model="filters.from" type="date" class="field"></label>
-        <label class="sub">{{ t('reports.to') }} <input v-model="filters.to" type="date" class="field"></label>
+        <div class="sub date-label"><label for="dt-filters-from">{{ t('reports.from') }}</label> <input id="dt-filters-from" v-model="filters.from" type="date" class="field"></div>
+        <div class="sub date-label"><label for="dt-filters-to">{{ t('reports.to') }}</label> <input id="dt-filters-to" v-model="filters.to" type="date" class="field"></div>
       </div>
       <div class="table-wrap">
         <table class="table">

@@ -152,8 +152,8 @@ const dateOf = (v: string | null) => v ? formatShortDate(v) : '—'
           <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
         </select>
       </label>
-      <label>{{ t('contentIssues.filter.from') }} <input v-model="filters.from" class="field" type="date"></label>
-      <label>{{ t('contentIssues.filter.to') }} <input v-model="filters.to" class="field" type="date"></label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('contentIssues.filter.from') }}</label> <input id="dt-filters-from" v-model="filters.from" class="field" type="date"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('contentIssues.filter.to') }}</label> <input id="dt-filters-to" v-model="filters.to" class="field" type="date"></div>
       <label class="check"><input v-model="filters.affectsScoring" type="checkbox"> {{ t('contentIssues.filter.affectsScoring') }}</label>
       <button class="btn ghost small" type="button" @click="resetFilters">{{ t('contentIssues.filter.reset') }}</button>
     </form>
@@ -235,7 +235,7 @@ const dateOf = (v: string | null) => v ? formatShortDate(v) : '—'
 <style scoped>
 .tabs { margin-bottom: var(--space-3); }
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .filters .field { width: auto; min-width: 140px; padding: var(--space-2) var(--space-3); }
 .filters .check { display: flex; align-items: center; gap: var(--space-2); }
 .state { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }

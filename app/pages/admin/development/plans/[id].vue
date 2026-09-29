@@ -110,8 +110,8 @@ async function addGoal() {
         <h2>{{ t('common.edit') }}</h2>
         <label>{{ t('dev.planGoal') }}<input v-model="editForm.summary" class="field" maxlength="2000"></label>
         <div class="two">
-          <label>{{ t('peopleReport.from') }}<input v-model="editForm.periodFrom" type="date" required class="field"></label>
-          <label>{{ t('peopleReport.to') }}<input v-model="editForm.periodTo" type="date" required class="field"></label>
+          <div class="date-label"><label for="dt-editForm-periodFrom">{{ t('peopleReport.from') }}</label><input id="dt-editForm-periodFrom" v-model="editForm.periodFrom" type="date" required class="field"></div>
+          <div class="date-label"><label for="dt-editForm-periodTo">{{ t('peopleReport.to') }}</label><input id="dt-editForm-periodTo" v-model="editForm.periodTo" type="date" required class="field"></div>
         </div>
         <div class="row2"><button type="button" class="chip" @click="editing = false">{{ t('common.cancel') }}</button><button type="submit" class="primary">{{ t('common.save') }}</button></div>
       </form>
@@ -137,7 +137,7 @@ async function addGoal() {
             <option v-for="k in ['competency', 'learning', 'result', 'project']" :key="k" :value="k">{{ t(`dev.kind.${k}`) }}</option>
           </select>
         </label>
-        <label>{{ t('dev.due') }}<input v-model="goalForm.dueAt" type="date" required class="field"></label>
+        <div class="date-label"><label for="dt-goalForm-dueAt">{{ t('dev.due') }}</label><input id="dt-goalForm-dueAt" v-model="goalForm.dueAt" type="date" required class="field"></div>
         <div class="row2"><button type="button" class="chip" @click="addingGoal = false">{{ t('common.cancel') }}</button><button type="submit" class="primary" :disabled="goalForm.title.length < 3 || !goalForm.dueAt">{{ t('common.save') }}</button></div>
       </form>
     </div>
@@ -173,7 +173,7 @@ h2 { margin: 0; font-weight: 800; }
 .primary:disabled { opacity: 0.5; }
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 40%); display: grid; place-items: center; padding: var(--space-3); z-index: 20; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-2); width: min(480px, 100%); box-sizing: border-box; max-height: 100%; overflow: auto; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; box-sizing: border-box; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 </style>

@@ -96,8 +96,8 @@ async function create() {
           </select>
         </label>
         <div class="two">
-          <label>{{ t('peopleReport.from') }}<input v-model="form.periodFrom" type="date" required class="field"></label>
-          <label>{{ t('peopleReport.to') }}<input v-model="form.periodTo" type="date" required class="field"></label>
+          <div class="date-label"><label for="dt-form-periodFrom">{{ t('peopleReport.from') }}</label><input id="dt-form-periodFrom" v-model="form.periodFrom" type="date" required class="field"></div>
+          <div class="date-label"><label for="dt-form-periodTo">{{ t('peopleReport.to') }}</label><input id="dt-form-periodTo" v-model="form.periodTo" type="date" required class="field"></div>
         </div>
         <label>{{ t('dev.planGoal') }}<input v-model="form.summary" class="field" maxlength="2000"></label>
         <div class="actions"><button type="button" class="chip" @click="creating = false">{{ t('common.cancel') }}</button><button type="submit" class="primary" :disabled="!form.userId || !form.periodFrom || !form.periodTo">{{ t('common.save') }}</button></div>
@@ -131,7 +131,7 @@ td { padding: var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft)
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 40%); display: grid; place-items: center; padding: var(--space-3); z-index: 20; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-2); width: min(480px, 100%); box-sizing: border-box; max-height: 100%; overflow: auto; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; box-sizing: border-box; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 .actions { display: flex; gap: var(--space-2); justify-content: flex-end; }

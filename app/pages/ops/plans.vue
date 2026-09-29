@@ -167,8 +167,8 @@ async function runArchive() {
         <label class="pick"><input v-model="form.aiIncluded" type="checkbox">{{ t('opsConsole.plansPage.f.aiIncluded') }}</label>
         <label class="field-wrap"><span class="label">{{ t('opsConsole.plansPage.f.aiTermDays') }}</span><input v-model="form.aiTermDays" class="field" type="number" min="1" max="3650" inputmode="numeric"></label>
         <label class="field-wrap"><span class="label">{{ t('opsConsole.plansPage.f.addons') }}</span><input v-model="form.addonsAllowed" class="field" autocomplete="off" :placeholder="t('opsConsole.plansPage.f.addonsAll')"></label>
-        <label class="field-wrap"><span class="label">{{ t('opsConsole.plansPage.f.validFrom') }}</span><input v-model="form.validFrom" class="field" type="date"></label>
-        <label class="field-wrap"><span class="label">{{ t('opsConsole.plansPage.f.validTo') }}</span><input v-model="form.validTo" class="field" type="date"></label>
+        <div class="field-wrap date-label"><label for="dt-form-validFrom"><span class="label">{{ t('opsConsole.plansPage.f.validFrom') }}</span></label><input id="dt-form-validFrom" v-model="form.validFrom" class="field" type="date"></div>
+        <div class="field-wrap date-label"><label for="dt-form-validTo"><span class="label">{{ t('opsConsole.plansPage.f.validTo') }}</span></label><input id="dt-form-validTo" v-model="form.validTo" class="field" type="date"></div>
       </div>
       <div v-if="needsReason" class="note sun" role="note" data-testid="ops-plan-affected">
         <p>{{ t('opsConsole.plansPage.affected', { n: editing!.companies }) }}</p>

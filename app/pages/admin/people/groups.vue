@@ -140,8 +140,8 @@ const fmt = (d: string | null) => d ? formatDateTime(new Date(d)) : '—'
           <label>{{ t('groups.locations') }}<select v-model="form.filter.locationIds" multiple size="4"><option v-for="r in refs.locations" :key="r.id" :value="r.id">{{ r.name }}</option></select></label>
           <label>{{ t('groups.levels') }}<select v-model="form.filter.positionLevelIds" multiple size="3"><option v-for="r in refs.levels" :key="r.id" :value="r.id">{{ r.name }}</option></select></label>
           <div class="two">
-            <label>{{ t('groups.hiredFrom') }}<input v-model="form.filter.hiredFrom" type="date"></label>
-            <label>{{ t('groups.hiredTo') }}<input v-model="form.filter.hiredTo" type="date"></label>
+            <div class="date-label"><label for="dt-form-filter-hiredFrom">{{ t('groups.hiredFrom') }}</label><input id="dt-form-filter-hiredFrom" v-model="form.filter.hiredFrom" type="date"></div>
+            <div class="date-label"><label for="dt-form-filter-hiredTo">{{ t('groups.hiredTo') }}</label><input id="dt-form-filter-hiredTo" v-model="form.filter.hiredTo" type="date"></div>
           </div>
           <label>{{ t('groups.certExpiring') }}<input v-model="form.filter.certificateExpiringDays" type="number" min="1" max="365"></label>
         </template>
@@ -179,7 +179,7 @@ h2 { margin: 0; font-weight: 800; }
 .notice { color: var(--color-teal-ink); }
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 40%); display: grid; place-items: center; padding: var(--space-3); z-index: 20; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); width: min(480px, 100%); box-sizing: border-box; max-height: 100%; overflow: auto; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .modal .check { display: flex; align-items: center; gap: var(--space-2); color: var(--color-ink); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; width: 100%; box-sizing: border-box; }

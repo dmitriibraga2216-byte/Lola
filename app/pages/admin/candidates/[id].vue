@@ -316,9 +316,9 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
             <option v-for="pos in positions" :key="pos.id" :value="pos.id">{{ pos.name }}</option>
           </select>
         </label>
-        <label>{{ t('candidate.startDate') }}
-          <input v-model="hireForm.startDate" type="date" required>
-        </label>
+        <div class="date-label"><label for="dt-hireForm-startDate">{{ t('candidate.startDate') }}</label>
+          <input id="dt-hireForm-startDate" v-model="hireForm.startDate" type="date" required>
+        </div>
         <fieldset v-if="onboarding.length" class="onboarding">
           <legend>{{ t('candidate.onboardingCourses') }}</legend>
           <label v-for="c in onboarding" :key="c.courseId" class="row">

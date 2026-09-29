@@ -50,8 +50,8 @@ const dateOf = (v: string | null) => v ? formatDate(new Date(v), { day: '2-digit
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <div class="filters">
-      <label>{{ t('funnelReport.from') }} <input v-model="from" type="date"></label>
-      <label>{{ t('funnelReport.to') }} <input v-model="to" type="date"></label>
+      <div class="date-label"><label for="dt-from">{{ t('funnelReport.from') }}</label> <input id="dt-from" v-model="from" type="date"></div>
+      <div class="date-label"><label for="dt-to">{{ t('funnelReport.to') }}</label> <input id="dt-to" v-model="to" type="date"></div>
       <button class="btn" type="button" :disabled="busy" @click="load">{{ t('funnelReport.apply') }}</button>
     </div>
 

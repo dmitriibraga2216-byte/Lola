@@ -83,7 +83,7 @@ const missing = computed(() => (step.value === 1
         <input v-model="form.title" class="field" :placeholder="t('assess.cycleTitle')" data-testid="cycle-title">
         <select v-if="forms.length" v-model="form.formId" class="field"><option v-for="f in forms" :key="f.id" :value="f.id">{{ f.title }}</option></select>
         <p v-else class="sub" data-testid="cycle-no-forms">{{ t('assess.noForms') }}: <NuxtLink to="/admin/assessment/forms" class="link">{{ t('assess.forms') }}</NuxtLink></p>
-        <label class="sub">{{ t('assess.period') }} <input v-model="form.periodFrom" class="field" type="date"> — <input v-model="form.periodTo" class="field" type="date"></label>
+        <div class="sub date-label"><label for="dt-form-periodFrom">{{ t('assess.period') }}</label> <input id="dt-form-periodFrom" v-model="form.periodFrom" class="field" type="date"> — <input v-model="form.periodTo" class="field" type="date"></div>
       </div>
       <div v-if="step === 2" class="grid">
         <p v-if="subject" class="row" data-testid="cycle-subject">
@@ -112,7 +112,7 @@ const missing = computed(() => (step.value === 1
         <label class="check"><input v-model="form.selfFirst" type="checkbox"> {{ t('assess.selfFirst') }}</label>
       </div>
       <div v-if="step === 4" class="grid">
-        <label class="sub">{{ t('assess.window') }} <input v-model="form.startsAt" class="field" type="datetime-local"> — <input v-model="form.endsAt" class="field" type="datetime-local"></label>
+        <div class="sub date-label"><label for="dt-form-startsAt">{{ t('assess.window') }}</label> <input id="dt-form-startsAt" v-model="form.startsAt" class="field" type="datetime-local"> — <input v-model="form.endsAt" class="field" type="datetime-local"></div>
       </div>
       <div v-if="step === 5" class="grid">
         <label class="check"><input v-model="form.anonymousForSubject" type="checkbox"> {{ t('assess.anonymous') }}</label>

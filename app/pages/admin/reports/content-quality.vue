@@ -74,8 +74,8 @@ const typeOf = (r: ContentQualityRow) => t(`contentIssues.target.${r.targetType}
     </PageHeader>
 
     <form class="filters" @submit.prevent="load">
-      <label>{{ t('contentQuality.from') }} <input v-model="filters.from" class="field" type="date"></label>
-      <label>{{ t('contentQuality.to') }} <input v-model="filters.to" class="field" type="date"></label>
+      <div class="date-label"><label for="dt-filters-from">{{ t('contentQuality.from') }}</label> <input id="dt-filters-from" v-model="filters.from" class="field" type="date"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('contentQuality.to') }}</label> <input id="dt-filters-to" v-model="filters.to" class="field" type="date"></div>
       <label>{{ t('contentQuality.groupBy') }}
         <select v-model="filters.groupBy" class="field">
           <option value="element">{{ t('contentQuality.byElement') }}</option>
@@ -180,7 +180,7 @@ const typeOf = (r: ContentQualityRow) => t(`contentIssues.target.${r.targetType}
 
 <style scoped>
 .filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); font-weight: 700; }
 .filters .field { width: auto; min-width: 140px; padding: var(--space-2) var(--space-3); }
 .tiles { margin-bottom: var(--space-4); }
 .strong { font-weight: 900; }

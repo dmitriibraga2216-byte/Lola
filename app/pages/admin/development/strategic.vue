@@ -144,7 +144,7 @@ async function setStatus(g: TreeGoal, code: string) {
             <option v-for="u in people" :key="u.id" :value="u.id">{{ u.fullName }}</option>
           </select>
         </label>
-        <label>{{ t('dev.due') }}<input v-model="form.dueAt" type="date" class="field"></label>
+        <div class="date-label"><label for="dt-form-dueAt">{{ t('dev.due') }}</label><input id="dt-form-dueAt" v-model="form.dueAt" type="date" class="field"></div>
         <label v-if="form.id">{{ t('dev.progress') }}<input v-model.number="form.progressPct" type="number" min="0" max="100" class="field"></label>
         <div class="row2"><button type="button" class="chip" @click="editing = false">{{ t('common.cancel') }}</button><button type="submit" class="primary" :disabled="form.title.length < 3 || !form.userId">{{ t('common.save') }}</button></div>
       </form>
@@ -194,7 +194,7 @@ h2 { margin: 0 0 var(--space-1); font-weight: 900; font-size: var(--font-size-bo
 .primary:disabled { opacity: 0.5; }
 .overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 40%); display: grid; place-items: center; padding: var(--space-3); z-index: 20; overflow: auto; }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-2); width: min(480px, 100%); box-sizing: border-box; max-height: 100%; overflow: auto; }
-.modal label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; box-sizing: border-box; }
 .row2 { display: flex; gap: var(--space-2); justify-content: flex-end; }
 @media (max-width: 900px) {

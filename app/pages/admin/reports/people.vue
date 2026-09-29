@@ -31,10 +31,10 @@ const fmt = (d: unknown) => d ? formatShortDate(new Date(String(d))) : '—'
       <button v-for="k in (['staffing', 'turnover', 'inactive'] as Kind[])" :key="k" role="tab" :aria-selected="kind === k" :class="['tab', { on: kind === k }]" @click="kind = k">{{ t(`peopleReport.${k}`) }}</button>
     </div>
     <div class="filters">
-      <label v-if="kind === 'staffing'">{{ t('peopleReport.asOf') }}<input v-model="q.asOf" type="date" :max="today"></label>
+      <div v-if="kind === 'staffing'" class="date-label"><label for="dt-q-asOf">{{ t('peopleReport.asOf') }}</label><input id="dt-q-asOf" v-model="q.asOf" type="date" :max="today"></div>
       <template v-if="kind === 'turnover'">
-        <label>{{ t('peopleReport.from') }}<input v-model="q.from" type="date"></label>
-        <label>{{ t('peopleReport.to') }}<input v-model="q.to" type="date"></label>
+        <div class="date-label"><label for="dt-q-from">{{ t('peopleReport.from') }}</label><input id="dt-q-from" v-model="q.from" type="date"></div>
+        <div class="date-label"><label for="dt-q-to">{{ t('peopleReport.to') }}</label><input id="dt-q-to" v-model="q.to" type="date"></div>
       </template>
       <label v-if="kind === 'inactive'">{{ t('peopleReport.days') }}<input v-model.number="q.days" type="number" min="1" max="365"></label>
     </div>
@@ -63,7 +63,7 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .filters { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); }
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }

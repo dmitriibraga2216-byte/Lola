@@ -142,9 +142,9 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
       </div>
     </template>
     <div v-else class="filters">
-      <label v-if="tab === 'security'">{{ t('journals.month') }} <input v-model="month" type="month"></label>
-      <label>{{ t('reports.from') }} <input v-model="filters.from" type="date"></label>
-      <label>{{ t('reports.to') }} <input v-model="filters.to" type="date"></label>
+      <div v-if="tab === 'security'" class="date-label"><label for="dt-month">{{ t('journals.month') }}</label> <input id="dt-month" v-model="month" type="month"></div>
+      <div class="date-label"><label for="dt-filters-from">{{ t('reports.from') }}</label> <input id="dt-filters-from" v-model="filters.from" type="date"></div>
+      <div class="date-label"><label for="dt-filters-to">{{ t('reports.to') }}</label> <input id="dt-filters-to" v-model="filters.to" type="date"></div>
       <label v-if="tab === 'security' || tab === 'org-conflicts'">{{ t('people.col.orgUnit') }}
         <select v-model="filters.orgUnitId"><option value="">{{ t('journals.anyType') }}</option><option v-for="u in units" :key="u.id" :value="u.id">{{ u.name }}</option></select>
       </label>
@@ -338,7 +338,7 @@ const retentionText = computed(() => retention.value == null ? t('journals.reten
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .filters { display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; margin: var(--space-2) 0 var(--space-3); }
-.filters label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
+.filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .filters .toggle { display: inline-flex; align-self: center; color: var(--color-ink); }
 .filters .toggle input[type="checkbox"] { appearance: none; border: none; padding: 0; background: var(--color-bg-line); }
 .filters .toggle input[type="checkbox"]:checked { background: var(--color-teal); }

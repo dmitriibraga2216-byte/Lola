@@ -35,8 +35,8 @@ async function save() {
       <p class="label top">{{ t('events.f.text') }}</p>
       <BlockEditor v-model="form.description" />
       <div class="row top">
-        <label class="col"><span class="label">{{ t('events.f.starts') }}</span><input v-model="form.startsAt" class="field" type="datetime-local"></label>
-        <label class="col"><span class="label">{{ t('events.f.ends') }}</span><input v-model="form.endsAt" class="field" type="datetime-local"></label>
+        <div class="col date-label"><label for="dt-form-startsAt"><span class="label">{{ t('events.f.starts') }}</span></label><input id="dt-form-startsAt" v-model="form.startsAt" class="field" type="datetime-local"></div>
+        <div class="col date-label"><label for="dt-form-endsAt"><span class="label">{{ t('events.f.ends') }}</span></label><input id="dt-form-endsAt" v-model="form.endsAt" class="field" type="datetime-local"></div>
       </div>
       <div class="row top">
         <label class="col"><span class="label">{{ t('events.f.where') }}</span><select v-model="form.locationId" class="field"><option value="">{{ t('events.allLocations') }}</option><option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option></select></label>

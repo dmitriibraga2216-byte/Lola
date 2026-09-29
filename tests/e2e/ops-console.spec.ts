@@ -12,6 +12,7 @@ import { totpAt } from '../../server/services/totp'
 const admin = postgres(process.env.DATABASE_ADMIN_URL ?? 'postgres://lola:lola_dev@localhost:5432/lola', { max: 1, onnotice: () => {} })
 const EMAIL = 'ops1-e2e@lola.test'
 const PASSWORD = 'ops1-e2e-password'
+const PLAN = `e2e-pl-${Date.now().toString(36)}`
 
 test.beforeAll(async () => {
   await admin`delete from rate_limits where key like ${'ops%'}`
@@ -21,6 +22,7 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
+  await admin`delete from plans where code like ${'e2e-pl-%'}`
   await admin`delete from platform_admins where email = ${EMAIL}`
   await admin.end()
 })
@@ -86,6 +88,26 @@ test('оператор: пароль → подключение 2FA → спис
 
   await page.goto(`/ops/audit?tenantId=${tenantId}`)
   await expect(page.getByTestId('ops-audit').getByText('tenant.extend')).toBeVisible()
+
+  // Каталог тарифів (docs/24 §4.4.2): створити → змінити → в архів; компаній на тарифі немає — без причини
+  await page.goto('/ops/plans')
+  await page.getByTestId('ops-plan-new').click()
+  const planForm = page.getByTestId('ops-plan-form')
+  await expect(planForm.getByLabel('Код', { exact: true })).toBeFocused()
+  await planForm.getByLabel('Код', { exact: true }).fill(PLAN)
+  await planForm.getByLabel('Назва', { exact: true }).fill('E2E Тир')
+  await planForm.getByLabel('Активних людей').fill('40')
+  await planForm.getByRole('button', { name: 'Створити тариф' }).click()
+  await expect(page.getByText('Тариф створено')).toBeVisible()
+  const planRow = page.getByTestId('ops-plans').getByRole('row').filter({ hasText: PLAN })
+  await planRow.getByRole('button', { name: 'Змінити: E2E Тир' }).click()
+  await expect(planForm.getByTestId('ops-plan-affected')).toHaveCount(0)
+  await planForm.getByLabel('Активних людей').fill('30')
+  await planForm.getByRole('button', { name: 'Зберегти' }).click()
+  await expect(page.getByText('Тариф збережено')).toBeVisible()
+  await planRow.getByRole('button', { name: 'В архів: E2E Тир' }).click()
+  await page.getByTestId('ops-plan-archive').getByRole('button', { name: 'В архів' }).click()
+  await expect(planRow.getByText('В архіві')).toBeVisible()
 
   // Выход и повторный вход — уже экран кода, не подключения
   await page.request.post('/api/v1/platform/logout')

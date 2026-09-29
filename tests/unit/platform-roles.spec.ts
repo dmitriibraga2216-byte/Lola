@@ -29,6 +29,7 @@ const EXPECTED: Record<PlatformAction, [boolean, boolean, boolean, boolean, bool
   'billing.payments': [Y, Y, Y, N, N],
   'billing.plan_change': [Y, Y, Y, N, N],
   'billing.extend': [Y, Y, Y, N, N],
+  'billing.plans': [Y, Y, Y, N, N],
   'announcements.manage': [Y, Y, N, N, N],
   'operators.manage': [Y, N, N, N, N],
   'operators.two_factor_reset': [Y, N, N, N, N],

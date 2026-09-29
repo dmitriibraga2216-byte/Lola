@@ -13,6 +13,6 @@ export default defineEventHandler(async (event) => {
   const p = tenantCreateSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', p.error.issues[0]?.message ?? 'Перевірте поля', { issues: p.error.issues })
   const r = await createTenant(p.data, actor)
-  if (!r.ok) return apiError(event, 409, `tenant.${r.code}`, r.code === 'slug_taken' ? 'Такий slug вже зайнятий' : 'Невідомий тариф')
+  if (!r.ok) return apiError(event, 409, `tenant.${r.code}`, r.code === 'slug_taken' ? 'Такий slug вже зайнятий' : r.code === 'plan_archived' ? 'Тариф в архіві — оберіть діючий тариф' : 'Невідомий тариф')
   return apiData(r)
 })

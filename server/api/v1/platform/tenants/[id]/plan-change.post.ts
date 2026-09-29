@@ -14,6 +14,6 @@ export default defineEventHandler(async (event) => {
   const p = platformPlanChangeSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 422, 'validation_failed', 'Оберіть тариф, період і вкажіть причину (10–500 знаків)', { issues: p.error.issues })
   const r = await changeTenantPlan(getRouterParam(event, 'id')!, p.data, actor)
-  if (!r.ok) return apiError(event, r.code === 'not_found' ? 404 : 422, r.code, r.code === 'not_found' ? 'Тенант не знайдено' : 'Такого тарифу немає')
+  if (!r.ok) return apiError(event, r.code === 'not_found' ? 404 : 422, r.code, r.code === 'not_found' ? 'Тенант не знайдено' : r.code === 'plan_archived' ? 'Тариф в архіві — оберіть діючий тариф' : 'Такого тарифу немає')
   return apiData(r)
 })

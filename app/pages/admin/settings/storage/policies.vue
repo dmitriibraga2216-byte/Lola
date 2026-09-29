@@ -12,7 +12,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'sto
 
 const { t } = useI18n()
 const { api } = useApi()
-const { formatBytes } = useFormat()
+const { formatBytes, formatDateTime } = useFormat()
 
 interface Policy {
   origin: string, enabled: boolean, keepMonths: number | null, anchor: string, action: string, keepEvidence: boolean
@@ -42,7 +42,18 @@ async function load() {
   catch (err) { loadError.value = apiErrorOf(err).message }
   finally { loading.value = false }
 }
-onMounted(load)
+/** Последний ночной сухой прогон политик (`storage.retention_scan`, §11; `44` §11 Р-S1). */
+interface RetentionScan {
+  at: string
+  report: { policies: { origin: string, files: number, bytes: number, batchFiles: number, upcomingFiles: number }[], drafts: { files: number, bytes: number }, staleUploads: { files: number, bytes: number }, total: { files: number, bytes: number } }
+}
+const lastScan = ref<RetentionScan | null>(null)
+async function loadScan() {
+  try { lastScan.value = (await api<{ retention: RetentionScan | null }>('/storage/scans')).retention }
+  catch { lastScan.value = null } // отчёт — подсказка, без него форма работает
+}
+
+onMounted(() => { load(); loadScan() })
 
 const deleting = (p: Policy) => p.enabled && p.action !== 'notify_only'
 const keepInvalid = (p: Policy) => deleting(p) && (typeof p.keepMonths !== 'number' || p.keepMonths < 1 || p.keepMonths > 120)
@@ -115,6 +126,18 @@ function touched(p: Policy) {
 
     <p class="help intro">{{ t('storage.policies.intro') }}</p>
     <p class="note sun">{{ t('storage.policies.notScheduled') }}</p>
+    <section v-if="lastScan" class="card last-scan" aria-labelledby="last-scan-title">
+      <h2 id="last-scan-title" class="panel-title">{{ t('storage.scans.retentionTitle', { date: formatDateTime(lastScan.at) }) }}</h2>
+      <p class="help">{{ t('storage.scans.retentionTotal', { n: lastScan.report.total.files, size: formatBytes(lastScan.report.total.bytes) }) }}</p>
+      <ul v-if="lastScan.report.policies.length" class="scan-list">
+        <li v-for="p in lastScan.report.policies" :key="p.origin">
+          <b>{{ t(`storage.origin.${p.origin}`) }}</b>
+          <span>{{ t('storage.scans.retentionPolicy', { n: p.files, size: formatBytes(p.bytes), batch: p.batchFiles, upcoming: p.upcomingFiles }) }}</span>
+        </li>
+      </ul>
+      <p v-if="lastScan.report.drafts.files" class="help">{{ t('storage.scans.drafts', { n: lastScan.report.drafts.files, size: formatBytes(lastScan.report.drafts.bytes) }) }}</p>
+      <p v-if="lastScan.report.staleUploads.files" class="help">{{ t('storage.scans.staleUploads', { n: lastScan.report.staleUploads.files, size: formatBytes(lastScan.report.staleUploads.bytes) }) }}</p>
+    </section>
 
     <p v-if="loading" class="help">{{ t('common.loading') }}</p>
     <p v-else-if="loadError" class="error-text" role="alert">{{ loadError }}</p>
@@ -195,6 +218,10 @@ function touched(p: Policy) {
 
 <style scoped>
 .intro { margin: 0 0 var(--space-3); }
+.last-scan { margin-bottom: var(--space-3); display: grid; gap: var(--space-2); }
+.last-scan .panel-title, .last-scan .help { margin: 0; }
+.scan-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); }
+.scan-list li { display: flex; flex-wrap: wrap; gap: var(--space-2); overflow-wrap: anywhere; }
 .policies { display: grid; gap: var(--space-3); }
 .policy { border: 1px solid var(--color-bg-line-soft); margin: 0; min-width: 0; display: grid; gap: var(--space-3); }
 .policy.on { border-color: var(--color-teal); }

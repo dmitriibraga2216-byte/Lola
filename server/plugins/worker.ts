@@ -418,6 +418,32 @@ export default defineNitroPlugin(async () => {
       const r = await pendingUploadRetry(tenantId)
       if (r.granted || r.abandoned) console.log(`[storage.pending_upload_retry] ${tenantId}:`, r)
     }))
+    // docs/v2/34 §11: политики, сироты и сверка с бакетом — всухую, отчёт в audit_log (docs/v2/44
+    // §11 Р-S1). Ошибка листинга бакета не глушится: круг доходит до конца, затем задача падает
+    // и уходит в повтор
+    await work('storage.retention_scan', () => runPerTenant('storage.retention_scan', async (tenantId) => {
+      const { retentionScan } = await import('../services/storageScans')
+      const r = await retentionScan(tenantId)
+      if (r.total.files) console.log(`[storage.retention_scan] ${tenantId}: всухую ${r.total.files} файлів`)
+    }))
+    await work('storage.orphan_scan', () => runPerTenant('storage.orphan_scan', async (tenantId) => {
+      const { orphanScan } = await import('../services/storageScans')
+      const r = await orphanScan(tenantId)
+      if (r.found) console.log(`[storage.orphan_scan] ${tenantId}: всухую ${r.found} файлів без посилань`)
+    }))
+    await work('storage.object_reconcile', async () => {
+      const s = await runPerTenant('storage.object_reconcile', async (tenantId) => {
+        const { objectReconcile } = await import('../services/storageScans')
+        const r = await objectReconcile(tenantId)
+        if (r.unregistered.files || r.missing.files) console.log(`[storage.object_reconcile] ${tenantId}:`, { unregistered: r.unregistered.files, missing: r.missing.files })
+      })
+      if (s.failed) throw new Error(`storage.object_reconcile: не звірено ${s.failed} тенант(ів): ${Object.keys(s.errors).join(', ')}`)
+    })
+    await work('storage.quota_warn', () => runPerTenant('storage.quota_warn', async (tenantId) => {
+      const { quotaWarn } = await import('../services/storageScans')
+      const r = await quotaWarn(tenantId)
+      if (r.sent) console.log(`[storage.quota_warn] ${tenantId}:`, r)
+    }))
     await work('webhook.deliver', () => runPerTenant('webhook.deliver', async (tenantId) => {
       const s = await deliverPending(tenantId)
       if (s.delivered || s.failed) console.log(`[webhook.deliver] ${tenantId}:`, s)

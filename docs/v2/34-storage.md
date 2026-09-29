@@ -413,7 +413,8 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 > Пороги 80 / 95 / 100 % своих кодов не получили: их поднимает общий механизм предупреждений по оси
 > `storage_bytes` — `limit_warning` / `limit_exceeded` (`35` §8, решение В-16, PR-09); два
 > параллельных канала о том же пороге дали бы админу два разных письма. `storage_retention_*` и
-> `storage_orphans_found` появятся вместе с задачами `storage.retention_scan` и `storage.orphan_scan`;
+> `storage_orphans_found` появятся вместе с исполнением задач `storage.retention_scan` и `storage.orphan_scan`
+> (задачи заведены всухую — письмо «політика видалить» было бы неправдой, `44` §11 Р-S1);
 > `storage_addon_activated` отменён фазой 1 (`44` §9). Адресаты «admin» — люди, чья роль даёт
 > `storage.view`, а не код роли.
 
@@ -478,6 +479,16 @@ running → done`, ветки `cancelled` (до подтверждения) и `
 > 200. Не в PR-36 (план называл только `storage.purge`): `storage.retention_scan` (политики уже
 > сохраняются и прогоняются всухую, но не исполняются), `storage.orphan_scan`,
 > `storage.object_reconcile`, `storage.quota_warn` (пороги — `billing.limit_scan`, PR-09).
+
+> [реализовано, `storage-jobs`; решение `44` §11 Р-S1] Заведены все четыре. `storage.retention_scan`
+> (03:00), `storage.orphan_scan` (03:30) и `storage.object_reconcile` (1-го числа, 05:00) — **сухой
+> прогон**: отчёт в `audit_log` с `after.dryRun = true`, строки и объекты не меняются; экран читает
+> последний отчёт `GET /storage/scans`. Каталог ссылок на файл — `MEDIA_REFERENCE_SOURCES`, шире
+> пяти источников §7.6 п. 3 (id в jsonb на любой глубине, ключи обложек, аватаров, PDF,
+> выгрузок); тест `v2-storage-jobs` сверяет его со схемой. Сверка с бакетом законными считает
+> ключи строки (файл, обложка, варианты) и ключи каталога; строка моложе суток или с незавершённой
+> загрузкой «пропавшей» не считается. `storage.quota_warn` (08:00) — повторы `limit_warning` /
+> `limit_exceeded` оси `storage_bytes`: 80 % — раз в 7 дней, 95 % и выше — раз в сутки.
 
 > [дополнено, PR-29] **Голос кандидата — исключение из корзины** (`30` §7.7, `42` §5 проверка 18): записи
 > `origin = 'interview_answer'` `storage.purge` не трогает, их объект по-настоящему удаляет

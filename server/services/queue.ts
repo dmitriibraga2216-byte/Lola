@@ -84,6 +84,11 @@ export async function getBoss(): Promise<PgBoss> {
       // docs/v2/34 §11 (PR-36): корзина хранилища и отложенные загрузки
       await b.createQueue('storage.purge', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/v2/34 §11: сухие отчёты политик, сирот и сверки с бакетом, напоминание о квоте
+      await b.createQueue('storage.retention_scan', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('storage.orphan_scan', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('storage.object_reconcile', { retryLimit: 2, retryDelay: 600, expireInSeconds: 3600 })
+      await b.createQueue('storage.quota_warn', { retryLimit: 2, expireInSeconds: 600 })
       // docs/v2/37 §11 (PR-22): нормы времени — факт, флаг отклонения, уведомление автору
       await b.createQueue('time.norms_recalc', { retryLimit: 2, expireInSeconds: 1800 })
       // docs/v2/29 §11 (PR-17): публикация и генерация текста. `vacancy.publish_retry` —
@@ -195,6 +200,12 @@ export async function getBoss(): Promise<PgBoss> {
       // остаётся до решения владельца продукта, docs/v2/44 §8); отложенные загрузки — каждые 15 минут
       await b.schedule('storage.purge', '0 4 * * *', {}, { singletonKey: 'storage.purge', tz: 'Europe/Kyiv' })
       await b.schedule('storage.pending_upload_retry', '*/15 * * * *', {}, { singletonKey: 'storage.pending_upload_retry' })
+      // Политики — 03:00, сироты — 03:30 (до корзины в 04:00), сверка с бакетом — 1-го числа в 05:00,
+      // напоминание о квоте — 08:00. Первые три — всухую, с отчётом (docs/v2/44 §11 Р-S1)
+      await b.schedule('storage.retention_scan', '0 3 * * *', {}, { singletonKey: 'storage.retention_scan', tz: 'Europe/Kyiv' })
+      await b.schedule('storage.orphan_scan', '30 3 * * *', {}, { singletonKey: 'storage.orphan_scan', tz: 'Europe/Kyiv' })
+      await b.schedule('storage.object_reconcile', '0 5 1 * *', {}, { singletonKey: 'storage.object_reconcile', tz: 'Europe/Kyiv' })
+      await b.schedule('storage.quota_warn', '0 8 * * *', {}, { singletonKey: 'storage.quota_warn', tz: 'Europe/Kyiv' })
       // Нормы времени (docs/v2/37 §11): еженедельно, в ночь на воскресенье — медиана факта, флаг
       // отклонения и уведомление автору. Свёртка идёт каждые 10 минут, витрина к этому часу свежая
       await b.schedule('time.norms_recalc', '30 2 * * 0', {}, { singletonKey: 'time.norms_recalc', tz: 'Europe/Kyiv' })

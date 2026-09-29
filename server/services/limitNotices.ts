@@ -154,7 +154,17 @@ export async function billingRecipients(tx: TenantTx, roles: readonly ('admin' |
  * payload — `{axis, resource, used, limit, pct}`, где `axis` машинный (В-16), а `resource`,
  * `used`, `limit` — готовые строки для шаблона. Дедуп — сутки на связку `(код, ось, человек)`.
  */
-async function notifyAdmins(tenantId: string, axis: LimitAxis, level: LimitNoticeLevel, used: number, limit: number | null): Promise<void> {
+export interface NotifyOptions {
+  /**
+   * Напоминание, а не подъём уровня (`storage.quota_warn`, docs/v2/34 §7.5 п. 3): оператору
+   * платформы строка не пишется — он получил её при подъёме.
+   */
+  reminder?: boolean
+  /** Не слать человеку, если то же уведомление по этой оси уже уходило ему за столько дней. */
+  quietDays?: number
+}
+
+export async function notifyAdmins(tenantId: string, axis: LimitAxis, level: LimitNoticeLevel, used: number, limit: number | null, opts: NotifyOptions = {}): Promise<number> {
   const code = level === 'exceeded' ? 'limit_exceeded' : 'limit_warning'
   const dict = defaultDictionary('uk')
   const display = (n: number) => (axis === 'storage_bytes' ? `${(n / GIB).toFixed(1)} ГБ` : String(n))
@@ -167,16 +177,27 @@ async function notifyAdmins(tenantId: string, axis: LimitAxis, level: LimitNotic
     consequence: dict[`billing.limitConsequence.${axis}`] ?? '',
   }
   const day = new Date().toISOString().slice(0, 10)
+  let sent = 0
   await withTenant(tenantId, null, async (tx: TenantTx) => {
     for (const a of await billingRecipients(tx)) {
+      if (opts.quietDays) {
+        const [recent] = await tx.execute(sql`
+          select 1 from notifications
+           where user_id = ${a.user_id}::uuid and code = ${code} and payload ->> 'axis' = ${axis}
+             and created_at > now() - make_interval(days => ${opts.quietDays}::int)
+           limit 1`) as unknown as unknown[]
+        if (recent) continue
+      }
       // Ключ дедупликации — на оси, а не на локализуемой подписи (В-16)
-      await enqueueNotification(tx, { tenantId, userId: a.user_id, code, payload, dedupKey: `${code}:${axis}:${tenantId}:${day}:${a.user_id}` })
+      if (await enqueueNotification(tx, { tenantId, userId: a.user_id, code, payload, dedupKey: `${code}:${axis}:${tenantId}:${day}:${a.user_id}` })) sent++
     }
   })
+  if (opts.reminder) return sent
   await db.insert(platformAudit).values({
     adminId: null, adminEmail: 'system', action: `tenant.${code}`,
     subjectTenantId: tenantId, entity: 'limit_notices', entityId: axis, after: payload,
   })
+  return sent
 }
 
 /** Порог из §7.9 — экспортируется для экранов, чтобы полоса красилась по тому же числу. */

@@ -390,7 +390,9 @@ export async function applyScheduledPlanChanges(tenantId: string, today?: string
   res.expired = await withTenant(tenantId, null, async (tx) => {
     const rows = await tx.update(planChangeRequests).set({ status: 'cancelled', decidedAt: new Date() }).where(and(
       eq(planChangeRequests.tenantId, tenantId), eq(planChangeRequests.status, 'blocked'),
-      sql`${planChangeRequests.createdAt} < (${day}::date - ${BLOCKED_TTL_DAYS}::int)`,
+      // Дата заявки — в поясе тенанта, как и `day`: сравнение момента UTC с датой по Киеву между
+      // 21:00 и 24:00 UTC отменяло заявку на день раньше срока
+      sql`(${planChangeRequests.createdAt} at time zone ${t?.timezone ?? 'Europe/Kyiv'})::date < (${day}::date - ${BLOCKED_TTL_DAYS}::int)`,
     )).returning({ id: planChangeRequests.id })
     return rows.length
   })

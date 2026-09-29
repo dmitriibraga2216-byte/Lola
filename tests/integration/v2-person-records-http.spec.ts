@@ -158,6 +158,23 @@ describe.skipIf(!BUILT)('Заметки и документы человека �
     expect((await fetch(`${BASE}/api/v1/people/not-a-uuid/notes`, { headers: { cookie: adm } })).status).toBe(404)
   })
 
+  it('выгрузка ПД по запросу (§7.4, §12): администратору — JSON-файл с основанием в журнале; сотруднику — 403; чужой — 404', async () => {
+    const noReason = await fetch(`${BASE}/api/v1/people/${subjectId}/personal-data`, json(adm, 'POST', {}))
+    expect(noReason.status).toBe(400)
+    const res = await fetch(`${BASE}/api/v1/people/${subjectId}/personal-data`, json(adm, 'POST', { reason: `Запит №7 від 29.09 ${stamp}` }))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-disposition')).toContain(`lola-personal-data-${subjectId}.json`)
+    const file = await res.json() as { format: string, subjectId: string, notes: unknown[] }
+    expect(file.format).toBe('lola.personal-data.v1')
+    expect(file.subjectId).toBe(subjectId)
+    const [log] = await admin`select after, request_context from audit_log where tenant_id = ${tenantId} and action = 'person.personal_data_export' and entity_id = ${subjectId} order by created_at desc limit 1`
+    expect((log!.after as { reason: string }).reason).toContain('Запит №7')
+    expect(log!.request_context).not.toBeNull()
+    const emp = await login(EMPLOYEE_PHONE)
+    expect((await fetch(`${BASE}/api/v1/people/${employeeId}/personal-data`, json(emp, 'POST', { reason: 'Мій запит' }))).status).toBe(403)
+    expect((await fetch(`${BASE}/api/v1/people/${foreignPersonId}/personal-data`, json(adm, 'POST', { reason: 'Запит' }))).status).toBe(404)
+  })
+
   it('справочник типов: системный не удаляется — 409 type_is_system', async () => {
     const res = await fetch(`${BASE}/api/v1/person-document-types/${medicalBookId}`, json(adm, 'DELETE'))
     expect(res.status).toBe(409)

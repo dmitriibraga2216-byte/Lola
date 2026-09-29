@@ -5,7 +5,7 @@ import { dueScanTenant } from '../jobs/dueScanTenant'
 import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs/candidateScan'
 import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
 import { shopReserveExpireTenant } from '../jobs/shopReserveExpire'
-import { absenceDeadlineGuard, documentsExpiryScan, notesArchiveScanTenant } from '../jobs/personRecordsScan'
+import { absenceBalanceScan, absenceDeadlineGuard, documentsExpiryScan, documentsMissingScan, notesArchiveScanTenant, notesSensitiveScreen } from '../jobs/personRecordsScan'
 import { vacancyPublicationHealthTenant, vacancySpamWatchTenant } from '../jobs/vacancyPublish'
 import { attemptPublish } from '../services/vacancyPublications'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
@@ -169,6 +169,20 @@ export default defineNitroPlugin(async () => {
     await work('absence.deadline_guard', () => runPerTenant('absence.deadline_guard', async (tenantId) => {
       const n = await absenceDeadlineGuard(tenantId)
       if (n) console.log(`[absence.deadline_guard] ${tenantId}: перенесено строків ${n}`)
+    }))
+    // docs/v2/38 §8, §11 (person-card-tails): отрицательный остаток отсутствий, недостающие
+    // обязательные документы, еженедельная переборка заметок по словарю скрина §7.5
+    await work('absence.balance_scan', () => runPerTenant('absence.balance_scan', async (tenantId) => {
+      const s = await absenceBalanceScan(tenantId)
+      if (s.negative) console.log(`[absence.balance_scan] ${tenantId}:`, s)
+    }))
+    await work('documents.missing_scan', () => runPerTenant('documents.missing_scan', async (tenantId) => {
+      const s = await documentsMissingScan(tenantId)
+      if (s.missing) console.log(`[documents.missing_scan] ${tenantId}:`, s)
+    }))
+    await work('notes.sensitive_screen', () => runPerTenant('notes.sensitive_screen', async (tenantId) => {
+      const s = await notesSensitiveScreen(tenantId)
+      if (s.flagged) console.log(`[notes.sensitive_screen] ${tenantId}:`, s)
     }))
     // docs/v2/38 §11 (PR-34): лента активности. Круг — по всем работающим тенантам
     // (`activeTenantIds`, таблица tenants без RLS), каждый тенант — внутри withTenant()

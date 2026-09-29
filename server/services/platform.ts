@@ -175,7 +175,7 @@ export interface CreateTenantInput {
   positionName?: string
 }
 
-export type CreateTenantResult = { ok: true, tenantId: string, adminUserId: string } | { ok: false, code: 'slug_taken' | 'plan_unknown' }
+export type CreateTenantResult = { ok: true, tenantId: string, adminUserId: string } | { ok: false, code: 'slug_taken' | 'plan_unknown' | 'plan_archived' }
 
 /**
  * Создание тенанта (docs/03 §3.12, docs/26 §26.6 seed-tenant): тенант, системные роли
@@ -193,6 +193,8 @@ export async function createTenant(input: CreateTenantInput, actor: PlatformAuth
   const planCode = input.plan ?? 'trial'
   const [plan] = await db.select().from(plans).where(eq(plans.code, planCode))
   if (!plan) return { ok: false, code: 'plan_unknown' }
+  // Архивный тариф новым компаниям не назначается (docs/24 §4.4.2, docs/v2/44 В-21)
+  if (!plan.isActive) return { ok: false, code: 'plan_archived' }
 
   return db.transaction(async (tx) => {
     const [tenant] = await tx.insert(tenants).values({
@@ -267,10 +269,6 @@ export async function updateTenant(id: string, input: { plan?: string, trialEnds
     invalidateTenant(id) // сбрасывает и кеш резолва по домену (докс/33 D-059)
   }
   return { ok: true, tenant: after! }
-}
-
-export async function listPlans() {
-  return platformDb().select().from(plans).orderBy(plans.sort)
 }
 
 /** Метрики платформы (docs/03 §3.12): активность, объём медиа, ошибки задач. */

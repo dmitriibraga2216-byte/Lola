@@ -80,7 +80,7 @@ const PLAN_LIMIT_KEYS = new Set<LimitKey>(['users', 'candidates', 'storageGb', '
 const limits = ref<Limits | null>(null)
 const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: '', smsPerMonth: '', apiPerMinute: '', webhooks: '', activeJobs: '', candidates: '', aiGenerateOps: '', aiReviewOps: '', aiInterviewOps: '', exportRows: '' })
 const busy = ref(false)
-const plans = ref<{ code: string, name: string }[]>([])
+const plans = ref<{ code: string, name: string, isActive: boolean }[]>([])
 onMounted(async () => { try { plans.value = await ops('/plans') } catch { /* назва тарифу — кодом, якщо список недоступний */ } })
 const planName = (code: string) => plans.value.find(p => p.code === code)?.name ?? code
 
@@ -402,7 +402,7 @@ const purgeAt = computed(() => data.value?.tenant.archivedAt ? fmt(new Date(new 
           <h2>{{ t('opsConsole.billing.changeTitle') }}</h2>
           <div class="row">
             <label class="field-wrap"><span class="label">{{ t('opsConsole.companies.plan') }}</span>
-              <select v-model="planChange.toPlanCode" class="field"><option value="" disabled>{{ t('opsConsole.companies.anyPlan') }}</option><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select>
+              <select v-model="planChange.toPlanCode" class="field"><option value="" disabled>{{ t('opsConsole.companies.anyPlan') }}</option><option v-for="p in plans.filter(x => x.isActive)" :key="p.code" :value="p.code">{{ p.name }}</option></select>
             </label>
             <label class="field-wrap"><span class="label">{{ t('opsConsole.billing.period') }}</span>
               <select v-model="planChange.billingPeriod" class="field"><option value="month">{{ t('opsConsole.billing.periodOf.month') }}</option><option value="year">{{ t('opsConsole.billing.periodOf.year') }}</option></select>

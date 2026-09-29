@@ -10,7 +10,7 @@ const { formatShortDate } = useFormat()
 const { ops, raw, can } = useOps()
 
 interface Row { id: string, slug: string, name: string, status: string, plan: string, createdAt: string, activeUsers: number, flags: string[] }
-interface Plan { code: string, name: string }
+interface Plan { code: string, name: string, isActive: boolean }
 
 const rows = ref<Row[]>([])
 const cursor = ref<string | null>(null)
@@ -94,7 +94,7 @@ const flagClass = (f: string) => f === 'limit_near' ? 'sun' : 'coral'
         </div>
         <div>
           <label class="label" for="nc-plan">{{ t('opsConsole.companies.plan') }}</label>
-          <select id="nc-plan" v-model="draft.plan" class="field"><option v-for="p in plans" :key="p.code" :value="p.code">{{ p.name }}</option></select>
+          <select id="nc-plan" v-model="draft.plan" class="field"><option v-for="p in plans.filter(x => x.isActive)" :key="p.code" :value="p.code">{{ p.name }}</option></select>
         </div>
       </div>
       <p class="help">{{ t('opsConsole.companies.createHint') }}</p>

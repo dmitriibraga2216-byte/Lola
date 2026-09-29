@@ -24,12 +24,15 @@ const { listTenantsPage, tenantOverview } = await import('../../server/services/
 const { sealHandoff, openHandoff } = await import('../../server/services/impersonationHandoff')
 const { totpAt } = await import('../../server/services/totp')
 const { requirePlatform } = await import('../../server/utils/platformGuard')
+const Plans = await import('../../server/services/platformPlans')
+const { effectiveLimits, invalidateLimits } = await import('../../server/services/tenantLimits')
 const { hash: argonHash } = await import('@node-rs/argon2')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 2, onnotice: () => {} })
 const OPS_HOST = 'ops.ops1.test'
 const PASSWORD = 'ops1-password-123'
 const MARK = 'ops1-'
+const PLAN = 'opspl-'
 const createdTenants: string[] = []
 /** Роли владельцев, которые тест на время понижает, чтобы проверить «последнего владельца» */
 let parkedOwners: string[] = []
@@ -94,6 +97,7 @@ afterAll(async () => {
     await admin`delete from limit_notices where tenant_id = ${id}`
     await admin`delete from tenants where id = ${id}`
   }
+  await admin`delete from plans where code like ${`${PLAN}%`}`
   await admin`delete from platform_admins where email like ${`${MARK}%`}`
   await admin`delete from rate_limits where key like ${'ops%'} or key like ${'imp:%'}`
   await admin.end()
@@ -427,5 +431,114 @@ describe('карточка компанії, вкладки (ops-console-2, docs
     const res = await handler(e)
     expect(res.data.length).toBeGreaterThan(0)
     expect(res.data.some(s => s.code === 'knowledge' && s.capabilities.ai_generate === true)).toBe(true)
+  })
+})
+
+describe('каталог тарифов (docs/24 §4.4.2, docs/v2/44 В-21)', () => {
+  const base = { adminId: '00000000-0000-0000-0000-000000000000', email: 'x', fullName: 'x', sessionId: 'x', twoFactorPending: false, twoFactorEnrolled: true }
+  const code = `${PLAN}${Date.now().toString(36)}`
+  let actor: { adminId: string, email: string, fullName: string }
+  const mkTenant = async (suffix: string, plan: string) => {
+    const r = await createTenant({ slug: `${MARK}${Date.now().toString(36)}${suffix}`, name: `ОпсКонсоль Тариф ${suffix}`, adminPhone: `+38050111${String(Math.floor(Math.random() * 1e4)).padStart(4, '0')}`, adminName: 'Власник', plan }, actor)
+    if (!r.ok) throw new Error(r.code)
+    createdTenants.push(r.tenantId)
+    return r.tenantId
+  }
+
+  beforeAll(async () => {
+    const adminId = await mkOperator('plans', 'billing')
+    actor = { adminId, email: `${MARK}plans@lola.test`, fullName: 'ОП plans' }
+  })
+
+  it('ручки каталога: billing и admin могут, support и viewer — 403 platform.forbidden; чтение — всем', async () => {
+    const post = (await import('../../server/api/v1/platform/plans/index.post')).default as unknown as (e: FakeEvent) => Promise<unknown>
+    const patch = (await import('../../server/api/v1/platform/plans/[code]/index.patch')).default as unknown as (e: FakeEvent) => Promise<unknown>
+    const archive = (await import('../../server/api/v1/platform/plans/[code]/archive.post')).default as unknown as (e: FakeEvent) => Promise<unknown>
+    const list = (await import('../../server/api/v1/platform/plans/index.get')).default as unknown as (e: FakeEvent) => Promise<{ data: { code: string, companies: number }[] }>
+    const call = async (role: string, fn: (e: FakeEvent) => Promise<unknown>) => {
+      const e = ev(`/api/v1/platform/plans/${PLAN}none`, { method: 'POST' })
+      e._params = { code: `${PLAN}none` }
+      e._body = {}
+      e.context.platform = { ...base, role }
+      return { err: await thrown(() => fn(e)), status: e._status }
+    }
+    for (const role of ['support', 'viewer']) {
+      for (const fn of [post, patch, archive]) expect((await call(role, fn)).err?.data?.code, role).toBe('platform.forbidden')
+    }
+    // С правом ручка идёт дальше: пустое тело — 400 validation_failed, несуществующий тариф — 404
+    expect(await call('billing', post)).toEqual({ err: null, status: 400 })
+    expect(await call('admin', patch)).toEqual({ err: null, status: 404 })
+    expect(await call('owner', archive)).toEqual({ err: null, status: 404 })
+    const e = ev('/api/v1/platform/plans')
+    e.context.platform = { ...base, role: 'viewer' }
+    const res = await list(e)
+    expect(res.data.find(p => p.code === 'trial')?.companies).toBeGreaterThan(0)
+  })
+
+  it('создание: только колонки plans, в журнал plan.create; код уникален; неизвестная опция — отказ', async () => {
+    const r = await Plans.createPlan(actor, { code, name: 'Тест-тир', tier: 2, maxUsers: 50, maxStorageGb: 10, maxSmsPerMonth: null, priceUah: 900 })
+    expect(r.ok).toBe(true)
+    expect(await auditOf('plan.create', code)).toBe(1)
+    expect((await Plans.createPlan(actor, { code, name: 'Дубль' })).ok).toBe(false)
+    const bad = await Plans.createPlan(actor, { code: `${code}x`, name: 'Опції', addonsAllowed: ['no_such_addon'] })
+    expect(bad).toEqual({ ok: false, code: 'unknown_addon' })
+  })
+
+  it('правка тарифа с компаниями: без причины — отказ с их числом; сниженный лимит закрепляется, повышенный — применяется', async () => {
+    const a = await mkTenant('pa', code) // без своего переопределения
+    const b = await mkTenant('pb', code) // со своим переопределением users = 70
+    await admin`insert into tenant_limits (tenant_id, users) values (${b}, 70)`
+    invalidateLimits()
+
+    expect(await Plans.updatePlan(actor, code, { maxUsers: 20 })).toEqual({ ok: false, code: 'reason_required', companies: 2 })
+
+    const r = await Plans.updatePlan(actor, code, { maxUsers: 20, maxStorageGb: 40, reason: 'Перегляд сітки тарифів на жовтень' })
+    if (!r.ok) throw new Error(r.code)
+    expect(r).toMatchObject({ companies: 2, pinned: 1 })
+    expect(r.plan.maxUsers).toBe(20)
+    // A: прежние 50 закреплены переопределением, хранилище выросло сразу; B: своё переопределение не тронуто
+    expect((await effectiveLimits(a)).users).toBe(50)
+    expect((await effectiveLimits(a)).storageGb).toBe(40)
+    expect((await effectiveLimits(b)).users).toBe(70)
+    const [pinnedRow] = await admin`select users, storage_gb from tenant_limits where tenant_id = ${a}`
+    expect(pinnedRow).toEqual({ users: 50, storage_gb: null })
+    // Новая компания на тарифе получает новый лимит
+    const c = await mkTenant('pc', code)
+    expect((await effectiveLimits(c)).users).toBe(20)
+    // Журналы: правка тарифа с причиной, закрепление — отдельной записью по компании в обоих журналах
+    const [planAudit] = await admin`select before, after from platform_audit where action = 'plan.update' and entity_id = ${code} order by id desc limit 1`
+    expect(planAudit!.before).toMatchObject({ maxUsers: 50, maxStorageGb: 10 })
+    expect(planAudit!.after).toMatchObject({ maxUsers: 20, reason: 'Перегляд сітки тарифів на жовтень', companies: 2, pinned: 1 })
+    expect(await auditOf('tenant.limits', a)).toBe(1)
+    expect(await auditOf('tenant.limits', b)).toBe(0)
+    const [tenantAudit] = await admin`select after from audit_log where tenant_id = ${a} and action = 'tenant.limits'`
+    expect(tenantAudit!.after).toMatchObject({ pinned: { users: 50 }, plan: code, by: actor.email })
+  })
+
+  it('«без обмежень» нельзя сузить, пока на тарифе компании; без изменений — без записи в журнал', async () => {
+    const r = await Plans.updatePlan(actor, code, { maxSmsPerMonth: 100, reason: 'Обмежуємо SMS на тарифі' })
+    expect(r).toEqual({ ok: false, code: 'limit_unpinnable', companies: 3, fields: ['maxSmsPerMonth'] })
+    const before = await auditOf('plan.update', code)
+    expect((await Plans.updatePlan(actor, code, { maxUsers: 20 })).ok).toBe(true)
+    expect(await auditOf('plan.update', code)).toBe(before)
+  })
+
+  it('архив: причина при компаниях; архивный тариф не назначается новым; trial не архивируется; возврат', async () => {
+    const { changeTenantPlan } = await import('../../server/services/platformTenants')
+    expect(await Plans.setPlanArchived(actor, 'trial', true, 'Пробний більше не потрібен')).toEqual({ ok: false, code: 'default_locked' })
+    expect(await Plans.setPlanArchived(actor, code, true)).toEqual({ ok: false, code: 'reason_required', companies: 3 })
+    const r = await Plans.setPlanArchived(actor, code, true, 'Тир виведено з продажу')
+    expect(r).toMatchObject({ ok: true, companies: 3 })
+    expect(await auditOf('plan.archive', code)).toBe(1)
+    expect((await Plans.setPlanArchived(actor, code, true, 'Тир виведено з продажу')).ok).toBe(false) // уже в архиве
+    // Компании остаются на тарифе; новым он не назначается ни созданием, ни сменой
+    const [still] = await admin`select count(*)::int as n from tenants where plan = ${code}`
+    expect(still!.n).toBe(3)
+    const created = await createTenant({ slug: `${MARK}${Date.now().toString(36)}arch`, name: 'Архівний', adminPhone: '+380501119977', adminName: 'Власник', plan: code }, actor)
+    expect(created).toEqual({ ok: false, code: 'plan_archived' })
+    const other = createdTenants[0]!
+    expect(await changeTenantPlan(other, { toPlanCode: code, billingPeriod: 'month', comment: 'Переводимо на архівний' }, actor)).toEqual({ ok: false, code: 'plan_archived' })
+    expect((await Plans.setPlanArchived(actor, code, false, 'Повертаємо тир у продаж')).ok).toBe(true)
+    expect(await auditOf('plan.restore', code)).toBe(1)
   })
 })

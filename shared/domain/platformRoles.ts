@@ -11,7 +11,7 @@ import { PLATFORM_ROLES, type PlatformRole } from '../enums'
  * | --- | --- |
  * | `owner` | всё, в том числе операторы (приглашение, роль, деактивация, сброс 2FA оператора) и окончательное удаление (`purge`) |
  * | `admin` | все действия с компаниями, кроме `purge` и операторов |
- * | `billing` | чтение + тариф, лимиты, платежи, продление, смена тарифа |
+ * | `billing` | чтение + тариф, лимиты, платежи, продление, смена тарифа, каталог тарифов |
  * | `support` | чтение компаний и пользователей (без денег), вход «від імені», сброс 2FA пользователю компании |
  * | `viewer` | только чтение, включая тариф и платежи |
  */
@@ -35,6 +35,7 @@ export const PLATFORM_ACTIONS = [
   'billing.payments',
   'billing.plan_change',
   'billing.extend',
+  'billing.plans', // каталог тарифов: создать, править, архивировать (docs/24 §4.4.2)
   // Платформа
   'announcements.manage',
   'operators.manage', // пригласить, сменить роль, деактивировать
@@ -43,7 +44,7 @@ export const PLATFORM_ACTIONS = [
 export type PlatformAction = typeof PLATFORM_ACTIONS[number]
 
 const READ: PlatformAction[] = ['platform.read', 'tenant.read', 'tenant.users.read', 'operators.read']
-const BILLING: PlatformAction[] = ['billing.read', 'billing.limits', 'billing.payments', 'billing.plan_change', 'billing.extend']
+const BILLING: PlatformAction[] = ['billing.read', 'billing.limits', 'billing.payments', 'billing.plan_change', 'billing.extend', 'billing.plans']
 const OWNER_ONLY: PlatformAction[] = ['tenant.purge', 'operators.manage', 'operators.two_factor_reset']
 
 export const PLATFORM_MATRIX: Record<PlatformRole, ReadonlySet<PlatformAction>> = {

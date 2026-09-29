@@ -412,12 +412,14 @@ export async function changeTenantPlan(
   tenantId: string,
   input: { toPlanCode: string, billingPeriod: 'month' | 'year', comment: string },
   actor: PlatformAuth,
-): Promise<{ ok: true, id: string } | { ok: false, code: 'not_found' | 'plan_unknown' }> {
+): Promise<{ ok: true, id: string } | { ok: false, code: 'not_found' | 'plan_unknown' | 'plan_archived' }> {
   const db = platformDb()
   const t = await loadTenant(tenantId)
   if (!t) return { ok: false, code: 'not_found' }
   const [plan] = await db.select().from(plans).where(eq(plans.code, input.toPlanCode))
   if (!plan) return { ok: false, code: 'plan_unknown' }
+  // Архивный тариф больше никому не назначается; компании, уже сидящие на нём, остаются (docs/v2/44 В-21)
+  if (!plan.isActive) return { ok: false, code: 'plan_archived' }
   const fromPlanCode = t.plan
   await db.update(tenants).set({ plan: input.toPlanCode }).where(eq(tenants.id, tenantId))
   await db.update(tenantLimits).set({ billingPeriod: input.billingPeriod, updatedBy: actor.adminId, updatedAt: new Date() }).where(eq(tenantLimits.tenantId, tenantId))

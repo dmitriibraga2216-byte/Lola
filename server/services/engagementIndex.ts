@@ -109,6 +109,12 @@ async function collectInputs(tx: TenantTx, ids: readonly string[], win: CalcWind
     ;(out.get(r.user_id)!.enrollments as IndexEnrollment[]).push(e)
   }
 
+  await activityInputs(tx, ids, win, out)
+  return out
+}
+
+/** `S` и `H` из суточного агрегата ленты за окно — общие для ежедневного расчёта и ретро-расчёта. */
+async function activityInputs(tx: TenantTx, ids: readonly string[], win: CalcWindow, out: Map<string, IndexInput>): Promise<void> {
   // S — самая длинная серия локальных дней с `level > 0` («острова» подряд идущих дат)
   const streaks = await tx.execute(sql`
     select user_id::text as user_id, max(len)::int as longest from (
@@ -131,7 +137,6 @@ async function collectInputs(tx: TenantTx, ids: readonly string[], win: CalcWind
      group by user_id`) as unknown as { user_id: string, reviews: number, issues: number }[]
   for (const h of help) out.get(h.user_id)!.help = { reviews: Number(h.reviews) || 0, issues: Number(h.issues) || 0 }
 
-  return out
 }
 
 /**
@@ -297,6 +302,7 @@ export async function recalcEngagementFor(ctx: Ctx, userIds: string[]): Promise<
 }
 
 export interface EngagementReportRow {
+  userId: string
   fullName: string
   location: string | null
   basePct: number
@@ -304,38 +310,194 @@ export interface EngagementReportRow {
   bonusStreak: number
   bonusHelp: number
   totalPct: number
+  calcDate: string
+}
+
+/** Первая строка любого файла отчёта (`38` §9 п. 5, §7.3). */
+export const ENGAGEMENT_REPORT_DISCLAIMER = 'Показник довідковий, не призначений для кадрових рішень'
+
+export interface EngagementReportFilter {
+  /** Область смотрящего: `null` — весь тенант, массив — точки (`areaForScope`). */
+  scope: string[] | null
+  locationId?: string
+  q?: string
 }
 
 /**
- * «Індекс залученості» (`38` §9 п. 5, PR-38, П-22, `⟵` PR-35). Рядок — поточний снімок людини
- * (`person_rating_snapshots.is_current`); людина відбирається тим самим каркасом (`frameWhere`,
- * тільки співробітники, без архівованих). «Показник довідковий, не призначений для кадрових
- * рішень» (`38` §7.3) — і сам звіт, і його реєстрація в конструкторі мають нести це попередження
- * рядком, а не одним разом на екрані.
- *
- * **«Виgrужується тільки з явною галкою» (`38` §9 п. 5)** — у загальному конструкторі
- * (`server/services/reportBuilder.ts`) чекбокса на рівні поля немає, тому підтвердження — це
- * `confirmed`: без нього функція навмисно повертає `[]`, а не дані. Викликати без підтвердження
- * і чекати даних — помилка викликаючого коду, не цього сервісу.
+ * «Індекс залученості» (`38` §9 п. 5): ПІБ · Точка · Основа · Достроковість · Регулярність · Внесок ·
+ * Разом — текущий снимок человека. Каркас людей — `frameWhere()` (только сотрудники, без уволенных,
+ * область — по **текущей** точке). Скрытые (`is_hidden`) не входят — индекс скрытого не попадает в
+ * сравнения (§7.2). `[решение]` Р-38.6: порядок — по ПІБ, а не по индексу, и колонки «місце» нет:
+ * отсортированный по цифре список людей и есть «ранжированный список, топ и антитоп», запрещённый
+ * §7.3 обеим сторонам таблицы; сортировать файл по «Разом» человек может сам, но продукт ранжирования
+ * не предлагает. Показ и выгрузка — отдельные права (`GET /reports/rating`, конструктор).
  */
-export async function engagementIndexReport(ctx: Ctx, confirmed: boolean): Promise<EngagementReportRow[]> {
-  if (!confirmed) return []
+export async function engagementIndexRows(ctx: Ctx, f: EngagementReportFilter): Promise<EngagementReportRow[]> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.execute(sql`
-      select u.full_name, l.name as location,
+      select u.id::text as user_id, u.full_name, l.name as location, prs.calc_date::text as calc_date,
              prs.base_pct::float as base_pct, prs.bonus_early::float as bonus_early,
              prs.bonus_streak::float as bonus_streak, prs.bonus_help::float as bonus_help,
              prs.total_pct::float as total_pct
         from person_rating_snapshots prs
         join users u on u.id = prs.user_id
         ${frameJoins()}
-       where prs.is_current ${frameWhere({ kind: 'employee' })}
-       order by prs.total_pct desc`) as unknown as {
-      full_name: string, location: string | null, base_pct: number, bonus_early: number, bonus_streak: number, bonus_help: number, total_pct: number
+       where prs.is_current and not u.is_hidden
+         ${frameWhere({ kind: 'employee', scope: f.scope, q: f.q })}
+         ${f.locationId ? sql`and pl.location_id = ${f.locationId}::uuid` : sql``}
+       order by u.full_name, u.id`) as unknown as {
+      user_id: string, full_name: string, location: string | null, calc_date: string, base_pct: number, bonus_early: number,
+      bonus_streak: number, bonus_help: number, total_pct: number
     }[]
     return rows.map(r => ({
-      fullName: r.full_name, location: r.location, basePct: r.base_pct, bonusEarly: r.bonus_early,
-      bonusStreak: r.bonus_streak, bonusHelp: r.bonus_help, totalPct: r.total_pct,
+      userId: r.user_id, fullName: r.full_name, location: r.location, basePct: r.base_pct, bonusEarly: r.bonus_early,
+      bonusStreak: r.bonus_streak, bonusHelp: r.bonus_help, totalPct: r.total_pct, calcDate: r.calc_date,
     }))
   })
+}
+
+/**
+ * Для конструктора выгрузок (`reportBuilder.ts`, П-22): «вигружується тільки з явною галкою»
+ * (`38` §9 п. 5) — без `confirmed` намеренно пусто, а не данные.
+ */
+export async function engagementIndexReport(ctx: Ctx, confirmed: boolean, scope: string[] | null = null): Promise<EngagementReportRow[]> {
+  if (!confirmed) return []
+  return engagementIndexRows(ctx, { scope })
+}
+
+/** Плоские строки файла: первая — предупреждение §7.3, дальше — колонки §9 п. 5. */
+export function engagementExportRows(rows: EngagementReportRow[]): Record<string, unknown>[] {
+  const disclaimer = { full_name: ENGAGEMENT_REPORT_DISCLAIMER, location: '', base_pct: '', bonus_early: '', bonus_streak: '', bonus_help: '', total_pct: '' }
+  return [disclaimer, ...rows.map(r => ({
+    full_name: r.fullName, location: r.location ?? '', base_pct: r.basePct, bonus_early: r.bonusEarly,
+    bonus_streak: r.bonusStreak, bonus_help: r.bonusHelp, total_pct: r.totalPct,
+  }))]
+}
+
+// ── Ретро-расчёт (`38` §5.3 «динамика за 12 месяцев», §7.2) ─────────────────────────────────
+
+/** На сколько прошлых месяцев восстанавливается динамика — столько показывает экран расшифровки. */
+export const ENGAGEMENT_BACKFILL_MONTHS = 12
+
+export interface BackfillStats { months: number, people: number, written: number, skipped: number }
+
+/** Окно на прошедшую дату `calcDate` (последний день месяца в календаре тенанта) и конец этого дня как момент. */
+async function calcWindowAt(tx: TenantTx, tenantId: string, calcDate: string): Promise<CalcWindow & { toTs: string }> {
+  const [w] = await tx.execute(sql`
+    select (d - ${ENGAGEMENT_WINDOW_DAYS - 1}::int)::text as window_from,
+           to_char(((d - ${ENGAGEMENT_WINDOW_DAYS - 1}::int)::timestamp at time zone tz) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as from_ts,
+           to_char(((d + 1)::timestamp at time zone tz) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as to_ts
+    from (select ${calcDate}::date as d, coalesce(t.timezone, 'Europe/Kyiv') as tz from tenants t where t.id = ${tenantId}::uuid) x`) as unknown as { window_from: string, from_ts: string, to_ts: string }[]
+  if (!w) throw new Error(`engagement: тенант ${tenantId} не найден`)
+  return { calcDate, from: w.window_from, fromTs: w.from_ts, toTs: w.to_ts }
+}
+
+/**
+ * Входы формулы «как было» на конец прошедшего дня. Записи на курс восстанавливаются по датам:
+ * заведена и открыта к этому дню, срок или завершение в окне, либо не завершена к этому дню.
+ * `[решение]` Р-38.7: исторического процента прохождения нет — у записи, завершённой позже даты
+ * расчёта, `cᵢ` берётся как у ещё не начатой (0), а статус — «в процессе», если она уже была
+ * начата; снятые записи не входят, как и в ежедневном расчёте (момент снятия в статусе не
+ * сохраняется). Серия и помощь — из суточного агрегата ленты: он бессрочный, но начинается с
+ * выкатки PR-34, поэтому ранние месяцы честно получают `S` и `H` по нулям.
+ */
+async function collectInputsAt(tx: TenantTx, ids: readonly string[], win: CalcWindow & { toTs: string }): Promise<Map<string, IndexInput>> {
+  const out = new Map<string, IndexInput>(ids.map(id => [id, { enrollments: [], longestStreak: 0, help: { reviews: 0, issues: 0 } }]))
+  if (!ids.length) return out
+  const rows = await tx.execute(sql`
+    select e.id::text as enrollment_id, e.user_id::text as user_id, e.subject_id::text as subject_id,
+           c.title, coalesce(a.is_mandatory, false) as mandatory, e.status, e.started_at,
+           greatest(e.created_at, coalesce(e.starts_at, e.created_at)) as assigned_at, e.due_at, e.completed_at,
+           ls.capabilities
+      from enrollments e
+      join courses c on c.id = e.subject_id
+      left join lifecycle_stages ls on ls.id = c.lifecycle_stage_id
+      left join assignments a on a.id = e.assignment_id
+     where e.user_id in ${ids}
+       and e.cancelled_at is null
+       and e.status in ('not_started', 'in_progress', 'done', 'failed')
+       and e.created_at < ${win.toTs}::timestamptz
+       and (e.starts_at is null or e.starts_at < ${win.toTs}::timestamptz)
+       and (   (e.due_at >= ${win.fromTs}::timestamptz and e.due_at < ${win.toTs}::timestamptz)
+            or (e.completed_at >= ${win.fromTs}::timestamptz and e.completed_at < ${win.toTs}::timestamptz)
+            or e.completed_at is null or e.completed_at >= ${win.toTs}::timestamptz)
+     order by e.created_at, e.id`) as unknown as {
+    enrollment_id: string, user_id: string, subject_id: string, title: string, mandatory: boolean, status: string,
+    started_at: Date | string | null, assigned_at: Date | string, due_at: Date | string | null, completed_at: Date | string | null,
+    capabilities: StageCapabilityMap | null
+  }[]
+  const end = Date.parse(win.toTs)
+  for (const r of rows) {
+    if (!stageCan(r.capabilities ? { capabilities: r.capabilities } : null, 'counts_in_rating')) continue
+    const doneThen = r.completed_at !== null && new Date(r.completed_at).getTime() < end
+    const startedThen = r.started_at !== null && new Date(r.started_at).getTime() < end
+    const e: IndexEnrollment = {
+      enrollmentId: r.enrollment_id,
+      subjectId: r.subject_id,
+      title: r.title,
+      mandatory: r.mandatory,
+      status: doneThen ? r.status : startedThen ? 'in_progress' : 'not_started',
+      progressPct: doneThen ? 100 : 0,
+      assignedAt: iso(r.assigned_at)!,
+      dueAt: iso(r.due_at),
+      completedAt: doneThen ? iso(r.completed_at) : null,
+    }
+    ;(out.get(r.user_id)!.enrollments as IndexEnrollment[]).push(e)
+  }
+  await activityInputs(tx, ids, win, out)
+  return out
+}
+
+/**
+ * Ретро-расчёт индекса (§7.2, «динамика за 12 месяцев» §5.3): снимок на последний день каждого из
+ * 12 прошедших месяцев — тем же `computeEngagementIndex()`, по данным «как было» (Р-38.7). Пишется
+ * **только** туда, где в этом месяце у человека нет ни одного снимка: настоящий ночной снимок
+ * главнее восстановленного, повторный запуск ничего не меняет. `is_current` и `users.rating_pct`
+ * не трогаются — текущая цифра остаётся за `rating.recalc`. Отметка `breakdown.retro = true` —
+ * экран и выгрузка ПД видят, что число восстановлено. Сотрудники, кроме уволенных, партиями по 500.
+ */
+export async function backfillTenantEngagement(tenantId: string, months = ENGAGEMENT_BACKFILL_MONTHS): Promise<BackfillStats> {
+  const stats: BackfillStats = { months: 0, people: 0, written: 0, skipped: 0 }
+  const dates = await withTenant(tenantId, null, async tx => (await tx.execute(sql`
+    select (date_trunc('month', (now() at time zone coalesce(t.timezone, 'Europe/Kyiv'))::date) - make_interval(months => g - 1) - interval '1 day')::date::text as d
+      from tenants t, generate_series(1, ${months}::int) g where t.id = ${tenantId}::uuid order by d`) as unknown as { d: string }[]).map(r => r.d))
+  stats.months = dates.length
+  for (const calcDate of dates) {
+    let after = '00000000-0000-0000-0000-000000000000'
+    for (;;) {
+      const n = await withTenant(tenantId, null, async (tx) => {
+        const batch = await employees(tx, { id: users.id }, ne(users.status, 'archived'), gt(users.id, after))
+          .orderBy(users.id).limit(ENGAGEMENT_BATCH_SIZE)
+        if (!batch.length) return 0
+        after = batch[batch.length - 1]!.id
+        const month = calcDate.slice(0, 7)
+        const have = new Set((await tx.execute(sql`
+          select distinct user_id::text as user_id from person_rating_snapshots
+           where user_id in ${batch.map(b => b.id)} and to_char(calc_date, 'YYYY-MM') = ${month}`) as unknown as { user_id: string }[]).map(r => r.user_id))
+        const ids = batch.map(b => b.id).filter(id => !have.has(id))
+        stats.skipped += batch.length - ids.length
+        const win = await calcWindowAt(tx, tenantId, calcDate)
+        const inputs = await collectInputsAt(tx, ids, win)
+        for (const id of ids) {
+          stats.people++
+          const r = computeEngagementIndex(inputs.get(id)!)
+          if (!r) continue
+          await tx.execute(sql`
+            insert into person_rating_snapshots (tenant_id, user_id, calc_date, base_pct, bonus_early, bonus_streak, bonus_help, total_pct, breakdown, window_from, window_to, is_current)
+            values (${tenantId}::uuid, ${id}::uuid, ${calcDate}::date, ${r.base}, ${r.early}, ${r.streak}, ${r.help}, ${r.total},
+                    ${JSON.stringify({ ...r.breakdown, retro: true })}::jsonb, ${win.from}::date, ${calcDate}::date, false)
+            on conflict (tenant_id, user_id, calc_date) do nothing`)
+          stats.written++
+        }
+        return batch.length
+      })
+      if (n < ENGAGEMENT_BATCH_SIZE) break
+    }
+  }
+  return stats
+}
+
+/** След выгрузки отчёта и запуска ретро-расчёта в `audit_log` (CLAUDE.md п. 14: `request_context` — там же). */
+export async function auditEngagement(ctx: { tenantId: string, actorId: string }, action: 'report.rating.export' | 'person_rating.backfill', after: Record<string, unknown>): Promise<void> {
+  await withTenant(ctx.tenantId, ctx.actorId, tx => recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action, entity: 'person_rating_snapshots', entityId: null, after }))
 }

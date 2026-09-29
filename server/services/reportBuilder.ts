@@ -22,7 +22,7 @@ import type { TimePlanFactQuery } from '../../shared/schemas/timeNorms'
 import { stageSpeedReport } from './lifecycleState'
 import { offboardingReasonsReport } from './offboarding'
 import { learningActivityReport } from './activity'
-import { engagementIndexReport } from './engagementIndex'
+import { engagementExportRows, engagementIndexReport } from './engagementIndex'
 import { reportFilterSchema } from '../../shared/schemas/reports'
 import type { ReportFilter } from '../../shared/schemas/reports'
 
@@ -375,15 +375,11 @@ export const FIXED_REPORTS: Record<string, FixedReportDef> = {
   'engagement-index': {
     fields: ['full_name', 'location', 'base_pct', 'bonus_early', 'bonus_streak', 'bonus_help', 'total_pct'],
     filters: ['confirmed'],
-    run: async (ctx, filters) => {
+    run: async (ctx, filters, scope) => {
       const confirmed = filters.confirmed === true || filters.confirmed === 'true'
-      const rows = await engagementIndexReport(ctx, confirmed)
       if (!confirmed) return []
-      const disclaimer = { full_name: 'Показник довідковий, не призначений для кадрових рішень', location: '', base_pct: '', bonus_early: '', bonus_streak: '', bonus_help: '', total_pct: '' }
-      return [disclaimer, ...rows.map(r => ({
-        full_name: r.fullName, location: r.location, base_pct: r.basePct, bonus_early: r.bonusEarly,
-        bonus_streak: r.bonusStreak, bonus_help: r.bonusHelp, total_pct: r.totalPct,
-      }))]
+      // Область конструктора — та же, что у остальных отчётов; строки и предупреждение — как у `GET /reports/rating`
+      return engagementExportRows(await engagementIndexReport(ctx, confirmed, scope))
     },
   },
 }

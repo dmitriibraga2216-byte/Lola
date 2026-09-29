@@ -171,7 +171,8 @@
       "interviews": "Interview scenarios",
       "aiSettings": "Artificial intelligence",
       "contentIssueReports": "Content issues: reports",
-      "aiReports": "AI reports"
+      "aiReports": "AI reports",
+      "ratingReport": "Engagement index"
     },
     "section": {
       "learning": "Learning",
@@ -8270,5 +8271,36 @@
       "latency": "Avg latency, ms",
       "errors": "Errors"
     }
+  },
+  "ratingReport": {
+    "title": "Engagement index",
+    "hint": "Current index of people in your area: base and three bonuses. The list is sorted by name — there are no ranks here.",
+    "disclaimer": "For reference only, not intended for HR decisions.",
+    "search": "Search",
+    "searchPlaceholder": "Name",
+    "apply": "Show",
+    "confirm": "I understand: the index is for reference only and not intended for HR decisions",
+    "confirmFirst": "Tick the box to export the file.",
+    "exportXlsx": "Export xlsx",
+    "exportCsv": "Export csv",
+    "loadError": "Could not load the report.",
+    "retry": "Try again",
+    "loading": "Loading…",
+    "empty": "No people with a calculated index in your area. The index is calculated nightly — check tomorrow or open a person's card and press “Recalculate”.",
+    "calcDate": "Calculated {date}",
+    "col": {
+      "person": "Name",
+      "location": "Location",
+      "base": "Base",
+      "early": "Early completion",
+      "streak": "Regularity",
+      "help": "Contribution",
+      "total": "Total"
+    },
+    "backfillTitle": "12-month history",
+    "backfillHint": "Restore monthly index values for the past year from existing data. Months already calculated are not changed; regularity and contribution before the activity feed launched will be zero.",
+    "backfill": "Restore history",
+    "backfillQueued": "The calculation is queued — the history will appear in cards within a few minutes.",
+    "backfillError": "Could not start the calculation. Try again or contact support."
   }
 }

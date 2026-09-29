@@ -229,3 +229,15 @@ export const conflictListQuerySchema = z.object({
   userId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
 })
+
+/**
+ * `GET /reports/rating` — «Індекс залученості» (docs/v2/38 §9 п. 5). Файл (`format` ≠ `json`)
+ * отдаётся только с `confirm=1` — «явна галка» §9 п. 5 с подтверждением §7.3.
+ */
+export const engagementReportQuerySchema = z.object({
+  locationId: z.string().uuid().optional(),
+  q: z.string().trim().max(100).optional(),
+  format: z.enum(['json', 'xlsx', 'csv']).default('json'),
+  confirm: z.enum(['0', '1']).optional(),
+})
+export type EngagementReportQuery = z.infer<typeof engagementReportQuerySchema>

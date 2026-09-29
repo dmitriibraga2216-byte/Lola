@@ -79,6 +79,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('activity.aggregate', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/38 §11 (PR-35): індекс залученості — полный пересчёт раз в сутки, партиями по 500
       await b.createQueue('rating.recalc', { retryLimit: 2, expireInSeconds: 1800 })
+      // docs/v2/38 §7.2 (person-card-tails): ретро-расчёт динамики за 12 месяцев — по запуску администратора
+      await b.createQueue('rating.backfill', { retryLimit: 1, expireInSeconds: 3600 })
       // docs/v2/34 §11 (PR-36): корзина хранилища и отложенные загрузки
       await b.createQueue('storage.purge', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('storage.pending_upload_retry', { retryLimit: 2, expireInSeconds: 600 })
@@ -226,6 +228,12 @@ export async function enqueueCertificatePdf(tenantId: string, certificateId: str
 export async function enqueueExpand(tenantId: string, assignmentId: string): Promise<void> {
   const b = await getBoss()
   await b.send('assignment.expand', { tenantId, assignmentId }, { singletonKey: `expand:${assignmentId}` })
+}
+
+/** Ретро-расчёт индекса тенанта (docs/v2/38 §7.2): один запуск на тенант за раз. */
+export async function enqueueRatingBackfill(tenantId: string): Promise<void> {
+  const b = await getBoss()
+  await b.send('rating.backfill', { tenantId }, { singletonKey: `rating.backfill:${tenantId}` })
 }
 
 export async function enqueueReportExport(tenantId: string, exportId: string) {

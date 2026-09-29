@@ -494,6 +494,10 @@
 | POST | `/platform/invite/accept` | без сессии: `{token, password ≥12}` — пароль по приглашению, ссылка гаснет |
 | GET | `/platform/companies` | `?q=&plan=&status=&flag=payment_overdue\|limit_near\|suspended&cursor=&limit=` — список компаний консоли, ключевой курсор `created_at desc, id desc`, у строки `flags[]`; «прострочена оплата» — только с `billing.read` |
 | GET | `/platform/tenants/:id/overview` | обзор карточки: статус, тариф, метки, подписка (только с `billing.read`), потребление по осям (`usageByAxis`), 10 последних действий операторов |
+| GET | `/platform/plans` | сетка тарифов (`platform.read`): все колонки `plans` и `companies` — сколько компаний на тарифе (`24` §4.4.2) |
+| POST | `/platform/plans` | `{code, name, titleUk?, tier 0–9?, max* (8 осей, null — без обмежень)?, aiIncluded?, aiTermDays?, addonsAllowed?, priceUah?, sort?, validFrom?, validTo?}` (`billing.plans`) — только колонки `plans`; `409 plan.code_taken`, `422 plan.unknown_addon`; в `platform_audit` `plan.create`. ops-plans-crud |
+| PATCH | `/platform/plans/:code` | те же поля без `code` + `reason 10–500` (`billing.plans`). Есть компании на тарифе — без причины `422 plan.reason_required` (`details.companies`); сниженный лимит им закрепляется прежним значением в `tenant_limits` (у кого своего переопределения нет), повышенный применяется сразу (`v2/44` В-21); сузить «без обмежень» при компаниях — `409 plan.limit_unpinnable` (`details.fields`). Ответ `{plan, companies, pinned}`; `plan.update` и по каждой закреплённой компании `tenant.limits` — в `platform_audit`, у компании ещё и в `audit_log` |
+| POST | `/platform/plans/:code/archive` \| `/restore` | `{reason?}` (`billing.plans`) — удаления нет, только архив (`is_active`): компании остаются на тарифе, новым он не назначается (`422 plan_archived` у создания компании и смены тарифа); причина обязательна при компаниях; `trial` в архив не уходит — `409 plan.default_locked`; повтор — `409 plan.wrong_state`; `plan.archive` / `plan.restore` в `platform_audit` |
 
 **Права (ops-console-1, `25` §7 п. 7).** Каждая ручка раздела, кроме входа, выхода, `me`,
 `two-factor/*` и `invite/*`, проверяет право роли оператора `requirePlatform(event, action)`
@@ -662,12 +666,14 @@
 - `35`: `GET /billing/plans`, `POST /billing/plan-change/preflight`, `POST /billing/plan-change`,
   `DELETE /billing/plan-change/:id`, `GET`/`POST /billing/addons`, `GET`/`PUT /platform/plans/:id` —
   «2026-09-24 · Фаза 3, PR-10 — оплата, смена тарифа, экраны (П-24.4)» → «Что не входит
-  (решение, не недосмотр)».
+  (решение, не недосмотр)». [ops-plans-crud] `GET`/`PUT /platform/plans/:id` закрыты как
+  `GET /platform/plans` + `PATCH /platform/plans/:code` (§4.17).
   > [дополнено 29.09.2026, `billing-35-k5-k7`] Четыре из этих строк реализованы по `v2/35` §13 к. 7:
   > `GET /billing/plans`, `POST /billing/plan-change/preflight`, `POST /billing/plan-change`,
   > `DELETE /billing/plan-change/:id` — раздел «Тариф и оплата» ниже. Таблица выше — снимок PR-40 и
-  > не пересчитывается; не реализованными в `35` остаются `GET`/`POST /billing/addons` и
-  > `GET`/`PUT /platform/plans/:id` (ждут платёжного провайдера и каталога тарифов).
+  > не пересчитывается; не реализованным в `35` остаётся `GET`/`POST /billing/addons` (ждёт
+  > платёжного провайдера); `GET`/`PUT /platform/plans/:id` закрыт отдельно в `ops-plans-crud` —
+  > см. пометку выше.
 - `37`: `GET /reports/delegations` — «2026-09-25 · Фаза 3, PR-38 — двенадцать (де-факто
   пятнадцать) отчётов пакета…» → «Що не входить» (журнал делегирований — не отчёт конструктора).
 - `38`: `GET /reports/documents` — «2026-09-25 · Фаза 3, PR-32 — заметки и документы человека» →
@@ -1092,7 +1098,7 @@ HR и администратор — весь тенант). Кандидат и
 > `GET`/`PUT /platform/tenants/:id/limits` (§4.17) с PR-08 несёт одиннадцать полей — прежние
 > шесть плюс `candidates`, `aiGenerateOps`, `aiReviewOps`, `aiInterviewOps`, `exportRows`;
 > причины, которой требует `41` §2.8, контракт не просит. Докупки опций владельцем
-> (`/billing/addons`) и каталога тарифов `/platform/plans/:id` нет — см. «Сводка по факту (PR-40)».
+> (`/billing/addons`) нет — см. «Сводка по факту (PR-40)».
 >
 > [дополнено 29.09.2026, `billing-35-k5-k7`, `v2/35` §13 к. 5 и к. 7] Смена тарифа **вниз** — самообслуживание
 > владельца (`billing.manage`): каталог, предпросмотр превышений и заявка с первого дня следующего
@@ -1100,6 +1106,10 @@ HR и администратор — весь тенант). Кандидат и
 > провайдера нет, даты оплаты ведёт оператор (`v2/44` В-21). Подписка в `readonly` (задача
 > `billing.grace_scan`) отвечает на изменяющие запросы тенанта `409 tenant.readonly`, кроме входа,
 > прохождения назначенного, ручной проверки, выгрузок и `/billing/*` (`v2/35` §7.8 п. 4).
+>
+> [дополнено, ops-plans-crud] Каталог тарифов оператора — `POST /platform/plans`,
+> `PATCH /platform/plans/:code`, `POST /platform/plans/:code/archive|restore` (§4.17): вместо
+> `GET/PUT /platform/plans/:id` пакета — PK тарифа `code`, колонки `id` нет (`v2/44` В-5).
 
 | Метод | Путь | Описание |
 | --- | --- | --- |

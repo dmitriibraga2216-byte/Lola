@@ -41,6 +41,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('shop.reserve_expire', { retryLimit: 2, expireInSeconds: 600 })
       // docs/v2/36 §11 (PR-24): карточки неактивных ответственных — следующему по маршрутизации
       await b.createQueue('content_issue.reassign_scan', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/v2/36 §7.6, §11: просрочка жалобы 1/3/7 дней — ответственный → руководитель → админ
+      await b.createQueue('content_issue.sla_scan', { retryLimit: 2, expireInSeconds: 600 })
       // docs/v2/37 §11: учёт времени биениями (PR-21) — закрытие зависших сегментов и свёртка
       await b.createQueue('time.close_stale_sessions', { retryLimit: 2, expireInSeconds: 300 })
       await b.createQueue('time.rollup', { retryLimit: 2, expireInSeconds: 900 })
@@ -135,6 +137,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('shop.reserve_expire', '25 * * * *', {}, { singletonKey: 'shop.reserve_expire' })
       // Жалобы на материал (docs/v2/36 §11): уволенный ответственный не держит очередь — раз в сутки
       await b.schedule('content_issue.reassign_scan', '50 3 * * *', {}, { singletonKey: 'content_issue.reassign_scan', tz: 'Europe/Kyiv' })
+      // Просрочка жалобы (docs/v2/36 §11) — ежечасно; ступени отмечаются ключом уведомления, повтор не шлёт
+      await b.schedule('content_issue.sla_scan', '35 * * * *', {}, { singletonKey: 'content_issue.sla_scan' })
       // Учёт времени (docs/v2/37 §11): сегменты без биений > 120 с — `stale` каждые 5 минут;
       // свёртка каждые 10 минут по окну в 2 часа и раз в сутки — по окну в 48 часов, чтобы
       // догнать всё, что частые прогоны пропустили, пока задача не работала (Р-21.18)

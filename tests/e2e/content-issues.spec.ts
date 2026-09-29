@@ -9,6 +9,7 @@ import { ADMIN_PHONE, EMPLOYEE_PHONE, api, apiLogin, cleanupCourses, loginViaUi,
  * Здесь проверяется ровно то, чего не видит integration-тест: что кнопка есть на экране
  * прохождения, что форма — два тапа и ноль обязательных полей, что урок после отправки
  * не перезагружается, и что шестая жалоба за сутки блокируется **текстом**, а не молча.
+ * В конце — свои жалобы во вкладке профиля (§5.5) на 320 px.
  */
 
 const PREFIX = 'E2E-ISSUE '
@@ -78,4 +79,13 @@ test('Жалоба из урока: флажок у блока, два тапа,
   await form.getByRole('button', { name: 'Надіслати' }).click()
   // Молчания нет: человек видит, почему форма не ушла, и что делать дальше
   await expect(form.getByRole('alert')).toHaveText(/Ти вже надіслав 5 повідомлень сьогодні/)
+
+  // §5.5 «Мої повідомлення про помилки»: вкладка профиля, статус простыми словами, телефон 320 px
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.goto('/learn/profile')
+  await page.getByRole('link', { name: 'Мої повідомлення про помилки' }).click()
+  await expect(page.getByRole('heading', { name: 'Мої повідомлення про помилки' })).toBeVisible()
+  const mine = page.getByRole('listitem').filter({ hasText: 'Помилка в тексті' }).first()
+  await expect(mine).toContainText('Розглядається')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })

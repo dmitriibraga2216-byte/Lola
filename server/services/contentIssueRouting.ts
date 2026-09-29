@@ -131,7 +131,7 @@ async function firstActive(tx: TenantTx, ids: readonly string[], exclude: Readon
  * Наименее загруженный действующий носитель роли или скоупа: открытых карточек меньше всех,
  * при равенстве — стабильно по id. Истёкшая роль прав не даёт (docs/16 §6.2).
  */
-async function leastLoaded(tx: TenantTx, by: { roleId: string } | { scope: string }, exclude: ReadonlySet<string>): Promise<string | null> {
+export async function leastLoaded(tx: TenantTx, by: { roleId: string } | { scope: string }, exclude: ReadonlySet<string>): Promise<string | null> {
   const holds = 'roleId' in by
     ? sql`exists (select 1 from user_roles ur where ur.user_id = u.id and ur.role_id = ${by.roleId}::uuid
                     and (ur.valid_until is null or ur.valid_until > now()))`
@@ -206,7 +206,7 @@ export async function assignTx(
   tenantId: string,
   issueId: string,
   assigneeId: string,
-  meta: { actorId: string | null, from: string | null, step: RouteStep | 'manual', ruleId?: string | null },
+  meta: { actorId: string | null, from: string | null, step: RouteStep | 'manual', ruleId?: string | null, overdueDueAt?: string },
 ): Promise<void> {
   const now = new Date()
   await tx.update(contentIssues)
@@ -217,7 +217,11 @@ export async function assignTx(
     issueId,
     actorId: meta.actorId,
     kind: 'assigned',
-    payload: { from: meta.from, to: assigneeId, step: meta.step, rule_id: meta.ruleId ?? null },
+    payload: {
+      from: meta.from, to: assigneeId, step: meta.step, rule_id: meta.ruleId ?? null,
+      // Переназначение SLA-сканом (§7.6): срок, по которому оно сделано, — отметка «уже сделано»
+      ...(meta.overdueDueAt ? { reason: 'overdue', due_at: meta.overdueDueAt } : {}),
+    },
     requestContext: currentRequestContext(),
   })
 }

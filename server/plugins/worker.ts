@@ -342,6 +342,12 @@ export default defineNitroPlugin(async () => {
       const n = await reassignScan(tenantId)
       if (n) console.log(`[content_issue.reassign_scan] ${tenantId}: переназначено ${n}`)
     }))
+    // docs/v2/36 §7.6, §11 `content_issue.sla_scan`: просрочка 1/3/7 дней и переназначение
+    await work('content_issue.sla_scan', () => runPerTenant('content_issue.sla_scan', async (tenantId) => {
+      const { contentIssueSlaScan } = await import('../services/contentIssueSla')
+      const s = await contentIssueSlaScan(tenantId)
+      if (s.reminded || s.escalated || s.reassigned) console.log(`[content_issue.sla_scan] ${tenantId}:`, s)
+    }))
     // Очередь проверки (docs/v2/37 §11, PR-19). Каждая задача — круг по тенантам: падение
     // одного не трогает остальных, приостановленные пропускаются.
     await work('review.sla_scan', () => runPerTenant('review.sla_scan', async (tenantId) => {

@@ -194,6 +194,7 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
       </label>
       <NuxtLink to="/learn/development" class="row-link">{{ t('dev.short') }}</NuxtLink>
       <NuxtLink to="/learn/profile/study-history" class="row-link">{{ t('studyHistory.title') }}</NuxtLink>
+      <NuxtLink to="/learn/profile/content-reports" class="row-link">{{ t('issue.mine.title') }}</NuxtLink>
       <NuxtLink to="/learn/surveys" class="row-link">{{ t('survey.title') }}</NuxtLink>
       <button class="row-link" :aria-expanded="pwd.open" @click="pwd.open = !pwd.open; pwdError = ''; pwd.done = false">{{ meUser?.hasPassword ? t('profile.changePassword') : t('profile.setPassword') }}</button>
       <form v-if="pwd.open" class="pwd" @submit.prevent="changePassword">

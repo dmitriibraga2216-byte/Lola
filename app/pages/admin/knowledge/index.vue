@@ -6,23 +6,45 @@ interface A { id: string, title: string, status: string, tags: string[], version
 const items = ref<A[]>([])
 const title = ref('')
 const error = ref('')
+const busy = ref(false)
+const titleInput = ref<HTMLInputElement | null>(null)
+/** Мінімум назви — як у сервера (`POST /knowledge`: title 3–200). */
+const TITLE_MIN = 3
 async function load() { try { items.value = await api<A[]>('/knowledge') } catch (err) { error.value = apiErrorOf(err).message } }
 onMounted(load)
+/**
+ * Кнопка «Створити» раньше была молча неактивной, пока в названии меньше трёх символов, —
+ * на iPad казалось, что создание сломано (замечание 27.09). Теперь кнопка нажимается всегда,
+ * а короткое название объясняется под полем, фокус возвращается в него.
+ */
 async function create() {
-  if (title.value.trim().length < 3) return
+  if (busy.value) return
+  if (title.value.trim().length < TITLE_MIN) {
+    error.value = t('kb.titleTooShort', { n: TITLE_MIN })
+    titleInput.value?.focus()
+    return
+  }
+  busy.value = true
+  error.value = ''
   try {
     const a = await api<{ id: string }>('/knowledge', { method: 'POST', body: { title: title.value.trim(), body: [{ id: 'b1', type: 'text', html: '<p></p>' }] } })
     await navigateTo(`/admin/knowledge/${a.id}`)
-  } catch (err) { error.value = apiErrorOf(err).message }
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
 }
 </script>
 <template>
   <div>
     <header class="head">
       <h1>{{ t('admin.nav.knowledge') }}</h1>
-      <div class="new"><input v-model="title" :placeholder="t('kb.newTitle')" @keyup.enter="create"><button class="primary" :disabled="title.trim().length < 3" @click="create">{{ t('course.create') }}</button></div>
+      <form class="new" novalidate @submit.prevent="create">
+        <input ref="titleInput" v-model="title" :placeholder="t('kb.newTitle')" :aria-label="t('kb.newTitle')" maxlength="200" enterkeyhint="done" :aria-invalid="!!error" aria-describedby="kb-new-hint">
+        <button type="submit" class="primary" :disabled="busy">{{ t('course.create') }}</button>
+        <small id="kb-new-hint" class="sub hint">{{ t('kb.titleHint', { n: TITLE_MIN }) }}</small>
+      </form>
     </header>
-    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
     <ul class="list">
       <li v-for="a in items" :key="a.id"><NuxtLink :to="`/admin/knowledge/${a.id}`" class="row">
         <span class="title">{{ a.title }}</span><span class="sub">v{{ a.version }} · {{ a.viewCount }} {{ t('kb.views') }}</span>
@@ -35,8 +57,10 @@ async function create() {
 <style scoped>
 .head { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-4); }
 h1 { margin: 0; font-weight: 900; }
-.new { margin-left: auto; display: flex; gap: var(--space-2); }
-input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); background: var(--color-bg-soft); color: var(--color-ink); min-width: 240px; }
+.new { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); max-width: 100%; }
+.new .hint { flex-basis: 100%; }
+input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); background: var(--color-bg-soft); color: var(--color-ink); flex: 1 1 240px; min-width: 0; }
+input[aria-invalid="true"] { border-color: var(--color-coral); }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .primary:disabled { opacity: 0.5; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }

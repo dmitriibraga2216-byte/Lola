@@ -1637,6 +1637,8 @@
     "none": "No ratings yet"
   },
   "kb": {
+    "titleHint": "Title — at least {n} characters",
+    "titleTooShort": "Enter an article title of at least {n} characters, then press “Create”",
     "title": "Knowledge base",
     "short": "Guide",
     "searchHint": "e.g. fish temperature",

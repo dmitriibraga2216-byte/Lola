@@ -662,6 +662,11 @@
   `DELETE /billing/plan-change/:id`, `GET`/`POST /billing/addons`, `GET`/`PUT /platform/plans/:id` —
   «2026-09-24 · Фаза 3, PR-10 — оплата, смена тарифа, экраны (П-24.4)» → «Что не входит
   (решение, не недосмотр)».
+  > [дополнено 29.09.2026, `billing-35-k5-k7`] Четыре из этих строк реализованы по `v2/35` §13 к. 7:
+  > `GET /billing/plans`, `POST /billing/plan-change/preflight`, `POST /billing/plan-change`,
+  > `DELETE /billing/plan-change/:id` — раздел «Тариф и оплата» ниже. Таблица выше — снимок PR-40 и
+  > не пересчитывается; не реализованными в `35` остаются `GET`/`POST /billing/addons` и
+  > `GET`/`PUT /platform/plans/:id` (ждут платёжного провайдера и каталога тарифов).
 - `37`: `GET /reports/delegations` — «2026-09-25 · Фаза 3, PR-38 — двенадцать (де-факто
   пятнадцать) отчётов пакета…» → «Що не входить» (журнал делегирований — не отчёт конструктора).
 - `38`: `GET /reports/documents` — «2026-09-25 · Фаза 3, PR-32 — заметки и документы человека» →
@@ -1081,17 +1086,27 @@ HR и администратор — весь тенант). Кандидат и
 > `GET /billing/notices`, `POST /billing/notices/:id/dismiss`, PR-09) описаны в §4.16.
 > `GET`/`PUT /platform/tenants/:id/limits` (§4.17) с PR-08 несёт одиннадцать полей — прежние
 > шесть плюс `candidates`, `aiGenerateOps`, `aiReviewOps`, `aiInterviewOps`, `exportRows`;
-> причины, которой требует `41` §2.8, контракт не просит. Самообслуживания владельца
-> (`/billing/plans`, `/billing/plan-change*`, `/billing/addons`) и каталога тарифов
-> `/platform/plans/:id` нет — см. «Сводка по факту (PR-40)».
+> причины, которой требует `41` §2.8, контракт не просит. Докупки опций владельцем
+> (`/billing/addons`) и каталога тарифов `/platform/plans/:id` нет — см. «Сводка по факту (PR-40)».
+>
+> [дополнено 29.09.2026, `billing-35-k5-k7`, `v2/35` §13 к. 5 и к. 7] Смена тарифа **вниз** — самообслуживание
+> владельца (`billing.manage`): каталог, предпросмотр превышений и заявка с первого дня следующего
+> периода. Вверх — через оператора (`/platform/tenants/:id/plan-change` после платежа): платёжного
+> провайдера нет, даты оплаты ведёт оператор (`v2/44` В-21). Подписка в `readonly` (задача
+> `billing.grace_scan`) отвечает на изменяющие запросы тенанта `409 tenant.readonly`, кроме входа,
+> прохождения назначенного, ручной проверки, выгрузок и `/billing/*` (`v2/35` §7.8 п. 4).
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/billing/summary` | «Тариф і оплата» (`billing.view`): `{plan: {code, name, titleUk, tier}, priceMinor, currency, subscription, ai: {status, until, termDays, included}, addons}`; цена — только с `billing.payments.view` (владелец), иначе `priceMinor: null` |
+| GET | `/billing/summary` | «Тариф і оплата» (`billing.view`): `{plan: {code, name, titleUk, tier}, priceMinor, currency, subscription, ai: {status, until, termDays, included}, addons, scheduledChange}` (`scheduledChange` — назначенный переход вниз `{id, toPlanCode, planName, effectiveAt}` или `null`); цена — только с `billing.payments.view` (владелец), иначе `priceMinor: null` |
 | GET | `/billing/payments` | «Історія платежів» (`billing.payments.view` — только владелец, иначе `403`): `?from&to&kind=subscription\|addon\|adjustment&status&cursor&limit` (≤ 100, по умолчанию 30), ключевой курсор (§4.1) → `{items, nextCursor}`; неверный фильтр — `400 validation_failed` |
 | GET | `/platform/tenants/:id/payments` | история платежей тенанта в панели оператора: новые сверху, без пагинации |
 | POST | `/platform/tenants/:id/payments` | «Записати платіж»: `{kind: subscription\|addon\|adjustment, planCode?, addonCode?, qty?, billingPeriod?, amountMinor, currency?, method?, invoiceNumber?, status?, comment}`. `subscription` продлевает `paid_until` от прежней даты, а не от даты платежа (`35` §7.8 п. 6); `addon` создаёт доплату `tenant_addons` со ссылкой на платёж, в том числе `ai_ops_pack` — пакет ИИ-операций; `adjustment` — только запись. `422 validation_failed`, `422 addon_unknown`, `404` |
 | POST | `/platform/tenants/:id/plan-change` | прямая смена тарифа оператором, без preflight: `{toPlanCode, billingPeriod: month\|year, comment}` → `{id}` — строка `plan_change_requests` сразу `applied`; `422 plan_unknown`, `404` |
+| GET | `/billing/plans` | «Змінити тариф» (`billing.view`): `{currentPlanCode, billingPeriod, currency, nextPeriodStart, plans: [{code, name, titleUk, tier, direction: current\|up\|down, prices: {month, year} \| null, annualSavingPct, limits: {users, candidates, storageBytes, aiGenerateOps, aiReviewOps, aiInterviewOps}, blockers}], request}` — тарифы действующие на сегодня (`is_active`, `valid_from`/`valid_to`), по `tier`, затем `sort`; `blockers` — превышения при переходе вниз `[{axis, current, newLimit, excess}]`; цены — только с `billing.payments.view` |
+| POST | `/billing/plan-change/preflight` | предпросмотр и «Перерахувати» (`billing.manage`): `{planCode, billingPeriod}` → `{allowed, request: {id, status: preflight\|blocked, blockers, effectiveAt}}`; одна открытая заявка на тенант. `404` — тариф вне каталога, `422 plan_change.upgrade_manual` — тариф выше (через менеджера), `422 plan_change.same_plan` |
+| POST | `/billing/plan-change` | «Підключити» (`billing.manage`): `{planCode, billingPeriod, confirm: true}` → заявка `scheduled` с `effectiveAt` — первый день следующего оплаченного периода; применяет задача `billing.plan_change_apply`. `409 limit_exceeded` с `details.blockers`, `409 conflict` — переход уже назначен, `422 validation_failed` без `confirm` |
+| DELETE | `/billing/plan-change/:id` | отменить заявку (`billing.manage`); применённую или отменённую — `409 conflict`, чужую — `404` |
 | POST | `/platform/tenants/:id/extend` | «Продовжити доступ», «Продовжити ШІ»: `{paidUntil?, graceUntil?, aiUntil?, comment}` — меняются только переданные даты, `null` снимает дату; `422 validation_failed`, `404` |
 
 ### Курсы по умолчанию группы должностей (`docs/v2/39-patches.md` П-24.3, П-24.5, PR-39)

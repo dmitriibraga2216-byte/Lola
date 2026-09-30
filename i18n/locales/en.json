@@ -173,7 +173,8 @@
       "contentIssueReports": "Content issues: reports",
       "aiReports": "AI reports",
       "ratingReport": "Engagement index",
-      "libraryReports": "Library reports"
+      "libraryReports": "Library reports",
+      "library": "Module library"
     },
     "section": {
       "learning": "Learning",
@@ -4147,7 +4148,8 @@
       "detached": "Block detached: it is now a regular resource copy",
       "replace": "Replace with a library module ▸",
       "updated": "Block updated to v{v}",
-      "bodyLocked": "Module content is not edited on the canvas — only in the library."
+      "bodyLocked": "Module content is not edited on the canvas — only in the library.",
+      "openInLibrary": "Open in library"
     },
     "update": {
       "title": "Update “{title}” from v{from} to v{to}",
@@ -4164,6 +4166,106 @@
       "consequence": "The update will not change the progress of {n} people who have already started. They will stay on v{from}",
       "noOneStarted": "Nobody has started this block yet — everyone will get v{to}",
       "confirm": "Update"
+    },
+    "status": {
+      "draft": "Draft",
+      "published": "Published",
+      "archived": "Archived"
+    },
+    "list": {
+      "title": "Module library",
+      "create": "Create module",
+      "search": "Search",
+      "showArchived": "Show archived",
+      "any": "All",
+      "tag": "Tag",
+      "onlyUnused": "Unused only",
+      "onlyStale": "Has outdated links",
+      "loading": "Loading the library",
+      "noMatch": "No modules match these filters. Change the filters",
+      "total": "Modules: {n}",
+      "usage": "Usage",
+      "usedIn": "in {n} places",
+      "unused": "not used",
+      "stale": "outdated: {n}",
+      "notPublished": "not published",
+      "more": "Show more",
+      "pageSize": "Per page"
+    },
+    "card": {
+      "loadError": "Could not load the module. Please try again",
+      "createTitle": "New module",
+      "createDraft": "Create draft",
+      "publish": "Publish version",
+      "more": "More actions",
+      "duplicate": "Duplicate",
+      "archive": "Archive",
+      "restore": "Restore",
+      "delete": "Delete",
+      "unpublished": "Has unpublished changes",
+      "owner": "Owner: {name}",
+      "archivedNote": "The module is archived: {reason}. Places keep working on their versions; it is not in the palette",
+      "tab": {
+        "content": "Content",
+        "versions": "Versions ({n})",
+        "usages": "Where used ({n})"
+      },
+      "usedBanner": "This module is used in {n} places. Only those who update the link will see changes",
+      "changelogHint": "Describe the changes — track authors will see this (5 to 500 characters)",
+      "published": "Version v{v} published",
+      "reasonHint": "Give a reason — track authors will see it",
+      "archived": "Module archived",
+      "restored": "Module restored",
+      "publishTitle": "Publish version v{v}",
+      "changelog": "What changed",
+      "hotfixHint": "An error that makes the content misleading. Updates automatically where nobody has started yet",
+      "notify": "Notify track authors",
+      "archiveTitle": "Archive module",
+      "archiveText": "The module disappears from the insert palette. Tracks and courses that already use it keep their versions",
+      "reason": "Reason",
+      "inUseTitle": "The module is in use",
+      "inUseText": "This module is used in {n} places. It cannot be deleted — you can archive it",
+      "openUsages": "Open the usage list",
+      "deleteTitle": "Delete the module forever? This cannot be undone",
+      "deleteForever": "Delete forever"
+    },
+    "form": {
+      "title": "Title",
+      "kind": "Type",
+      "category": "Category",
+      "tags": "Tags",
+      "tagsHint": "comma-separated, up to 20",
+      "language": "Language",
+      "minutes": "Duration, min",
+      "summary": "Short description",
+      "authors": "Authors: {names}",
+      "body": "Content"
+    },
+    "versions": {
+      "empty": "No versions yet. Publish the first one — then the module can be inserted into a track or course",
+      "version": "Version",
+      "date": "Date",
+      "author": "Author",
+      "changelog": "What changed",
+      "places": "Places on version",
+      "retired": "Retired",
+      "compare": "Compare with v{v}",
+      "compareTitle": "Changes from v{from} to v{to}"
+    },
+    "usages": {
+      "updateAll": "Update all to v{v}",
+      "empty": "The module is not used anywhere yet. It can be deleted safely",
+      "container": "Track / course",
+      "holder": "Node / lesson",
+      "version": "Version",
+      "attachedBy": "Inserted by",
+      "attachedAt": "When",
+      "staleVersion": "v{v} · outdated",
+      "detached": "Detached earlier ({n})",
+      "detachedAt": "detached {date}",
+      "updateAllConfirm": "Update {n} places to v{v}? People already in progress stay on their version",
+      "updatedAll": "Places updated: {n}, now on v{v}",
+      "updatedSkipped": "Places updated: {n} to v{v}; skipped {skipped} — a lesson of a published course version is updated in the course draft"
     }
   },
   "frame": {

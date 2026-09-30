@@ -71,6 +71,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/meetups', label: t('admin.nav.meetups'), show: hasScope('meetup.manage') || hasScope('meetup.attendance'), group: t('admin.group.contentMaterials') },
     { to: '/admin/assessment/criteria', label: t('admin.nav.assessCriteria'), show: hasScope('assessment.manage'), group: t('admin.group.contentMaterials') },
     { to: '/admin/resources/categories', label: t('admin.nav.resourceCategories'), show: hasScope('course.edit'), group: t('admin.group.contentMaterials') },
+    // Бібліотека модулів (docs/v2/31 §5.1–§5.3): список і картка модуля — кожному з `library.view` (§2)
+    { to: '/admin/library', label: t('admin.nav.library'), show: hasScope('library.view'), group: t('admin.group.contentLibrary') },
     // Звіти бібліотеки (docs/v2/31 §9): використання, застарілі посилання, пропозиції — кожному, хто бачить бібліотеку (§2)
     { to: '/admin/library/reports', label: t('admin.nav.libraryReports'), show: hasScope('library.view'), group: t('admin.group.contentLibrary') },
   ] },

@@ -309,6 +309,9 @@ create index idx_candidate_summaries_tenant_due on candidate_summaries (tenant_i
 > - индекс `idx_candidate_summaries_tenant (tenant_id, candidate_id, version desc)` не заведён — он
 >   повторяет ведущие колонки уникального ключа; вместо него `idx_candidate_summaries_tenant_state`;
 > - `media_id` (PDF) в PR-29 не заполняется: документ читается страницей по ссылке, PDF — «что осталось».
+> - [дополнено, ai-tails-2 часть 2, 30.09] `media_id` заполняется при отправке: PDF отправленной версии —
+>   документ кандидата, `origin = 'ai_artifact'`, владелец — кандидат; рекрутеру «Завантажити PDF» — на лету;
+>   кандидату — `GET /public/candidate-summaries/:token/pdf`; при обезличивании — в корзину (`44` Р-AI2.9).
 
 ### 3.6 Подсказка проверяющему и контроль качества
 
@@ -775,6 +778,10 @@ created → consent_pending → in_progress ⇄ paused → submitted → transcr
 > `summary.auto_send` (каждые 10 минут, тенанты с рекрутингом), `summary.expire` (03:50), `ai.review_hint`
 > (по событию, строки ещё нет — повтор очереди через 20 с), `ai.quality_sample` (06:00), `ai.metrics_rollup`
 > (06:30). PDF Підсумка — не формируется.
+>
+> [дополнено, ai-tails-2 часть 2, 30.09] PDF Підсумка формируется при отправке, а не в `summary.build`:
+> хранится ровно отправленная версия (`44` Р-AI2.9). «Згенерувати критерії (ШІ)» §6.2 не реализовано —
+> нужен `ref_kind` для сценария в `ai_call_ref_kind` (`docs/02`), вопрос владельцу (`44` Р-AI2.10).
 
 ---
 

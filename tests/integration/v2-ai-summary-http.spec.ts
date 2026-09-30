@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import postgres from 'postgres'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 /**
  * PR-29 по HTTP (образец — `v2-interview-http.spec.ts`). Сервисный слой проверяет
@@ -117,6 +117,9 @@ describe.skipIf(!BUILT)('Підсумок, «Не погоджуюсь», під
     await admin.end()
   })
 
+  // Входы по коду в каждом сценарии — счётчик попыток сбрасывается, как в `v2-ai-http.spec.ts`
+  beforeEach(async () => { await admin`delete from rate_limits` })
+
   it('к. 14: документ по ссылке открывается без входа и несёт «Документ сформовано автоматично»; ПД третьих лиц нет', async () => {
     const res = await fetch(`${BASE}/api/v1/public/candidate-summaries/${sentToken}`)
     expect(res.status).toBe(200)
@@ -132,6 +135,23 @@ describe.skipIf(!BUILT)('Підсумок, «Не погоджуюсь», під
     expect(unknown.status).toBe(404)
     expect((await error(unknown)).code).toBe('summary.not_found')
     const revoked = await fetch(`${BASE}/api/v1/public/candidate-summaries/${revokedToken}`)
+    expect(revoked.status).toBe(410)
+    expect((await error(revoked)).code).toBe('summary.revoked')
+  })
+
+  it('PDF (44 Р-AI2.9): рекрутеру — файл документа кандидата; без summary.view — 403; ссылка кандидата — те же 404/410', async () => {
+    const cookie = await login(ADMIN_PHONE)
+    const [row] = await admin`select id from candidate_summaries where candidate_id = ${candidateId} and version = 2`
+    const pdf = await send(cookie, 'GET', `/candidate-summaries/${row!.id}/pdf`)
+    expect(pdf.status).toBe(200)
+    expect(pdf.headers.get('content-type')).toContain('application/pdf')
+    expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString('latin1')).toBe('%PDF-')
+    expect((await send(cookie, 'GET', '/candidate-summaries/00000000-0000-0000-0000-000000000000/pdf')).status).toBe(404)
+    const emp = await login('+380670000003')
+    expect((await send(emp, 'GET', `/candidate-summaries/${row!.id}/pdf`)).status).toBe(403)
+    const unknown = await fetch(`${BASE}/api/v1/public/candidate-summaries/${randomBytes(24).toString('base64url')}/pdf`, { redirect: 'manual' })
+    expect(unknown.status).toBe(404)
+    const revoked = await fetch(`${BASE}/api/v1/public/candidate-summaries/${revokedToken}/pdf`, { redirect: 'manual' })
     expect(revoked.status).toBe(410)
     expect((await error(revoked)).code).toBe('summary.revoked')
   })

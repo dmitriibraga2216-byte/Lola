@@ -53,6 +53,8 @@ test('к. 14: Підсумок за посиланням без входу — 3
   // Вимкнений рекрутером розділ «Пройдене і результати» не показується; ім'я автора оцінки — теж
   await expect(page.getByText('Стандарти сервісу')).toHaveCount(0)
   await expect(page.getByText('Рекрутерка Прихована')).toHaveCount(0)
+  // PDF — той самий документ кандидата (docs/v2/30 §3.5, docs/v2/44 Р-AI2.9)
+  await expect(page.getByTestId('summary-public-pdf')).toHaveAttribute('href', `/api/v1/public/candidate-summaries/${token}/pdf`)
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 

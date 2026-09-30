@@ -26,6 +26,7 @@ import { effectiveLimits } from './tenantLimits'
 import { enqueueForTenant } from './tenantQueue'
 import { hitRateLimit } from './rateLimit'
 import { alignDelay, ipHash } from './publicApply'
+import { discardSummaryPdfsTx, ensureSummaryPdf, pdfDataOf, renderSummaryPdf, summaryPdfUrl } from './summaryPdf'
 
 /**
  * Підсумок кандидата (`docs/v2/30-ai-interview.md` §1 (2), §3.5, §4, §5.4, §7.14, §7.15, §8, §10,
@@ -490,10 +491,34 @@ async function sendTx(tx: TenantTx, tenantId: string, actorId: string | null, r:
 export async function sendSummary(v: Viewer, id: string, channel: CandidateSummaryChannel): Promise<SendResult> {
   const current = await withTenant(v.tenantId, v.actorId, async tx => (await tx.select().from(candidateSummaries).where(eq(candidateSummaries.id, id)))[0] ?? null)
   if (!current || !await candidateVisible(v, current.candidateId)) return { ok: false, code: 'not_found' }
-  return withTenant(v.tenantId, v.actorId, async (tx) => {
+  const r = await withTenant(v.tenantId, v.actorId, async (tx) => {
     const [r] = await tx.select().from(candidateSummaries).where(eq(candidateSummaries.id, id)).for('update')
     return r ? sendTx(tx, v.tenantId, v.actorId, r, channel, 'manual') : { ok: false as const, code: 'not_found' as const }
   })
+  if (r.ok) await archiveSentPdf(v.tenantId, id)
+  return r
+}
+
+/**
+ * PDF отправленной версии — в хранилище (`30` §3.5, §7.7; `44` Р-AI2.9) после фиксации отправки.
+ * Сбой S3 отправку не отменяет: файл досоздаст первое скачивание (`summaryPdf.ts#ensureSummaryPdf`).
+ */
+async function archiveSentPdf(tenantId: string, id: string): Promise<void> {
+  await ensureSummaryPdf(tenantId, id).catch(err => console.error('[summary.pdf]', err))
+}
+
+export type PdfResult = { ok: true, pdf: Buffer, fileName: string } | { ok: false, code: 'not_found' | 'redacted' }
+
+/**
+ * «Завантажити PDF» рекрутеру (`summary.view`): документ так, как его увидит кандидат, — включённые
+ * разделы без ПД третьих лиц. Рендер на лету из текущего тела: до отправки документ ещё правят,
+ * хранится только отправленная версия.
+ */
+export async function recruiterSummaryPdf(v: Viewer, id: string): Promise<PdfResult> {
+  const r = await withTenant(v.tenantId, v.actorId, async tx => (await tx.select().from(candidateSummaries).where(eq(candidateSummaries.id, id)))[0] ?? null)
+  if (!r || !await candidateVisible(v, r.candidateId)) return { ok: false, code: 'not_found' }
+  if (r.redactedAt) return { ok: false, code: 'redacted' }
+  return { ok: true, pdf: await renderSummaryPdf(await pdfDataOf(v.tenantId, r)), fileName: `pidsumok-v${r.version}.pdf` }
 }
 
 export type RevokeResult = { ok: true } | { ok: false, code: 'not_found' | 'not_revocable' }
@@ -584,9 +609,9 @@ export async function summaryAutoSendScan(tenantId: string, now: Date = new Date
   const due = await withTenant(tenantId, null, tx => tx.select({ id: candidateSummaries.id }).from(candidateSummaries)
     .where(and(eq(candidateSummaries.state, 'ready'), sql`${candidateSummaries.autoSendDueAt} <= ${now.toISOString()}::timestamptz`)).limit(200))
   for (const { id } of due) {
-    await withTenant(tenantId, null, async (tx) => {
+    const sentNow = await withTenant(tenantId, null, async (tx): Promise<boolean> => {
       const [r] = await tx.select().from(candidateSummaries).where(eq(candidateSummaries.id, id)).for('update')
-      if (!r || r.state !== 'ready' || !r.autoSendDueAt || r.autoSendDueAt > now) return
+      if (!r || r.state !== 'ready' || !r.autoSendDueAt || r.autoSendDueAt > now) return false
       const scheduledKind = ((r.autoSendRule as { scoreKind?: CandidateScoreKind } | null)?.scoreKind) ?? rule.scoreKind
       const f = await factsOf(tx, r.candidateId, scheduledKind)
       const block = blockOf({ ...rule, scoreKind: scheduledKind }, r, await latestVersionOf(tx, r.candidateId), f)
@@ -594,7 +619,7 @@ export async function summaryAutoSendScan(tenantId: string, now: Date = new Date
         await tx.update(candidateSummaries).set({ autoSendDueAt: null, updatedAt: new Date() }).where(eq(candidateSummaries.id, r.id))
         await recordAudit(tx, { tenantId, actorId: SYSTEM_ACTOR, action: 'summary.auto_send_skipped', entity: 'candidate_summary', entityId: r.id, after: { reason: block } })
         report.skipped.push({ id: r.id, reason: block })
-        return
+        return false
       }
       const sent = await sendTx(tx, tenantId, SYSTEM_ACTOR, r, 'email', 'auto')
       if (sent.ok) report.sent++
@@ -602,7 +627,9 @@ export async function summaryAutoSendScan(tenantId: string, now: Date = new Date
         await tx.update(candidateSummaries).set({ autoSendDueAt: null, updatedAt: new Date() }).where(eq(candidateSummaries.id, r.id))
         report.skipped.push({ id: r.id, reason: sent.code })
       }
+      return sent.ok
     })
+    if (sentNow) await archiveSentPdf(tenantId, id)
   }
   if (!rule.enabled || rule.minScore === null) return report
 
@@ -699,7 +726,9 @@ export async function redactSummariesTx(tx: TenantTx, tenantId: string, candidat
            state = case when state in ('draft', 'ready', 'sent') then 'revoked' else state end
      where candidate_id = ${candidateId}::uuid and redacted_at is null
     returning id`) as unknown as { id: string }[]
-  if (rows.length) await recordAudit(tx, { tenantId, actorId: null, action: 'summary.redacted', entity: 'user', entityId: candidateId, after: { reason, summaries: rows.map(r => r.id) } })
+  // PDF — те же слова документа: в корзину с немедленной очисткой (`30` §7.9)
+  const pdfs = await discardSummaryPdfsTx(tx, rows.map(r => r.id), reason)
+  if (rows.length) await recordAudit(tx, { tenantId, actorId: null, action: 'summary.redacted', entity: 'user', entityId: candidateId, after: { reason, summaries: rows.map(r => r.id), pdfs } })
   return rows.length
 }
 
@@ -753,4 +782,23 @@ export async function publicSummary(token: string, ctx: PublicCtx): Promise<Publ
       },
     }
   })
+}
+
+export type PublicPdfResult = { ok: true, url: string } | Extract<PublicSummaryResult, { ok: false }> | { ok: false, code: 'unavailable' }
+
+/**
+ * PDF по ссылке кандидата (`GET /public/candidate-summaries/:token/pdf`): те же проверки и тот же
+ * потолок просмотров, что у страницы, затем подписанная ссылка на сохранённый файл отправленной
+ * версии. Файла нет (S3 был недоступен при отправке) — он создаётся сейчас.
+ */
+export async function publicSummaryPdf(token: string, ctx: PublicCtx): Promise<PublicPdfResult> {
+  const page = await publicSummary(token, ctx)
+  if (!page.ok) return page
+  const [link] = await db.execute(sql`select * from candidate_summary_public_lookup(${token})`) as unknown as { id: string, tenant_id: string }[]
+  if (!link) return { ok: false, code: 'not_found' }
+  const url = await summaryPdfUrl(link.tenant_id, link.id).catch((err) => {
+    console.error('[summary.pdf]', err)
+    return null
+  })
+  return url ? { ok: true, url } : { ok: false, code: 'unavailable' }
 }

@@ -69,6 +69,7 @@ onMounted(async () => {
         <SummaryDocument :doc="summary.document" :disclaimer-line="summary.disclaimerLine" />
       </section>
       <p class="sub">{{ t('candidateSummary.public.validUntil', { date: formatDate(summary.expiresAt) }) }}</p>
+      <a class="btn ghost" :href="`/api/v1/public/candidate-summaries/${route.params.token}/pdf`" data-testid="summary-public-pdf">{{ t('candidateSummary.pdf') }}</a>
     </template>
   </main>
 </template>

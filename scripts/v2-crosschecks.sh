@@ -552,6 +552,9 @@ check12_contours_pr39() {
 # reportBuilder.ts`, PR-38, П-22) регистрирует уже готовый отчёт «План і факт часу» второй
 # точкой входа — вызывает `timePlanFactReport()`/`planFactExportRows()` теми же аргументами,
 # что и его собственная ручка, не читая норму или флаг напрямую и не вводя нового расчёта.
+# Очередь проверки и её карточка (`server/services/reviewQueue.ts`, `reviewCard.ts`,
+# review-time-tails) показывают «Відхилення» работы (`37` §5.1, §5.2, §9.1) — одним именем
+# `queueItemDeviation` из правил норм: только показ проверяющему, ни в решение, ни в балл.
 # Любое другое упоминание в server/ и shared/ — это правило балла, зачёта или рейтинга, которое
 # начало смотреть на время. Комментарии нарушением не считаются.
 check13_time_norms_not_in_score() {
@@ -563,6 +566,7 @@ check13_time_norms_not_in_score() {
     | grep -vE "^server/services/(attempts|workshops)\.ts:[0-9]+:import \{ plannedSecondsFor \} from '\./timeNorms'$" \
     | grep -vE "^server/services/resources\.ts:[0-9]+:import \{ syncMaterialEstimate \} from '\./timeNorms'$" \
     | grep -vE "^server/services/personTracks\.ts:[0-9]+:import \{ versionPlannedSeconds \} from '\./timeNorms'$" \
+    | grep -vE "^server/services/review(Queue|Card)\.ts:[0-9]+:import \{ queueItemDeviation \} from '\.\./\.\./shared/domain/timeNorms'$" \
     | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ planFactExportRows, timePlanFactReport \} from '\./timeNorms'$" \
     | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import \{ timePlanFactQuerySchema \} from '\.\./\.\./shared/schemas/timeNorms'$" \
     | grep -vE "^server/services/reportBuilder\.ts:[0-9]+:import type \{ TimePlanFactQuery \} from '\.\./\.\./shared/schemas/timeNorms'$" || true)"

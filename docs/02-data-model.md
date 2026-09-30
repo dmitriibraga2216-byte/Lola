@@ -2034,6 +2034,11 @@ create table learning_time_totals (                 -- витрина «чело
   content_seconds int not null default 0, attempt_seconds int not null default 0,
   discarded_seconds int not null default 0, sessions_count int not null default 0,
   first_started_at timestamptz, last_activity_at timestamptz,
+  -- Перенос убранного `time.purge_sessions` (миграция 0100, `v2/44` §17 Р-T1): сегменты старше
+  -- 400 дней удаляются целой замолчавшей парой, их суммы копятся здесь; итог = перенос + сегменты
+  purged_content_seconds int not null default 0, purged_attempt_seconds int not null default 0,
+  purged_discarded_seconds int not null default 0, purged_sessions_count int not null default 0,
+  purged_first_started_at timestamptz, purged_last_activity_at timestamptz,
   unique nulls not distinct (tenant_id, user_id, subject_type, subject_id, enrollment_id)
 );
 create index idx_learning_time_totals_tenant on learning_time_totals (tenant_id, subject_type, subject_id);

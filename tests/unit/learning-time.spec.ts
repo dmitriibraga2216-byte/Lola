@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ActivityMeter, LEARNING_TIME_RULES as R, applyOnlineBeat, applyReplay, attemptOfSegment, discardReplay,
-  emptyPairState, submissionOfSegment, timeConfidence,
+  NO_CARRY, emptyPairState, submissionOfSegment, timeConfidence, withCarry,
 } from '../../shared/domain/learningTime'
 import type { BeatIn, PairState, TimeSegment } from '../../shared/domain/learningTime'
 import { beatSchema, beatsBatchSchema } from '../../shared/schemas/learningTime'
@@ -371,5 +371,29 @@ describe('контракт биения', () => {
     expect(beatSchema.safeParse({ ...ok, kind: 'reading' }).success).toBe(false)
     expect(beatsBatchSchema.safeParse({ beats: Array.from({ length: 201 }, () => ok) }).success).toBe(false)
     expect(beatsBatchSchema.safeParse({ beats: [ok], sentAt: new Date().toISOString() }).success).toBe(true)
+  })
+})
+
+describe('перенос убранного уборкой (time.purge_sessions, Р-T1)', () => {
+  const d = (iso: string) => new Date(iso)
+  const sum = { content: 90, attempt: 30, discarded: 2, sessions: 1, first: d('2026-09-30T10:00:00Z'), last: d('2026-09-30T10:05:00Z'), confidence: 'ok' as const }
+
+  it('без переноса итог не меняется', () => {
+    expect(withCarry(sum, NO_CARRY)).toEqual(sum)
+  })
+
+  it('перенос складывается с сегментами, границы — самые широкие, прочие поля не трогаются', () => {
+    const r = withCarry(sum, { content: 540, attempt: 0, discarded: 4, sessions: 2, first: d('2025-05-01T09:00:00Z'), last: d('2025-05-02T09:00:00Z') })
+    expect(r).toEqual({ content: 630, attempt: 30, discarded: 6, sessions: 3, first: d('2025-05-01T09:00:00Z'), last: d('2026-09-30T10:05:00Z'), confidence: 'ok' })
+  })
+
+  it('пара без оставшихся сегментов берёт границы переноса', () => {
+    const empty = { content: 0, attempt: 0, discarded: 0, sessions: 0, first: null, last: null }
+    expect(withCarry(empty, { content: 5, attempt: 0, discarded: 0, sessions: 1, first: d('2025-01-01T00:00:00Z'), last: null }))
+      .toEqual({ content: 5, attempt: 0, discarded: 0, sessions: 1, first: d('2025-01-01T00:00:00Z'), last: null })
+  })
+
+  it('уборка — через 400 дней', () => {
+    expect(R.purgeAfterDays).toBe(400)
   })
 })

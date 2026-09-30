@@ -13,11 +13,11 @@
  * делегування», «Переназначити». Что из этого доступно — решает сервер (`can` в карточке).
  */
 import { REVIEW_TASK_TYPES } from '#shared/enums'
-import type { ReviewTaskType } from '#shared/enums'
+import type { ContentTimeDeviationFlag, ReviewDelegationReason, ReviewTaskType } from '#shared/enums'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'review.queue' })
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { api } = useApi()
 const { hasScope } = useAuth()
 const { formatShortDate, formatDateTime } = useFormat()
@@ -38,6 +38,9 @@ interface Row {
   estimatedSeconds: number | null
   contentSeconds: number
   attemptSeconds: number
+  timeConfidence: string
+  deviation: ContentTimeDeviationFlag
+  deviationFactor: number | null
   completedAt: string | null
   status: string
   reviewerName: string | null
@@ -50,11 +53,12 @@ interface Row {
 interface Counts { mine: number, mineOverdue: number, delegatedIn: number, delegatedOut: number }
 interface Page { items: Row[], total: number, cursor: string | null, counts: Counts }
 interface Card {
-  item: { id: string, taskType: ReviewTaskType, taskTitle: string | null, status: string, attemptNo: number, slaDueAt: string | null, escalatedAt: string | null, escalatedToName: string | null, reviewerName: string | null, delegationDepth: number, locationName: string | null }
+  item: { id: string, taskType: ReviewTaskType, taskTitle: string | null, status: string, attemptNo: number, slaDueAt: string | null, escalatedAt: string | null, escalatedToName: string | null, reviewerName: string | null, delegationDepth: number, locationName: string | null, estimatedSeconds: number | null, contentSeconds: number, attemptSeconds: number, timeConfidence: string, deviation: ContentTimeDeviationFlag, deviationFactor: number | null }
   subject: { fullName: string | null, kind: string }
   contactsHidden: boolean
   delegations: { id: string, depth: number, fromName: string | null, toName: string | null, reasonCode: string, reasonText: string | null, dueAt: string, state: string }[]
   conflict: 'self' | 'author' | null
+  trainedByMe: boolean
   can: { delegate: boolean, revoke: string | null, reassign: boolean }
   work: { kind: 'workshop', text: string, criteria: { id: string, text: string }[], history: { attemptNo: number, status: string, reviewComment: string | null }[] }
     | { kind: 'quiz_open_answer', quizTitle: string | null, answer: { text?: string } | null, question: { criteria: string[] } | null, history: { attemptNo: number, status: string, score: number | null }[] }
@@ -77,7 +81,7 @@ const notice = ref('')
 const selected = ref<string[]>([])
 
 const card = ref<Card | null>(null)
-const delegating = ref<{ ids: string[], slaDueAt: string | null } | null>(null)
+const delegating = ref<{ ids: string[], slaDueAt: string | null, reason?: ReviewDelegationReason } | null>(null)
 const revoking = ref<{ id: string, toName: string | null, manager: boolean } | null>(null)
 const revokeReason = ref('')
 const reassigning = ref<Card | null>(null)
@@ -158,9 +162,9 @@ async function openCard(id: string) {
   }
 }
 
-function startDelegate(ids: string[]) {
+function startDelegate(ids: string[], reason?: ReviewDelegationReason) {
   const dues = items.value.filter(i => ids.includes(i.id)).map(i => i.slaDueAt).filter((d): d is string => !!d).sort()
-  delegating.value = { ids, slaDueAt: card.value && ids.length === 1 ? card.value.item.slaDueAt : dues[0] ?? null }
+  delegating.value = { ids, slaDueAt: card.value && ids.length === 1 ? card.value.item.slaDueAt : dues[0] ?? null, reason }
 }
 async function afterDelegate(message: string) {
   delegating.value = null
@@ -216,6 +220,16 @@ async function reassign() {
   finally {
     busy.value = false
   }
+}
+
+/** «Відхилення» (§7.14): множитель факт/план этой работы; флаг считает сервер. */
+const factorText = (f: number | null) => (f === null ? '—' : t('reviewQueue.factor', { n: f.toLocaleString(locale.value, { maximumFractionDigits: 1 }) }))
+const deviationBadge = (d: ContentTimeDeviationFlag) => (d === 'too_slow' || d === 'too_fast' ? 'sun' : 'muted')
+
+/** Выгрузка экрана «Черга перевірки» (§9.1): тот же таб и фильтры, файлом. */
+function exportUrl(format: 'xlsx' | 'csv') {
+  const { limit: _limit, ...q } = query({ format })
+  return `/api/v1/review/queue?${new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString()}`
 }
 
 const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/admin/review-workshops' : taskType === 'quiz_open_answer' ? '/admin/review' : null
@@ -301,6 +315,7 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
             <th>{{ t('reviewQueue.col.due') }}</th>
             <th v-if="tab === 'delegated_in'">{{ t('reviewQueue.col.delegatedBy') }}</th>
             <th v-if="tab === 'delegated_out'">{{ t('reviewQueue.col.delegationState') }}</th>
+            <th>{{ t('reviewQueue.col.deviation') }}</th>
             <th />
           </tr>
         </thead>
@@ -319,8 +334,11 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
             <td>{{ r.taskTitle ?? '—' }}</td>
             <td class="num">{{ r.attemptNo }}</td>
             <td class="num">{{ minutes(r.estimatedSeconds) }}</td>
-            <td class="num">{{ minutes(r.contentSeconds) }}</td>
-            <td class="num">{{ minutes(r.attemptSeconds) }}</td>
+            <td :class="['num', { unreliable: r.timeConfidence === 'unreliable' }]">
+              {{ minutes(r.contentSeconds) }}
+              <span v-if="r.timeConfidence === 'unreliable'" class="sub">{{ t('reviewQueue.time.incomplete') }}</span>
+            </td>
+            <td :class="['num', { unreliable: r.timeConfidence === 'unreliable' }]">{{ minutes(r.attemptSeconds) }}</td>
             <td class="nowrap">{{ r.completedAt ? formatShortDate(r.completedAt) : '—' }}</td>
             <td>{{ r.reviewerName ?? t('reviewQueue.unassigned') }}</td>
             <td class="nowrap">
@@ -334,6 +352,10 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
                 <span class="sub">{{ r.myDelegation.toName }}</span>
               </template>
             </td>
+            <td class="nowrap">
+              <span v-if="r.deviation === 'too_slow' || r.deviation === 'too_fast'" :class="['badge', deviationBadge(r.deviation)]" :title="t('reviewQueue.deviationHint')">{{ factorText(r.deviationFactor) }} · {{ t(`reviewQueue.deviation.${r.deviation}`) }}</span>
+              <span v-else>{{ factorText(r.deviationFactor) }}</span>
+            </td>
             <td>
               <button class="btn ghost small" type="button" @click="openCard(r.id)">{{ t('reviewQueue.open') }}</button>
             </td>
@@ -341,6 +363,10 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
         </tbody>
       </table>
       <p class="sub">{{ t('reviewQueue.shown', { n: items.length, total }) }}</p>
+      <p v-if="hasScope('report.export')" class="exports">
+        <a :href="exportUrl('xlsx')" class="link">{{ t('reviewQueue.exportXlsx') }}</a>
+        <a :href="exportUrl('csv')" class="link">{{ t('reviewQueue.exportCsv') }}</a>
+      </p>
       <button v-if="cursor" class="btn ghost small" type="button" @click="more">{{ t('reviewQueue.loadMore') }}</button>
     </div>
 
@@ -356,6 +382,15 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
         <p v-if="card.contactsHidden" class="note muted-note">{{ t('reviewQueue.card.contactsHidden') }}</p>
         <p v-if="card.conflict === 'self'" class="note coral">{{ t('reviewQueue.card.conflictSelf') }}</p>
         <p v-if="card.conflict === 'author'" class="note sun">{{ t('reviewQueue.card.conflictAuthor') }}</p>
+        <div v-if="card.trainedByMe && card.conflict !== 'self' && card.item.status !== 'done'" class="note sun trained">
+          <span>{{ t('reviewQueue.card.trainedByMe') }}</span>
+          <button v-if="card.can.delegate && hasScope('review.delegate')" class="btn ghost small" type="button" @click="startDelegate([card.item.id], 'conflict_of_interest')">{{ t('reviewQueue.card.handOver') }}</button>
+        </div>
+        <p class="time-line">
+          {{ t('reviewQueue.card.timeLine', { plan: minutes(card.item.estimatedSeconds), content: minutes(card.item.contentSeconds), attempt: minutes(card.item.attemptSeconds) }) }}
+          <span v-if="card.item.deviation === 'too_slow' || card.item.deviation === 'too_fast'" :class="['badge', deviationBadge(card.item.deviation)]" :title="t('reviewQueue.deviationHint')">{{ factorText(card.item.deviationFactor) }} · {{ t(`reviewQueue.deviation.${card.item.deviation}`) }}</span>
+        </p>
+        <p v-if="card.item.timeConfidence !== 'ok'" class="sub">{{ t('reviewQueue.card.timeIncomplete') }} — {{ t(`reviewQueue.card.timeReason.${card.item.timeConfidence}`) }}</p>
         <p v-if="card.item.slaDueAt" class="sub">{{ t('reviewQueue.card.sla', { date: formatDateTime(card.item.slaDueAt) }) }}</p>
         <p v-if="card.item.escalatedAt && card.item.escalatedToName" class="note coral">{{ t('reviewQueue.card.escalatedTo', { name: card.item.escalatedToName }) }}</p>
 
@@ -404,7 +439,7 @@ const reviewLink = (taskType: ReviewTaskType) => taskType === 'workshop' ? '/adm
       </section>
     </div>
 
-    <ReviewDelegateDialog v-if="delegating" :item-ids="delegating.ids" :sla-due-at="delegating.slaDueAt" @close="delegating = null" @done="afterDelegate" />
+    <ReviewDelegateDialog v-if="delegating" :item-ids="delegating.ids" :sla-due-at="delegating.slaDueAt" :reason="delegating.reason" @close="delegating = null" @done="afterDelegate" />
 
     <div v-if="revoking" class="overlay" @click.self="revoking = null" @keydown.esc="revoking = null">
       <form class="modal" role="dialog" aria-modal="true" aria-labelledby="revoke-title" @submit.prevent="revoke">
@@ -466,6 +501,10 @@ tr.late td { background: var(--color-coral-soft); }
 .modal .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0; display: block; }
 .answer { white-space: pre-wrap; margin: 0; }
 .chain li { display: grid; gap: var(--space-1); }
+.unreliable { color: var(--color-ink-muted); }
+.exports { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.trained { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; justify-content: space-between; }
+.time-line { margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .muted-note { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .modal-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }
 @media (max-width: 480px) {

@@ -2,7 +2,8 @@ import { sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
-import { attemptOfSegment, submissionOfSegment, timeConfidence } from '../../shared/domain/learningTime'
+import { LEARNING_TIME_RULES, NO_CARRY, attemptOfSegment, submissionOfSegment, timeConfidence, withCarry } from '../../shared/domain/learningTime'
+import type { PurgedCarry } from '../../shared/domain/learningTime'
 import type { LearningTimeClosedReason, LearningTimeKind, ReviewTimeConfidence } from '../../shared/enums'
 
 /**
@@ -26,6 +27,12 @@ import type { LearningTimeClosedReason, LearningTimeKind, ReviewTimeConfidence }
  *   не раньше начала сегмента, иначе к текущему черновику.
  * - `review_queue_items.content_seconds / attempt_seconds / time_confidence` — «Час на
  *   контент», «Час на випробування» и достоверность работы в очереди проверки (`37` §5.1).
+ *
+ * **После уборки (`time.purge_sessions`, Р-T1).** Сегменты замолчавшей на 400 дней пары удалены,
+ * их суммы лежат в `learning_time_totals.purged_*`. Витрина и `lesson_progress` считаются как
+ * «перенесено + оставшиеся сегменты»; попытка, сдача и строка очереди, начатые не позже последнего
+ * убранного биения пары, не пересчитываются вовсе — их время посчитано до уборки, а новые
+ * сегменты (человек открыл условия теста через год) им не принадлежат.
  *
  * **Чего свёртка не трогает никогда.** В `attempts` — ни `deadline_at` (его сдвигает жалоба,
  * PR-23), ни `snapshot` (правило 4), ни `params`, ни `status`, ни `updated_at`: последний —
@@ -121,6 +128,27 @@ async function dirtyPairs(tx: TenantTx, tenantId: string, windowMinutes: number)
   return rows.map(r => ({ userId: r.user_id, subjectType: r.subject_type, subjectId: r.subject_id }))
 }
 
+/** Перенесённое уборкой (`purged_*`) по строкам витрины пар чанка: ключ — пара и запись на курс. */
+async function purgedCarries(tx: TenantTx, tenantId: string, pairs: Pair[]): Promise<Map<string, PurgedCarry>> {
+  const rows = await tx.execute(sql`
+    select t.user_id, t.subject_type, t.subject_id, t.enrollment_id, t.purged_content_seconds, t.purged_attempt_seconds,
+      t.purged_discarded_seconds, t.purged_sessions_count, t.purged_first_started_at, t.purged_last_activity_at
+    from learning_time_totals t
+    join unnest(${pgArray(pairs.map(p => p.userId), 'uuid')}, ${pgArray(pairs.map(p => p.subjectType), 'text')}, ${pgArray(pairs.map(p => p.subjectId), 'uuid')})
+      as p(user_id, subject_type, subject_id)
+      on p.user_id = t.user_id and p.subject_type = t.subject_type and p.subject_id = t.subject_id
+    where t.tenant_id = ${tenantId}::uuid and t.purged_first_started_at is not null
+  `) as unknown as { user_id: string, subject_type: string, subject_id: string, enrollment_id: string | null, purged_content_seconds: number, purged_attempt_seconds: number, purged_discarded_seconds: number, purged_sessions_count: number, purged_first_started_at: string | Date, purged_last_activity_at: string | Date | null }[]
+  return new Map(rows.map(r => [`${keyOf(r.user_id, r.subject_type, r.subject_id)}|${r.enrollment_id ?? ''}`, {
+    content: r.purged_content_seconds,
+    attempt: r.purged_attempt_seconds,
+    discarded: r.purged_discarded_seconds,
+    sessions: r.purged_sessions_count,
+    first: new Date(r.purged_first_started_at),
+    last: r.purged_last_activity_at ? new Date(r.purged_last_activity_at) : null,
+  }]))
+}
+
 /** Свернуть пары одной транзакцией (чанк). */
 async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promise<Omit<RollupStats, 'pairs'>> {
   const stats = { totals: 0, lessonProgress: 0, attempts: 0, submissions: 0, queueItems: 0 }
@@ -137,6 +165,21 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
     s.started_at = new Date(s.started_at)
     s.last_beat_at = new Date(s.last_beat_at)
   }
+  const carries = await purgedCarries(tx, tenantId, pairs)
+  const carryOf = (userId: string, subjectType: string, subjectId: string, enrollmentId: string | null) =>
+    carries.get(`${keyOf(userId, subjectType, subjectId)}|${enrollmentId ?? ''}`) ?? NO_CARRY
+  /** Последнее убранное биение пары (по всем записям на курс): всё, что начато до него, заморожено. */
+  const purgedUntil = new Map<string, number>()
+  for (const [k, c] of carries) {
+    const pk = k.slice(0, k.lastIndexOf('|'))
+    const t = (c.last ?? c.first)!.getTime()
+    if (t > (purgedUntil.get(pk) ?? 0)) purgedUntil.set(pk, t)
+  }
+  const frozen = (userId: string, subjectType: string, subjectId: string, createdAt: string | Date) => {
+    const until = purgedUntil.get(keyOf(userId, subjectType, subjectId))
+    return until !== undefined && new Date(createdAt).getTime() <= until
+  }
+  const frozenSources = new Set<string>()
   const byPair = new Map<string, Seg[]>()
   for (const s of segs as Seg[]) {
     const k = keyOf(s.user_id, s.subject_type, s.subject_id)
@@ -168,6 +211,11 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
       if (id) pushTo(segsOfAttempt, id, s)
     }
     for (const a of mine) {
+      // Попытка старше уборки: её время посчитано и не меняется (Р-T1)
+      if (frozen(p.userId, 'quiz', p.subjectId, a.started_at)) {
+        frozenSources.add(a.id)
+        continue
+      }
       const own = (segsOfAttempt.get(a.id) ?? []).filter(s => s.kind === 'attempt')
       const net = own.reduce((sum, s) => sum + s.credited_seconds, 0)
       const discarded = own.reduce((sum, s) => sum + s.discarded_seconds, 0)
@@ -191,12 +239,12 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
   const workshopPairs = pairs.filter(p => p.subjectType === 'workshop')
   const subRows = workshopPairs.length
     ? await tx.execute(sql`
-        select w.id, w.user_id, w.workshop_id, w.enrollment_id, w.attempt_no, w.submitted_at, w.attempt_seconds, w.content_seconds
+        select w.id, w.user_id, w.workshop_id, w.enrollment_id, w.attempt_no, w.submitted_at, w.attempt_seconds, w.content_seconds, w.created_at
         from workshop_submissions w
         join unnest(${pgArray(workshopPairs.map(p => p.userId), 'uuid')}, ${pgArray(workshopPairs.map(p => p.subjectId), 'uuid')}) as p(user_id, workshop_id)
           on p.user_id = w.user_id and p.workshop_id = w.workshop_id
         where w.tenant_id = ${tenantId}::uuid
-      `) as unknown as { id: string, user_id: string, workshop_id: string, enrollment_id: string | null, attempt_no: number, submitted_at: string | Date | null, attempt_seconds: number, content_seconds: number }[]
+      `) as unknown as { id: string, user_id: string, workshop_id: string, enrollment_id: string | null, attempt_no: number, submitted_at: string | Date | null, attempt_seconds: number, content_seconds: number, created_at: string | Date }[]
     : []
   const segsOfSubmission = new Map<string, Seg[]>()
   const subUpdates: { id: string, attempt: number, content: number }[] = []
@@ -209,6 +257,10 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
       if (id) pushTo(segsOfSubmission, id, s)
     }
     for (const w of mine) {
+      if (frozen(p.userId, 'workshop', p.subjectId, w.created_at)) {
+        frozenSources.add(w.id)
+        continue
+      }
       const sum = summarize(segsOfSubmission.get(w.id) ?? [])
       if (sum.attempt !== w.attempt_seconds || sum.content !== w.content_seconds) subUpdates.push({ id: w.id, attempt: sum.attempt, content: sum.content })
     }
@@ -239,7 +291,7 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
     for (const lp of lpRows) {
       const segsOf = (byPair.get(keyOf(lp.user_id, 'lesson', lp.lesson_id)) ?? [])
         .filter(s => s.enrollment_id === lp.enrollment_id && s.kind === 'content')
-      const sum = summarize(segsOf)
+      const sum = withCarry(summarize(segsOf), carryOf(lp.user_id, 'lesson', lp.lesson_id, lp.enrollment_id))
       if (sum.content !== lp.content_seconds || sum.discarded !== lp.discarded_seconds || sum.sessions !== lp.sessions_count) {
         lpUpdates.push({ id: lp.id, content: sum.content, discarded: sum.discarded, sessions: sum.sessions })
       }
@@ -265,6 +317,7 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
       where tenant_id = ${tenantId}::uuid and task_type = 'workshop' and source_id = any(${pgArray(subIds, 'uuid')})
     `) as unknown as { id: string, source_id: string, content_seconds: number, attempt_seconds: number, time_confidence: string }[]
     for (const q of items) {
+      if (frozenSources.has(q.source_id)) continue
       const sum = summarize(segsOfSubmission.get(q.source_id) ?? [])
       if (sum.content !== q.content_seconds || sum.attempt !== q.attempt_seconds || sum.confidence !== q.time_confidence) {
         queueUpdates.push({ id: q.id, content: sum.content, attempt: sum.attempt, confidence: sum.confidence })
@@ -279,6 +332,7 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
       where q.tenant_id = ${tenantId}::uuid and q.task_type = 'quiz_open_answer' and aa.attempt_id = any(${pgArray(attemptIds, 'uuid')})
     `) as unknown as { id: string, attempt_id: string, content_seconds: number, attempt_seconds: number, time_confidence: string }[]
     for (const q of items) {
+      if (frozenSources.has(q.attempt_id)) continue
       const sum = summarize(segsOfAttempt.get(q.attempt_id) ?? [])
       if (sum.content !== q.content_seconds || sum.attempt !== q.attempt_seconds || sum.confidence !== q.time_confidence) {
         queueUpdates.push({ id: q.id, content: sum.content, attempt: sum.attempt, confidence: sum.confidence })
@@ -306,10 +360,14 @@ async function rollupChunk(tx: TenantTx, tenantId: string, pairs: Pair[]): Promi
   }
   if (groups.size) {
     const values = [...groups.values()].map((g) => {
-      const sum = summarize(g.segs)
       // Границы — по всем сегментам, а не только зачтённым: «первое открытие» бывает и пустым
-      const first = new Date(Math.min(...g.segs.map(s => s.started_at.getTime())))
-      const last = new Date(Math.max(...g.segs.map(s => s.last_beat_at.getTime())))
+      const bounds = {
+        first: new Date(Math.min(...g.segs.map(s => s.started_at.getTime()))),
+        last: new Date(Math.max(...g.segs.map(s => s.last_beat_at.getTime()))),
+      }
+      const sum = withCarry({ ...summarize(g.segs), ...bounds }, carryOf(g.pair.userId, g.pair.subjectType, g.pair.subjectId, g.enrollmentId))
+      const first = sum.first!
+      const last = sum.last!
       return sql`(${tenantId}::uuid, ${g.pair.userId}::uuid, ${g.enrollmentId}::uuid, ${g.pair.subjectType}::text, ${g.pair.subjectId}::uuid,
         ${sum.confidence}::text, ${sum.content}::int, ${sum.attempt}::int, ${sum.discarded}::int, ${sum.sessions}::int,
         ${first.toISOString()}::timestamptz, ${last.toISOString()}::timestamptz)`
@@ -351,6 +409,111 @@ export async function rollupTenant(tenantId: string, opts: { windowMinutes?: num
     stats.attempts += s.attempts
     stats.submissions += s.submissions
     stats.queueItems += s.queueItems
+  }
+  return stats
+}
+
+// ── Уборка сегментов ───────────────────────────────────────────────────────────────────────
+
+/**
+ * `time.purge_sessions` (docs/v2/37 §11, ежедневно): удаление сегментов учёта времени старше
+ * 400 дней. Решение Р-T1 (`docs/v2/44` §17).
+ *
+ * **Уборка не меняет ни одной цифры.** Сегменты — сырьё; всё, что из них посчитано (витрина
+ * `learning_time_totals`, `lesson_progress`, попытки, сдачи, строки очереди, норма времени),
+ * после уборки остаётся тем же. Для этого:
+ *   1. Убирается **только целая замолчавшая пара** «человек × элемент»: последнее биение старше
+ *      400 дней и открытых сегментов нет. Пару, по которой ещё идёт работа, уборка не трогает
+ *      вовсе, — иначе попытка на стыке 400 дней потеряла бы часть времени.
+ *   2. Суммы удаляемых сегментов в той же транзакции **переносятся** в строку витрины
+ *      (`purged_*`, миграция `0100`) по ключу «пара × запись на курс»; свёртка дальше считает
+ *      «перенесено + оставшиеся сегменты» (`withCarry`), так что человек, вернувшийся к уроку
+ *      через год, не теряет год обучения.
+ *   3. Попытки, сдачи и строки очереди, к которым не привязан ни один сегмент, свёртка больше не
+ *      пересчитывает (`learningTimeRollup.ts`) — их время посчитано до уборки.
+ *
+ * Живёт в модуле свёртки: колонки учёта времени пишет только он (сквозная проверка 22,
+ * `scripts/v2-crosschecks.sh` проверка 11).
+ *
+ * Сегмент, начатый параллельно с уборкой (биение пришло в ту же секунду), не попадает ни в
+ * перенос, ни в удаление: оба условия повторяют `last_beat_at < порог` построчно.
+ */
+
+export interface PurgeStats { pairs: number, segments: number }
+
+/** Пар за одну транзакцию: уборка идёт кусками, чтобы не держать долгих блокировок. */
+const PURGE_CHUNK = 500
+/** Кусков за прогон: остаток доберёт завтрашний прогон, ничего не теряется. */
+const PURGE_MAX_CHUNKS = 40
+
+export async function purgeLearningTimeSessions(tenantId: string, opts: { now?: Date, chunk?: number } = {}): Promise<PurgeStats> {
+  const now = opts.now ?? new Date()
+  const chunk = Math.max(1, opts.chunk ?? PURGE_CHUNK)
+  const cutoff = new Date(now.getTime() - LEARNING_TIME_RULES.purgeAfterDays * 86_400_000).toISOString()
+  const stats: PurgeStats = { pairs: 0, segments: 0 }
+  for (let i = 0; i < PURGE_MAX_CHUNKS; i++) {
+    const r = await withTenant(tenantId, null, async (tx) => {
+      const [row] = await tx.execute(sql`
+        with dormant as materialized (
+          select user_id, subject_type, subject_id from learning_time_sessions
+          where tenant_id = ${tenantId}::uuid
+          group by user_id, subject_type, subject_id
+          having max(last_beat_at) < ${cutoff}::timestamptz and bool_and(closed_reason is not null)
+          limit ${chunk}
+        ),
+        agg as (
+          select s.user_id, s.enrollment_id, s.subject_type, s.subject_id,
+            coalesce(sum(s.credited_seconds) filter (where s.kind = 'content'), 0)::int as content,
+            coalesce(sum(s.credited_seconds) filter (where s.kind = 'attempt'), 0)::int as attempt,
+            coalesce(sum(s.discarded_seconds), 0)::int as discarded,
+            (count(distinct s.session_key) filter (where s.credited_seconds > 0))::int as sessions,
+            min(s.started_at) as first, max(s.last_beat_at) as last
+          from learning_time_sessions s
+          join dormant d on d.user_id = s.user_id and d.subject_type = s.subject_type and d.subject_id = s.subject_id
+          where s.tenant_id = ${tenantId}::uuid and s.last_beat_at < ${cutoff}::timestamptz
+          group by s.user_id, s.enrollment_id, s.subject_type, s.subject_id
+        ),
+        carried as (
+          insert into learning_time_totals as t (tenant_id, user_id, enrollment_id, subject_type, subject_id,
+            content_seconds, attempt_seconds, discarded_seconds, sessions_count, first_started_at, last_activity_at,
+            purged_content_seconds, purged_attempt_seconds, purged_discarded_seconds, purged_sessions_count,
+            purged_first_started_at, purged_last_activity_at)
+          select ${tenantId}::uuid, user_id, enrollment_id, subject_type, subject_id,
+            content, attempt, discarded, sessions, first, last,
+            content, attempt, discarded, sessions, first, last
+          from agg
+          on conflict on constraint uq_learning_time_totals_key do update set
+            purged_content_seconds = t.purged_content_seconds + excluded.purged_content_seconds,
+            purged_attempt_seconds = t.purged_attempt_seconds + excluded.purged_attempt_seconds,
+            purged_discarded_seconds = t.purged_discarded_seconds + excluded.purged_discarded_seconds,
+            purged_sessions_count = t.purged_sessions_count + excluded.purged_sessions_count,
+            purged_first_started_at = least(t.purged_first_started_at, excluded.purged_first_started_at),
+            purged_last_activity_at = greatest(t.purged_last_activity_at, excluded.purged_last_activity_at),
+            -- Пара замолчала целиком: итог = всё перенесённое. У свёрнутой пары это те же числа,
+            -- что уже лежат в строке; не свёрнутую (задача свёртки не работала) это доводит до верных.
+            content_seconds = t.purged_content_seconds + excluded.purged_content_seconds,
+            attempt_seconds = t.purged_attempt_seconds + excluded.purged_attempt_seconds,
+            discarded_seconds = t.purged_discarded_seconds + excluded.purged_discarded_seconds,
+            sessions_count = t.purged_sessions_count + excluded.purged_sessions_count,
+            first_started_at = least(t.purged_first_started_at, excluded.purged_first_started_at),
+            last_activity_at = greatest(t.purged_last_activity_at, excluded.purged_last_activity_at),
+            updated_at = now()
+          returning 1
+        ),
+        removed as (
+          delete from learning_time_sessions s using dormant d
+          where s.tenant_id = ${tenantId}::uuid and s.user_id = d.user_id and s.subject_type = d.subject_type
+            and s.subject_id = d.subject_id and s.last_beat_at < ${cutoff}::timestamptz
+          returning 1
+        )
+        select (select count(*) from dormant)::int as pairs, (select count(*) from removed)::int as segments,
+          (select count(*) from carried)::int as carried
+      `) as unknown as { pairs: number, segments: number, carried: number }[]
+      return row ?? { pairs: 0, segments: 0, carried: 0 }
+    })
+    stats.pairs += r.pairs
+    stats.segments += r.segments
+    if (r.pairs < chunk) break
   }
   return stats
 }

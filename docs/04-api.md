@@ -178,20 +178,21 @@
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/review/queue` | **единая очередь** поверх `review_queue_items` (`v2/37` §10, решение `v2/44` В-15): `?tab=mine\|delegated_in\|delegated_out\|done&taskType&locationId&trackId&reviewerId&subjectKind&from&to&overdue&cursor&limit`; ответ `{items, total, cursor, counts}` — `counts` со счётчиками табов (PR-19) |
+| GET | `/review/queue` | **единая очередь** поверх `review_queue_items` (`v2/37` §10, решение `v2/44` В-15): `?tab=mine\|delegated_in\|delegated_out\|done&taskType&locationId&trackId&reviewerId&subjectKind&from&to&overdue&cursor&limit`; ответ `{items, total, cursor, counts}` — `counts` со счётчиками табов (PR-19); строка несёт `deviation` и `deviationFactor` — «Відхилення» работы, факт к снимку нормы (`v2/37` §5.1, §7.14; `no_data` — нет плана, факта или измерение `unreliable`). `format=xlsx\|csv` — выгрузка экрана «Черга перевірки» (`v2/37` §9.1): тот же таб и фильтры, все страницы до 5000 строк, колонки §9.1; право — `report.export` (review-time-tails) |
 | GET | `/review/answers` | **узкий фильтр** поверх того же источника: очередь **ответов** (`12` §14.4) со своими фильтрами — `checked`, метки вопросов, «Поза програмами», «Поза курсами», точка, курс |
 | POST | `/review/answers/:id/grade` | `{score, comment}`; наставнику видна `grader_hint` |
 | GET | `/review/workshops` | **узкий фильтр**: очередь сдач практикумов, `?mine&overdue`; сортировка по времени в очереди |
 | POST | `/review/workshops/:id/claim` | взять в работу (блокировка 30 минут) (старый путь: `/review/submissions/:id/claim`, до конца R1) |
 | POST | `/review/workshops/:id/grade` | `{decision: passed\|rework\|failed, criteria[], comment}` (старый путь: `/review/submissions/:id/grade`, до конца R1) |
 | GET/POST | `/review/submissions/:id`, `/:id/claim`, `/:id/release`, `/:id/grade`, `/:id/comments` | карточка проверки и действия над **работой**; решение принимается над работой, а не над строкой очереди — очередь обновляется тем же сервисом в той же транзакции. С PR-19 назначенную или делегированную другому работу взять нельзя: `409 review.assigned_to_other` |
-| GET | `/review/items/:id` | карточка элемента очереди (`v2/37` §5.2): работа, критерии, история попыток, цепочка передач, `can` — какие действия доступны смотрящему. **Без `phone`, `email`, `resume_asset_id`** ни для кого (сквозная проверка 20); не видящему работу ни в одном табе — `404` |
+| GET | `/review/items/:id` | карточка элемента очереди (`v2/37` §5.2): работа, критерии, история попыток, цепочка передач, `can` — какие действия доступны смотрящему. **Без `phone`, `email`, `resume_asset_id`** ни для кого (сквозная проверка 20); не видящему работу ни в одном табе — `404`; `item.deviation`/`deviationFactor` — значок отклонения строки времени, `trainedByMe` — плашка «Ви навчали цю людину за цим треком» (`v2/37` §7.9: наставник траектории проверяемого с узлом этой работы; не запрет — «Передати іншому» делегирует с причиной `conflict_of_interest`) |
 | GET | `/review/items/:id/delegate-targets` | кому можно передать работу (`v2/37` §6.1) — список уже отфильтрован по праву оценки на точке, отсутствию и «приймаю делегування»; с нагрузкой `open / max` |
 | POST | `/review/items/:id/delegate` | `{toUserId, reasonCode, reasonText?, dueAt, notify}` → `{delegationId, item}`; `422 review.delegate_target_forbidden \| review.delegate_target_declines \| review.delegate_cycle \| review.delegate_depth_exceeded`, `409 review.already_in_review`. Срок проверки не меняется (`v2/37` §7.5) |
 | POST | `/review/items/bulk-delegate` | «Делегувати обрані»: `{itemIds[≤25], toUserId, reasonCode, dueAt}` → `{ok[], failed[{id, code, message}]}`; `422 review.bulk_limit` |
 | POST | `/review/items/:id/reassign` | «Переназначити» (`review.delegate.any`): `{toUserId, reason}` — без цепочки, активные звенья закрываются `revoked_by_manager` |
 | POST | `/review/delegations/:id/revoke` | `{reason?}`; автору — пока делегат не открыл карточку, иначе `409 review.delegation_in_progress`; руководителю — всегда, с причиной (`v2/37` §7.6) |
 | GET | `/review/workload` | нагрузка проверяющих области (`v2/37` §5.3): `?locationId` |
+| GET | `/reports/delegations` | журнал «Делегування» (`v2/37` §9.4, `review.workload.view` — область роли): `?from&to&fromUserId&toUserId&reasonCode&state&locationId`; ответ `{rows, truncated}` — строка на звено (дата, від кого, кому, глибина, завдання, причина, пояснення, стан, дата завершення), не больше 2000; работа кандидата — только при `candidate.view`; `format=xlsx` — `report.export` (review-time-tails) |
 | PATCH | `/review/capacity/:userId` | «Змінити ліміт» и «приймаю делегування» (`v2/37` §5.3, §7.2 (д)) |
 | POST | `/review/absences` | отсутствие проверяющего (`v2/37` §6.2) → `{absence, movedCount}`; `422 reviewer_absence.range_invalid`, `422 absence.self_substitute` |
 | DELETE | `/review/absences/:id` | отмена отсутствия; переехавшие работы назад не едут |
@@ -1008,6 +1009,11 @@ HR и администратор — весь тенант). Кандидат и
 только сегменты `learning_time_sessions`; витрину, прогресс урока, попытку, сдачу и колонки
 времени очереди проверки пересчитывает фоновая `time.rollup` (раз в 10 минут). Колонки времени
 попытки — учёт, а не правило: срок попытки по-прежнему только `deadline_at`.
+Сегменты старше 400 дней убирает ежедневная `time.purge_sessions` (05:10 по Киеву) — только целой
+замолчавшей парой «человек × элемент», с переносом сумм в `learning_time_totals.purged_*`: ни
+одна посчитанная цифра при уборке не меняется (решение `v2/44` §17 Р-T1). Узел траектории
+(`subjectType = 'track_node'`) меряет экран шага-материала `/learn/resources/:id` — когда материал
+открыт из траектории, контекст ответа `open` несёт `nodeId`.
 
 ### Нормы времени на контент (`docs/v2/37-review-delegation.md` §6.3, §7.13–7.14, §9.3, §10, PR-22)
 

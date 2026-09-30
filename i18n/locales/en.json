@@ -175,7 +175,8 @@
       "ratingReport": "Engagement index",
       "libraryReports": "Library reports",
       "library": "Module library",
-      "interviewReports": "Interview reports"
+      "interviewReports": "Interview reports",
+      "delegations": "Delegation log"
     },
     "section": {
       "learning": "Learning",
@@ -6526,7 +6527,8 @@
       "reviewer": "Reviewer",
       "due": "Deadline",
       "delegatedBy": "Delegated by",
-      "delegationState": "Delegation status"
+      "delegationState": "Delegation status",
+      "deviation": "Deviation"
     },
     "filter": {
       "location": "Locations",
@@ -6596,11 +6598,30 @@
       "conflictAuthor": "You are the author of this material — assess the work, not your content",
       "goReview": "Go to review",
       "question": "Question",
-      "noWork": "The content of this work is shown in its own section"
+      "noWork": "The content of this work is shown in its own section",
+      "trainedByMe": "You mentored this person on this track. You don’t have to review it — you can hand it over",
+      "handOver": "Hand over",
+      "timeLine": "Estimated time {plan} · Content {content} · Attempt {attempt}",
+      "timeIncomplete": "Time measured incompletely",
+      "timeReason": {
+        "partial": "part of the time was sent after the connection came back, or less than 80% of the pass was measured",
+        "unreliable": "less than 40% of the pass was measured, the daily limit was hit, or all sessions were cut off"
+      }
     },
     "delegate": "Delegate",
     "revoke": "Revoke delegation",
-    "reassign": "Reassign"
+    "reassign": "Reassign",
+    "factor": "×{n}",
+    "deviation": {
+      "too_slow": "Slower than planned",
+      "too_fast": "Faster than planned"
+    },
+    "deviationHint": "Actual time of this work against the estimated time. It signals how accurate the plan is or how hard the material is, not how good the person is",
+    "time": {
+      "incomplete": "incomplete data"
+    },
+    "exportXlsx": "Export to Excel",
+    "exportCsv": "Export to CSV"
   },
   "reviewDelegate": {
     "title": "Delegate the review",
@@ -8625,6 +8646,36 @@
         "no_version": "published but has no current version",
         "no_body": "has no content draft"
       }
+    }
+  },
+  "delegationJournal": {
+    "title": "Delegations",
+    "hint": "Who handed a review to whom, why, and how it ended",
+    "filter": {
+      "from": "From",
+      "to": "To",
+      "fromUser": "From",
+      "toUser": "To",
+      "reason": "Reason",
+      "state": "State",
+      "location": "Location",
+      "anyone": "Anyone",
+      "all": "All"
+    },
+    "export": "Export to Excel",
+    "loadError": "Could not load the log. Please try again",
+    "empty": "No hand-overs in this period. Change the period or filters",
+    "truncated": "Showing the first {n} records — narrow the period to see the rest",
+    "col": {
+      "date": "Date",
+      "from": "From",
+      "to": "To",
+      "depth": "Depth",
+      "task": "Task",
+      "reason": "Reason",
+      "reasonText": "Explanation",
+      "state": "State",
+      "resolvedAt": "Closed on"
     }
   }
 }

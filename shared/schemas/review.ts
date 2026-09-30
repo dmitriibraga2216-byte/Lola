@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { REVIEWER_ABSENCE_KINDS, REVIEW_DELEGATION_REASONS, REVIEW_ROUTING_STRATEGIES, REVIEW_TASK_TYPES, USER_KINDS } from '../enums'
+import { REVIEWER_ABSENCE_KINDS, REVIEW_DELEGATION_REASONS, REVIEW_DELEGATION_STATES, REVIEW_ROUTING_STRATEGIES, REVIEW_TASK_TYPES, USER_KINDS } from '../enums'
 import { KEYSETS } from '../domain/keyset'
 import { keysetCursorSchema } from './keyset'
 
@@ -123,3 +123,20 @@ export type ReviewRoutingRuleInput = z.infer<typeof reviewRoutingRuleSchema>
 export const reviewWorkloadQuerySchema = z.object({
   locationId: z.string().uuid().optional(),
 })
+
+/**
+ * Журнал «Делегування» — `GET /reports/delegations` (`docs/v2/37` §9.4, §10). Фильтры §9.4:
+ * період (по дате передачи), від кого, кому, причина, стан; сверх них — точка работы (только
+ * сужает область смотрящего). `format=xlsx` — выгрузка теми же строками (`report.export`).
+ */
+export const reviewDelegationJournalQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  fromUserId: z.string().uuid().optional(),
+  toUserId: z.string().uuid().optional(),
+  reasonCode: z.enum(REVIEW_DELEGATION_REASONS).optional(),
+  state: z.enum(REVIEW_DELEGATION_STATES).optional(),
+  locationId: z.string().uuid().optional(),
+  format: z.enum(['xlsx']).optional(),
+})
+export type ReviewDelegationJournalQuery = z.infer<typeof reviewDelegationJournalQuerySchema>

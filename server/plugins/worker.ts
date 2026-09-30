@@ -368,6 +368,13 @@ export default defineNitroPlugin(async () => {
       const s = await rollupTenant(tenantId, { windowMinutes: jobs[0]?.data?.windowMinutes })
       if (s.totals || s.lessonProgress || s.attempts || s.submissions || s.queueItems) console.log(`[time.rollup] ${tenantId}:`, s)
     }))
+    // Уборка сегментов старше 400 дней (docs/v2/37 §11, Р-T1): суммы переносятся в витрину,
+    // ни одна посчитанная цифра не меняется; круг — по `activeTenantIds`, как у свёртки
+    await work('time.purge_sessions', () => runPerTenant('time.purge_sessions', async (tenantId) => {
+      const { purgeLearningTimeSessions } = await import('../services/learningTimeRollup')
+      const s = await purgeLearningTimeSessions(tenantId)
+      if (s.segments) console.log(`[time.purge_sessions] ${tenantId}:`, s)
+    }))
     // Нормы времени (docs/v2/37 §11, PR-22): тот же круг по `activeTenantIds` — выборка
     // «тенанты с нормами» вне withTenant под app_user вернула бы пусто (RLS)
     await work('time.norms_recalc', () => runPerTenant('time.norms_recalc', async (tenantId) => {

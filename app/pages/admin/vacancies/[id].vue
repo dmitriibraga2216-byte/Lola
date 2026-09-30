@@ -17,8 +17,9 @@ import type { VacancyState } from '#shared/enums'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'vacancy.view' })
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const { api } = useApi()
+const { hasScope } = useAuth()
 const route = useRoute()
 const id = route.params.id as string
 
@@ -33,12 +34,20 @@ interface Card {
   locationId: string | null
   recruiterId: string | null
   recruiterName: string | null
+  categoryId: string | null
+  orgUnitId: string | null
+  positionId: string | null
   employmentType: string | null
   workFormat: string | null
+  countryCode: string | null
   city: string | null
+  experienceLevel: string | null
+  educationLevel: string | null
   salaryFrom: string | null
   salaryTo: string | null
+  salaryCurrency: string
   salaryVisible: boolean
+  languages: { langCode: string, level: string, isRequired: boolean }[]
   publicEnabled: boolean
   publicToken: string | null
   closeReason: string | null
@@ -65,9 +74,28 @@ const AI_FIELDS = [
 ] as const
 type AiField = typeof AI_FIELDS[number][0]
 
+/**
+ * Повна форма §6.1. Країна й мова — коди ISO (3166-1 / 639-1), назви дає `Intl.DisplayNames`
+ * мовою інтерфейсу: власного перекладу сотні назв продукт не тримає. Перелік — ринки, з якими
+ * працюють мережі тенантів; поточне значення вакансії показується, навіть якщо його в переліку нема.
+ */
+const COUNTRIES = ['UA', 'PL', 'DE', 'CZ', 'SK', 'RO', 'MD', 'HU', 'BG', 'LT', 'LV', 'EE', 'AT', 'NL', 'BE', 'FR', 'ES', 'IT', 'PT', 'GB', 'IE', 'SE', 'NO', 'DK', 'FI', 'CH', 'GE', 'TR', 'IL', 'AE', 'US', 'CA']
+const LANG_CODES = ['en', 'uk', 'pl', 'de', 'fr', 'es', 'it', 'cs', 'ro', 'ru', 'tr', 'zh']
+const CURRENCIES = ['UAH', 'EUR', 'USD', 'PLN', 'GBP']
+function displayName(type: 'region' | 'language', code: string): string {
+  try { return new Intl.DisplayNames([locale.value], { type }).of(code) ?? code }
+  catch { return code }
+}
+
 const card = ref<Card | null>(null)
 const courses = ref<Option[]>([])
 const locations = ref<Option[]>([])
+const recruiters = ref<{ id: string, fullName: string }[]>([])
+const categories = ref<Option[]>([])
+const orgUnits = ref<Option[]>([])
+const positions = ref<Option[]>([])
+const langDraft = reactive({ langCode: 'en', level: 'b1', isRequired: true })
+const fieldError = reactive({ salary: '', language: '', city: '' })
 const accounts = ref<Account[]>([])
 const publications = ref<Publication[]>([])
 const applications = ref<Application[]>([])
@@ -78,6 +106,10 @@ const busy = ref('')
 
 const form = reactive({
   title: '', courseId: '', locationId: '', city: '', employmentType: '', dueDays: 3, passScore: '',
+  recruiterId: '', categoryId: '', orgUnitId: '', positionId: '', workFormat: '', countryCode: '',
+  experienceLevel: '', educationLevel: '', salaryFrom: '' as string | number, salaryTo: '' as string | number,
+  salaryCurrency: 'UAH', salaryVisible: false,
+  languages: [] as { langCode: string, level: string, isRequired: boolean }[],
   descriptionHtml: '', requirementsHtml: '', dutiesHtml: '', extraHtml: '',
 })
 const criterion = reactive({ name: '', weight: 1, scaleMin: 0, scaleMax: 5, isCritical: false })
@@ -93,6 +125,19 @@ function fill(v: Card) {
   form.locationId = v.locationId ?? ''
   form.city = v.city ?? ''
   form.employmentType = v.employmentType ?? ''
+  form.recruiterId = v.recruiterId ?? ''
+  form.categoryId = v.categoryId ?? ''
+  form.orgUnitId = v.orgUnitId ?? ''
+  form.positionId = v.positionId ?? ''
+  form.workFormat = v.workFormat ?? ''
+  form.countryCode = v.countryCode ?? ''
+  form.experienceLevel = v.experienceLevel ?? ''
+  form.educationLevel = v.educationLevel ?? ''
+  form.salaryFrom = v.salaryFrom == null ? '' : Number(v.salaryFrom)
+  form.salaryTo = v.salaryTo == null ? '' : Number(v.salaryTo)
+  form.salaryCurrency = v.salaryCurrency || 'UAH'
+  form.salaryVisible = v.salaryVisible
+  form.languages = (v.languages ?? []).map(l => ({ langCode: l.langCode, level: l.level, isRequired: l.isRequired }))
   form.dueDays = v.assignmentTemplate.dueDays ?? 3
   form.passScore = v.assignmentTemplate.params.passScore === undefined ? '' : String(v.assignmentTemplate.params.passScore)
   form.descriptionHtml = v.descriptionHtml ?? ''
@@ -127,6 +172,14 @@ async function load() {
     locations.value = await api<Option[]>('/refs/locations')
   }
   catch { /* нет прав на справочник — селекты остаются пустыми */ }
+  // Довідники повної форми (§6.1) — кожен окремо: відсутнє право на один не ховає інші.
+  recruiters.value = await api<{ id: string, fullName: string }[]>('/people', { query: { limit: 100, status: 'active' } }).catch(() => [])
+  if (card.value?.recruiterId && !recruiters.value.some(r => r.id === card.value!.recruiterId)) {
+    recruiters.value.unshift({ id: card.value.recruiterId, fullName: card.value.recruiterName ?? '—' })
+  }
+  categories.value = await api<Option[]>('/course-categories').catch(() => [])
+  orgUnits.value = await api<Option[]>('/refs/org-units').catch(() => [])
+  positions.value = await api<Option[]>('/refs/positions').catch(() => [])
   try {
     accounts.value = (await api<{ items: Account[] }>('/job-board-accounts')).items
   }
@@ -135,17 +188,48 @@ async function load() {
 }
 onMounted(load)
 
+/** Перевірки §6.1 до відправки — тексти з таблиці форми; сервер перевіряє те саме незалежно. */
+function validate(): boolean {
+  fieldError.salary = form.salaryFrom !== '' && form.salaryTo !== '' && Number(form.salaryFrom) > Number(form.salaryTo) ? t('vacancies.f.salaryRangeError') : ''
+  fieldError.city = form.city && (form.city.trim().length < 2 || form.city.trim().length > 80) ? t('vacancies.f.cityError') : ''
+  return !fieldError.salary && !fieldError.city
+}
+
+function addLanguage() {
+  fieldError.language = ''
+  if (form.languages.some(l => l.langCode === langDraft.langCode)) {
+    fieldError.language = t('vacancies.f.languageDuplicate')
+    return
+  }
+  form.languages.push({ ...langDraft })
+}
+
 async function save() {
   error.value = ''
   notice.value = ''
+  if (!validate()) return
   busy.value = 'save'
   try {
+    const num = (v: string | number) => (v === '' ? null : Number(v))
     const body = {
       title: form.title,
       courseId: form.courseId || null,
       locationId: form.locationId || null,
-      city: form.city || null,
+      recruiterId: form.recruiterId || null,
+      categoryId: form.categoryId || null,
+      orgUnitId: form.orgUnitId || null,
+      positionId: form.positionId || null,
+      city: form.city.trim() || null,
+      countryCode: form.countryCode || null,
       employmentType: form.employmentType || null,
+      workFormat: form.workFormat || null,
+      experienceLevel: form.experienceLevel || null,
+      educationLevel: form.educationLevel || null,
+      salaryFrom: num(form.salaryFrom),
+      salaryTo: num(form.salaryTo),
+      salaryCurrency: form.salaryCurrency,
+      salaryVisible: form.salaryVisible,
+      languages: form.languages.map((l, i) => ({ ...l, sort: i })),
       descriptionHtml: form.descriptionHtml || null,
       requirementsHtml: form.requirementsHtml || null,
       dutiesHtml: form.dutiesHtml || null,
@@ -386,7 +470,7 @@ const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'a
           </select>
         </label>
         <label>{{ t('vacancies.f.city') }}
-          <input v-model="form.city" maxlength="120">
+          <input v-model="form.city" maxlength="80">
         </label>
         <label>{{ t('vacancies.f.employment') }}
           <select v-model="form.employmentType">
@@ -396,8 +480,111 @@ const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'a
             </option>
           </select>
         </label>
+        <label>{{ t('vacancies.f.recruiter') }}
+          <select v-model="form.recruiterId">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="r in recruiters" :key="r.id" :value="r.id">{{ r.fullName }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.category') }}
+          <select v-model="form.categoryId">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.orgUnit') }}
+          <select v-model="form.orgUnitId">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="o in orgUnits" :key="o.id" :value="o.id">{{ o.name }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.position') }}
+          <select v-model="form.positionId" aria-describedby="hint-position">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="o in positions" :key="o.id" :value="o.id">{{ o.name }}</option>
+          </select>
+          <span id="hint-position" class="sub">{{ t('vacancies.f.positionHint') }}</span>
+        </label>
       </div>
       <p v-if="card.publicToken" class="sub">{{ t('vacancies.f.link') }}: <code>/j/{{ card.publicToken }}</code></p>
+    </section>
+
+    <section class="panel">
+      <h2>{{ t('vacancies.sec.conditions') }}</h2>
+      <div class="grid">
+        <label>{{ t('vacancies.f.workFormat') }}
+          <select v-model="form.workFormat">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="f in (['on_site', 'hybrid', 'remote'] as const)" :key="f" :value="f">{{ t(`vacancy.format.${f}`) }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.country') }}
+          <select v-model="form.countryCode">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-if="form.countryCode && !COUNTRIES.includes(form.countryCode)" :value="form.countryCode">{{ displayName('region', form.countryCode) }}</option>
+            <option v-for="c in COUNTRIES" :key="c" :value="c">{{ displayName('region', c) }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.experience') }}
+          <select v-model="form.experienceLevel">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="e in (['none', 'under_1y', '1_3y', '3_5y', 'over_5y'] as const)" :key="e" :value="e">{{ t(`vacancy.experience.${e}`) }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.education') }}
+          <select v-model="form.educationLevel">
+            <option value="">{{ t('vacancies.f.notChosen') }}</option>
+            <option v-for="e in (['none', 'secondary', 'vocational', 'incomplete_higher', 'higher'] as const)" :key="e" :value="e">{{ t(`vacancy.education.${e}`) }}</option>
+          </select>
+        </label>
+      </div>
+      <p v-if="fieldError.city" class="error" role="alert">{{ fieldError.city }}</p>
+
+      <h3>{{ t('vacancies.f.salary') }}</h3>
+      <div class="grid">
+        <label>{{ t('vacancies.f.salaryFrom') }}
+          <input v-model="form.salaryFrom" type="number" min="0" step="100" inputmode="numeric">
+        </label>
+        <label>{{ t('vacancies.f.salaryTo') }}
+          <input v-model="form.salaryTo" type="number" min="0" step="100" inputmode="numeric">
+        </label>
+        <label>{{ t('vacancies.f.currency') }}
+          <select v-model="form.salaryCurrency">
+            <option v-if="!CURRENCIES.includes(form.salaryCurrency)" :value="form.salaryCurrency">{{ form.salaryCurrency }}</option>
+            <option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </label>
+        <label class="check">
+          <input v-model="form.salaryVisible" type="checkbox" aria-describedby="hint-salary-visible">{{ t('vacancies.f.salaryVisible') }}
+        </label>
+      </div>
+      <p id="hint-salary-visible" class="sub">{{ t('vacancies.f.salaryVisibleHint') }}</p>
+      <p v-if="fieldError.salary" class="error" role="alert">{{ fieldError.salary }}</p>
+
+      <h3>{{ t('vacancies.f.languages') }}</h3>
+      <ul class="lang-list">
+        <li v-for="(l, i) in form.languages" :key="l.langCode" class="lang-item">
+          <span class="grow">{{ displayName('language', l.langCode) }} · {{ t(`vacancy.level.${l.level}`) }}{{ l.isRequired ? '' : ` · ${t('vacancies.f.languageOptional')}` }}</span>
+          <button class="btn ghost small" type="button" @click="form.languages.splice(i, 1)">{{ t('common.delete') }}</button>
+        </li>
+      </ul>
+      <div class="grid">
+        <label>{{ t('vacancies.f.language') }}
+          <select v-model="langDraft.langCode">
+            <option v-for="c in LANG_CODES" :key="c" :value="c">{{ displayName('language', c) }}</option>
+          </select>
+        </label>
+        <label>{{ t('vacancies.f.languageLevel') }}
+          <select v-model="langDraft.level">
+            <option v-for="lv in (['a1', 'a2', 'b1', 'b2', 'c1', 'c2', 'native'] as const)" :key="lv" :value="lv">{{ t(`vacancy.level.${lv}`) }}</option>
+          </select>
+        </label>
+        <label class="check">
+          <input v-model="langDraft.isRequired" type="checkbox">{{ t('vacancies.f.languageRequired') }}
+        </label>
+        <button class="btn ghost" type="button" :disabled="form.languages.length >= 10" @click="addLanguage">{{ t('vacancies.f.addLanguage') }}</button>
+      </div>
+      <p v-if="fieldError.language" class="error" role="alert">{{ fieldError.language }}</p>
     </section>
 
     <section class="panel">
@@ -562,7 +749,13 @@ const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'a
     </section>
 
     <section class="panel">
-      <h2>{{ t('vacancies.applications.title') }}</h2>
+      <div class="app-head">
+        <h2 class="grow">{{ t('vacancies.applications.title') }}</h2>
+        <!-- §9.6: файл із контактами — лише з доступом до всіх вакансій і правом на вивантаження (сервер перевіряє сам) -->
+        <a v-if="hasScope('report.export')" class="btn ghost small" :href="`/api/v1/vacancies/${id}/applications/export?format=xlsx`" :title="t('vacancies.applications.exportHint')">
+          {{ t('vacancies.applications.export') }}
+        </a>
+      </div>
       <div class="tabs" role="tablist">
         <button
           v-for="s in (['pending', 'pending_review', 'accepted', 'spam', 'rejected'] as const)" :key="s" role="tab"
@@ -629,6 +822,11 @@ const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'a
 .draft { margin-top: var(--space-2); border-top: 1px solid var(--color-bg-line); padding-top: var(--space-2); }
 .draft-row { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-1) 0; }
 .manual { margin-top: var(--space-3); }
+h3 { margin: var(--space-3) 0 var(--space-2); font-size: var(--font-size-body); }
+.lang-list { list-style: none; margin: 0 0 var(--space-2); padding: 0; }
+.lang-item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; border-bottom: 1px solid var(--color-bg-line); }
+.app-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.grow { flex: 1 1 auto; }
 .row-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }

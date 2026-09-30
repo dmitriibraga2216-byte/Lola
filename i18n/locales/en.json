@@ -179,7 +179,8 @@
       "delegations": "Delegation log",
       "documentsReport": "Employee documents",
       "absencesReport": "Absence norms and balances",
-      "learningActivityReport": "Learning activity"
+      "learningActivityReport": "Learning activity",
+      "vacancyReports": "Vacancy reports"
     },
     "section": {
       "learning": "Learning",
@@ -208,7 +209,8 @@
       "motivation": "Motivation",
       "fromLola": "From Lola",
       "contentMaterials": "Materials",
-      "contentLibrary": "Module library"
+      "contentLibrary": "Module library",
+      "recruitingReports": "Recruiting"
     },
     "menu": {
       "learner": "My cabinet",
@@ -5628,7 +5630,8 @@
       "main": "About the vacancy",
       "blocks": "Vacancy texts",
       "template": "Assignment parameters",
-      "criteria": "Candidate criteria"
+      "criteria": "Candidate criteria",
+      "conditions": "Working conditions"
     },
     "f": {
       "title": "Title",
@@ -5639,7 +5642,31 @@
       "notChosen": "Not selected",
       "link": "Selection link",
       "dueDays": "Days to complete",
-      "passScore": "Pass score, %"
+      "passScore": "Pass score, %",
+      "recruiter": "Recruiter",
+      "category": "Category",
+      "orgUnit": "Department",
+      "position": "Position",
+      "positionHint": "The position is used when hiring",
+      "workFormat": "Work format",
+      "country": "Country",
+      "experience": "Work experience",
+      "education": "Education",
+      "salary": "Salary",
+      "salaryFrom": "Salary from",
+      "salaryTo": "Salary to",
+      "currency": "Currency",
+      "salaryVisible": "Show to candidates",
+      "salaryVisibleHint": "The salary range will be visible on the public page",
+      "salaryRangeError": "The lower bound is greater than the upper one",
+      "cityError": "City — from 2 to 80 characters",
+      "languages": "Foreign languages",
+      "language": "Language",
+      "languageLevel": "Level",
+      "languageRequired": "Required",
+      "languageOptional": "nice to have",
+      "addLanguage": "+ Add a language",
+      "languageDuplicate": "This language has already been added"
     },
     "c": {
       "name": "Criterion",
@@ -5699,7 +5726,9 @@
       "resume": "Resume",
       "reasons": "Flags",
       "blocklist": "To blocklist",
-      "blocklisted": "The response contacts have been added to the blocklist"
+      "blocklisted": "The response contacts have been added to the blocklist",
+      "export": "Export responses",
+      "exportHint": "A file with contacts — only with access to all vacancies"
     },
     "blocklist": {
       "title": "Contact blocklist",
@@ -8863,6 +8892,63 @@
       "longestStreak": "Longest streak",
       "totalEvents": "Total events",
       "hours": "Hours"
+    }
+  },
+  "vacancyReports": {
+    "title": "Vacancy reports",
+    "hint": "Views, responses and hires; job boards, publications, page protection and AI — within the vacancies you can see",
+    "exportXlsx": "Export XLSX",
+    "exportCsv": "Export CSV",
+    "from": "From",
+    "to": "To",
+    "any": "All",
+    "apply": "Show",
+    "empty": "No data for this period. Change the period or filters.",
+    "topOverall": "Most frequent reasons for the period",
+    "tab": {
+      "effectiveness": "Vacancy effectiveness",
+      "boards": "Job boards",
+      "publications": "Publication log",
+      "protection": "Page protection",
+      "ai": "AI usage"
+    },
+    "about": {
+      "effectiveness": "Responses of the period without spam; of them — accepted, those who completed the recruiting course, and hired. Conversions are counted over the same people.",
+      "boards": "Responses and hires by the publication tag in the job board link. A vacancy budget is split evenly between its job boards.",
+      "publications": "Every publication of the period: who initiated it, state, term, retries and the last job board error.",
+      "protection": "Views, submissions, blocks and spam by day. There are no IP addresses in the report.",
+      "ai": "Text generations by author and block; the share of published texts a person did not edit."
+    },
+    "col": {
+      "vacancy": "Vacancy",
+      "views": "Views",
+      "applications": "Responses",
+      "accepted": "Accepted",
+      "completed": "Completed selection",
+      "hired": "Hired",
+      "viewToApply": "View → response",
+      "applyToCompleted": "Response → completed",
+      "daysToHire": "Days to first hire",
+      "active": "Active publications",
+      "budget": "Budget",
+      "costPerHire": "Cost per hire",
+      "initiator": "Initiator",
+      "publishedAt": "Published",
+      "expiresAt": "Valid until",
+      "attempts": "Retries",
+      "lastError": "Last error",
+      "day": "Day",
+      "submits": "Submissions",
+      "blocked": "Blocked",
+      "pendingReview": "Under review",
+      "spam": "Spam",
+      "topReasons": "Top 5 reasons",
+      "user": "User",
+      "block": "Block",
+      "generations": "Generations",
+      "ops": "Operations charged",
+      "published": "Published",
+      "unedited": "Not edited by a person"
     }
   }
 }

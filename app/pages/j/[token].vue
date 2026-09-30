@@ -136,6 +136,8 @@ async function submit() {
           consent: form.consent,
           formNonce: vacancy.value.formNonce,
           website: form.website,
+          // Метка публикации площадки (§7.19): пришёл по ссылке с `?s=` — отклик засчитается ей.
+          ...(typeof route.query.s === 'string' && route.query.s ? { s: route.query.s.slice(0, 64) } : {}),
         },
       },
     )

@@ -61,7 +61,9 @@ test('15. Вакансія: без курсу не публікується, п�
   await page.getByLabel('Рекрутинговий курс').selectOption({ index: 1 })
   await page.getByLabel('Точка').selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Зберегти', exact: true }).click()
-  await expect(page.getByText(/Зміни вплинуть лише на нові відгуки/)).toBeVisible()
+  // Тот же текст всегда стоит плашкой в разделе шаблона — ответ сохранения ищем по role=status
+  // (как в vacancy-publish.spec.ts), иначе strict mode находит два элемента.
+  await expect(page.getByRole('status').filter({ hasText: /Зміни вплинуть лише на нові відгуки/ })).toBeVisible()
   await page.getByRole('button', { name: 'Опублікувати' }).click()
   await expect(page.getByText('Опублікована')).toBeVisible()
   await expect(page.getByText(/Посилання на відбір/)).toBeVisible()
@@ -89,7 +91,7 @@ test('15. Вакансія: без курсу не публікується, п�
   await expect(page.getByText('Кандидатів у роботі: 1')).toBeVisible()
   await page.getByLabel('Поріг проходження, %').fill('95')
   await page.getByRole('button', { name: 'Зберегти', exact: true }).click()
-  await expect(page.getByText('Зміни вплинуть лише на нові відгуки. Кандидатів у роботі: 1')).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Зміни вплинуть лише на нові відгуки. Кандидатів у роботі: 1' })).toBeVisible()
 
   // Назначение не изменилось ни в одном поле — правка вакансии его не касается.
   const [after] = await admin`select params, due_days from assignments where title = ${TITLE}`

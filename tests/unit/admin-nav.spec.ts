@@ -128,6 +128,8 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/reports/builder': "hasScope('report.builder')",
   '/admin/reports/people': "hasScope('report.team')",
   '/admin/reports/recruiting-funnel': "recruitingOn() && hasScope('candidate.view')",
+  // docs/v2/29 §9.1–§9.5 (vacancies-tails, часть 2): звіти вакансій
+  '/admin/reports/vacancies': "recruitingOn() && hasScope('vacancy.view')",
   '/admin/checklists/report': "hasScope('report.team')",
   '/admin/meetups/report': "hasScope('report.team')",
   '/admin/development/reports': "hasScope('report.team')",

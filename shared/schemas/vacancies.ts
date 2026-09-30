@@ -327,3 +327,28 @@ export type BlocklistCreateInput = z.infer<typeof blocklistCreateSchema>
 export const blocklistApplicationSchema = z
   .object({ reason: z.string().trim().max(500).nullable().optional() })
   .strict()
+
+/**
+ * Отчёты вакансий (`29` §9.1–§9.5, `GET /reports/vacancies/:name`). Период — даты по поясу
+ * тенанта включительно, по умолчанию последние 30 дней; выгрузка — теми же строками, что экран.
+ */
+export const vacancyReportQuerySchema = z
+  .object({
+    from: z.string().date().optional(),
+    to: z.string().date().optional(),
+    locationId: z.string().uuid().optional(),
+    recruiterId: z.string().uuid().optional(),
+    categoryId: z.string().uuid().optional(),
+    state: z.enum(VACANCY_STATES).optional(),
+    provider: z.enum(JOB_BOARD_PROVIDERS).optional(),
+    format: z.enum(['json', 'xlsx', 'csv']).default('json'),
+  })
+  .strict()
+  .refine(v => !v.from || !v.to || v.from <= v.to, { path: ['to'], message: 'Кінець періоду раніше за початок' })
+
+export type VacancyReportQuery = z.infer<typeof vacancyReportQuerySchema>
+
+/** Выгрузка откликов (`29` §9.6, `GET /vacancies/:id/applications/export`). */
+export const vacancyApplicationsExportSchema = z
+  .object({ format: z.enum(['xlsx', 'csv']).default('xlsx') })
+  .strict()

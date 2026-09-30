@@ -58,11 +58,11 @@ beforeAll(async () => {
   locationId = await upsertOne(() => admin`select id from locations where tenant_id = ${tenantId} and name = 'Точка А'`, () => admin`insert into locations (tenant_id, name, org_unit_id) values (${tenantId}, 'Точка А', ${unit}) returning id`)
   otherLocationId = await upsertOne(() => admin`select id from locations where tenant_id = ${tenantId} and name = 'Точка Б'`, () => admin`insert into locations (tenant_id, name, org_unit_id) values (${tenantId}, 'Точка Б', ${unit}) returning id`)
   positionId = await upsertOne(() => admin`select id from positions where tenant_id = ${tenantId} and name = 'Кухар звітів'`, () => admin`insert into positions (tenant_id, name) values (${tenantId}, 'Кухар звітів') returning id`)
-  adminId = await person('Адмін Звітів', '+380679950001', locationId)
-  chief = await person('Шеф Звітів', '+380679950002', locationId)
-  worker = await person('Кухар Звітів', '+380679950003', locationId)
-  outsider = await person('Поза Деревом', '+380679950004', otherLocationId)
-  candidate = await person('Кандидат Звітів', '+380679950005', locationId, 'candidate')
+  adminId = await person('Адмін Звітів', '+380684320001', locationId)
+  chief = await person('Шеф Звітів', '+380684320002', locationId)
+  worker = await person('Кухар Звітів', '+380684320003', locationId)
+  outsider = await person('Поза Деревом', '+380684320004', otherLocationId)
+  candidate = await person('Кандидат Звітів', '+380684320005', locationId, 'candidate')
   await admin`update locations set manager_id = ${adminId} where id = ${otherLocationId}`
   await admin`update tenants set settings = coalesce(settings, '{}'::jsonb) || '{"org_structure_is_source_of_truth": true}'::jsonb where id = ${tenantId}`
   ctx = { tenantId, actorId: adminId }
@@ -84,6 +84,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await wipe(tenantId)
+  // Люди тестового тенанта — тоже прочь: вход идёт по телефону, и чужой файл с тем же номером
+  // иначе попал бы в этого человека (префикс `+38068432` больше нигде не занят).
+  await admin`update locations set manager_id = null where tenant_id = ${tenantId}`
+  await admin`delete from user_placements where tenant_id = ${tenantId}`
+  await admin`delete from users where tenant_id = ${tenantId}`
   await admin.end()
 })
 

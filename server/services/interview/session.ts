@@ -15,6 +15,7 @@ import type { InterviewAnswerInput, InterviewHeartbeatInput, InterviewUploadInpu
 import { notifyAll, recruitingRecipients, type Ctx } from './common'
 import { redactInterviewData } from './redaction'
 import { setSessionAudioTermTx } from './mediaPurge'
+import { applyPatternFlagsTx } from './patternFlags'
 
 /**
  * Прохождение собеседования кандидатом (`docs/v2/30-ai-interview.md` §4, §5.2, §7.6, §7.12,
@@ -448,6 +449,9 @@ async function finishTx(tx: TenantTx, ctx: Ctx, s: Session): Promise<FinishTail>
   // Срок голоса — и на самих записях (`30` §7.7, сквозная проверка 18): его исполняет
   // `interview.media_purge`, а видит SQL проверки `media_assets.purge_after`
   if (purgeAfter) await setSessionAudioTermTx(tx, s.id, purgeAfter)
+  // Письменная сессия — тексты уже есть: факты по сессии целиком сейчас; голосовую досчитает
+  // `advanceSession()` после расшифровки (`30` §7.17)
+  if (state === 'scoring') await applyPatternFlagsTx(tx, s.id)
   await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'interview.finish', entity: 'interview_session', entityId: s.id, after: { state, answered: s.turnsAnswered, attemptStatus: submitted?.status ?? attempt.status } })
   return { sessionId: s.id, state, submitted, released: false }
 }

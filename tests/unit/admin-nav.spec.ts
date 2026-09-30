@@ -101,6 +101,8 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/vacancies': "recruitingOn() && hasScope('vacancy.view')",
   // PR-28 (docs/v2/30 §5.6): сценарії ШІ-співбесіди — тим самим прапорцем рекрутингу
   '/admin/settings/interviews': "recruitingOn() && hasScope('interview.configure')",
+  // ai-tails-2 (docs/v2/30 §9.1, §9.2, §9.6): звіти співбесід — у групі людей, «Звіти модулів» заповнені
+  '/admin/reports/interviews': "recruitingOn() && hasScope('interview.view')",
   '/admin/people/groups': "hasScope('people.view')",
   '/admin/org': "hasScope('people.view')",
   '/admin/refs': "hasScope('people.view')",

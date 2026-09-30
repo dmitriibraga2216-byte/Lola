@@ -174,7 +174,8 @@
       "aiReports": "AI reports",
       "ratingReport": "Engagement index",
       "libraryReports": "Library reports",
-      "library": "Module library"
+      "library": "Module library",
+      "interviewReports": "Interview reports"
     },
     "section": {
       "learning": "Learning",
@@ -3541,6 +3542,7 @@
       "content_time_deviation": "Time deviates from the estimate",
       "absence_deadline_shifted": "Deadline moved because of an absence",
       "ai_provider_down": "AI provider is unavailable",
+      "interview_invited": "Invitation to the online interview",
       "interview_declined": "Candidate chose an alternative interview format",
       "interview_completed": "Interview completed — decision needed",
       "interview_needs_human": "Interview assessment not produced",
@@ -7896,6 +7898,10 @@
         "modelVersion": "Model version",
         "temperature": "Temperature (0–2)",
         "maxTokens": "Response token limit",
+        "priceIn": "Price per 1M input tokens, minor units",
+        "priceOut": "Price per 1M output tokens, minor units",
+        "currency": "Price currency",
+        "priceHint": "Cents per million tokens. Without a price a call costs 0 in the log and in “AI cost”.",
         "region": "Where data is processed",
         "regionComment": "Why data will be processed outside the EU",
         "regionCommentHint": "At least 10 characters; the comment goes to the audit log",
@@ -8296,7 +8302,23 @@
       "notifications_queued": "queued",
       "notifications_failed_24h": "notification failures 24h",
       "webhooks_failed_24h": "webhook failures 24h",
-      "media": "media"
+      "media": "media",
+      "aiTitle": "AI: metrics only",
+      "aiHint": "Latency, tokens, cost and call statuses for 30 days. The operator never sees call content, recordings or people.",
+      "aiEmpty": "No AI calls in the period",
+      "aiCalls": "calls",
+      "aiErrors": "errors",
+      "aiCost": "cost",
+      "aiCol": {
+        "tenant": "Company",
+        "purpose": "Role",
+        "model": "Model",
+        "calls": "Calls",
+        "errors": "Errors",
+        "latency": "Avg / p95, ms",
+        "tokens": "Tokens (in / out)",
+        "cost": "Cost"
+      }
     },
     "auditPage": {
       "tenantId": "Company ID",
@@ -8429,6 +8451,60 @@
       "cost": "Cost",
       "latency": "Avg latency, ms",
       "errors": "Errors"
+    }
+  },
+  "interviewReports": {
+    "title": "Interview reports",
+    "hint": "Counts and numbers, no transcripts or recordings: decisions about people are made by people",
+    "tab": {
+      "funnel": "Interview funnel",
+      "consents": "Consents",
+      "sessions": "Interview export"
+    },
+    "about": {
+      "funnel": "How many candidates went from assignment to a finished interview — per interview test.",
+      "consents": "Share of AI refusals by vacancy and consent text language, and which alternatives people choose. Growing refusals signal that the consent text scares people.",
+      "sessions": "Candidate, scenario, date, duration, criterion scores, confidence, facts for a person and agreement with their decision."
+    },
+    "vacancy": "Vacancy",
+    "location": "Location",
+    "scenario": "Interview",
+    "any": "All",
+    "noVacancy": "No vacancy",
+    "funnelNote": "“Assigned” means candidates from the audience of assignments created in the period plus those who first answered the consent in the period. The average score covers scored sessions only; “needs a person” has no AI score.",
+    "consentsNote": "The person’s latest decision on the interview is counted. Withdrawn consent is separate: the person agreed and then changed their mind.",
+    "sessionsNote": "There are no transcripts, quotes or audio links here and there won’t be in the file — voice answers never leave the system. File exports are recorded in the audit log.",
+    "truncated": "Showing the first 10,000 sessions — narrow the period.",
+    "stub": "test stub, not a model",
+    "human": "person {v}",
+    "lang": {
+      "uk": "Ukrainian",
+      "en": "English",
+      "ru": "Russian"
+    },
+    "alt": {
+      "human_interview": "Live interview",
+      "text_form": "Written form"
+    },
+    "col": {
+      "scenario": "Interview",
+      "assigned": "Assigned",
+      "agreed": "Agreed",
+      "declined": "Declined",
+      "finished": "Finished",
+      "needsHuman": "Needs a person",
+      "avgScore": "Avg AI score",
+      "median": "Median, min",
+      "vacancy": "Vacancy",
+      "lang": "Consent language",
+      "decisions": "Decisions",
+      "accepted": "Consent",
+      "withdrawn": "Withdrew",
+      "state": "State",
+      "duration": "Duration, min",
+      "aiScore": "AI score",
+      "confidence": "Confidence",
+      "agreement": "Agreement with person"
     }
   },
   "ratingReport": {

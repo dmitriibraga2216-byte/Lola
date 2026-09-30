@@ -299,6 +299,9 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   // внутренней деградации (§8). `interview_abandoned_recruiter` — «рекрутер уведомлён» из §4 и
   // §7.12, в таблице §8 своей строки не имел. Оценка заглушки подписана прямо в тексте (Р-28.4):
   // по случайному числу решение принимать нельзя.
+  // docs/v2/30 §8: приглашение кандидату, когда ему назначен тест собеседования (`interview/invite.ts`),
+  // e-mail и Telegram; {{minutes}} — оценка по сценарию, {{until}} — ближайший из сроков назначения и доступа
+  interview_invited: 'Наступний крок відбору — електронна співбесіда, близько {{minutes}} хв: {{url}}{{#until}} Посилання діє до {{until}}.{{/until}}',
   interview_declined: '{{name}} обрав альтернативний формат співбесіди: {{alternative}}.{{#reason}} Причина: {{reason}}.{{/reason}}{{#preferredTime}} Зручний час для дзвінка: {{preferredTime}}.{{/preferredTime}}{{#live}} Потрібна жива співбесіда.{{/live}}',
   interview_completed: '{{name}} завершив співбесіду. Оцінка ШІ: {{score}}{{#stub}} (тестова заглушка, а не модель — не підстава для рішення){{/stub}}. Потрібне рішення людини',
   interview_needs_human: 'Оцінку співбесіди {{name}} не сформовано: {{reason}}. Відповіді збережено — потрібне рішення людини',
@@ -338,7 +341,7 @@ export function emailDefaultEnabled(code: string): boolean {
     // docs/v2/32 §8: итог импорта инициатору и откат администраторам — канал e-mail (PR-31)
     || /^org_structure_(import_finished|rollback)$/.test(code)
     // docs/v2/30 §8 (PR-28): рекрутеру — «in-app, email», кандидату о брошенной сессии — e-mail
-    || /^interview_(declined|completed|needs_human|consent_withdrawn|abandoned|abandoned_recruiter)$/.test(code)
+    || /^interview_(invited|declined|completed|needs_human|consent_withdrawn|abandoned|abandoned_recruiter)$/.test(code)
     // docs/v2/30 §8 (PR-29): Підсумок кандидату — e-mail; розбіжність ШІ з людиною — «email, in-app» адміну
     || code === 'interview_result_ready' || code === 'ai_quality_degraded'
     // docs/v2/35 §8: початок пільгового періоду, режим лише читання і застосований тариф — «email» у каналах

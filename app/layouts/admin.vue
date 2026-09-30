@@ -89,6 +89,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/vacancies', label: t('admin.nav.vacancies'), show: recruitingOn() && hasScope('vacancy.view'), group: t('admin.group.peopleList') },
     // Сценарії ШІ-співбесіди (docs/v2/30 §5.6, PR-28) — той самий прапорець рекрутингу: співбесіда — етап відбору
     { to: '/admin/settings/interviews', label: t('admin.nav.interviews'), show: recruitingOn() && hasScope('interview.configure'), group: t('admin.group.peopleList') },
+    // Звіти співбесід (docs/v2/30 §9.1, §9.2, §9.6) — поруч зі сценаріями: у «Звітах модулів» вже 10 пунктів
+    { to: '/admin/reports/interviews', label: t('admin.nav.interviewReports'), show: recruitingOn() && hasScope('interview.view'), group: t('admin.group.peopleList') },
     { to: '/admin/people/groups', label: t('admin.nav.groups'), show: hasScope('people.view'), group: t('admin.group.peopleList') },
     { to: '/admin/import', label: t('admin.nav.import'), show: hasScope('people.import'), group: t('admin.group.peopleList') },
     { to: '/admin/offboarding', label: t('admin.nav.offboarding'), show: hasScope('offboarding.start'), group: t('admin.group.peopleList') },

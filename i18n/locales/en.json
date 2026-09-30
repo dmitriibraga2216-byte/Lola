@@ -5705,7 +5705,7 @@
       "title": "Contact blocklist",
       "hint": "A response with this phone or email silently goes to “Spam”, the recruiter will not see it. We do not keep the contacts themselves — only a fingerprint for matching and a mask.",
       "contact": "Phone or email",
-      "contactHint": "+380XXXXXXXXX or name@example.com",
+      "contactHint": "+380XXXXXXXXX or name{'@'}example.com",
       "reason": "Reason (optional)",
       "add": "Add to the list",
       "empty": "The list is empty",

@@ -88,10 +88,10 @@ beforeAll(async () => {
     ?? (await admin`insert into locations (tenant_id, name, org_unit_id) values (${tenantId}, 'Точка хвостів', ${unit!.id}) returning id`)[0]!.id) as string
   positionId = ((await admin`select id from positions where tenant_id = ${tenantId} and name = 'Кухар хвостів'`)[0]?.id
     ?? (await admin`insert into positions (tenant_id, name) values (${tenantId}, 'Кухар хвостів') returning id`)[0]!.id) as string
-  adminId = await person('Адмін Хвостів', '+380679940001')
-  chief = await person('Шеф Хвостів', '+380679940002')
-  worker = await person('Кухар Хвостів', '+380679940003')
-  pointManager = await person('Керуючий Точки', '+380679940004')
+  adminId = await person('Адмін Хвостів', '+380684310001')
+  chief = await person('Шеф Хвостів', '+380684310002')
+  worker = await person('Кухар Хвостів', '+380684310003')
+  pointManager = await person('Керуючий Точки', '+380684310004')
   // Администратор структуры — носитель `org.structure.import` (`32` §2): адресат письма о конфликтах.
   const [role] = await admin`
     insert into roles (tenant_id, code, name, scopes, default_scope_type)
@@ -108,6 +108,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await wipe(tenantId)
+  // Люди тестового тенанта — тоже прочь: вход идёт по телефону, и чужой файл с тем же номером
+  // иначе попал бы в этого человека (префикс `+38068431` больше нигде не занят).
+  await admin`update locations set manager_id = null where tenant_id = ${tenantId}`
+  await admin`delete from user_roles where tenant_id = ${tenantId}`
+  await admin`delete from user_placements where tenant_id = ${tenantId}`
+  await admin`delete from users where tenant_id = ${tenantId}`
   await admin.end()
 })
 

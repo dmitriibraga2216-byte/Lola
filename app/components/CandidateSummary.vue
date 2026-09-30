@@ -178,6 +178,8 @@ const cancelAuto = () => run(() => api(`/candidate-summaries/${latest.value!.id}
         <button v-if="canSend && latest.state === 'ready'" class="btn primary small" type="button" :disabled="busy" @click="send">{{ t('candidateSummary.send') }}</button>
         <button v-if="canSend" class="btn ghost small" type="button" :disabled="busy" @click="copyLink">{{ t('candidateSummary.copy') }}</button>
         <button v-if="canSend && !revoking" class="btn ghost small" type="button" @click="revoking = true">{{ t('candidateSummary.revoke') }}</button>
+        <!-- PDF — документ так, як його побачить кандидат (docs/v2/30 §3.5, docs/v2/44 Р-AI2.9) -->
+        <a v-if="latest.body" class="btn ghost small" :href="`/api/v1/candidate-summaries/${latest.id}/pdf`" data-testid="summary-pdf">{{ t('candidateSummary.pdf') }}</a>
       </div>
       <form v-if="revoking" class="row" @submit.prevent="revoke">
         <label class="grow">{{ t('candidateSummary.revokeReason') }}

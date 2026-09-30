@@ -33,7 +33,7 @@ if (typeof new TextDecoder('ascii').decode(new Uint8Array([65])) !== 'string') {
   }
 }
 let fontCache: { regular: Buffer, black: Buffer } | null = null
-function fonts() {
+export function fonts() {
   fontCache ??= { regular: readFileSync(join(FONTS, 'Nunito-Regular.ttf')), black: readFileSync(join(FONTS, 'Nunito-Black.ttf')) }
   return fontCache
 }

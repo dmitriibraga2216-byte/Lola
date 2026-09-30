@@ -7,7 +7,7 @@
 
 ## 2026-09-30 · org-structure-tails, часть 2 — «Підпорядкування людей» и «Журнал змін структури»
 
-**Ветка:** `org-structure-tails-2`. **Миграции нет.** Решения — `44` §15 Р-OS.6, Р-OS.7; пометка — `32` §9; API —
+**Ветка:** `org-structure-tails-2`. **Миграции нет.** Решения — `44` §16 Р-OS.6, Р-OS.7; пометка — `32` §9; API —
 `docs/04` (`GET /org-structure/subordination`, `GET /org-structure/changes`).
 
 ### Что сделано

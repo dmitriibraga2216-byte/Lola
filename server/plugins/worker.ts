@@ -6,7 +6,10 @@ import { candidateAutoArchiveTenant, candidateConsentSweepTenant } from '../jobs
 import { vacancyApplicationExpireTenant, vacancyAttemptsGcTenant } from '../jobs/vacancyApplyScan'
 import { shopReserveExpireTenant } from '../jobs/shopReserveExpire'
 import { absenceBalanceScan, absenceDeadlineGuard, documentsExpiryScan, documentsMissingScan, notesArchiveScanTenant, notesSensitiveScreen } from '../jobs/personRecordsScan'
-import { vacancyPublicationHealthTenant, vacancySpamWatchTenant } from '../jobs/vacancyPublish'
+import {
+  vacancyPublicationExpiryTenant, vacancyPublicationHealthTenant, vacancyRemoveExternalJob, vacancySpamWatchTenant,
+  vacancyStatsRollupJob, vacancySubscriberNotifyJob,
+} from '../jobs/vacancyPublish'
 import { attemptPublish } from '../services/vacancyPublications'
 import { expireStaleAttempts, tenantsWithActiveAttempts } from '../services/attempts'
 import { dispatchNotifications, tenantsWithQueued } from '../services/notifications'
@@ -247,6 +250,23 @@ export default defineNitroPlugin(async () => {
       const n = await purgeIdempotencyKeys(tenantId)
       if (n) console.log(`[idempotency.purge] ${tenantId}: видалено ${n}`)
     }))
+    // docs/v2/29 §11 (vacancies-tails): снятие с площадок и письма подписавшимся — по событию
+    // на вакансию; срок объявлений и свёртка публичной страницы — сканы по тенантам рекрутинга.
+    await perTenant<{ tenantId: string, vacancyId: string }>('vacancy.remove_external', async (data) => {
+      const r = await vacancyRemoveExternalJob(data.tenantId, data.vacancyId)
+      if (r.removed) console.log(`[vacancy.remove_external] ${data.tenantId}: знято ${r.removed}`)
+    })
+    await perTenant<{ tenantId: string, vacancyId: string }>('vacancy.subscriber_notify', async (data) => {
+      const r = await vacancySubscriberNotifyJob(data.tenantId, data.vacancyId)
+      if (r.sent || r.skipped) console.log(`[vacancy.subscriber_notify] ${data.tenantId}:`, r)
+    })
+    await work('vacancy.publication_expiry', () => runPerTenant('vacancy.publication_expiry', async (tenantId) => {
+      const r = await vacancyPublicationExpiryTenant(tenantId)
+      if (r.expired || r.warned) console.log(`[vacancy.publication_expiry] ${tenantId}:`, r)
+    }, recruitingTenantIds))
+    await work('vacancy.stats_rollup', () => runPerTenant('vacancy.stats_rollup', async (tenantId) => {
+      await vacancyStatsRollupJob(tenantId)
+    }, recruitingTenantIds))
     // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход в S3 живёт 90 дней, строка — 400
     await work('ai.calls_cleanup', () => runPerTenant('ai.calls_cleanup', async (tenantId) => {
       const { aiCallsCleanup } = await import('../services/ai/calls')

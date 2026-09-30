@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, char, check, index, integer, jsonb, numeric, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { boolean, char, check, date, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { baseColumns, tenantId } from './_common'
 import { tenants } from './tenants'
 import { users } from './people'
@@ -377,4 +377,68 @@ export const vacancyAiGenerations = pgTable('vacancy_ai_generations', {
   index('idx_vacancy_ai_generations_tenant').on(t.tenantId, t.createdAt.desc()),
   check('vacancy_ai_generations_target_chk', sql`${t.target} in ('description', 'requirements', 'duties', 'extra', 'criteria')`),
   check('vacancy_ai_generations_status_chk', sql`${t.status} in ('ok', 'failed', 'limited')`),
+])
+
+/**
+ * Подписка на возобновление набора (`29` §5.6, §10 `POST /j/:token/subscribe`, миграция 0104).
+ *
+ * Кнопка «Повідомити, коли відкриється» на странице 410 приостановленной вакансии. Строка
+ * одноразовая: `vacancy.subscriber_notify` удаляет её после письма, закрытие вакансии — без
+ * письма (закрытая переоткрывается с новым токеном и другими условиями, `29` §4). Решение
+ * `v2/44` Р-VT.2.
+ */
+export const vacancySubscribers = pgTable('vacancy_subscribers', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  vacancyId: uuid('vacancy_id').notNull().references(() => vacancies.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  /** Язык письма — язык страницы, с которой подписались (`29` §7.20); `null` — язык пространства. */
+  locale: text('locale'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('uq_vacancy_subscribers_email').on(t.tenantId, t.vacancyId, sql`lower(${t.email})`),
+  check('vacancy_subscribers_email_chk', sql`length(${t.email}) between 3 and 200 and position('@' in ${t.email}) > 1`),
+])
+
+/**
+ * Суточная свёртка публичной страницы (`29` §9.1, §9.4, §11 `vacancy.stats_rollup`, миграция 0104).
+ *
+ * `public_apply_attempts` живёт 30 дней, а отчёты смотрят дальше: свёртка переносит просмотры,
+ * отправки и блокировки с причинами в строку «вакансия × сутки». Пересчитываются только дни,
+ * целиком лежащие в журнале, — уборка журнала свёртку не уменьшает (`v2/44` Р-VT.3).
+ */
+export const vacancyStatsDaily = pgTable('vacancy_stats_daily', {
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  vacancyId: uuid('vacancy_id').notNull().references(() => vacancies.id, { onDelete: 'cascade' }),
+  day: date('day').notNull(),
+  views: integer('views').notNull().default(0),
+  submits: integer('submits').notNull().default(0),
+  blocked: integer('blocked').notNull().default(0),
+  /** `{причина: число}` строк `submit_blocked` за сутки. */
+  blockReasons: jsonb('block_reasons').notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ name: 'vacancy_stats_daily_pk', columns: [t.tenantId, t.vacancyId, t.day] }),
+  index('idx_vacancy_stats_daily_tenant').on(t.tenantId, t.day),
+  check('vacancy_stats_daily_nonneg_chk', sql`${t.views} >= 0 and ${t.submits} >= 0 and ${t.blocked} >= 0`),
+])
+
+/**
+ * Чёрный список контактов тенанта (`29` §7.7, слагаемое 100; миграция 0104).
+ *
+ * Контакт — HMAC-хэш с посолью тенанта (как `ip_hash`) плюс маска для экрана: проверке нужен
+ * ответ «тот же ли это номер», а не сам номер (`v2/44` Р-VT.4). Вид контакта не хранится —
+ * он виден по маске и перечисления не требует.
+ */
+export const contactBlocklist = pgTable('contact_blocklist', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  contactHash: text('contact_hash').notNull(),
+  contactMasked: text('contact_masked').notNull(),
+  reason: text('reason'),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+}, t => [
+  uniqueIndex('uq_contact_blocklist_hash').on(t.tenantId, t.contactHash),
+  index('idx_contact_blocklist_tenant').on(t.tenantId, t.createdAt.desc()),
+  check('contact_blocklist_reason_chk', sql`${t.reason} is null or length(${t.reason}) <= 500`),
 ])

@@ -571,6 +571,8 @@ export const VACANCY_APPLY_SPAM_SCORES = {
   commentLinks: 30,
   consonantName: 20,
   ipMarkedSpam: 50,
+  /** Контакт в чёрном списке тенанта (`contact_blocklist`, миграция 0104): сразу `spam`. */
+  contactBlocked: 100,
 } as const
 
 /** Порог ручной модерации и порог немого отсева (`29` §7.7). */
@@ -635,6 +637,20 @@ export const VACANCY_PUBLISH_RETRY_DELAYS_SEC = [60, 300, 1500] as const
 
 /** Через сколько дней истёкшая публикация напоминает о себе (`29` §11 `vacancy.publication_expiring`). */
 export const VACANCY_PUBLICATION_EXPIRING_DAYS = 3
+
+/**
+ * Подписка «Повідомити, коли відкриється» на странице 410 (`29` §5.6, §10): не больше пяти
+ * адресов с одного `ip_hash` за час — тот же порядок, что у откликов §7.4 (3 в час), с запасом
+ * на семью за одним роутером (`v2/44` Р-VT.2).
+ */
+export const VACANCY_SUBSCRIBE_PER_HOUR = 5
+
+/**
+ * Окно пересчёта `vacancy.stats_rollup` (`29` §11): последние 29 суток. На сутки короче срока
+ * журнала `public_apply_attempts` (30 дней, `vacancy.attempts_gc`), чтобы не пересчитывать
+ * день, который уборка уже начала срезать (`v2/44` Р-VT.3).
+ */
+export const VACANCY_STATS_ROLLUP_DAYS = 29
 
 /**
  * Блок формы вакансии, который умеет генерировать ИИ (`vacancy_ai_generations.target`,

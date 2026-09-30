@@ -691,6 +691,13 @@
     {
       "idx": 98,
       "version": "7",
+      "when": 1790235360000,
+      "tag": "0104_v2_vacancy_tails",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
       "when": 1790235420000,
       "tag": "0105_idempotency_keys",
       "breakpoints": true

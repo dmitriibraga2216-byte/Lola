@@ -1,7 +1,9 @@
-import { eq, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { jobBoardAccounts, vacancies } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
-import { checkAccountHealth } from '../services/vacancyPublications'
+import { checkAccountHealth, publicationExpiryScan, removeExternalPublications } from '../services/vacancyPublications'
+import { notifyVacancySubscribers } from '../services/vacancySubscribers'
+import { vacancyStatsRollupTenant } from '../services/vacancyStats'
 import { enqueueNotification, tenantAdminIds } from '../services/notifications'
 import { VACANCY_SPAM_BURST_HARDEN_HOURS, VACANCY_SPAM_BURST_THRESHOLD_PER_HOUR } from '../../shared/enums'
 
@@ -16,8 +18,9 @@ import { VACANCY_SPAM_BURST_HARDEN_HOURS, VACANCY_SPAM_BURST_THRESHOLD_PER_HOUR 
  * `jobBoardAccounts.ts#revokeAccount()` — эта функция только находит, кого спрашивать.
  */
 export async function vacancyPublicationHealthTenant(tenantId: string): Promise<number> {
+  // `failing` — тем же проходом: иначе замолчавший аккаунт не вернулся бы в `active` сам.
   const accounts = await withTenant(tenantId, null, tx => tx.select({ id: jobBoardAccounts.id })
-    .from(jobBoardAccounts).where(eq(jobBoardAccounts.status, 'active')))
+    .from(jobBoardAccounts).where(inArray(jobBoardAccounts.status, ['active', 'failing'])))
   for (const a of accounts) await checkAccountHealth(tenantId, a.id)
   return accounts.length
 }
@@ -61,3 +64,32 @@ export async function vacancySpamWatchTenant(tenantId: string): Promise<number> 
     return hardened
   })
 }
+
+/**
+ * `vacancy.remove_external` — по событию закрытия (§11, §4 «публикации в очередь на снятие»).
+ * Пока хоть одна площадка не ответила, задача падает: повтор с экспонентой делает очередь
+ * (`queue.ts`), уже снятые строки второй раз не трогаются.
+ */
+export async function vacancyRemoveExternalJob(tenantId: string, vacancyId: string): Promise<{ removed: number, pending: number }> {
+  const r = await removeExternalPublications(tenantId, vacancyId)
+  if (r.pending) throw new Error(`[vacancy.remove_external] ${vacancyId}: площадка не ответила на ${r.pending} публикаций`)
+  return r
+}
+
+/** `vacancy.publication_expiry` — ежедневно 08:00 (§11): `expired` и предупреждение за 3 дня. */
+export async function vacancyPublicationExpiryTenant(tenantId: string): Promise<{ expired: number, warned: number }> {
+  return publicationExpiryScan(tenantId)
+}
+
+/** `vacancy.subscriber_notify` — по событию возобновления набора (§11, §5.6). */
+export async function vacancySubscriberNotifyJob(tenantId: string, vacancyId: string) {
+  const r = await notifyVacancySubscribers(tenantId, vacancyId)
+  if (r.failed) throw new Error(`[vacancy.subscriber_notify] ${vacancyId}: не надіслано ${r.failed} листів`)
+  return r
+}
+
+/** `vacancy.stats_rollup` — ежечасно (§11): свёртка публичной страницы для §9.1 и §9.4. */
+export async function vacancyStatsRollupJob(tenantId: string): Promise<number> {
+  return vacancyStatsRollupTenant(tenantId)
+}
+

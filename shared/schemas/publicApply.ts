@@ -79,3 +79,9 @@ export const applicationRejectSchema = z
   .strict()
 
 export type ApplicationRejectInput = z.infer<typeof applicationRejectSchema>
+
+/**
+ * «Повідомити, коли відкриється» на странице 410 (`29` §5.6, `POST /api/v1/public/j/:token/subscribe`).
+ * Только почта: письмо `vacancy_subscriber_reopened` уходит по e-mail (§8).
+ */
+export const publicSubscribeSchema = z.object({ email }).strict()

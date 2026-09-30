@@ -309,3 +309,21 @@ export const vacancyAiTextRequestSchema = z
   .strict()
 
 export type VacancyAiTextRequestInput = z.infer<typeof vacancyAiTextRequestSchema>
+
+/**
+ * Чёрный список контактов тенанта (`29` §7.7, `POST /contact-blocklist`). Телефон или почта —
+ * одной строкой: сервер сам отличает их и нормализует, форма не заставляет выбирать вид.
+ */
+export const blocklistCreateSchema = z
+  .object({
+    contact: z.string().trim().min(3).max(200),
+    reason: z.string().trim().max(500).nullable().optional(),
+  })
+  .strict()
+
+export type BlocklistCreateInput = z.infer<typeof blocklistCreateSchema>
+
+/** «До чорного списку» из строки отклика — только причина, контакты берутся из отклика. */
+export const blocklistApplicationSchema = z
+  .object({ reason: z.string().trim().max(500).nullable().optional() })
+  .strict()

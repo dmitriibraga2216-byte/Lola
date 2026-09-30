@@ -567,6 +567,41 @@ create table vacancy_ai_generations (         -- журнал ИИ-генера�
   created_at timestamptz not null default now()
 );
 
+-- Хвосты вакансий (`v2/29` §5.6, §7.7, §11; миграция 0104_v2_vacancy_tails; решения `v2/44` Р-VT.2–Р-VT.4).
+-- Ни одного нового перечисления: у подписки и списка нет состояний, у свёртки — только счётчики.
+create table vacancy_subscribers (            -- «Повідомити, коли відкриється» на странице 410 (§5.6)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid not null references vacancies(id) on delete cascade,
+  email text not null,                        -- 3–200, живёт до одного письма или до закрытия вакансии
+  locale text,                                -- язык страницы, с которой подписались; null — язык пространства
+  created_at timestamptz not null default now()
+  -- uq_vacancy_subscribers_email (tenant_id, vacancy_id, lower(email))
+);
+
+create table vacancy_stats_daily (            -- свёртка публичной страницы, vacancy.stats_rollup (§11)
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  vacancy_id uuid not null references vacancies(id) on delete cascade,
+  day date not null,                          -- сутки по поясу тенанта
+  views int not null default 0, submits int not null default 0, blocked int not null default 0,
+  block_reasons jsonb not null default '{}'::jsonb, -- {причина: число} строк submit_blocked
+  updated_at timestamptz not null default now(),
+  primary key (tenant_id, vacancy_id, day)
+);
+-- public_apply_attempts живёт 30 дней; свёртка пересчитывает последние 29 суток целиком и
+-- переживает уборку журнала. Отклики и наймы в неё не входят — они хранятся без срока.
+
+create table contact_blocklist (              -- чёрный список контактов тенанта (§7.7, слагаемое 100)
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants(id) on delete cascade,
+  contact_hash text not null,                 -- HMAC-SHA256 нормализованного контакта с посолью тенанта
+  contact_masked text not null,               -- для экрана: +380** *** ** 67 / a****@gmail.com
+  reason text,                                -- до 500
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (tenant_id, contact_hash)
+);
+
 -- Провайдер модели и учёт вызовов (`v2/30` §3.2, §7.7, §7.12, §7.16; план `v2/45` PR-27, миграция
 -- 0092). Каждый вызов модели в продукте — генерация вакансии, эмбеддинги библиотеки и базы знаний,
 -- а дальше расшифровка, оценка, подсказка, Підсумок — идёт через шлюз server/services/ai/gateway.ts
@@ -3242,6 +3277,7 @@ CHECK) — **23**, а не 15: из пятнадцати таблиц §3.1 (14 
 | Расширения карточки человека | `38` §3.7 | `person_rating_snapshots` (Т) | 0094 | PR-35 [#137] | `docs/v2/38` §3.7 + миграция |
 | ИИ-собеседование | `30` §3.1, §3.3 | `interview_scenarios`, `interview_criteria`, `interview_consents`, `interview_sessions`, `interview_turns`, `interview_criterion_scores` (Т) | 0095 | PR-28 [#139] | `docs/v2/30` §3.1, §3.3 + миграция |
 | ИИ-собеседование | `30` §3.5–3.6 | `candidate_summaries`, `ai_review_hints`, `ai_quality_reviews` (Т) | 0096 | PR-29 [#142] | `docs/v2/30` §3.5–3.6 + миграция |
+| Рекрутинг: вакансии | `29` §5.6, §7.7, §11 | `vacancy_subscribers`, `vacancy_stats_daily`, `contact_blocklist` (Т) | 0104 | vacancies-tails | выше, «Хвосты вакансий» + `docs/v2/44` Р-VT.2–Р-VT.4 |
 
 `docs/v2/40-data-model-delta.md` §2–§3 остаётся историческим планом (что задумывалось до
 реализации); состав и колонки по факту — таблица выше и разделы «Изменения существующих таблиц

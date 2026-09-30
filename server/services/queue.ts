@@ -101,6 +101,13 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('vacancy.publish_retry', { retryLimit: 1, expireInSeconds: 300 })
       await b.createQueue('vacancy.publication_health', { retryLimit: 2, expireInSeconds: 600 })
       await b.createQueue('vacancy.spam_watch', { retryLimit: 2, expireInSeconds: 300 })
+      // docs/v2/29 §11 (vacancies-tails): снятие с площадок и письма подписавшимся — по событию
+      // (закрытие / возобновление набора), повтор с экспонентой: площадка или SMTP могли
+      // промолчать один раз. Срок объявлений — ежедневно, свёртка страницы — ежечасно.
+      await b.createQueue('vacancy.remove_external', { retryLimit: 3, retryBackoff: true, retryDelay: 60, expireInSeconds: 600 })
+      await b.createQueue('vacancy.subscriber_notify', { retryLimit: 3, retryBackoff: true, retryDelay: 60, expireInSeconds: 600 })
+      await b.createQueue('vacancy.publication_expiry', { retryLimit: 2, expireInSeconds: 600 })
+      await b.createQueue('vacancy.stats_rollup', { retryLimit: 2, expireInSeconds: 600 })
       // docs/v2/32 §11 (PR-31): применение импорта оргструктуры по запуску. Без повторов: упавший
       // импорт закрывается `failed` с письмом инициатору, дерево не тронуто (одна транзакция), а
       // повтор того же файла — осознанное действие человека, не очереди
@@ -238,6 +245,10 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
       await b.schedule('idempotency.purge', '20 4 * * *', {}, { singletonKey: 'idempotency.purge', tz: 'Europe/Kyiv' })
       await b.schedule('oauth.states_cleanup', '15 4 * * *', {}, { singletonKey: 'oauth.states_cleanup', tz: 'Europe/Kyiv' })
+      // Срок объявлений на площадках — 08:00 (§11): предупреждение за 3 дня приходит утром;
+      // свёртка публичной страницы — ежечасно в :15, после истечения откликов в :10
+      await b.schedule('vacancy.publication_expiry', '0 8 * * *', {}, { singletonKey: 'vacancy.publication_expiry', tz: 'Europe/Kyiv' })
+      await b.schedule('vacancy.stats_rollup', '15 * * * *', {}, { singletonKey: 'vacancy.stats_rollup' })
       await b.schedule('ai.calls_cleanup', '10 4 * * *', {}, { singletonKey: 'ai.calls_cleanup', tz: 'Europe/Kyiv' })
       await b.schedule('interview.reap', '*/15 * * * *', {}, { singletonKey: 'interview.reap' })
       await b.schedule('interview.media_purge', '40 3 * * *', {}, { singletonKey: 'interview.media_purge', tz: 'Europe/Kyiv' })
@@ -293,4 +304,16 @@ export async function enqueueTrajectoryTimer(tenantId: string, stateId: string, 
 export async function enqueuePublishRetry(tenantId: string, publicationId: string, delaySec: number): Promise<void> {
   const b = await getBoss()
   await b.send('vacancy.publish_retry', { tenantId, publicationId }, { singletonKey: `publish_retry:${publicationId}`, startAfter: delaySec })
+}
+
+/** Снятие объявлений закрытой вакансии с площадок (docs/v2/29 §11 `vacancy.remove_external`). */
+export async function enqueueRemoveExternal(tenantId: string, vacancyId: string): Promise<void> {
+  const b = await getBoss()
+  await b.send('vacancy.remove_external', { tenantId, vacancyId }, { singletonKey: `remove_external:${vacancyId}` })
+}
+
+/** Письма подписавшимся на странице 410 после возобновления набора (docs/v2/29 §11 `vacancy.subscriber_notify`). */
+export async function enqueueSubscriberNotify(tenantId: string, vacancyId: string): Promise<void> {
+  const b = await getBoss()
+  await b.send('vacancy.subscriber_notify', { tenantId, vacancyId }, { singletonKey: `subscriber_notify:${vacancyId}` })
 }

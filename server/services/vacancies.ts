@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm'
 import {
   candidateScores, courses, users, vacancies, vacancyCriteria, vacancyCriterionScores,
-  vacancyLanguages, vacancyPublications,
+  vacancyLanguages, vacancySubscribers,
 } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
@@ -487,7 +487,8 @@ export async function cardOf(tx: TenantTx, row: VacancyRow): Promise<VacancyCard
 // ── Состояния (§4) ────────────────────────────────────────────────────────────────────────
 
 export type TransitionResult =
-  | { ok: true, vacancy: VacancyCard }
+  /** `resumed` — набор возобновлён после паузы: ручка ставит `vacancy.subscriber_notify` (§5.6). */
+  | { ok: true, vacancy: VacancyCard, resumed?: boolean }
   | { ok: false, code: 'not_found' }
   | { ok: false, code: 'link_requirements', missing: string[] }
   | { ok: false, code: 'ai_text_unreviewed', blocks: string[] }
@@ -563,7 +564,7 @@ export async function publishVacancy(v: Viewer, id: string): Promise<TransitionR
       tenantId: v.tenantId, actorId: v.actorId, action: 'vacancy.publish', entity: 'vacancy', entityId: id,
       before: { state: row.state }, after: { state: 'published', reopened: reopen },
     })
-    return { ok: true, vacancy: await cardOf(tx, (await rowById(tx, v, id))!) } as TransitionResult
+    return { ok: true, vacancy: await cardOf(tx, (await rowById(tx, v, id))!), resumed: row.state === 'paused' } as TransitionResult
   })
 }
 
@@ -597,14 +598,14 @@ export async function closeVacancy(v: Viewer, id: string, input: VacancyCloseInp
       before: { state: row.state }, after: { state: 'closed', reason: input.reason, reasonText: input.reasonText ?? null, candidates: inProgress.length },
     })
     // §4 «публикации в очередь на снятие», чекбокс «Зняти оголошення з майданчиків» (§6.4,
-    // включён по умолчанию — `removeExternal`). PR-17 не заводит фоновую задачу
-    // `vacancy.remove_external` (нет в объёме этого PR, `docs/v2/46-progress.md`): строки
-    // сразу переводятся в `removed` без вызова `adapter.remove()`, ровно как это уже делает
-    // `vacancyPublications.ts#removePublication()` для одиночного снятия — второй логики нет.
-    if (input.removeExternal) {
-      await tx.update(vacancyPublications).set({ state: 'removed', removedAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(vacancyPublications.vacancyId, id), inArray(vacancyPublications.state, ['queued', 'publishing', 'active', 'manual', 'conflict'])))
-    }
+    // включён по умолчанию — `removeExternal`): снимает задача `vacancy.remove_external`
+    // (`vacancyPublications.ts#removeExternalPublications()`), её ставит ручка закрытия после
+    // коммита — вызов площадки внутри транзакции закрытия держал бы строку вакансии открытой
+    // на время чужого API.
+    // Подписка «Повідомити, коли відкриється» (§5.6) умирает вместе со ссылкой: закрытая
+    // вакансия переоткрывается с новым токеном и другими условиями (§4), и письмо «набір знову
+    // відкрито» подписавшемуся на старую было бы неправдой (`v2/44` Р-VT.2).
+    await tx.delete(vacancySubscribers).where(eq(vacancySubscribers.vacancyId, id))
     // `vacancy.closed_with_candidates` (`29` §8, критерий §13 к. 13): прохождение не
     // прерывается, рекрутер и HR/админ решают по каждому кандидату отдельно.
     if (inProgress.length) {

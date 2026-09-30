@@ -691,8 +691,8 @@
   пятнадцать) отчётов пакета…» → «Що не входить» (журнал делегирований — не отчёт конструктора).
 - `38`: `GET /reports/documents` — «2026-09-25 · Фаза 3, PR-32 — заметки и документы человека» →
   «Что не входит…» (отчёты `38` §9 п. 1–2).
-- Публичный контур: `POST /public/j/:token/subscribe` — «2026-09-25 · Фаза 3, PR-17 — публикация
-  и генерация текста…» → «Что осталось».
+- ~~Публичный контур: `POST /public/j/:token/subscribe`~~ — реализован vacancies-tails (30.09), строка в
+  таблице публичного контура ниже.
 
 ### Этапы жизненного цикла (`docs/v2/33-lifecycle.md` §5.2, §6.1, §10, PR-05)
 
@@ -821,16 +821,20 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | POST | `/vacancies/:id/ai-text/:gid/acknowledge` | «Текст перевірено» (`vacancy.ai.use`, PR-17): снимает блокировку публикации без правки текста |
 | POST | `/vacancies/:id/criteria/generate` | «Згенерувати критерії (AI)» (`vacancy.ai.use`, PR-17): черновик 3–8 критериев, ни одна строка `vacancy_criteria` не создаётся без явного `POST .../criteria` по каждому |
 | GET/POST | `/vacancies/:id/publications` | журнал публикаций на площадках (`vacancy.view` / `jobboard.publish`, PR-17): `{accountIds[]}` — через адаптер, `{manual:{accountId, externalUrl}}` — обходной путь `44` §8; оба под `{confirm:true}`; `409 publication.duplicate`, `422 jobboard.account_not_active` |
-| DELETE | `/vacancies/:id/publications/:pid` | снятие публикации (`jobboard.publish`, PR-17): помечает `removed`, адаптер не вызывается |
+| DELETE | `/vacancies/:id/publications/:pid` | снятие публикации (`jobboard.publish`, PR-17; vacancies-tails): у `active` — через `remove()` адаптера, `409 publication.remove_failed`, если площадка не ответила; остальные — сразу `removed` |
 | POST | `/vacancies/:id/publications/:pid/link-external` | «Прив'язати існуюче оголошення» при `conflict` (`jobboard.publish`, PR-17): `409 publication.not_conflict` |
 | GET | `/job-board-accounts` | аккаунты площадок, сгруппированные по владельцу (`jobboard.connect`, PR-17): чужие личные видны только админу |
 | POST | `/job-board-accounts` | подключение (`jobboard.connect`, PR-17): синхронное — заглушка не делает сетевого вызова, поэтому пары `auth-url`/`callback` из документа здесь нет (`[решение]`, `docs/v2/46-progress.md`); `403 jobboard.owner_forbidden` |
 | POST | `/job-board-accounts/:id/disconnect` | отключение (`jobboard.connect`, PR-17): `company` — только админ, `personal` — только владелец, `recruiter` — он сам или админ |
+| POST | `/job-board-accounts/:id/recheck` | «Спробувати ще раз» (`jobboard.connect`, vacancies-tails, `29` §5.4): `health()` сразу → `{outcome: ok\|failing\|revoked\|skipped}`; «мовчить» — статус `failing` (`docs/09` §9.3); чужой личный — `404` |
+| GET/POST | `/contact-blocklist` | чёрный список контактов тенанта (`candidate.edit`, vacancies-tails, `29` §7.7): в списке только маска; `{contact, reason?}` — телефон или почта одной строкой; `409 blocklist.duplicate`, `422 contact.invalid` |
+| DELETE | `/contact-blocklist/:id` | убрать контакт из списка (`candidate.edit`); `404` на чужой |
 
 | GET | `/vacancies/:id/applications` | отклики вакансии, фильтр `state` (`vacancy.view`); вкладка «На модерації» — это `state=pending_review` |
 | POST | `/vacancies/:id/applications/:aid/accept` | принять придержанный отклик вручную (`candidate.edit`): создаётся кандидат и назначение; `409 limit.candidates_exceeded`, `409 application.wrong_state` |
 | POST | `/vacancies/:id/applications/:aid/reject` | отказ с причиной (`candidate.edit`); `422 validation_failed` |
 | POST | `/vacancies/:id/applications/:aid/spam` | пометка «спам» (`candidate.edit`): человеку ничего не уходит |
+| POST | `/vacancies/:id/applications/:aid/blocklist` | «До чорного списку» (`candidate.edit`, vacancies-tails): телефон и почта отклика разом, `{reason?}`; состояние отклика не меняется; `409 blocklist.duplicate` |
 
 **Публичный контур вакансии** (`29` §10, решение `docs/v2/44` В-9) — префикс `/api/v1/public/*`,
 без сессии, тенант из токена ссылки, правило контура — `docs/27-gateway-public.md` §27.8.1.
@@ -841,6 +845,7 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | POST | `/public/j/:token/apply` | отклик: `{fullName, phone?, email?, comment?, consent, formNonce, website, s?}`. **`202` при любом исходе проверок §7.6–§7.7** — форма не сообщает отправителю, какая сработала; `422 consent.required` и `422 form.stale` — единственные исключения, оба про человека, а не про спам |
 | POST | `/public/j/:token/apply/:aid/confirm` | подтверждение контакта кодом: `200 {status:"accepted"}`; `400 otp.invalid`, `429 otp.too_many`, `410 application.expired` |
 | POST | `/public/j/:token/apply/:aid/resume` | резюме, multipart `file` (PR-17, отложено из PR-16, `29` §6.3): PDF/DOC/DOCX/зображення до 10 МБ; принимается только после подтверждения контакта — до того `409 application.not_confirmed`; `413 media.too_big`, `415 file.type` |
+| POST | `/public/j/:token/subscribe` | «Повідомити, коли відкриється» на странице 410 (vacancies-tails, `29` §5.6): `{email}` → `202` — и у приостановленной, и у открытой вакансии (хранится только у приостановленной); письмо — при возобновлении, задача `vacancy.subscriber_notify`; `404` (закрытая и неизвестная неразличимы), `429 rate.too_many` (5 в час с адреса) |
 
 ### Жалоба на материал (`docs/v2/36-content-feedback.md` §10, PR-23)
 

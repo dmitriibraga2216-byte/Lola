@@ -172,7 +172,8 @@
       "aiSettings": "Artificial intelligence",
       "contentIssueReports": "Content issues: reports",
       "aiReports": "AI reports",
-      "ratingReport": "Engagement index"
+      "ratingReport": "Engagement index",
+      "libraryReports": "Library reports"
     },
     "section": {
       "learning": "Learning",
@@ -199,7 +200,9 @@
       "peopleList": "People",
       "peopleStructure": "Structure",
       "motivation": "Motivation",
-      "fromLola": "From Lola"
+      "fromLola": "From Lola",
+      "contentMaterials": "Materials",
+      "contentLibrary": "Module library"
     },
     "menu": {
       "learner": "My cabinet",
@@ -8356,5 +8359,83 @@
     "backfill": "Restore history",
     "backfillQueued": "The calculation is queued — the history will appear in cards within a few minutes.",
     "backfillError": "Could not start the calculation. Try again or contact support."
+  },
+  "libraryReports": {
+    "title": "Module library reports",
+    "hint": "Where modules are used, which links lag behind the latest version, and what is proposed to the library",
+    "tab": {
+      "usage": "Library usage",
+      "stale": "Outdated links",
+      "proposals": "Library proposals"
+    },
+    "from": "From",
+    "to": "To",
+    "any": "All",
+    "apply": "Show",
+    "retry": "Try again",
+    "loading": "Loading the report…",
+    "loadError": "Could not load the report. Please try again",
+    "exportXlsx": "Export XLSX",
+    "exportCsv": "Export CSV",
+    "onlyUnused": "Unused only",
+    "minLag": "Behind by at least, versions",
+    "versionAt": "v{v} · {date}",
+    "noVersion": "Not published",
+    "empty": {
+      "usage": "No modules match these filters. Change the filters or create a module in the library",
+      "stale": "No outdated links — every place is on the latest version",
+      "proposals": "No proposals match these filters"
+    },
+    "col": {
+      "module": "Module",
+      "kind": "Type",
+      "category": "Category",
+      "owner": "Owner",
+      "version": "Version",
+      "usages": "Places",
+      "stale": "Of them outdated",
+      "opens": "Opens in period",
+      "completion": "Completed",
+      "updatedAt": "Last edit",
+      "container": "Track / course",
+      "holder": "Node / lesson",
+      "pinned": "Pinned",
+      "latest": "Latest",
+      "lag": "Behind, versions",
+      "days": "Days since newer",
+      "author": "Track or course author",
+      "sourceLesson": "Source lesson",
+      "proposedBy": "Proposed by",
+      "createdAt": "Date",
+      "status": "Status",
+      "decidedBy": "Decided by",
+      "decision": "Decision comment"
+    },
+    "moduleStatus": {
+      "draft": "draft",
+      "published": "published",
+      "archived": "archived"
+    },
+    "proposalStatus": {
+      "pending": "Awaiting decision",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "withdrawn": "Withdrawn"
+    },
+    "scans": {
+      "title": "Maintenance checks",
+      "orphan": "Broken records scan (weekly)",
+      "retire": "Version retirement (daily)",
+      "found": "found: {n}",
+      "never": "has not run yet",
+      "noRetire": "no versions retired yet",
+      "retired": "versions retired: {n}",
+      "orphanLesson": "Lesson “{title}” has no owning module and no version",
+      "orphanHint": "The scan fixes nothing. Send the list to developers — these are traces of interrupted saves",
+      "problem": {
+        "no_version": "published but has no current version",
+        "no_body": "has no content draft"
+      }
+    }
   }
 }

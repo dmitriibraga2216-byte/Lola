@@ -155,6 +155,18 @@ export default defineNitroPlugin(async () => {
       const s = await staleDigest(tenantId)
       if (s.authors) console.log(`[library.stale_digest] ${tenantId}:`, s)
     }))
+    // docs/v2/31 §11: следы оборванных транзакций (только отчёт) и вывод из оборота версий,
+    // которые никто не закрепляет дольше 90 дней
+    await work('library.orphan_scan', () => runPerTenant('library.orphan_scan', async (tenantId) => {
+      const { libraryOrphanScan } = await import('../services/libraryReports')
+      const r = await libraryOrphanScan(tenantId)
+      if (r.found) console.log(`[library.orphan_scan] ${tenantId}: знайдено ${r.found}`)
+    }))
+    await work('library.version_retire', () => runPerTenant('library.version_retire', async (tenantId) => {
+      const { libraryVersionRetire } = await import('../services/libraryReports')
+      const r = await libraryVersionRetire(tenantId)
+      if (r.retired) console.log(`[library.version_retire] ${tenantId}: виведено ${r.retired}`)
+    }))
     // docs/v2/38 §11: карточка человека — архив заметок по сроку хранения (§7.6) и сроки
     // документов с уведомлениями человеку, руководителю точки и HR (§4, §8)
     await work('notes.archive_scan', () => runPerTenant('notes.archive_scan', async (tenantId) => {

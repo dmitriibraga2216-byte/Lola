@@ -60,16 +60,19 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/rewards', label: t('admin.nav.rewards'), show: hasScope('settings.tenant'), group: t('admin.group.motivation') },
   ] },
   { key: 'content', label: t('admin.section.content'), icon: 'doc', items: [
-    { to: '/admin/resources', label: t('admin.nav.resources'), show: hasScope('course.view') },
-    { to: '/admin/courses', label: t('admin.nav.courses'), show: hasScope('course.view') },
-    { to: '/admin/programs', label: t('admin.nav.programs'), show: hasScope('program.manage') },
-    { to: '/admin/quizzes', label: t('admin.nav.quizzes'), show: hasScope('course.view') },
-    { to: '/admin/workshops', label: t('admin.nav.workshops'), show: hasScope('course.view') },
-    { to: '/admin/meetups/complex', label: t('admin.nav.complexTests'), show: hasScope('complextest.manage') },
-    { to: '/admin/surveys', label: t('admin.nav.surveys'), show: hasScope('survey.manage') },
-    { to: '/admin/meetups', label: t('admin.nav.meetups'), show: hasScope('meetup.manage') || hasScope('meetup.attendance') },
-    { to: '/admin/assessment/criteria', label: t('admin.nav.assessCriteria'), show: hasScope('assessment.manage') },
-    { to: '/admin/resources/categories', label: t('admin.nav.resourceCategories'), show: hasScope('course.edit') },
+    // Матеріали і контейнери — одна пачка; бібліотека модулів (docs/v2/31) — своя: пачка з 10 пунктів повна
+    { to: '/admin/resources', label: t('admin.nav.resources'), show: hasScope('course.view'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/courses', label: t('admin.nav.courses'), show: hasScope('course.view'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/programs', label: t('admin.nav.programs'), show: hasScope('program.manage'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/quizzes', label: t('admin.nav.quizzes'), show: hasScope('course.view'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/workshops', label: t('admin.nav.workshops'), show: hasScope('course.view'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/meetups/complex', label: t('admin.nav.complexTests'), show: hasScope('complextest.manage'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/surveys', label: t('admin.nav.surveys'), show: hasScope('survey.manage'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/meetups', label: t('admin.nav.meetups'), show: hasScope('meetup.manage') || hasScope('meetup.attendance'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/assessment/criteria', label: t('admin.nav.assessCriteria'), show: hasScope('assessment.manage'), group: t('admin.group.contentMaterials') },
+    { to: '/admin/resources/categories', label: t('admin.nav.resourceCategories'), show: hasScope('course.edit'), group: t('admin.group.contentMaterials') },
+    // Звіти бібліотеки (docs/v2/31 §9): використання, застарілі посилання, пропозиції — кожному, хто бачить бібліотеку (§2)
+    { to: '/admin/library/reports', label: t('admin.nav.libraryReports'), show: hasScope('library.view'), group: t('admin.group.contentLibrary') },
   ] },
   // PR-30: раздел дорос до одиннадцати пунктов и перестал помещаться одной пачкой
   // (лимит 10, `tests/unit/admin-nav.spec.ts`). Разделён подзаголовками по смыслу:

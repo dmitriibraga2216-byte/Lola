@@ -6,6 +6,7 @@ import { scopeHolders } from './contentIssueNotify'
 import { orgTreeIsSourceOfTruth } from './orgManager'
 import { notifyManagerChangesFor } from './orgStructure'
 import { takeSnapshot } from './orgTreeWrite'
+import { ORG_CHANGE_ACTIONS } from '../../shared/domain/orgLayout'
 
 /**
  * Хвосты оргструктуры (`docs/v2/32-org-structure.md` §7 п. 7, §7.8, §8, §11; решения —
@@ -32,16 +33,6 @@ export const SNAPSHOT_RETENTION_DAYS = 365
 /** Порог узлов, с которого дерево можно объявить источником истины (`32` §7.8). */
 export const SOURCE_OF_TRUTH_MIN_NODES = 5
 
-/**
- * Действия журнала, которые меняют дерево или его держателей (`32` §7 п. 3). Сам снимок
- * (`org_structure.snapshot`) в перечне нет: иначе каждый ежедневный снимок оправдывал бы
- * следующий, и «только при изменениях» не работало бы.
- */
-export const ORG_CHANGE_ACTIONS = [
-  'org_node.create', 'org_node.update', 'org_node.move', 'org_node.reorder', 'org_node.archive',
-  'org_node.restore', 'org_node.assign_user', 'org_node.unassign_user',
-  'org_structure.import', 'org_structure.rollback',
-] as const
 
 // ── org.daily_snapshot ─────────────────────────────────────────────────────────────────
 

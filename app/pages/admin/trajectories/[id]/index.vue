@@ -437,6 +437,7 @@ const ASSIGN_MODES = ['manual', 'catalog_free', 'catalog_request', 'automation']
                 </div>
                 <div class="row">
                   <button class="btn ghost small" type="button" @click="previewBody(selNode)">{{ t('library.node.preview', { v: selNode.library.version }) }}</button>
+                  <NuxtLink class="btn ghost small" :to="`/admin/library/${selNode.library.moduleId}`" target="_blank" rel="noopener">{{ t('library.node.openInLibrary') }}</NuxtLink>
                   <button v-if="!published" class="btn ghost small" type="button" @click="detachLibrary(selNode)">{{ t('library.node.detach') }}</button>
                 </div>
               </template>

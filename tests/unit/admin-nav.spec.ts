@@ -159,6 +159,7 @@ const ORIGINAL_SHOW: Record<string, string> = {
   // а не рядом с «Новинами» компании: две ленты не смешиваются и в меню. Читает любой вошедший.
   '/admin/platform-announcements': "hasScope('learn.view')",
   // library-tails (docs/v2/31 §9): звіти бібліотеки — у «Контенті», своєю пачкою «Бібліотека модулів»
+  '/admin/library': "hasScope('library.view')",
   '/admin/library/reports': "hasScope('library.view')",
   // person-card-tails (docs/v2/38 §9 п. 5): «Індекс залученості» в «Основних звітах» — тем, кто
   // видит чужой индекс; в «Звітах модулів» уже десять пунктов

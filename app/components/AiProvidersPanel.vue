@@ -21,7 +21,7 @@ interface Provider {
   hasOwnKey: boolean
   modelName: string
   modelVersion: string | null
-  params: { temperature?: number, maxTokens?: number }
+  params: { temperature?: number, maxTokens?: number, priceInPer1M?: number, priceOutPer1M?: number, currency?: string }
   dataRegion: AiDataRegion
   providerRetention: AiProviderRetention
   maxLatencyMs: number
@@ -44,7 +44,7 @@ const editing = ref<string | null>(null)
 
 const blank = () => ({
   code: '', name: '', purpose: 'interview_score' as AiPurpose, driver: 'openai_compatible' as AiDriver, endpointUrl: '', apiKey: '', dropKey: false,
-  modelName: '', modelVersion: '', temperature: '' as number | '', maxTokens: '' as number | '', dataRegion: 'eu' as AiDataRegion, regionComment: '',
+  modelName: '', modelVersion: '', temperature: '' as number | '', maxTokens: '' as number | '', priceIn: '' as number | '', priceOut: '' as number | '', currency: '', dataRegion: 'eu' as AiDataRegion, regionComment: '',
   providerRetention: 'none' as AiProviderRetention, maxLatencySec: 30, isActive: true, priority: 100, fallbackProviderId: '',
 })
 const form = reactive({ ...blank(), error: '', busy: false })
@@ -65,7 +65,8 @@ function open(p: Provider | null) {
   if (p) {
     Object.assign(form, {
       code: p.code, name: p.name, purpose: p.purpose, driver: p.driver, endpointUrl: p.endpointUrl ?? '', modelName: p.modelName,
-      modelVersion: p.modelVersion ?? '', temperature: p.params.temperature ?? '', maxTokens: p.params.maxTokens ?? '', dataRegion: p.dataRegion,
+      modelVersion: p.modelVersion ?? '', temperature: p.params.temperature ?? '', maxTokens: p.params.maxTokens ?? '',
+      priceIn: p.params.priceInPer1M ?? '', priceOut: p.params.priceOutPer1M ?? '', currency: p.params.currency ?? '', dataRegion: p.dataRegion,
       providerRetention: p.providerRetention, maxLatencySec: Math.round(p.maxLatencyMs / 1000), isActive: p.isActive, priority: p.priority,
       fallbackProviderId: p.fallbackProviderId ?? '',
     })
@@ -81,9 +82,13 @@ const regionChanged = computed(() => form.dataRegion === 'other' && current.valu
 async function save() {
   form.error = ''
   form.busy = true
-  const params: Record<string, number> = {}
+  const params: Record<string, number | string> = {}
   if (form.temperature !== '') params.temperature = Number(form.temperature)
   if (form.maxTokens !== '') params.maxTokens = Number(form.maxTokens)
+  // Ціна вендора для «Вартості ШІ» (docs/v2/44 Р-AI2.3): без неї виклик коштує 0
+  if (form.priceIn !== '') params.priceInPer1M = Number(form.priceIn)
+  if (form.priceOut !== '') params.priceOutPer1M = Number(form.priceOut)
+  if (form.currency.trim()) params.currency = form.currency.trim().toUpperCase()
   const body: Record<string, unknown> = {
     name: form.name, purpose: form.purpose, driver: form.driver,
     endpointUrl: form.driver === 'stub' ? null : (form.endpointUrl.trim() || null),
@@ -161,6 +166,16 @@ async function save() {
         </label>
         <label>{{ t('aiSettings.providers.f.maxTokens') }}
           <input v-model.number="form.maxTokens" class="field" type="number" min="1" max="32000" step="1">
+        </label>
+        <label>{{ t('aiSettings.providers.f.priceIn') }}
+          <input v-model.number="form.priceIn" class="field" type="number" min="0" step="any" data-testid="ai-price-in">
+        </label>
+        <label>{{ t('aiSettings.providers.f.priceOut') }}
+          <input v-model.number="form.priceOut" class="field" type="number" min="0" step="any">
+        </label>
+        <label>{{ t('aiSettings.providers.f.currency') }}
+          <input v-model="form.currency" class="field" maxlength="3" placeholder="EUR" autocapitalize="characters">
+          <span class="sub">{{ t('aiSettings.providers.f.priceHint') }}</span>
         </label>
         <label>{{ t('aiSettings.providers.f.region') }}
           <select v-model="form.dataRegion" class="field">

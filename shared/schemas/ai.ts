@@ -14,6 +14,13 @@ import { keysetCursorSchema } from './keyset'
 export const aiProviderParamsSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(1).max(32_000).optional(),
+  /**
+   * Цена вендора для `ai_calls.cost_minor` (`44` Р-AI2.3, `shared/domain/aiCost.ts`): за миллион
+   * токенов в минорных единицах валюты. Без цены стоимость вызова — 0.
+   */
+  priceInPer1M: z.number().min(0).max(100_000_000).optional(),
+  priceOutPer1M: z.number().min(0).max(100_000_000).optional(),
+  currency: z.string().trim().regex(/^[A-Z]{3}$/, 'Валюта — три латинські літери ISO 4217, наприклад EUR').optional(),
 }).strict()
 
 const endpointUrl = z.string().trim().url('Вкажіть адресу API провайдера, наприклад https://api.example.com/v1').max(500)
@@ -120,6 +127,18 @@ export const aiReportQuerySchema = z.object({
   format: z.enum(['json', 'xlsx', 'csv']).default('json'),
 }).strict()
 export type AiReportQuery = z.infer<typeof aiReportQuerySchema>
+
+/**
+ * `GET /platform/ai-metrics` — журнал ИИ оператору, только метрики (`30` §2, `44` Р-AI2.4):
+ * период по дате вызова (UTC), тенант и роль вызова — необязательные фильтры.
+ */
+export const aiOperatorMetricsQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  tenantId: z.string().uuid().optional(),
+  purpose: z.enum(AI_PURPOSES).optional(),
+}).strict().refine(q => !q.from || !q.to || q.from <= q.to, { message: 'Початок періоду пізніше кінця', path: ['from'] })
+export type AiOperatorMetricsQuery = z.infer<typeof aiOperatorMetricsQuerySchema>
 
 // ── Перепроверка качества ИИ (`30` §7.16, §10 `/ai/quality-reviews`; план `45` PR-29) ────────
 

@@ -25,12 +25,12 @@ const pct = (part: number, whole: number): number | null => (whole > 0 ? Math.ro
 const round = (v: number | string | null, digits: number): number | null => (v === null ? null : Math.round(Number(v) * 10 ** digits) / 10 ** digits)
 
 /** Условие периода по колонке времени в поясе тенанта. */
-function period(col: SQL, tz: string, q: Pick<AiReportQuery, 'from' | 'to'>): SQL {
+export function period(col: SQL, tz: string, q: { from?: string, to?: string }): SQL {
   return sql`${q.from ? sql`and (${col} at time zone ${tz})::date >= ${q.from}::date` : sql``}
              ${q.to ? sql`and (${col} at time zone ${tz})::date <= ${q.to}::date` : sql``}`
 }
 
-async function tenantTz(tx: TenantTx, tenantId: string): Promise<string> {
+export async function tenantTz(tx: TenantTx, tenantId: string): Promise<string> {
   const [r] = await tx.execute(sql`select timezone from tenants where id = ${tenantId}::uuid`) as unknown as { timezone: string }[]
   return r?.timezone ?? 'Europe/Kyiv'
 }

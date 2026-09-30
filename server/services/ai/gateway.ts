@@ -6,6 +6,7 @@ import { ensureAiProviders } from '../../db/tenantDefaults'
 import { withTenant, type TenantTx } from '../../utils/withTenant'
 import { currentRequestContext } from '../../utils/requestContext'
 import type { AiCallRefKind, AiDriver, AiPurpose, AiUsageAxis } from '../../../shared/enums'
+import { AI_DEFAULT_CURRENCY, callCostMinor, type AiPrice } from '../../../shared/domain/aiCost'
 import { effectiveLimits, type LimitCheck } from '../tenantLimits'
 import { AXIS_METER, applyUsageTx, meterOrDegrade, prepareUsage, recordUsage, settleUsage, type AxisDegradation } from '../usageCounters'
 import { syncNotice } from '../limitNotices'
@@ -112,6 +113,8 @@ interface ChainEntry {
   modelName: string
   modelVersion: string | null
   params: { temperature?: number, maxTokens?: number }
+  /** Цена вендора из параметров профиля (`44` Р-AI2.3); пусто — вызов стоит 0. */
+  price: AiPrice
   maxLatencyMs: number
   isActive: boolean
   priority: number
@@ -119,13 +122,18 @@ interface ChainEntry {
 }
 
 function toEntry(r: ProfileRow): ChainEntry {
-  const params = (r.params ?? {}) as { temperature?: unknown, maxTokens?: unknown }
+  const params = (r.params ?? {}) as { temperature?: unknown, maxTokens?: unknown, priceInPer1M?: unknown, priceOutPer1M?: unknown, currency?: unknown }
   return {
     id: r.id, code: r.code, name: r.name, purpose: r.purpose as AiPurpose, driver: r.driver as AiDriver,
     endpointUrl: r.endpointUrl, secretRef: r.secretRef, modelName: r.modelName, modelVersion: r.modelVersion,
     params: {
       ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
       ...(typeof params.maxTokens === 'number' ? { maxTokens: params.maxTokens } : {}),
+    },
+    price: {
+      ...(typeof params.priceInPer1M === 'number' ? { priceInPer1M: params.priceInPer1M } : {}),
+      ...(typeof params.priceOutPer1M === 'number' ? { priceOutPer1M: params.priceOutPer1M } : {}),
+      ...(typeof params.currency === 'string' ? { currency: params.currency } : {}),
     },
     maxLatencyMs: r.maxLatencyMs, isActive: r.isActive, priority: r.priority, fallbackProviderId: r.fallbackProviderId,
   }
@@ -430,6 +438,7 @@ export async function callModel<I, O>(ctx: AiCtx, prompt: PromptDef<I, O>, input
       await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
         await tx.update(aiCalls).set({
           status: 'ok', output: journal as object, outputDigest: digestOf(output), tokensIn: r.tokensIn, tokensOut: r.tokensOut,
+          costMinor: callCostMinor(r.tokensIn, r.tokensOut, p.price), currency: p.price.currency ?? AI_DEFAULT_CURRENCY,
           httpStatus: r.httpStatus, latencyMs, finishedAt: new Date(), billed: prep !== null,
         }).where(eq(aiCalls.id, callId))
         if (prep && axis) {

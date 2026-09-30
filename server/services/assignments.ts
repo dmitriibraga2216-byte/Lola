@@ -14,6 +14,7 @@ import { shiftDeadlinesForAbsences } from './absences'
 import { deriveTaskState, overdueSql } from './enrollmentStatus'
 import { findContent } from './taskContent'
 import { employeeOnly } from './repo/people'
+import { inviteToInterviewTx } from './interviewInvite'
 import type { Audience, assignmentCreateSchema, assignmentUpdateSchema } from '../../shared/schemas/assignments'
 import type { ContentType } from '../../shared/enums'
 
@@ -181,6 +182,11 @@ export async function expandAssignment(tenantId: string, assignmentId: string): 
       for (const userId of wanted) { const r = await enrollProgram(tx, tenantId, a.subjectId, userId, { source: 'assignment', assignmentId, actorId: a.createdBy }); if (r.ok && r.created) n++ }
       await tx.update(assignments).set({ stats: sql`jsonb_set(coalesce(${assignments.stats}, '{}'), '{assigned}', (select count(*) from program_enrollments e where e.assignment_id = ${assignmentId}::uuid)::text::jsonb)`, updatedAt: new Date() }).where(eq(assignments.id, assignmentId))
       return n
+    }
+    if (a.subjectType === 'test') {
+      // Тест вида `interview` — приглашение кандидатам (docs/v2/30 §8 `interview.invited`); записей по-прежнему нет
+      await inviteToInterviewTx(tx, tenantId, assignmentId)
+      return 0
     }
     if (a.subjectType !== 'course') return 0 // тест и комплексный тест: записи не создаются, правила берутся при старте попытки (taskParams.ts)
 

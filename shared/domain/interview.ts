@@ -328,7 +328,7 @@ export function isDisconnectGap(lastActivityAt: Date | null, now: Date, gapSec =
 // ── Факты для человека (`30` §7.17) ────────────────────────────────────────────────────
 
 /** Флаг антифрода: только измеримые факты; ни один не влияет на балл и не виден кандидату. */
-export type InterviewFlag = 'ip_changed' | 'device_changed' | 'tab_switches' | 'too_fast' | 'lang_mismatch' | 'read_aloud'
+export type InterviewFlag = 'ip_changed' | 'device_changed' | 'tab_switches' | 'too_fast' | 'lang_mismatch' | 'read_aloud' | 'duplicate_answer' | 'long_silence_pattern'
 
 /** Слова текста в нижнем регистре — для шинглового сходства (`30` §7.17 `read_aloud`). */
 function words(text: string): string[] {
@@ -366,4 +366,57 @@ export function turnFlags(t: TurnFacts, scenarioLang: string): InterviewFlag[] {
   if (t.prompt && answer && shingleSimilarity(answer, t.prompt) > 0.7) out.push('read_aloud')
   if (t.lang && t.lang !== scenarioLang) out.push('lang_mismatch')
   return out
+}
+
+/** Порог `duplicate_answer` (`30` §7.17): сходство с ответом другого кандидата на тот же вопрос > 85 %. */
+export const DUPLICATE_ANSWER_THRESHOLD = 0.85
+
+/**
+ * Короче — не сравниваем (`44` Р-AI2.1): «Так, працював баристою» у двух людей совпадает честно,
+ * и флаг на таком ответе был бы шумом, а не фактом для человека.
+ */
+export const DUPLICATE_ANSWER_MIN_WORDS = 12
+
+/**
+ * Совпадает ли ответ с ответом другого кандидата (`30` §7.17 `duplicate_answer`): доля шинглов
+ * **этого** ответа, найденных в чужом, больше 85 %. Меряется от своего ответа: вставка чужого
+ * текста целиком с парой своих слов вокруг флаг даёт, а короткий ответ, целиком вошедший в
+ * длинный чужой, — нет, пока в нём меньше `DUPLICATE_ANSWER_MIN_WORDS` слов.
+ */
+export function isDuplicateAnswer(answer: string, others: readonly string[]): boolean {
+  if (words(answer).length < DUPLICATE_ANSWER_MIN_WORDS) return false
+  return others.some(o => shingleSimilarity(answer, o) > DUPLICATE_ANSWER_THRESHOLD)
+}
+
+export interface SilenceFacts { answerMode: string | null, silenceMs: number | null, firstSoundDelayMs: number | null }
+
+/**
+ * Реплика «с долгим молчанием» (`44` Р-AI2.2): закрыта молчанием (`answer_mode = 'none'` — три
+ * подсказки без ответа, `30` §7.12), либо молчание внутри ответа или до первого звука не короче
+ * `silence_timeout_sec` сценария.
+ */
+export function isLongSilenceTurn(t: SilenceFacts, silenceTimeoutSec: number): boolean {
+  const limit = silenceTimeoutSec * 1000
+  return t.answerMode === 'none' || (t.silenceMs ?? 0) >= limit || (t.firstSoundDelayMs ?? 0) >= limit
+}
+
+/**
+ * `long_silence_pattern` (`30` §7.17, `44` Р-AI2.2) — повторяющееся, а не разовое: не меньше двух
+ * реплик с долгим молчанием и не меньше трети всех реплик кандидата. Одна пауза — обычное
+ * волнение, а не факт, который стоит проверять человеку.
+ */
+export function longSilencePattern(turns: readonly SilenceFacts[], silenceTimeoutSec: number): boolean {
+  const asked = turns.filter(t => t.answerMode !== null)
+  const long = asked.filter(t => isLongSilenceTurn(t, silenceTimeoutSec)).length
+  return long >= 2 && long * 3 >= asked.length
+}
+
+/**
+ * «Близько {N} хв» в приглашении `interview.invited` (`30` §8, `44` Р-AI2.8): на каждый вопрос —
+ * время на обдумывание и середина окна ответа сценария, плюс две минуты на согласие и проверку
+ * микрофона; вверх до минуты. Оценка для человека, а не лимит: кандидат не торопится по ней.
+ */
+export function interviewEstimateMinutes(questions: number, s: { thinkTimeSec: number, minAnswerSec: number, maxAnswerSec: number }): number {
+  const perQuestion = s.thinkTimeSec + (s.minAnswerSec + s.maxAnswerSec) / 2
+  return Math.max(1, Math.ceil((Math.max(0, questions) * perQuestion) / 60) + 2)
 }

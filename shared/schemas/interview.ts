@@ -238,3 +238,19 @@ export const interviewRescoreSchema = z.object({
 }).strict()
 
 export type InterviewRescoreInput = z.infer<typeof interviewRescoreSchema>
+
+/**
+ * Отчёты собеседований (`docs/v2/30` §9.1, §9.2, §9.6; `44` Р-AI2.5–Р-AI2.7): период, вакансия,
+ * точка вакансии, тест собеседования («сценарий» — все его версии). Формат `json` — экран,
+ * `xlsx`/`csv` — те же строки файлом (`docs/22` §7).
+ */
+export const interviewReportQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  vacancyId: z.string().uuid().optional(),
+  locationId: z.string().uuid().optional(),
+  quizId: z.string().uuid().optional(),
+  format: z.enum(['json', 'xlsx', 'csv']).default('json'),
+}).strict().refine(q => !q.from || !q.to || q.from <= q.to, { message: 'Початок періоду пізніше кінця', path: ['from'] })
+
+export type InterviewReportQuery = z.infer<typeof interviewReportQuerySchema>

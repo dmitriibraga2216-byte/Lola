@@ -16,6 +16,7 @@ import {
 import type { InterviewDegradedReason } from '../../../shared/enums'
 import { enqueueScore, enqueueTranscribe, notifyNeedsHuman } from './session'
 import { notifyAll, recruitingRecipients } from './common'
+import { applyPatternFlagsTx } from './patternFlags'
 
 /**
  * Фоновая часть собеседования (`docs/v2/30-ai-interview.md` §7.2, §7.10–§7.12, §11; план `45`
@@ -149,6 +150,8 @@ export async function advanceSession(tenantId: string, sessionId: string): Promi
     if (!s || s.state !== 'transcribing' || s.redactedAt) return 'waiting' as const
     const turns = await tx.select().from(interviewTurns).where(and(eq(interviewTurns.sessionId, sessionId), eq(interviewTurns.answerMode, 'voice')))
     if (turns.some(t => t.transcriptStatus === 'pending')) return 'waiting' as const
+    // Все тексты готовы — факты по сессии целиком (`30` §7.17): на балл и на путь сессии не влияют
+    await applyPatternFlagsTx(tx, sessionId)
     const [scenario] = await tx.select({ minConfidence: interviewScenarios.minConfidence }).from(interviewScenarios).where(eq(interviewScenarios.id, s.scenarioId))
     if (turns.some(t => t.transcriptStatus === 'failed')) {
       await toNeedsHuman(tx, tenantId, s, 'transcribe_failed')

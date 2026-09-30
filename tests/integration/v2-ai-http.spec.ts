@@ -140,6 +140,29 @@ describe.skipIf(!BUILT)('ИИ: профили и журнал по HTTP', () => 
     expect((await send(adm, 'GET', '/reports/ai/cost?from=вчора')).status).toBe(422)
   })
 
+  it('отчёты собеседований: только с interview.view, файл — с журналом; метрики ИИ оператору — только сессии оператора (30 §2, §9.1, §9.2, §9.6)', async () => {
+    const emp = await login(EMPLOYEE_PHONE)
+    for (const name of ['funnel', 'consents', 'sessions']) expect((await send(emp, 'GET', `/reports/interviews/${name}`)).status, name).toBe(403)
+    const adm = await login(ADMIN_PHONE)
+    for (const name of ['funnel', 'consents', 'sessions']) {
+      const res = await send(adm, 'GET', `/reports/interviews/${name}?from=2026-01-01`)
+      expect(res.status, name).toBe(200)
+      expect(((await res.json()) as { data: { rows: unknown[] } }).data.rows).toEqual(expect.any(Array))
+    }
+    const before = Number((await admin`select count(*)::int as n from audit_log where action = 'interview.sessions.export'`)[0]!.n)
+    const xlsx = await send(adm, 'GET', '/reports/interviews/sessions?format=xlsx')
+    expect(xlsx.status).toBe(200)
+    expect(xlsx.headers.get('content-type')).toContain('spreadsheetml')
+    const [log] = await admin`select request_context, after from audit_log where action = 'interview.sessions.export' order by created_at desc limit 1`
+    expect(Number((await admin`select count(*)::int as n from audit_log where action = 'interview.sessions.export'`)[0]!.n)).toBe(before + 1)
+    expect(log).toMatchObject({ after: expect.objectContaining({ format: 'xlsx', rows: expect.any(Number) }), request_context: expect.objectContaining({ ip: expect.any(String) }) })
+    expect((await send(adm, 'GET', '/reports/interviews/consents?format=csv')).headers.get('content-type')).toContain('text/csv')
+    expect((await send(adm, 'GET', '/reports/interviews/unknown')).status).toBe(404)
+    expect((await send(adm, 'GET', '/reports/interviews/funnel?from=2026-02-01&to=2026-01-01')).status).toBe(422)
+    // Сессия тенанта не открывает журнал оператора
+    expect((await send(adm, 'GET', '/platform/ai-metrics')).status).toBe(401)
+  })
+
   it('переоценка: без interview.override — 403; причина обязательна — 422; нет кандидата — 404 (30 §10)', async () => {
     const emp = await login(EMPLOYEE_PHONE)
     expect((await send(emp, 'POST', '/candidates/00000000-0000-0000-0000-000000000000/interview/rescore', { reason: 'Оновили промпт оцінки' })).status).toBe(403)

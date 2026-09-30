@@ -167,6 +167,11 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 > `30` §5.6, `ai.audit` + `report.export`) и `GET /reports/ai/:name` (`quality | review-help | cost`,
 > отчёты `30` §9.3–§9.5, `ai.audit`; Р-AI.3). Коды — `docs/04` §4.21, строки этих путей.
 
+> [дополнено, ai-tails-2 30.09] Сверх таблицы — `GET /reports/interviews/:name` (`funnel | consents |
+> sessions`, отчёты `30` §9.1, §9.2, §9.6, `interview.view` + `report.export` для файла; `44` Р-AI2.5…Р-AI2.7)
+> и `GET /platform/ai-metrics` (журнал ИИ оператору — только метрики, `30` §2, `platform.read`; Р-AI2.4).
+> Итог §2.12 не пересчитывался.
+
 ### 2.4 Библиотека переиспользуемых модулей — документ `31`
 
 | Метод | Путь | Скоуп | Назначение |

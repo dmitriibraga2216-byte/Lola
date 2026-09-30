@@ -164,3 +164,102 @@ export const libraryUpdatePreviewQuerySchema = z.object({
 export const libraryDetachSchema = z.object({
   makeCopy: z.boolean().default(true),
 })
+
+// ── Отчёты §9 и служебные проверки §11 ──────────────────────────────────────────────────
+
+/**
+ * Три отчёта библиотеки (`31` §9): «Використання бібліотеки», «Застарілі посилання»,
+ * «Пропозиції до бібліотеки». Один набор фильтров на все три — каждый берёт свои.
+ */
+export const LIBRARY_REPORT_KINDS = ['usage', 'stale', 'proposals'] as const
+export type LibraryReportKind = typeof LIBRARY_REPORT_KINDS[number]
+
+/** Потолок строк отчёта и выгрузки (§9 «до 50 000 строк»). */
+export const LIBRARY_REPORT_MAX_ROWS = 50_000
+
+export const libraryReportQuerySchema = z.object({
+  /** Период: «відкриттів за період» у «Використання», дата подачи у «Пропозиції». */
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  kind: z.enum(RESOURCE_KINDS).optional(),
+  categoryId: z.string().uuid().optional(),
+  ownerId: z.string().uuid().optional(),
+  onlyUnused: queryBool.optional(),
+  /** «Застарілі посилання»: автор контейнера и отставание ≥ N версий. */
+  authorId: z.string().uuid().optional(),
+  minLag: z.coerce.number().int().min(1).max(1000).optional(),
+  status: z.enum(LIBRARY_PROPOSAL_STATUSES).optional(),
+})
+export type LibraryReportQuery = z.infer<typeof libraryReportQuerySchema>
+
+/** «Використання бібліотеки» — строка на модуль. */
+export interface LibraryUsageReportRow {
+  moduleId: string
+  title: string
+  contentKind: string
+  status: string
+  categoryId: string | null
+  category: string | null
+  ownerId: string
+  owner: string | null
+  version: number | null
+  versionAt: string | null
+  usages: number
+  stale: number
+  opens: number
+  /** Доля завершивших среди открывших за период, %; нет открытий — `null`. */
+  completionPct: number | null
+  updatedAt: string
+}
+
+/** «Застарілі посилання» — строка на активное место, закреплённое не на последней версии. */
+export interface LibraryStaleReportRow {
+  usageId: string
+  containerType: string
+  containerId: string
+  containerTitle: string
+  holderTitle: string | null
+  moduleId: string
+  moduleTitle: string
+  pinnedVersion: number
+  latestVersion: number
+  lag: number
+  /** Дней с выхода первой версии новее закреплённой. */
+  daysSinceNewer: number
+  authorId: string | null
+  author: string | null
+}
+
+/** «Пропозиції до бібліотеки». */
+export interface LibraryProposalReportRow {
+  id: string
+  sourceLessonTitle: string
+  containerTitle: string | null
+  proposedBy: string
+  createdAt: string
+  status: string
+  decidedBy: string | null
+  decisionComment: string | null
+  libraryModuleId: string | null
+}
+
+/** Отчёт `library.orphan_scan` (§11): следы оборванных транзакций, ничего не чинит. */
+export interface LibraryOrphanScanReport {
+  found: number
+  /** Уроки с `library_module_id`, которые не черновик модуля и не урок ни одной версии. */
+  lessons: { lessonId: string, moduleId: string, title: string }[]
+  /** Опубликованный модуль без текущей версии и модуль без тела-черновика. */
+  modules: { moduleId: string, title: string, problem: 'no_version' | 'no_body' }[]
+}
+
+/** Отчёт `library.version_retire` (§11): какие версии выведены из оборота за прогон. */
+export interface LibraryVersionRetireReport {
+  retired: number
+  versions: { versionId: string, moduleId: string, moduleTitle: string, version: number }[]
+}
+
+/** `GET /library/scans` — последние отчёты двух служебных задач. */
+export interface LibraryScansView {
+  orphanScan: { at: string, report: LibraryOrphanScanReport } | null
+  versionRetire: { at: string, report: LibraryVersionRetireReport } | null
+}

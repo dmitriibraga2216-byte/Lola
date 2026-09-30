@@ -63,6 +63,8 @@ export async function getBoss(): Promise<PgBoss> {
       // еженедельный дайджест устаревших ссылок авторам треков и курсов
       await b.createQueue('library.hotfix_propagate', { retryLimit: 3, retryBackoff: true, expireInSeconds: 600 })
       await b.createQueue('library.stale_digest', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('library.orphan_scan', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('library.version_retire', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/38 §11: две ночные задачи карточки человека (PR-32)
       await b.createQueue('notes.archive_scan', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('documents.expiry_scan', { retryLimit: 2, expireInSeconds: 900 })
@@ -175,6 +177,9 @@ export async function getBoss(): Promise<PgBoss> {
       // дайджест устаревших ссылок — по понедельникам в 09:00 (по времени Киева, как остальные сканы)
       await b.schedule('library.usage_recalc', '20 3 * * *', {}, { singletonKey: 'library.usage_recalc', tz: 'Europe/Kyiv' })
       await b.schedule('library.stale_digest', '0 9 * * 1', {}, { singletonKey: 'library.stale_digest', tz: 'Europe/Kyiv' })
+      // docs/v2/31 §11: следы оборванных транзакций — еженедельно (воскресенье 04:10), вывод версий из оборота — 03:40
+      await b.schedule('library.orphan_scan', '10 4 * * 0', {}, { singletonKey: 'library.orphan_scan', tz: 'Europe/Kyiv' })
+      await b.schedule('library.version_retire', '40 3 * * *', {}, { singletonKey: 'library.version_retire', tz: 'Europe/Kyiv' })
       // Карточка человека (docs/v2/38 §11): архив заметок в 02:00, сроки документов в 06:00
       await b.schedule('notes.archive_scan', '0 2 * * *', {}, { singletonKey: 'notes.archive_scan', tz: 'Europe/Kyiv' })
       await b.schedule('documents.expiry_scan', '0 6 * * *', {}, { singletonKey: 'documents.expiry_scan', tz: 'Europe/Kyiv' })

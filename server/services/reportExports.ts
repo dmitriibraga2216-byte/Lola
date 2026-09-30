@@ -73,6 +73,15 @@ export async function reportRows(tenantId: string, userId: string, report: strin
     const canSeeCandidates = access.grants.some(g => g.scopes.includes('candidate.view'))
     return LOG_KINDS.includes(kind) && q.success ? logRows({ ...ctx, canSeeCandidates }, kind, q.data) : []
   }
+  // docs/v2/31 §9: отчёты библиотеки — область как у экрана (`library.view`, предложения — свои или все у куратора)
+  if (report.startsWith('library-')) {
+    if (!access.grants.some(g => g.scopes.includes('library.view'))) return []
+    const { libraryActorOf } = await import('./library')
+    const { libraryReportRows } = await import('./libraryReports')
+    const { libraryReportQuerySchema } = await import('../../shared/schemas/library')
+    const q = libraryReportQuerySchema.safeParse(filters)
+    return q.success ? libraryReportRows(libraryActorOf(access), report.slice(8), q.data) : []
+  }
   if (report.startsWith('saved:')) {
     const { runReport } = await import('./reportBuilder')
     const [r] = await withTenant(tenantId, userId, tx => tx.select().from(savedReports).where(eq(savedReports.id, report.slice(6))))

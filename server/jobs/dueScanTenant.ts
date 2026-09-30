@@ -20,6 +20,7 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const { expireExports } = await import('../services/reportExports')
   const { expireRoles, roleExpiryScan } = await import('../services/positionRoleMap')
   const { syncDismissals, validateStructure } = await import('../services/orgStructure')
+  const { notifyStructureConflicts } = await import('../services/orgJobs')
   const { withTenant } = await import('../utils/withTenant')
 
   const s = await runDueScan(tenantId)
@@ -38,6 +39,8 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   // обновляется и точечно, в транзакции правки дерева, и раз в сутки целиком.
   const orgDismissed = await withTenant(tenantId, null, tx => syncDismissals(tx, { tenantId, actorId: null }))
   const orgConflicts = await validateStructure(tenantId)
+  // Новые конфликты `critical` (валидатора и импорта) — письмом администраторам (docs/v2/32 §8)
+  const orgConflictMail = (await notifyStructureConflicts(tenantId)).sent
   const g = await goalDueScan(tenantId)
   const a = await assessmentScan(tenantId)
   const ai = await actionDueScan(tenantId)
@@ -49,7 +52,7 @@ export async function dueScanTenant(tenantId: string, monday = new Date().getDay
   const prReminder = await programReminderScan(tenantId) // докс/33 D-049: клас сповіщень programReminder
   // trajectoryScan (docs/17: отложенные правилом прохождения, подстраховка таймеров) перенесён на щогодинний
   // assignment.sync (docs/33 D-026) — щоденний due.scan давав запізнення таймера до доби
-  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, anniversaries: av, programs: pr, programReminders: prReminder, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired, orgDismissed, orgConflicts }
+  const stats = { ...s, goals: g, assessment: a, actionsOverdue: ai, checklistDue: cf, notices: an, birthdays: bd, anniversaries: av, programs: pr, programReminders: prReminder, inactive, plans, reqReports, compExpiry, kbReview, digest, retention, expiredExports: expired, rolesExpiring, rolesExpired, orgDismissed, orgConflicts, orgConflictMail }
   console.log(`[due.scan] ${tenantId}:`, stats)
   return stats
 }

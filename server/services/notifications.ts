@@ -129,7 +129,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   trajectory_assessment_waiting: 'Траєкторія «{{title}}»: {{name}} чекає на оцінювання «{{form}}»{{#fill}} — заповніть анкету{{/fill}}{{#launch}} — запустіть цикл оцінки{{/launch}}',
   // Оргструктура (docs/v2/32 §8, PR-30). Адресат везде — результат `resolveManager()`,
   // а не `locations.manager_id`: вопрос «кто руководитель» задаётся одному месту (П-16.4).
-  org_node_assigned: 'Вас додано до оргструктури: {{node_title}}. Керівник — {{manager_name}}.',
+  // Керівника може не бути (`source='none'`, `32` §7.8 крок 4) — тоді речення про нього не пишеться.
+  org_node_assigned: 'Вас додано до оргструктури: {{node_title}}.{{#manager_name}} Керівник — {{manager_name}}.{{/manager_name}}',
   org_manager_changed: 'Ваш керівник змінився: тепер це {{manager_name}}.',
   org_subordinate_added: 'У вашій команді новий співробітник: {{user_name}} ({{node_title}}).',
   org_node_vacant: 'Вузол «{{node_title}}» став вакантним.',
@@ -340,6 +341,8 @@ export function emailDefaultEnabled(code: string): boolean {
     || /^review_(sla_breach|escalated)$/.test(code)
     // docs/v2/32 §8: итог импорта инициатору и откат администраторам — канал e-mail (PR-31)
     || /^org_structure_(import_finished|rollback)$/.test(code)
+    // docs/v2/32 §8: конфлікти структури `critical` адміністраторам — канал e-mail
+    || code === 'org_structure_conflict'
     // docs/v2/30 §8 (PR-28): рекрутеру — «in-app, email», кандидату о брошенной сессии — e-mail
     || /^interview_(invited|declined|completed|needs_human|consent_withdrawn|abandoned|abandoned_recruiter)$/.test(code)
     // docs/v2/30 §8 (PR-29): Підсумок кандидату — e-mail; розбіжність ШІ з людиною — «email, in-app» адміну

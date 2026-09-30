@@ -1,6 +1,7 @@
 import { orgTreeQuerySchema } from '../../../../shared/schemas/orgStructure'
 import { requireScope } from '../../../services/access'
 import { editableBranches, listTree } from '../../../services/orgStructure'
+import { sourceOfTruthStatus } from '../../../services/orgJobs'
 import { withTenant } from '../../../utils/withTenant'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
@@ -9,6 +10,8 @@ import { apiData, apiError } from '../../../utils/apiResponse'
  * без заметок и без скрытых людей, `admin` — конструктор. Режим `admin` требует
  * `org.structure.edit`; ответ несёт ветки, которые человек имеет право править
  * (`32` §2: «своя ветка» руководителя), чтобы клиент не гадал, где разрешён drop.
+ * Администратору конструктора — ещё `sourceOfTruth`: включено ли дерево источником истины о
+ * руководителе и можно ли предложить перевод (`32` §7.8, ≥ 5 живых узлов).
  */
 export default defineEventHandler(async (event) => {
   const q = orgTreeQuerySchema.safeParse(getQuery(event))
@@ -19,5 +22,6 @@ export default defineEventHandler(async (event) => {
   const tree = await listTree(ctx, { mode, includeArchived: q.data.includeArchived, includeVacant: q.data.includeVacant })
   const canEditAll = a.grants.some(g => g.scopes.includes('org.structure.edit') && g.scopeType === 'tenant')
   const branches = mode === 'admin' && !canEditAll ? await withTenant(a.tenantId, a.userId, tx => editableBranches(tx, a.userId)) : []
-  return apiData({ ...tree, mode, canEditAll, branches })
+  const sourceOfTruth = mode === 'admin' && canEditAll ? await sourceOfTruthStatus(ctx) : null
+  return apiData({ ...tree, mode, canEditAll, branches, sourceOfTruth })
 })

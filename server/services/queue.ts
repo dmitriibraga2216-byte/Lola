@@ -103,6 +103,10 @@ export async function getBoss(): Promise<PgBoss> {
       // импорт закрывается `failed` с письмом инициатору, дерево не тронуто (одна транзакция), а
       // повтор того же файла — осознанное действие человека, не очереди
       await b.createQueue('org.import_apply', { retryLimit: 0, expireInSeconds: 1800 })
+      // docs/v2/32 §11: ежедневный снимок (раз в час по всем тенантам, снимает тот, у кого по его
+      // поясу 03:xx) и еженедельная чистка снимков
+      await b.createQueue('org.daily_snapshot', { retryLimit: 2, expireInSeconds: 900 })
+      await b.createQueue('org.snapshot_cleanup', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход 90 дней, строка 400 дней
       await b.createQueue('ai.calls_cleanup', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/30 §11 (PR-28): собеседование. Расшифровка и оценка — по событию; повторы после
@@ -211,6 +215,10 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('storage.orphan_scan', '30 3 * * *', {}, { singletonKey: 'storage.orphan_scan', tz: 'Europe/Kyiv' })
       await b.schedule('storage.object_reconcile', '0 5 1 * *', {}, { singletonKey: 'storage.object_reconcile', tz: 'Europe/Kyiv' })
       await b.schedule('storage.quota_warn', '0 8 * * *', {}, { singletonKey: 'storage.quota_warn', tz: 'Europe/Kyiv' })
+      // Оргструктура (docs/v2/32 §7 п. 7, §11): «03:00 по таймзоне тенанта» — ежечасный прогон,
+      // снимает тот, у кого сейчас 03:xx (приём `usage.collect`); чистка — в ночь на воскресенье
+      await b.schedule('org.daily_snapshot', '10 * * * *', {}, { singletonKey: 'org.daily_snapshot' })
+      await b.schedule('org.snapshot_cleanup', '40 4 * * 0', {}, { singletonKey: 'org.snapshot_cleanup', tz: 'Europe/Kyiv' })
       // Нормы времени (docs/v2/37 §11): еженедельно, в ночь на воскресенье — медиана факта, флаг
       // отклонения и уведомление автору. Свёртка идёт каждые 10 минут, витрина к этому часу свежая
       await b.schedule('time.norms_recalc', '30 2 * * 0', {}, { singletonKey: 'time.norms_recalc', tz: 'Europe/Kyiv' })

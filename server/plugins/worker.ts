@@ -451,6 +451,17 @@ export default defineNitroPlugin(async () => {
       })
       if (s.failed) throw new Error(`storage.object_reconcile: не звірено ${s.failed} тенант(ів): ${Object.keys(s.errors).join(', ')}`)
     })
+    // docs/v2/32 §11: снимок дерева в 03:00 по поясу тенанта при изменениях и чистка снимков
+    await work('org.daily_snapshot', () => runPerTenant('org.daily_snapshot', async (tenantId) => {
+      const { dailySnapshot } = await import('../services/orgJobs')
+      const r = await dailySnapshot(tenantId)
+      if (r.taken) console.log(`[org.daily_snapshot] ${tenantId}: вузлів ${r.nodeCount}`)
+    }))
+    await work('org.snapshot_cleanup', () => runPerTenant('org.snapshot_cleanup', async (tenantId) => {
+      const { snapshotCleanup } = await import('../services/orgJobs')
+      const r = await snapshotCleanup(tenantId)
+      if (r.expired || r.dailyOverflow) console.log(`[org.snapshot_cleanup] ${tenantId}:`, r)
+    }))
     await work('storage.quota_warn', () => runPerTenant('storage.quota_warn', async (tenantId) => {
       const { quotaWarn } = await import('../services/storageScans')
       const r = await quotaWarn(tenantId)

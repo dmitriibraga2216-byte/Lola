@@ -417,7 +417,12 @@ export async function assignUser(ctx: Ctx, nodeId: string, input: { userId: stri
 
     // Смена узла — смена должности: производные роли пересобираются существующим механизмом.
     if (isPrimary) await applyPositionRoles(tx, ctx, input.userId)
-    await notifyManagerChanges(tx, ctx, node.path, [input.userId], { nodeTitle: fresh.title, userName: person.fullName })
+    // «Вас додано до оргструктури» (`32` §8) уже называет руководителя — отдельное
+    // `org_manager_changed` тому же человеку было бы вторым сообщением о том же (Р-OS.2).
+    await notifyManagerChanges(tx, ctx, node.path, [input.userId], { nodeTitle: fresh.title, userName: person.fullName }, new Set([input.userId]))
+    const mgr = await resolveManager(tx, input.userId, { tenantId: ctx.tenantId })
+    const [mgrRow] = mgr.managerUserId ? await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, mgr.managerUserId)) : []
+    await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: input.userId, code: 'org_node_assigned', payload: { node_title: fresh.title, manager_name: mgrRow?.fullName ?? '' }, dedupKey: `org_assigned:${assignment.id}` })
     return { ok: true as const, assignmentId: assignment.id, node: fresh }
   })
 }
@@ -476,19 +481,21 @@ async function rebuildSubtree(tx: TenantTx, tenantId: string, path: string): Pro
  * Уведомления о смене руководителя (`32` §8, критерий приёмки 2). Считаются по разнице между
  * сохранённой картой и свежим резолвом — иначе «сменился» пришлось бы угадывать по действию.
  */
-async function notifyManagerChanges(tx: TenantTx, ctx: Ctx, path: string, seedUserIds: string[], vars: { nodeTitle?: string, userName?: string } = {}): Promise<void> {
+async function notifyManagerChanges(tx: TenantTx, ctx: Ctx, path: string, seedUserIds: string[], vars: { nodeTitle?: string, userName?: string } = {}, silent?: ReadonlySet<string>): Promise<void> {
   const affected = await tx.execute(sql`
     select distinct a.user_id from org_node_assignments a join org_nodes n on n.id = a.node_id
     where a.ended_at is null and n.path <@ ${path}::ltree`) as unknown as { user_id: string }[]
-  await notifyManagerChangesFor(tx, ctx, [...seedUserIds, ...affected.map(r => r.user_id)], vars)
+  await notifyManagerChangesFor(tx, ctx, [...seedUserIds, ...affected.map(r => r.user_id)], vars, silent)
 }
 
 /**
  * То же для заранее известного круга людей — импорт и откат меняют дерево целиком, и круг
  * задаёт вызывающий (все, кто в дереве до и после). Уведомления — по разнице сохранённой
- * карты и свежего резолва, карта пересобирается тут же.
+ * карты и свежего резолва, карта пересобирается тут же. `silent` — кому `org_manager_changed`
+ * не шлётся: о новом руководителе им уже сказало `org_node_assigned`; руководителю
+ * `org_subordinate_added` уходит при этом как обычно.
  */
-export async function notifyManagerChangesFor(tx: TenantTx, ctx: Ctx, userIds: string[], vars: { nodeTitle?: string, userName?: string } = {}): Promise<void> {
+export async function notifyManagerChangesFor(tx: TenantTx, ctx: Ctx, userIds: string[], vars: { nodeTitle?: string, userName?: string } = {}, silent?: ReadonlySet<string>): Promise<void> {
   const ids = [...new Set(userIds)]
   if (!ids.length) return
   const before = new Map((await tx.execute(sql`
@@ -503,7 +510,8 @@ export async function notifyManagerChangesFor(tx: TenantTx, ctx: Ctx, userIds: s
     const prev = before.get(id) ?? null
     if (next === prev) continue
     const managerName = next ? (names.get(next) ?? (await tx.select({ fullName: users.fullName }).from(users).where(eq(users.id, next)))[0]?.fullName ?? '') : ''
-    await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: id, code: 'org_manager_changed', payload: { manager_name: managerName }, dedupKey: `org_mgr:${id}:${next ?? 'none'}` })
+    // `silent` — люди, которым о смене руководителя уже сообщает другое уведомление (`org_node_assigned`).
+    if (!silent?.has(id)) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: id, code: 'org_manager_changed', payload: { manager_name: managerName }, dedupKey: `org_mgr:${id}:${next ?? 'none'}` })
     if (next) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: next, code: 'org_subordinate_added', payload: { user_name: names.get(id) ?? vars.userName ?? '', node_title: vars.nodeTitle ?? '' }, dedupKey: `org_sub:${next}:${id}` })
   }
   await rebuildManagerMap(tx, ctx.tenantId, ids)

@@ -375,6 +375,9 @@ onMounted(load)
           <button class="btn" :disabled="busy" @click="snapshot">{{ t('orgStructure.snapshot') }}</button>
           <button class="btn" :disabled="busy" @click="snapshotsOpen = true">{{ t('orgStructure.snapshots') }}</button>
         </template>
+        <!-- «Журнал змін» (`32` §5.1) и отчёт подчинения (`32` §9) — отдельные экраны -->
+        <NuxtLink class="btn" to="/org-structure/changes">{{ t('orgReports.links.changes') }}</NuxtLink>
+        <NuxtLink v-if="hasScope('report.team')" class="btn" to="/org-structure/subordination">{{ t('orgReports.links.subordination') }}</NuxtLink>
       </div>
     </header>
 

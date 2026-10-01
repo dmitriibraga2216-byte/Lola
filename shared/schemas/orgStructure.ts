@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { ORG_ASSIGNMENT_END_REASONS, ORG_ASSIGNMENT_ROLES, ORG_NODE_TYPES, ORG_SNAPSHOT_KINDS } from '../enums'
 import { KEYSETS } from '../domain/keyset'
 import { ORG_IMPORT_COLUMNS } from '../domain/orgImport'
+import { ORG_JOURNAL_ACTIONS } from '../domain/orgLayout'
 import { keysetCursorSchema } from './keyset'
 
 /**
@@ -95,3 +96,26 @@ export type OrgNodeCreate = z.infer<typeof orgNodeCreateSchema>
 export type OrgNodeUpdate = z.infer<typeof orgNodeUpdateSchema>
 export type OrgNodeMove = z.infer<typeof orgNodeMoveSchema>
 export type OrgAssignmentCreate = z.infer<typeof orgAssignmentCreateSchema>
+
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+const flag = z.enum(['1', 'true', '0', 'false']).transform(v => v === '1' || v === 'true')
+
+/** «Підпорядкування людей» (`docs/v2/32` §9): фильтры и формат. */
+export const orgSubordinationQuerySchema = z.object({
+  locationId: z.string().uuid().optional(),
+  onlyFallback: flag.optional(),
+  q: z.string().trim().max(120).optional(),
+  format: z.enum(['json', 'csv', 'xlsx']).default('json'),
+})
+
+/** «Журнал змін структури» (`docs/v2/32` §9): период, автор, действие, ветка; курсор — ключ журналов. */
+export const orgChangesQuerySchema = z.object({
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+  actorId: z.string().uuid().optional(),
+  action: z.enum(ORG_JOURNAL_ACTIONS).optional(),
+  nodeId: z.string().uuid().optional(),
+  cursor: keysetCursorSchema(KEYSETS.logs).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+  format: z.enum(['json', 'csv', 'xlsx']).default('json'),
+})

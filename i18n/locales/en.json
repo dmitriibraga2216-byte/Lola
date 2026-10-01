@@ -8677,5 +8677,74 @@
       "state": "State",
       "resolvedAt": "Closed on"
     }
+  },
+  "orgReports": {
+    "search": "Search",
+    "apply": "Show",
+    "exportXlsx": "Excel",
+    "exportCsv": "CSV",
+    "loadError": "Couldn't load the report.",
+    "retry": "Try again",
+    "loading": "Loading…",
+    "from": "From",
+    "to": "To",
+    "more": "Show more",
+    "system": "System",
+    "col": {
+      "person": "Full name",
+      "position": "Position",
+      "location": "Branch",
+      "node": "Node",
+      "manager": "Manager",
+      "source": "Manager source",
+      "secondary": "Secondary roles",
+      "since": "Reporting since",
+      "date": "Date",
+      "actor": "Author",
+      "action": "Action",
+      "before": "Before",
+      "after": "After",
+      "affected": "Descendants affected"
+    },
+    "source": {
+      "org_tree": "Tree",
+      "location": "Location field",
+      "functional": "Functional",
+      "role_scope": "Role in area",
+      "none": "No manager",
+      "unknown": "Not calculated yet"
+    },
+    "subordination": {
+      "title": "Reporting lines",
+      "hint": "Who reports to whom and which rule it relies on. A source other than “Tree” means a fallback rule: add the person to the org structure.",
+      "searchPlaceholder": "Name, manager or node",
+      "onlyFallback": "Fallback rules only",
+      "empty": "No people match these filters. Change the filters or the branch."
+    },
+    "changes": {
+      "title": "Structure change log",
+      "hint": "Who changed what in the org structure and when. To find a change, narrow the period, action or branch.",
+      "branch": "Branch",
+      "empty": "No changes match these filters. Widen the period or clear the branch filter."
+    },
+    "links": {
+      "changes": "Change log",
+      "subordination": "Reporting lines"
+    },
+    "action": {
+      "org_node_create": "Node created",
+      "org_node_update": "Node updated",
+      "org_node_move": "Branch moved",
+      "org_node_reorder": "Order changed",
+      "org_node_archive": "Node archived",
+      "org_node_restore": "Node restored",
+      "org_node_assign_user": "Person assigned",
+      "org_node_unassign_user": "Person removed",
+      "org_structure_import": "Import",
+      "org_structure_rollback": "Rollback to snapshot",
+      "org_structure_snapshot": "Snapshot",
+      "org_structure_snapshot_cleanup": "Snapshot cleanup",
+      "org_structure_source_of_truth": "Tree became the source of truth"
+    }
   }
 }

@@ -124,3 +124,24 @@ export function descendantsOf(nodes: readonly LayoutInput[], id: string): string
   }
   return [...out]
 }
+
+/**
+ * Действия `audit_log`, которые меняют дерево или его держателей (`docs/v2/32` §7 п. 3). Сам
+ * снимок (`org_structure.snapshot`) в перечне нет: иначе каждый ежедневный снимок оправдывал бы
+ * следующий, и «снимок только при изменениях» (`org.daily_snapshot`) не работал бы.
+ */
+export const ORG_CHANGE_ACTIONS = [
+  'org_node.create', 'org_node.update', 'org_node.move', 'org_node.reorder', 'org_node.archive',
+  'org_node.restore', 'org_node.assign_user', 'org_node.unassign_user',
+  'org_structure.import', 'org_structure.rollback',
+] as const
+
+/**
+ * Действия «Журналу змін структури» (`32` §9): изменения дерева плюс снимки, их чистка и перевод
+ * дерева в источник истины — события структуры, которые администратору нужно видеть рядом.
+ */
+export const ORG_JOURNAL_ACTIONS = [
+  ...ORG_CHANGE_ACTIONS,
+  'org_structure.snapshot', 'org_structure.snapshot_cleanup', 'org_structure.source_of_truth',
+] as const
+export type OrgJournalAction = typeof ORG_JOURNAL_ACTIONS[number]

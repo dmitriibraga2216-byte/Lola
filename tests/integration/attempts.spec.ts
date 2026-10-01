@@ -9,6 +9,7 @@ const { createCourse, addModule, addLesson, publishCourse } = await import('../.
 const { selfEnroll, enrollmentTree, openLesson, completeLesson } = await import('../../server/services/learning')
 const { issueForEnrollment, myCertificates, publicCertificate, revokeCertificate } = await import('../../server/services/certificates')
 const { assignWithParams } = await import('./_assign')
+const { updateAssignment } = await import('../../server/services/assignments')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
 
@@ -203,6 +204,92 @@ describe('банк, тест, попытка со снапшотом', () => {
     await annulAttempt(mentor(), r.attemptId, 'Тестова аннуляція')
     const intro = await quizIntro(learner(), quizId)
     expect(intro!.attemptsLeft).toBe(1)
+  })
+})
+
+describe('критерии приёмки docs/15 §13.3 и docs/12 §13.1, 13.2, 13.6 (сверка docs/47)', () => {
+  let quizId: string
+  let assignmentId: string
+  let qCrit: string
+  let qMain: string
+  let firstAttempt: string
+
+  it('банк: критический вопрос на 1 балл и обычный на 19, тест; назначение с 1 попыткой и лимитом 10 минут', async () => {
+    const bank = await createBank(author(), { name: `Тест-банк ${Date.now()}c` })
+    qCrit = (await createQuestion(author(), {
+      bankId: bank.id, kind: 'single', stem: stem('Стара формулювання: температура холодильника?'), options: opts('a', 'b'),
+      answer: { correctId: 'a' }, isCritical: true, difficulty: 2, points: 1, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
+    })).id
+    qMain = (await createQuestion(author(), {
+      bankId: bank.id, kind: 'single', stem: stem('Скільки хвилин мити руки?'), options: opts('a', 'b'),
+      answer: { correctId: 'b' }, isCritical: false, difficulty: 1, points: 19, scoringMethod: 'formula', attachFiles: false, negativeMarking: false, tags: [],
+    })).id
+    const quiz = await createQuiz(author(), { title: 'Тест критеріїв приймання', kind: 'quiz', tags: [], selectionMode: 'fixed', requiresOfflineConfirm: false })
+    quizId = quiz.id
+    quizIds.push(quizId)
+    await setQuizQuestions(author(), quizId, [{ questionId: qCrit, sort: 0 }, { questionId: qMain, sort: 1 }])
+    assignmentId = await assignWithParams(author(), 'test', quizId, { passScore: 80, attemptsAllowed: 1, timeLimitSec: 600, shuffleQuestions: false, shuffleOptions: false }, [learnerId])
+    assignmentIds.push(assignmentId)
+  })
+
+  it('docs/12 §13.1 + docs/15 §13.3: deadline_at = старт + 10 минут; снимок attempts_allowed=1 не меняется правкой назначения на 3', async () => {
+    const r = await startAttempt(learner(), quizId)
+    if (!r.ok) throw new Error(r.code)
+    firstAttempt = r.attemptId
+    const [row] = await admin`select started_at, deadline_at, params from attempts where id = ${firstAttempt}`
+    expect(new Date(row!.deadline_at as string).getTime() - new Date(row!.started_at as string).getTime()).toBe(600_000)
+    expect((row!.params as { attemptsAllowed: number }).attemptsAllowed).toBe(1)
+
+    const updated = await updateAssignment(author(), assignmentId, { params: { attemptsAllowed: 3 } })
+    expect((updated!.params as { attemptsAllowed: number }).attemptsAllowed).toBe(3)
+    const [after] = await admin`select params from attempts where id = ${firstAttempt}`
+    expect((after!.params as { attemptsAllowed: number }).attemptsAllowed).toBe(1)
+  })
+
+  it('docs/12 §13.2: 95 %, но ошибка в критическом → failed, в разборе вопрос помечен критическим и неверным', async () => {
+    await saveAnswer(learner(), firstAttempt, qCrit, { optionId: 'b' }) // неверно
+    await saveAnswer(learner(), firstAttempt, qMain, { optionId: 'b' }) // верно, 19 из 20
+    const s = await submitAttempt(learner(), firstAttempt)
+    if (!s.ok) throw new Error(s.code)
+    expect(s.score).toBe(95)
+    expect(s.status).toBe('failed')
+    expect(s.passed).toBe(false)
+
+    const result = await getAttemptResult(learner(), firstAttempt)
+    if (!result || result.locked) throw new Error('locked')
+    // Попытка живёт по своему снимку: разрешена 1, осталось 0 — хотя назначение уже даёт 3
+    expect(result.attemptsAllowed).toBe(1)
+    expect(result.attemptsLeft).toBe(0)
+    const crit = result.questions.find(q => q.id === qCrit)!
+    expect(crit.isCritical).toBe(true)
+    expect(crit.isCorrect).toBe(false)
+  })
+
+  it('docs/12 §13.6: правка формулировки после сдачи — разбор показывает старую формулировку из снапшота', async () => {
+    await updateQuestion(author(), qCrit, { stem: stem('Нова формулювання') })
+    const result = await getAttemptResult(learner(), firstAttempt)
+    if (!result || result.locked) throw new Error('locked')
+    const crit = result.questions.find(q => q.id === qCrit)!
+    expect(JSON.stringify(crit.stem)).toContain('Стара формулювання')
+    expect(JSON.stringify(crit.stem)).not.toContain('Нова формулювання')
+  })
+
+  it('docs/12 §13.1: после дедлайна ответы не принимаются; ответ после дедлайна не засчитывается', async () => {
+    // Новая попытка — уже по новым параметрам назначения (3 попытки)
+    const r = await startAttempt(learner(), quizId)
+    if (!r.ok) throw new Error(r.code)
+    const [row] = await admin`select params from attempts where id = ${r.attemptId}`
+    expect((row!.params as { attemptsAllowed: number }).attemptsAllowed).toBe(3)
+
+    expect((await saveAnswer(learner(), r.attemptId, qMain, { optionId: 'b' })).ok).toBe(true)
+    await admin`update attempts set deadline_at = now() - interval '1 second' where id = ${r.attemptId}`
+    const late = await saveAnswer(learner(), r.attemptId, qCrit, { optionId: 'a' })
+    expect(late).toEqual({ ok: false, code: 'deadline' })
+    // Ответ, сохранённый после дедлайна в обход проверки, при подсчёте даёт 0
+    await admin`update attempt_answers set answered_at = now() + interval '1 minute' where attempt_id = ${r.attemptId} and question_id = ${qMain}`
+    const s = await submitAttempt(learner(), r.attemptId)
+    if (!s.ok) throw new Error(s.code)
+    expect(s.score).toBe(0)
   })
 })
 

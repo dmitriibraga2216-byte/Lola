@@ -1,7 +1,7 @@
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-const { createAssignment, expandAssignment, previewAudience, cancelAssignment, extendEnrollment, getAssignment } = await import('../../server/services/assignments')
+const { createAssignment, expandAssignment, syncAssignments, previewAudience, cancelAssignment, extendEnrollment, getAssignment } = await import('../../server/services/assignments')
 const { createProfile, applyProfile, previewProfile, createRule, runRules } = await import('../../server/services/automation')
 const { runDueScan } = await import('../../server/services/dueScan')
 const { renderTemplate, scheduleWithQuietHours, dispatchNotifications } = await import('../../server/services/notifications')
@@ -121,11 +121,27 @@ describe('назначения: аудитория, раскрытие, идем
     expect(n).toBe(2)
   })
 
-  it('autoSync: новый человек на позиции получает запись при sync (приёмка этапа 4)', async () => {
+  it('autoSync: новый человек на позиции получает запись ежечасным sync, назначение без autoSync — нет (docs/15 §13.2)', async () => {
+    // Второе назначение на ту же аудиторию, но без autoSync: его состав зафиксирован на момент создания
+    const frozenCourse = await makeCourse('Курс без autoSync')
+    const frozen = await createAssignment(ctx(), {
+      subjectType: 'course', subjectId: frozenCourse, lockVersion: false,
+      audience: { rules: [{ type: 'position', ids: [baristaPosId], locationIds: [lazarevaId] }], match: 'any' },
+      dueMode: 'none', dueDays: 14, isMandatory: true, autoSync: false, tags: [], status: 'active',
+    })
+    if (!frozen.ok) throw new Error(frozen.code)
+    expect(frozen.expanded).toBe(2)
+
     const personC = await makePerson('Бариста В', baristaPosId, lazarevaId)
-    expect(await expandAssignment(tenantId, assignmentId)).toBe(1)
+    // `assignment.sync` — ежечасная задача (server/services/queue.ts), здесь — её тело
+    expect(await syncAssignments(tenantId)).toBeGreaterThanOrEqual(1)
     const [e] = await admin`select id from enrollments where assignment_id = ${assignmentId} and user_id = ${personC}`
     expect(e).toBeDefined()
+    const none = await admin`select id from enrollments where assignment_id = ${frozen.assignmentId} and user_id = ${personC}`
+    expect(none).toHaveLength(0)
+    expect(await expandAssignment(tenantId, assignmentId)).toBe(0)
+    await admin`delete from enrollments where assignment_id = ${frozen.assignmentId}`
+    await admin`delete from assignments where id = ${frozen.assignmentId}`
   })
 
   it('пустая аудитория → empty_audience; неопубликованный курс → subject_not_found', async () => {
@@ -250,6 +266,9 @@ describe('профиль обучения и правила автоматиза
     // Ветерану — только c2; остальным бариста (A, B, C, Терміновий) — по 2
     const [{ n1 }] = await admin<[{ n1: number }]>`select count(*)::int as n1 from enrollments e join assignments a on a.id = e.assignment_id where a.profile_id = ${p.id} and e.user_id = ${veteran}`
     expect(n1).toBe(1)
+    // docs/15 §13.5: назначен именно недостающий курс
+    const vet = await admin`select e.subject_id from enrollments e join assignments a on a.id = e.assignment_id where a.profile_id = ${p.id} and e.user_id = ${veteran}`
+    expect(vet.map(r => r.subject_id)).toEqual([c2])
 
     // Новый человек на позиции → размещение → onPlacementChanged → sync
     const [nu] = await admin`insert into users (tenant_id, phone, full_name, status) values (${tenantId}, ${`+38095${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`}, 'Новачок', 'active') returning id`

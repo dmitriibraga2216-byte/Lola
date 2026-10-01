@@ -27,6 +27,13 @@ export const tenantLimitsSchema = z.object({
 })
 export type TenantLimitsInput = z.infer<typeof tenantLimitsSchema>
 
+/**
+ * Причина переопределения (`docs/v2/35` §7.10, §10 «`422` без причины», §13 к. 10): та же
+ * граница 10–500 знаков, что у «Продовжити доступ» и смены тарифа. Тело `PUT …/limits` —
+ * плоские оси плюс `reason`; сервис кладёт её в `platform_audit.after.reason` (`44` Р-BT.2).
+ */
+export const limitsReasonSchema = z.object({ reason: z.string().trim().min(10).max(500) })
+
 export const tenantSuspendSchema = z.object({ reason: z.string().trim().max(500).optional() })
 
 /** Удаление подтверждается slug тенанта — защита от клика по соседней строке (docs/24 §7 п. 5). */

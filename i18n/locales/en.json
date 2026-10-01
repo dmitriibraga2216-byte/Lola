@@ -8114,6 +8114,7 @@
       "hint": "Empty field — limit of the “{plan}” plan. The people limit counts active users.",
       "plan": "plan",
       "fromPlan": "from plan",
+      "reasonHint": "The reason is saved to the operator log with the change.",
       "users": "Active people",
       "storageGb": "Storage, GB",
       "smsPerMonth": "SMS per month",

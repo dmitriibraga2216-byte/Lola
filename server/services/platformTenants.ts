@@ -1,5 +1,5 @@
 import { DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 import {
   mediaAssets, planAddons, planChangeRequests, platformAudit, plans, tenantAddons, tenantLimits,
   tenantPayments, tenantSecrets, tenants,
@@ -208,7 +208,7 @@ export async function getTenantLimits(id: string) {
  * когда подписке нечего терять: статус `trial` и все три даты пусты. Иначе переопределения
  * обнуляются на месте — иначе «очистить лимиты» стирало бы оплаченный срок (docs/28 §v2-08).
  */
-export async function setTenantLimits(id: string, input: TenantLimitsInput, actor: PlatformAuth) {
+export async function setTenantLimits(id: string, input: TenantLimitsInput, actor: PlatformAuth, reason: string | null = null) {
   const before = await getTenantLimits(id)
   if (!before) return null
   const db = platformDb()
@@ -234,7 +234,7 @@ export async function setTenantLimits(id: string, input: TenantLimitsInput, acto
     await db.insert(tenantLimits).values({ tenantId: id, ...values, updatedBy: actor.adminId })
       .onConflictDoUpdate({ target: tenantLimits.tenantId, set: { ...values, updatedBy: actor.adminId, updatedAt: new Date() } })
   }
-  await recordPlatformAudit(actor, { action: 'tenant.limits', tenantId: id, entity: 'tenant_limits', entityId: id, before: before.overrides, after: values })
+  await recordPlatformAudit(actor, { action: 'tenant.limits', tenantId: id, entity: 'tenant_limits', entityId: id, before: before.overrides, after: { ...values, reason } })
   invalidateLimits(id)
   // Лимит мог вырасти — отложенные записи сотрудников досылаются сразу (docs/v2/34 §7.5 п. 4)
   const { kickPendingUploads } = await import('./storagePending')
@@ -327,9 +327,10 @@ export async function recordTenantPayment(
 
   let periodFrom: string | null = null
   let periodTo: string | null = null
+  let renewedAddons: string[] = []
 
   if (input.kind === 'subscription') {
-    const [row] = await db.select({ paidUntil: tenantLimits.paidUntil }).from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId))
+    const [row] = await db.select({ paidUntil: tenantLimits.paidUntil, autorenew: tenantLimits.autorenew }).from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId))
     const period = input.billingPeriod ?? 'month'
     // «От прежней даты окончания» (§7.8 п. 6): даже просроченный paid_until — точка отсчёта,
     // а не «сегодня». Только первая оплата тенанта (paid_until никогда не было) считается от сегодня.
@@ -341,6 +342,7 @@ export async function recordTenantPayment(
       target: tenantLimits.tenantId,
       set: { billingPeriod: period, status: 'active', paidUntil: periodTo, graceUntil: null, updatedBy: actor.adminId, updatedAt: new Date() },
     })
+    if (row?.autorenew ?? true) renewedAddons = await renewPeriodAddons(tenantId, periodFrom, periodTo)
   }
 
   if (input.kind === 'addon') {
@@ -389,11 +391,31 @@ export async function recordTenantPayment(
     tenantId,
     entity: 'tenant_payments',
     entityId: payment!.id,
-    after: { kind: input.kind, amountMinor: input.amountMinor, currency: input.currency, periodFrom, periodTo, status: input.status },
+    after: { kind: input.kind, amountMinor: input.amountMinor, currency: input.currency, periodFrom, periodTo, status: input.status, ...(renewedAddons.length ? { renewedAddons } : {}) },
   })
   invalidateLimits(tenantId)
   const eff = await effectiveLimits(tenantId)
   return { ok: true, payment: payment!, subscription: eff.subscription }
+}
+
+/**
+ * Продление опций вместе с тарифом (`35` §7.8 п. 1, §13 к. 9): оплата подписки при `autorenew`
+ * дотягивает до нового `paid_until` каждую купленную опцию `term='period'`, которая доживала
+ * до конца прежнего оплаченного периода (`valid_until ≥ periodFrom`). Истёкшие раньше не
+ * воскрешаются, `perpetual` (срока нет) и подарки оператора (`grant`, `compensation` — их срок
+ * назначает оператор, а не тариф) не трогаются (`44` Р-BT.1). Возвращает id продлённых строк.
+ */
+async function renewPeriodAddons(tenantId: string, periodFrom: string, periodTo: string): Promise<string[]> {
+  const db = platformDb()
+  const rows = await db.update(tenantAddons).set({ validUntil: periodTo, updatedAt: new Date() }).where(and(
+    eq(tenantAddons.tenantId, tenantId),
+    eq(tenantAddons.source, 'purchase'),
+    isNotNull(tenantAddons.validUntil),
+    gte(tenantAddons.validUntil, periodFrom),
+    lt(tenantAddons.validUntil, periodTo),
+    inArray(tenantAddons.addonCode, db.select({ code: planAddons.code }).from(planAddons).where(eq(planAddons.term, 'period'))),
+  )).returning({ id: tenantAddons.id })
+  return rows.map(r => r.id)
 }
 
 /** История платежей для панели оператора (`35` §5.6) — без пагинации, тенантов достаточно мало платежей. */
@@ -448,6 +470,7 @@ export async function extendTenantDates(
   tenantId: string,
   input: { paidUntil?: string | null, graceUntil?: string | null, aiUntil?: string | null },
   actor: PlatformAuth,
+  reason: string | null = null,
 ): Promise<{ ok: true } | { ok: false, code: 'not_found' }> {
   const db = platformDb()
   const t = await loadTenant(tenantId)
@@ -459,7 +482,7 @@ export async function extendTenantDates(
   const [row] = await db.select({ tenantId: tenantLimits.tenantId }).from(tenantLimits).where(eq(tenantLimits.tenantId, tenantId))
   if (row) await db.update(tenantLimits).set({ ...set, updatedBy: actor.adminId, updatedAt: new Date() }).where(eq(tenantLimits.tenantId, tenantId))
   else await db.insert(tenantLimits).values({ tenantId, ...set, updatedBy: actor.adminId })
-  await recordPlatformAudit(actor, { action: 'tenant.extend', tenantId, entity: 'tenant_limits', entityId: tenantId, after: set })
+  await recordPlatformAudit(actor, { action: 'tenant.extend', tenantId, entity: 'tenant_limits', entityId: tenantId, after: { ...set, reason } })
   invalidateLimits(tenantId)
   return { ok: true }
 }

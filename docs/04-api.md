@@ -485,7 +485,7 @@
 | POST | `/platform/tenants/:id/resume` | возобновление из suspended. Spec 25 |
 | POST | `/platform/tenants/:id/purge` | `{confirmSlug}` — команда на удаление: только из suspended, slug должен совпасть (409 `tenant.confirm_mismatch`); `status = archived`, задача `tenant.purge` через 30 дней. Spec 25 |
 | DELETE | `/platform/tenants/:id/purge` | отмена удаления до срока: archived → suspended. Spec 25 |
-| GET/PUT | `/platform/tenants/:id/limits` | тариф и переопределения `tenant_limits` (`users`, `storageGb`, `smsPerMonth`, `apiPerMinute`, `webhooks`, `activeJobs`); null — вернуться к тарифу. Spec 25 |
+| GET/PUT | `/platform/tenants/:id/limits` | тариф и переопределения `tenant_limits` (`users`, `storageGb`, `smsPerMonth`, `apiPerMinute`, `webhooks`, `activeJobs`); null — вернуться к тарифу. `PUT` — обязательный `reason` 10–500 знаков, без него `422 reason_required`; причина — в `platform_audit` (`docs/v2/44` Р-BT.2). Spec 25 |
 | GET/PUT | `/platform/tenants/:id/smtp-tls` | `{ignoreTlsErrors}` — небезпечний прапорець SMTP (`09` §9.7.1 п. 3, докс/33 D-050): тенант його не бачить, лише оператор платформи; кожна зміна в `platform_audit`. Spec 23/25 |
 | GET | `/platform/audit` | `?tenantId=&limit=` — журнал `platform_audit` (`25` §7 п. 5). Spec 25 |
 | GET/POST | `/platform/announcements` | объявления платформы (`v2/39` П-21, П-24.2, PR-39): список с числом прочтений; создание `{title 3–200, body ≤5000, audience: all\|plans\|tenants, planCodes, tenantIds, publish}` — адресация согласована с видом (400), тариф только из `plans` (`422 announcement.unknown_plan`). Пишет только оператор: у роли приложения на таблицу — только `select` |
@@ -1150,7 +1150,7 @@ HR и администратор — весь тенант). Кандидат и
 
 | Метод | Путь | Описание |
 | --- | --- | --- |
-| GET | `/billing/summary` | «Тариф і оплата» (`billing.view`): `{plan: {code, name, titleUk, tier}, priceMinor, currency, subscription, ai: {status, until, termDays, included}, addons, scheduledChange}` (`scheduledChange` — назначенный переход вниз `{id, toPlanCode, planName, effectiveAt}` или `null`); цена — только с `billing.payments.view` (владелец), иначе `priceMinor: null` |
+| GET | `/billing/summary` | «Тариф і оплата» (`billing.view`): `{plan: {code, name, titleUk, tier}, priceMinor, currency, subscription, ai: {status, until, termDays, included}, addons, scheduledChange}` (`scheduledChange` — назначенный переход вниз `{id, toPlanCode, planName, effectiveAt}` или `null`); цена — только с `billing.payments.view` (владелец), иначе `priceMinor: null`; без `billing.view` (сотрудник) — `403` |
 | GET | `/billing/payments` | «Історія платежів» (`billing.payments.view` — только владелец, иначе `403`): `?from&to&kind=subscription\|addon\|adjustment&status&cursor&limit` (≤ 100, по умолчанию 30), ключевой курсор (§4.1) → `{items, nextCursor}`; неверный фильтр — `400 validation_failed` |
 | GET | `/platform/tenants/:id/payments` | история платежей тенанта в панели оператора: новые сверху, без пагинации |
 | POST | `/platform/tenants/:id/payments` | «Записати платіж»: `{kind: subscription\|addon\|adjustment, planCode?, addonCode?, qty?, billingPeriod?, amountMinor, currency?, method?, invoiceNumber?, status?, comment}`. `subscription` продлевает `paid_until` от прежней даты, а не от даты платежа (`35` §7.8 п. 6); `addon` создаёт доплату `tenant_addons` со ссылкой на платёж, в том числе `ai_ops_pack` — пакет ИИ-операций; `adjustment` — только запись. `422 validation_failed`, `422 addon_unknown`, `404` |

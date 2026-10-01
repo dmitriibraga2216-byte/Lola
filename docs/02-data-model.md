@@ -3133,8 +3133,10 @@ ai_data_region: eu | other
 ai_call_status: queued | running | ok | failed | timeout | refused | degraded
 
 -- О чём вызов (`ai_calls.ref_kind`, мягкая ссылка `v2/44` В-11). Четыре — из `v2/30` §3.2;
--- vacancy_generation, library_module, knowledge_article, search_query добавлены PR-27
-ai_call_ref_kind: interview_session | interview_turn | review_hint | summary | vacancy_generation | library_module | knowledge_article | search_query
+-- vacancy_generation, library_module, knowledge_article, search_query добавлены PR-27;
+-- interview_scenario (критерии сценария, `v2/30` §6.2, решение владельца 01.10 — `v2/44` Р-AI2.10)
+-- и course (черновик трека, `v2/35` к. 4 — `v2/44` Р-BT.3) — миграция 0106
+ai_call_ref_kind: interview_session | interview_turn | review_hint | summary | vacancy_generation | library_module | knowledge_article | search_query | interview_scenario | course
 
 -- Вид события ленты активности (`user_activity_events.kind`, `v2/38` §3.3, §7.9, PR-34). Закрытый
 -- список: вход в систему, открытие без завершения, просмотр списка или карточки, уведомление и

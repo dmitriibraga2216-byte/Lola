@@ -672,6 +672,22 @@ export const VACANCY_AI_CRITERIA_MIN = 3
 export const VACANCY_AI_CRITERIA_MAX = 8
 
 /**
+ * «Згенерувати критерії (ШІ)» сценария (`30` §6.2, `44` Р-AI2.10): сколько предложить за раз.
+ * Потолок — тот же, что у вакансии (`29` §7.11): больше восьми критериев человек не проверит.
+ */
+export const INTERVIEW_AI_CRITERIA_MAX = 8
+export const INTERVIEW_AI_CRITERIA_DEFAULT = 5
+
+/**
+ * «Згенерувати трек» (`35` к. 4, `44` Р-BT.3): черновик курса из опубликованных модулей
+ * библиотеки тенанта. Модель видит не больше `POOL` модулей и раскладывает их по разделам.
+ */
+export const TRACK_AI_POOL_MAX = 40
+export const TRACK_AI_SECTIONS_MAX = 10
+export const TRACK_AI_GOAL_MIN = 10
+export const TRACK_AI_GOAL_MAX = 1000
+
+/**
  * Всплеск блокировок публичной формы (`29` §7.8): порог за час, на который ужесточаются
  * частотные лимиты §7.4, и срок ужесточения.
  */
@@ -1113,11 +1129,14 @@ export type AiCallStatus = typeof AI_CALL_STATUSES[number]
  * О чём вызов (`ai_calls.ref_kind`, мягкая ссылка, `44` В-11). Четыре — `30` §3.2; ещё четыре
  * добавлены PR-27 для вызовов, которые были до журнала: генерация вакансии (`ref_id` — строка
  * `vacancy_ai_generations`), эмбеддинг модуля библиотеки и статьи базы знаний, вектор
- * поискового запроса (`ref_id` пуст — запрос не сущность).
+ * поискового запроса (`ref_id` пуст — запрос не сущность). Ещё два — миграция `0106`:
+ * `interview_scenario` — «Згенерувати критерії (ШІ)» сценария (`30` §6.2, решение владельца
+ * `44` Р-AI2.10), `course` — «Згенерувати трек», черновик курса (`35` к. 4, `44` Р-BT.3).
  */
 export const AI_CALL_REF_KINDS = [
   'interview_session', 'interview_turn', 'review_hint', 'summary',
   'vacancy_generation', 'library_module', 'knowledge_article', 'search_query',
+  'interview_scenario', 'course',
 ] as const
 export type AiCallRefKind = typeof AI_CALL_REF_KINDS[number]
 

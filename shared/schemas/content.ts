@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { COURSE_CATALOG_MODES } from './catalog'
-import { CONTENT_RATING_TARGETS, MEDIA_ORIGINS } from '../enums'
+import { CONTENT_RATING_TARGETS, MEDIA_ORIGINS, TRACK_AI_GOAL_MAX, TRACK_AI_GOAL_MIN, TRACK_AI_POOL_MAX } from '../enums'
 
 /** Блоки контента (docs/11-content-lessons.md §3.3). */
 
@@ -60,6 +60,19 @@ export const courseCreateSchema = z.object({
 })
 
 export const courseUpdateSchema = courseCreateSchema.partial()
+
+/**
+ * «Згенерувати трек» (`docs/v2/35` к. 4, `44` Р-BT.3): цель словами человека, необязательный этап
+ * и, по желанию, модули библиотеки, из которых собирать. Без списка — пул из опубликованных
+ * модулей тенанта (не больше `TRACK_AI_POOL_MAX`).
+ */
+export const trackGenerateSchema = z.object({
+  goal: z.string().trim().min(TRACK_AI_GOAL_MIN, 'Опишіть мету треку — від 10 символів').max(TRACK_AI_GOAL_MAX, 'Мета — до 1000 символів'),
+  language: z.enum(['uk', 'en']).default('uk'),
+  lifecycleStageId: z.string().uuid().nullable().optional(),
+  libraryModuleIds: z.array(z.string().uuid()).min(1).max(TRACK_AI_POOL_MAX).optional(),
+}).strict()
+export type TrackGenerateInput = z.infer<typeof trackGenerateSchema>
 
 export const moduleCreateSchema = z.object({
   title: z.string().min(1).max(200),

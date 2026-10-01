@@ -701,6 +701,13 @@
       "when": 1790235420000,
       "tag": "0105_idempotency_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1790235480000,
+      "tag": "0106_v2_ai_ref_scenario_course",
+      "breakpoints": true
     }
   ]
 }

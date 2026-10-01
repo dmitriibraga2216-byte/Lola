@@ -6,7 +6,7 @@ import { KEYSETS, encodeKeyset } from '../../../shared/domain/keyset'
 import type {
   InterviewCriterionInput, InterviewCriterionUpdate, InterviewScenarioCreate, InterviewScenarioListQuery, InterviewScenarioUpdate,
 } from '../../../shared/schemas/interview'
-import type { InterviewAlternativePath, InterviewAnswerMode, InterviewScenarioStatus } from '../../../shared/enums'
+import type { InterviewAlternativePath, InterviewAnswerMode, InterviewCriterionSource, InterviewScenarioStatus } from '../../../shared/enums'
 import { recordAudit } from '../audit'
 
 /**
@@ -346,7 +346,8 @@ export async function listCriteria(ctx: Ctx, scenarioId: string): Promise<Criter
   })
 }
 
-export async function addCriterion(ctx: Ctx, scenarioId: string, input: InterviewCriterionInput): Promise<CriterionResult> {
+export async function addCriterion(ctx: Ctx, scenarioId: string, criterion: Omit<InterviewCriterionInput, 'source'> & { source?: InterviewCriterionSource }): Promise<CriterionResult> {
+  const input = { ...criterion, source: criterion.source ?? 'manual' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx): Promise<CriterionResult> => {
     const editable = await editableScenario(tx, scenarioId)
     if (!editable.ok) return editable
@@ -365,9 +366,10 @@ export async function addCriterion(ctx: Ctx, scenarioId: string, input: Intervie
       scaleMax: String(input.scaleMax),
       isCritical: input.isCritical,
       sort: input.sort ?? (existing.reduce((m, e) => Math.max(m, e.sort), 0) + 1),
-      source: 'manual',
+      // Предложение ИИ сохраняет человек — по одному, после проверки (`30` §6.2, инвариант 18)
+      source: input.source,
     }).returning()
-    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'interview.criterion.create', entity: 'interview_criterion', entityId: row!.id, after: { scenarioId, name: input.name } })
+    await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'interview.criterion.create', entity: 'interview_criterion', entityId: row!.id, after: { scenarioId, name: input.name, source: input.source } })
     return { ok: true, criterion: criterionView(row!) }
   })
 }

@@ -667,11 +667,11 @@
 
 - ~~`28`: `POST /candidates/:id/invite`, `DELETE /candidates/:id`~~ — реализованы candidates-tails
   (`docs/v2/46-progress.md`, «2026-09-29 · candidates-tails»).
-- `30`: `POST /interview-scenarios/:id/criteria/generate` — «2026-09-25 · Фаза 3, PR-28 —
+- ~~`30`: `POST /interview-scenarios/:id/criteria/generate` — «2026-09-25 · Фаза 3, PR-28 —
   сценарий, согласие, прохождение собеседования…» → «Что осталось» (предложение критериев ИИ,
-  `30` §6.2); ~~`POST /candidates/:id/interview/rescore` — «2026-09-25 · Фаза 3, PR-29 — Підсумок,
+  `30` §6.2)~~ — реализована owner-decisions-ai-track (01.10, `v2/44` Р-OD.1); ~~`POST /candidates/:id/interview/rescore` — «2026-09-25 · Фаза 3, PR-29 — Підсумок,
   подсказки ментору, качество…» → «Что осталось»~~ — реализована ai-settings-screens (29.09, `v2/44`
-  Р-AI.2); нереализованных после неё 17.
+  Р-AI.2); нереализованных после неё 17, после owner-decisions-ai-track — 16.
 - `32`: `GET /org-structure/nodes/:id` — в `46` не упомянута; узел с держателями (`holders`)
   отдаёт `GET /org-structure/tree`.
 - `34`: `GET`/`POST /storage/addons` — «2026-09-24 · Фаза 3, PR-36 — квота, корзина, сроки
@@ -705,6 +705,7 @@
 | GET | `/settings/lifecycle-stages` | справочник этапов тенанта по `sort` (`lifecycle.view`): `{id, code, nameUk, nameEn, icon, color, sort, isEnabled, expectedDays, capabilities, appliesToCandidate, coursesCount, peopleCount}` |
 | PATCH | `/settings/lifecycle-stages/:id` | правка этапа (`lifecycle.manage`): `{nameUk?, nameEn?, icon?, color?: ink\|sun\|teal\|coral, sort?, isEnabled?, expectedDays?: 1–365}`. Неизвестный ключ и `code` — `422 validation_failed` (`v2/44` В-3), `capabilities` в теле — `403 capabilities.readonly`, выключение этапа, в котором есть курсы или люди, — `409 lifecycle_stage.in_use`; нет этапа — `404` |
 | PATCH | `/courses/:id/stage` | этап курса (`lifecycle.manage`): `{lifecycleStageId: uuid\|null, confirm?}` → `{id, lifecycleStageId, stageLocked, completedCount}`; курс с завершёнными прохождениями без `confirm` — `409 course.stage_locked`, выключенный этап — `422 lifecycle.disabled`, нет курса или этапа — `404` |
+| POST | `/courses/generate` | «Згенерувати трек» (`course.create` + `course.edit`; этап — `lifecycle.manage`; `v2/35` к. 4, `v2/44` Р-OD.2): `{goal (10–1000), language?, lifecycleStageId?, libraryModuleIds?}` → `201 {courseId, title, sections, lessons, aiCallId}` — курс `draft` из опубликованных модулей библиотеки, назначений нет; `409 ai.unavailable`, `409 limit_exceeded`, `503 ai.provider_failed`, `422 lifecycle.ai_generate_forbidden \| lifecycle.disabled \| track.no_modules \| track.empty_plan` |
 | PATCH | `/platform/tenants/:id/lifecycle-stages/:stageId` | набор возможностей этапа тенанта `{capabilities}` — только оператор платформы; неизвестный ключ — `422 validation_failed`, нет этапа — `404` |
 
 ### Жизненный цикл и офбординг (`docs/v2/33-lifecycle.md` §10, PR-07)
@@ -1101,6 +1102,7 @@ HR и администратор — весь тенант). Кандидат и
 | POST | `/interview-scenarios/:id/criteria` | критерий (описание 20–500 знаков); у опубликованной версии — `409 scenario.published`; `201` |
 | PUT | `/interview-scenarios/:id/criteria/:criterionId` | правка критерия черновика |
 | DELETE | `/interview-scenarios/:id/criteria/:criterionId` | удалить критерий черновика; `204` |
+| POST | `/interview-scenarios/:id/criteria/generate` | «Згенерувати критерії (ШІ)» (`interview.configure`, `v2/30` §6.2, `v2/44` Р-OD.1): `{count?}` (1–8, по умолчанию 5) → `{criteria: [{name, description, weight, scaleMax, isCritical:false}], aiCallId}` — черновик, строки `interview_criteria` не создаются (сохраняет человек `POST …/criteria` с `source:'ai_suggested'`); у опубликованного — `409 scenario.published`; `409 ai.unavailable`, `409 limit_exceeded` (`axis = ai_generate_ops`), `503 ai.provider_failed` |
 
 ИИ не принимает решений о людях (`v2/30` §7.1): вывод модели ложится в карточку одной строкой
 `candidate_scores.kind = 'ai'` рядом с человеческими, состояние кандидата, колонку канбана, статус

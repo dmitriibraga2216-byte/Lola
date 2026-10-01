@@ -82,6 +82,46 @@ async function create() {
   }
 }
 
+// ── «Згенерувати трек» (docs/v2/35 к. 4, docs/v2/44 Р-BT.3) ──────────────────────────────
+// Сервер збирає ЧЕРНЕТКУ курсу з опублікованих модулів бібліотеки; людина переглядає її в
+// редакторі й публікує сама. Етап — лише для того, хто керує етапами, і лише той, де генерацію
+// дозволено (`stageCan(stage, 'ai_generate')`, docs/v2/33 §3.3).
+interface Stage { id: string, nameUk: string, nameEn: string | null, isEnabled: boolean, capabilities: Record<string, boolean | undefined> }
+const canGenerate = computed(() => hasScope('course.create') && hasScope('course.edit'))
+const genOpen = ref(false)
+const gen = reactive({ goal: '', lifecycleStageId: '' })
+const stages = ref<Stage[]>([])
+const aiStages = computed(() => stages.value.filter(st => st.isEnabled && st.capabilities.ai_generate === true))
+
+async function openGenerate() {
+  genOpen.value = true
+  error.value = ''
+  if (hasScope('lifecycle.manage') && !stages.value.length) {
+    try { stages.value = await api<Stage[]>('/settings/lifecycle-stages') }
+    catch { stages.value = [] }
+  }
+}
+
+async function generate() {
+  if (gen.goal.trim().length < 10) return
+  busy.value = true
+  error.value = ''
+  try {
+    const r = await api<{ courseId: string }>('/courses/generate', {
+      method: 'POST',
+      body: { goal: gen.goal.trim(), ...(gen.lifecycleStageId ? { lifecycleStageId: gen.lifecycleStageId } : {}) },
+    })
+    await navigateTo(`/admin/courses/${r.courseId}`)
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+    genOpen.value = false
+  }
+  finally {
+    busy.value = false
+  }
+}
+
 const shortName = (n: string | null) => (n ? n.split(' ').map((p, i) => (i === 0 ? p : `${p[0]}.`)).slice(0, 2).join(' ') : '—')
 </script>
 
@@ -89,6 +129,7 @@ const shortName = (n: string | null) => (n ? n.split(' ').map((p, i) => (i === 0
   <div>
     <PageHeader :title="t('course.title')" :crumbs="[{ label: t('admin.section.content') }]">
       <template #actions>
+        <button v-if="canGenerate" class="btn ghost" @click="openGenerate">{{ t('course.aiGenerate') }}</button>
         <button v-if="hasScope('course.create')" class="btn primary" @click="formOpen = true">{{ t('course.add') }}</button>
       </template>
     </PageHeader>
@@ -136,6 +177,29 @@ const shortName = (n: string | null) => (n ? n.split(' ').map((p, i) => (i === 0
           <tr v-if="visible.length === 0"><td colspan="6" class="empty">{{ t('course.empty') }}</td></tr>
         </tbody>
       </table>
+    </div>
+
+    <div v-if="genOpen" class="modal-backdrop" @click.self="genOpen = false">
+      <form class="modal card" @submit.prevent="generate">
+        <h2 class="panel-title">{{ t('course.aiTitle') }}</h2>
+        <p class="note sun">{{ t('course.aiHint') }}</p>
+        <label>
+          <span class="label">{{ t('course.aiGoal') }}</span>
+          <textarea v-model="gen.goal" class="field" rows="3" minlength="10" maxlength="1000" required autofocus />
+          <span class="help">{{ t('course.aiGoalHint') }}</span>
+        </label>
+        <label v-if="aiStages.length">
+          <span class="label">{{ t('course.aiStage') }}</span>
+          <select v-model="gen.lifecycleStageId" class="field">
+            <option value="">{{ t('course.aiNoStage') }}</option>
+            <option v-for="st in aiStages" :key="st.id" :value="st.id">{{ st.nameUk }}</option>
+          </select>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" @click="genOpen = false">{{ t('common.cancel') }}</button>
+          <button type="submit" class="btn primary" :disabled="busy || gen.goal.trim().length < 10">{{ busy ? t('course.aiBusy') : t('course.aiSubmit') }}</button>
+        </div>
+      </form>
     </div>
 
     <div v-if="formOpen" class="modal-backdrop" @click.self="formOpen = false">

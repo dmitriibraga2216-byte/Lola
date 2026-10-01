@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import type { AiPurpose } from '../../../shared/enums'
-import { VACANCY_AI_CRITERIA_MAX, VACANCY_AI_CRITERIA_MIN, VACANCY_AI_TEXT_MAX_CHARS } from '../../../shared/enums'
+import {
+  INTERVIEW_AI_CRITERIA_MAX, TRACK_AI_SECTIONS_MAX, VACANCY_AI_CRITERIA_MAX, VACANCY_AI_CRITERIA_MIN, VACANCY_AI_TEXT_MAX_CHARS,
+} from '../../../shared/enums'
 import { sanitizeUserHtml } from '../sanitize'
 import { stubVector } from '../embeddings'
 import { stubHint } from '../../../shared/domain/reviewHint'
@@ -189,6 +191,144 @@ export const VACANCY_CRITERIA_PROMPT: PromptDef<VacancyCriteriaInput, VacancyCri
     return { criteria: r.criteria.slice(0, VACANCY_AI_CRITERIA_MAX) }
   },
   cacheable: true,
+}
+
+// ── Сценарий собеседования: черновик критериев (`30` §6.2, `44` Р-AI2.10) ───────────────
+
+export interface InterviewCriteriaInput {
+  scenarioName: string
+  quizTitle: string | null
+  /** Тексты вопросов сценария — без ответов кандидатов: модель описывает, что считать сильным ответом. */
+  questions: string[]
+  /** Названия уже заведённых критериев — чтобы не предлагать их второй раз. */
+  existing: string[]
+  count: number
+  language: 'uk' | 'en' | 'ru'
+}
+
+export interface InterviewCriterionDraft { name: string, description: string, weight: number, scaleMax: number, isCritical: boolean }
+export interface InterviewCriteriaOutput { criteria: InterviewCriterionDraft[] }
+
+/** Те же границы, что у формы §6.2 и CHECK'ов `interview_criteria`: черновик не бывает невалиднее ручного ввода. */
+const interviewCriterionDraftSchema = z.object({
+  name: z.string().trim().min(3).max(100),
+  description: z.string().trim().transform(v => v.slice(0, 500)).pipe(z.string().min(20)),
+  weight: z.number().min(0.1).max(10),
+})
+
+const STUB_INTERVIEW_CRITERIA: { name: string, description: string, weight: number }[] = [
+  { name: 'Повнота відповіді', description: 'Відповідь закриває всі частини запитання і не обходить його суть', weight: 2 },
+  { name: 'Конкретні приклади', description: 'Кандидат спирається на власний досвід і наводить конкретні ситуації, а не загальні слова', weight: 2 },
+  { name: 'Структура і ясність', description: 'Думку викладено послідовно: ситуація, дія, результат; слухачеві легко стежити', weight: 1 },
+  { name: 'Ставлення до людей', description: 'Кандидат описує уважну й доброзичливу поведінку з клієнтами та колегами', weight: 1 },
+  { name: 'Відповідальність', description: 'Кандидат визнає наслідки своїх рішень і говорить, що зробив би інакше', weight: 1 },
+  { name: 'Готовність навчатися', description: 'Кандидат розповідає, чого навчився нещодавно і як застосував це в роботі', weight: 1 },
+]
+
+/**
+ * Черновик — вход для человека (инвариант 18): ни одна строка `interview_criteria` не пишется
+ * из ответа модели, её создаёт «Зберегти» по каждому критерию. «Критичний» модель не ставит:
+ * критичный критерий отправляет сессию человеку (`30` §7.10), это решение методиста.
+ */
+export const INTERVIEW_CRITERIA_PROMPT: PromptDef<InterviewCriteriaInput, InterviewCriteriaOutput> = {
+  key: 'interview.criteria',
+  version: 'v1',
+  purpose: 'generate',
+  stub(input) {
+    const taken = new Set(input.existing.map(n => n.trim().toLowerCase()))
+    const scenario = { name: 'Відповідність сценарію', description: `Відповіді показують розуміння роботи, про яку сценарій «${input.scenarioName}»`.slice(0, 500), weight: 3 }
+    return {
+      criteria: [scenario, ...STUB_INTERVIEW_CRITERIA]
+        .filter(c => !taken.has(c.name.toLowerCase()))
+        .slice(0, input.count)
+        .map(c => ({ ...c, scaleMax: 5, isCritical: false })),
+    }
+  },
+  chat: input => [
+    {
+      role: 'system',
+      content: [
+        'You propose evaluation criteria for a recorded job interview. They are a draft for a human HR specialist who decides and edits them.',
+        `Write in ${LANGUAGE_NAME[input.language]}.`,
+        `Return JSON {"criteria": [{"name": "...", "description": "...", "weight": 1}]} with at most ${input.count} items.`,
+        'Name is 3-100 characters. Description is 20-500 characters and explains what a strong answer looks like. Weight is a number from 1 to 5.',
+        'Criteria must be about skills and behaviour visible in the answers; never about age, gender, health, family, religion, origin, accent or voice.',
+        'Do not repeat the existing criteria.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({ scenario: input.scenarioName, test: input.quizTitle, questions: input.questions, existing: input.existing }),
+    },
+  ],
+  parse(raw) {
+    const r = z.object({ criteria: z.array(z.unknown()).min(1) }).parse(raw)
+    // Невалидная строка отбрасывается, а не валит весь ответ; пусто после отбора — `bad_output`
+    const criteria = r.criteria.flatMap((c) => {
+      const p = interviewCriterionDraftSchema.safeParse(c)
+      return p.success ? [{ ...p.data, scaleMax: 5, isCritical: false }] : []
+    }).slice(0, INTERVIEW_AI_CRITERIA_MAX)
+    if (!criteria.length) throw new Error('no valid criteria')
+    return { criteria }
+  },
+  // Повтор — новая операция: человек просит другие варианты, а не тот же ответ
+  cacheable: false,
+}
+
+// ── «Згенерувати трек»: черновик курса из модулей библиотеки (`35` к. 4, `44` Р-BT.3) ─────
+
+export interface TrackDraftModule { n: number, title: string, summary: string | null, minutes: number | null }
+
+export interface TrackDraftInput {
+  goal: string
+  language: 'uk' | 'en' | 'ru'
+  /** Пул — только опубликованные модули библиотеки тенанта; модель ссылается на них номером `n`. */
+  modules: TrackDraftModule[]
+}
+
+export interface TrackDraftSection { title: string, modules: number[] }
+export interface TrackDraftOutput { title: string, summary: string, sections: TrackDraftSection[] }
+
+const trackDraftSchema = z.object({
+  title: z.string().trim().min(3).transform(v => v.slice(0, 200)),
+  summary: z.string().trim().default('').transform(v => v.slice(0, 1000)),
+  sections: z.array(z.object({
+    title: z.string().trim().min(1).transform(v => v.slice(0, 200)),
+    modules: z.array(z.number().int().positive()).min(1),
+  })).min(1).transform(v => v.slice(0, TRACK_AI_SECTIONS_MAX)),
+})
+
+/**
+ * Модель **не пишет учебный контент**: она только называет трек и раскладывает уже существующие
+ * модули тенанта по разделам. Номер вне пула сервис отбрасывает (`trackAi.ts`) — ссылка на
+ * несуществующий материал в черновик не попадает. Результат — курс `draft`: публикует человек.
+ */
+export const TRACK_DRAFT_PROMPT: PromptDef<TrackDraftInput, TrackDraftOutput> = {
+  key: 'track.draft',
+  version: 'v1',
+  purpose: 'generate',
+  stub(input) {
+    const goal = input.goal.replace(/\s+/g, ' ').trim()
+    return {
+      title: goal.length > 80 ? `${goal.slice(0, 79)}…` : goal,
+      summary: goal.slice(0, 1000),
+      sections: [{ title: 'Основне', modules: input.modules.map(m => m.n) }],
+    }
+  },
+  chat: input => [
+    {
+      role: 'system',
+      content: [
+        'You draft a learning track for employees from existing modules of a company library. A human methodologist reviews, edits and publishes it.',
+        `Write in ${LANGUAGE_NAME[input.language]}.`,
+        `Return JSON {"title": "...", "summary": "...", "sections": [{"title": "...", "modules": [1, 2]}]} with 1 to ${TRACK_AI_SECTIONS_MAX} sections.`,
+        'Use only module numbers from the list, each at most once, and only modules relevant to the goal. Do not invent new modules or content.',
+      ].join(' '),
+    },
+    { role: 'user', content: JSON.stringify({ goal: input.goal, modules: input.modules }) },
+  ],
+  parse: raw => trackDraftSchema.parse(raw),
+  cacheable: false,
 }
 
 // ── Эмбеддинги (`31` §7.8, `docs/03` §3.7) ──────────────────────────────────────────────

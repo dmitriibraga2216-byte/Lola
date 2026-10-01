@@ -8,6 +8,7 @@ import type { AiProviderCreateInput, AiProviderUpdateInput } from '../../../shar
 import { recordAudit } from '../audit'
 import { dropRefSecret, putRefSecret } from '../secrets'
 import { endpointAllowed, fallbackViolation, normalizeEndpoint, retentionForbidden, type FallbackViolation } from './policy'
+import { checkPublicUrl } from '../netGuard'
 
 /**
  * Профили поставщика модели тенанта (`docs/v2/30` §3.2, §10 `GET | PUT /ai/providers[/:id]`;
@@ -129,6 +130,8 @@ async function applyApiKey(tx: TenantTx, ctx: ProviderCtx, row: Row, apiKey: str
 }
 
 export async function createProvider(ctx: ProviderCtx, input: AiProviderCreateInput): Promise<SaveProviderResult> {
+  // Имя, которое резолвится во внутреннюю сеть (`*.nip.io`, свой DNS), строкой не распознать — DNS (security-sweep-3)
+  if (input.endpointUrl && await checkPublicUrl(input.endpointUrl, { httpsOnly: true }) === 'private') return { ok: false, code: 'endpoint_invalid' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await allRows(tx, ctx.tenantId)
     if (rows.some(r => r.code === input.code)) return { ok: false as const, code: 'code_taken' as const }
@@ -159,6 +162,8 @@ export async function createProvider(ctx: ProviderCtx, input: AiProviderCreateIn
 }
 
 export async function updateProvider(ctx: ProviderCtx, id: string, input: AiProviderUpdateInput): Promise<SaveProviderResult> {
+  // Имя, которое резолвится во внутреннюю сеть (`*.nip.io`, свой DNS), строкой не распознать — DNS (security-sweep-3)
+  if (input.endpointUrl && await checkPublicUrl(input.endpointUrl, { httpsOnly: true }) === 'private') return { ok: false, code: 'endpoint_invalid' }
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await allRows(tx, ctx.tenantId)
     const before = rows.find(r => r.id === id)

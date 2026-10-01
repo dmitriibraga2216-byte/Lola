@@ -9,6 +9,7 @@ const { encrypt, decrypt } = await import('../../server/services/crypto')
 const { setSecret, getSecret, integrationStatus, disconnect, SECRET_KEYS } = await import('../../server/services/secrets')
 const { createTenant, platformLogin, validatePlatformSession, impersonate, checkPlanLimit, ensureFirstAdmin, updateTenant } = await import('../../server/services/platform')
 const { createEndpoint, emitWebhook, deliverPending, listDeliveries, sign, retryDelivery } = await import('../../server/services/webhooks')
+const { setNetGuardAllowPrivate } = await import('../../server/services/netGuard')
 const { createToken, validateBearer, revokeToken } = await import('../../server/services/apiTokens')
 const { validateSession } = await import('../../server/services/session')
 const { withTenant } = await import('../../server/utils/withTenant')
@@ -165,9 +166,11 @@ describe('вебхуки наружу (docs/09 §9.5)', () => {
   })
 
   beforeAll(async () => {
+    // Приёмник — на 127.0.0.1: внутренние адреса вебхукам разрешены только в тестах (security-sweep-3)
+    setNetGuardAllowPrivate(true)
     await new Promise<void>(r => server.listen(0, '127.0.0.1', () => { port = (server.address() as { port: number }).port; r() }))
   })
-  afterAll(() => server.close())
+  afterAll(() => { setNetGuardAllowPrivate(false); server.close() })
 
   it('подписка на событие → доставка с подписью HMAC; события мимо подписки не шлются', async () => {
     const epr = await createEndpoint(ctx(), { url: `http://127.0.0.1:${port}/ok`, events: ['certificate.issued'], description: 'test ok' })

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AiDriver, AiPurpose, AiProviderRetention, AiUsageAxis } from '../../../shared/enums'
+import { checkUrlShape } from '../netGuard'
 
 /**
  * Правила шлюза модели без базы и сети (`docs/v2/30` §3.2, §7.7, §7.12, §7.18; `docs/v2/35`
@@ -204,7 +205,6 @@ export function normalizeEndpoint(url: string | null | undefined): string | null
   return s || null
 }
 
-const PRIVATE_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|\[?f[cd][0-9a-f]{2}:.*|\[?fe80:.*)$/i
 
 /**
  * Адрес, который тенант вправе вписать в свой профиль: только `https` и не внутренняя сеть.
@@ -221,5 +221,7 @@ export function endpointAllowed(url: string): boolean {
     return false
   }
   if (u.protocol !== 'https:' || u.username || u.password) return false
-  return !PRIVATE_HOST.test(u.hostname)
+  // Общая проверка исходящих адресов (`netGuard.ts`, security-sweep-3): кроме диапазонов — IPv4 внутри
+  // IPv6 и имена без точки (`minio`, `postgres` — сервисы docker); DNS — при сохранении профиля
+  return checkUrlShape(url, { httpsOnly: true }) === 'ok'
 }

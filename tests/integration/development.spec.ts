@@ -81,7 +81,7 @@ describe('этап 7: компетенции, профиль должности,
     expect((await dev.transitionPlan(asBarista(), plan.id, 'submit')).ok).toBe(true)
     // Сотрудник не может утвердить свой план — только submit/review; approve делает руководитель
     expect(await dev.transitionPlan(asBarista(), plan.id, 'submit')).toMatchObject({ ok: false })
-    expect((await dev.transitionPlan(asAdmin(), plan.id, 'approve')).ok).toBe(true)
+    expect((await dev.transitionPlan(asAdmin(), plan.id, 'approve', undefined, { scope: null })).ok).toBe(true)
     expect((await dev.myPlan(asBarista(), baristaId)).plan?.status).toBe('active')
 
     // screens-7 (docs/19 §3.4 [рішення], docs/31 `DevelopmentPlanMobile`): наставник плану — окремо від owner_id

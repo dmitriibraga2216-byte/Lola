@@ -102,10 +102,13 @@ async function buildSnapshot(tx: TenantTx, quiz: typeof quizzes.$inferSelect, pa
 
   const snapshot: SnapshotQuestion[] = picked.map(({ q, points, isCritical }) => {
     let options = q.options
-    if (params.shuffleOptions && Array.isArray(options)) options = shuffle(options as unknown[])
-    if (params.shuffleOptions && options && typeof options === 'object' && 'right' in (options as object)) {
+    // «Порядок» и «Відповідність» хранят варианты в порядке ответа: без перемешивания снимок отдавал бы
+    // ответ прямо в вопросе (а нетронутый ввод получал бы полный балл) — мешаем всегда (security-sweep-4)
+    const answerOrdered = q.kind === 'ordering' || q.kind === 'comparison'
+    if ((params.shuffleOptions || q.kind === 'ordering') && Array.isArray(options)) options = shuffleAway(options as unknown[])
+    if ((params.shuffleOptions || answerOrdered) && options && typeof options === 'object' && 'right' in (options as object)) {
       const o = options as { left: unknown[], right: unknown[] }
-      options = { left: o.left, right: shuffle(o.right) }
+      options = { left: o.left, right: shuffleAway(o.right) }
     }
     if (params.shuffleOptions && options && typeof options === 'object' && 'items' in (options as object) && 'groups' in (options as object)) {
       const o = options as { groups: unknown[], items: unknown[] }
@@ -137,6 +140,14 @@ async function buildSnapshot(tx: TenantTx, quiz: typeof quizzes.$inferSelect, pa
  * Одобренные запросы дополнительных попыток (docs/12 §14.5): каждый даёт +1 попытку сверх
  * лимита назначения. Само назначение не меняется.
  */
+/** Перемешать так, чтобы порядок отличался от исходного (если элементов больше одного). */
+function shuffleAway<T>(items: readonly T[]): T[] {
+  let out = shuffle([...items])
+  for (let i = 0; i < 5 && items.length > 1 && out.every((x, j) => x === items[j]); i++) out = shuffle([...items])
+  if (items.length > 1 && out.every((x, j) => x === items[j])) out = [...items.slice(1), items[0]!]
+  return out
+}
+
 export async function approvedExtraAttempts(tx: TenantTx, userId: string, quizId: string, enrollmentId?: string | null): Promise<number> {
   const [row] = await tx.select({ n: sql<number>`count(*)::int` }).from(attemptRequests).where(and(
     eq(attemptRequests.userId, userId),

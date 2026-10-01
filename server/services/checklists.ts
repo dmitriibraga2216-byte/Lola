@@ -288,20 +288,28 @@ export async function myRuns(ctx: Ctx) {
 }
 
 /** Пункты плана действий: статус open → done; overdue ставит сканер. */
-export async function updateAction(ctx: Ctx, runId: string, actionId: string, patch: { status?: 'open' | 'done', text?: string, dueAt?: string, responsibleId?: string }) {
+/**
+ * Кто правит план действий прогона (security-sweep-4): наблюдатель, ответственный за пункт (только пункт),
+ * или держатель `checklist.run` в области точки прогона. Раньше — любой с `checklist.run` по id прогона.
+ */
+export type RunGuard = (run: { observerId: string, locationId: string | null }, responsibleId?: string) => boolean
+
+export async function updateAction(ctx: Ctx, runId: string, actionId: string, patch: { status?: 'open' | 'done', text?: string, dueAt?: string, responsibleId?: string }, guard: RunGuard = () => true) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [r] = await tx.select().from(checklistRuns).where(eq(checklistRuns.id, runId))
     if (!r) return null
+    const item = (r.actionPlan as ActionItem[]).find(p => p.id === actionId)
+    if (!item || !guard(r, item.responsibleId)) return null
     const plan = (r.actionPlan as ActionItem[]).map(p => p.id === actionId ? { ...p, ...patch, doneAt: patch.status === 'done' ? new Date().toISOString() : patch.status === 'open' ? null : p.doneAt } : p)
     await tx.update(checklistRuns).set({ actionPlan: plan, updatedAt: new Date() }).where(eq(checklistRuns.id, runId))
     return plan.find(p => p.id === actionId) ?? null
   })
 }
 
-export async function addAction(ctx: Ctx, runId: string, item: { text: string, responsibleId: string, dueAt: string }) {
+export async function addAction(ctx: Ctx, runId: string, item: { text: string, responsibleId: string, dueAt: string }, guard: RunGuard = () => true) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [r] = await tx.select().from(checklistRuns).where(eq(checklistRuns.id, runId))
-    if (!r) return null
+    if (!r || !guard(r)) return null
     const a: ActionItem = { id: crypto.randomUUID(), ...item, status: 'open' }
     await tx.update(checklistRuns).set({ actionPlan: [...(r.actionPlan as ActionItem[]), a], updatedAt: new Date() }).where(eq(checklistRuns.id, runId))
     if (item.responsibleId !== ctx.actorId) await enqueueNotification(tx, { tenantId: ctx.tenantId, userId: item.responsibleId, code: 'action_item_due', payload: { text: item.text, due: item.dueAt }, dedupKey: `ai_new:${runId}:${a.id}` })

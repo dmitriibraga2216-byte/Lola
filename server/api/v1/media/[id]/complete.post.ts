@@ -16,6 +16,8 @@ export default defineEventHandler(async (event) => {
   const uploader = can(access, 'media.upload')
   if (!uploader) {
     const own = await getMedia(ctx, id).catch(() => null)
+    // Чужого тенанта (RLS) или несуществующего файла не видно — 404, а не 403 (CLAUDE.md п. 15)
+    if (!own) return apiError(event, 404, 'not_found', 'Файл не знайдено')
     const origin = own?.origin as never
     const allowed = own && own.ownerUserId === access.userId
       && (SELF_SERVICE_ORIGINS.includes(origin) || (LEARNER_UPLOAD_ORIGINS.includes(origin) && can(access, 'learn.attempt')))

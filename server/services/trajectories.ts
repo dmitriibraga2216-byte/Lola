@@ -542,11 +542,13 @@ export async function selfEnroll(ctx: Ctx, id: string): Promise<EnrollResult | {
 }
 
 /** Решение по заявке (catalog_request) — тем, у кого есть assignment.create; відмова — з причиною (docs/10 §14.1). */
-export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean, reason?: string): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'not_requested' }> {
+export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boolean, reason?: string): Promise<{ ok: true } | { ok: false, code: 'not_found' | 'not_requested' | 'self' }> {
   const r = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [e] = await tx.select().from(trajectoryEnrollments).where(eq(trajectoryEnrollments.id, enrollmentId))
     if (!e) return { ok: false as const, code: 'not_found' as const }
     if (e.status !== 'not_assigned' || !e.requestedAt || e.cancelledAt) return { ok: false as const, code: 'not_requested' as const }
+    // Свою заявку не одобряют (security-sweep-4)
+    if (approve && e.userId === ctx.actorId) return { ok: false as const, code: 'self' as const }
     if (approve) {
       await tx.update(trajectoryEnrollments).set({ status: 'not_started', updatedAt: new Date() }).where(eq(trajectoryEnrollments.id, enrollmentId))
       await logPassEvent(tx, ctx.tenantId, { subjectType: 'trajectory', subjectId: e.trajectoryId, enrollmentId, userId: e.userId, event: 'created', payload: { from: 'not_assigned', to: 'not_started', source: e.source }, actorId: ctx.actorId })

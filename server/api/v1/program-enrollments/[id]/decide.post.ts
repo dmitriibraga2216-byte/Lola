@@ -9,5 +9,6 @@ export default defineEventHandler(async (event) => {
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Вкажіть рішення', { issues: p.error.issues })
   const r = await decideRequest({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data.approve, p.data.reason)
   if (!r) return apiError(event, 404, 'not_found', 'Заявку не знайдено')
+  if (r.status === 'self') return apiError(event, 403, 'request.self', 'Власну заявку не погоджують — її розглядає інший відповідальний')
   return apiData(r)
 })

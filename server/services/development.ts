@@ -290,10 +290,29 @@ const PLAN_FLOW: Record<PlanTransition, { from: string[], to: string }> = {
   close: { from: ['review', 'active'], to: 'closed' },
 }
 
-export async function transitionPlan(ctx: Ctx, planId: string, action: PlanTransition, comment?: string) {
+/**
+ * `team` — у кого `development.team`/`development.manage` и где (`developmentPlanScope`: `null` — вся сеть,
+ * массив — точки). Без него переходы доступны только участникам плана. Погодить, вернуть и закрыть
+ * — не свой план и только в своей области (security-sweep-4): раньше любой с `development.own` двигал
+ * чужой план, а наставник погоджував власний.
+ */
+export async function transitionPlan(ctx: Ctx, planId: string, action: PlanTransition, comment?: string, team: { scope: string[] | null } | null = null) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [p] = await tx.select().from(developmentPlans).where(eq(developmentPlans.id, planId))
     if (!p) return { ok: false as const, code: 'not_found' as const }
+    const participant = ctx.actorId === p.userId || ctx.actorId === p.ownerId || ctx.actorId === p.mentorId
+    let inArea = false
+    if (team) {
+      if (team.scope === null) inArea = true
+      else if (team.scope.length) {
+        const rows = await tx.execute(sql`select 1 from user_placements where user_id = ${p.userId}::uuid and ended_at is null and location_id in ${team.scope} limit 1`) as unknown as unknown[]
+        inArea = rows.length > 0
+      }
+    }
+    const decides = action === 'approve' || action === 'return' || action === 'close'
+    if (decides ? (!inArea || ctx.actorId === p.userId) : !(participant || inArea)) {
+      return { ok: false as const, code: (participant || inArea) ? 'forbidden' as const : 'not_found' as const }
+    }
     const flow = PLAN_FLOW[action]
     if (!flow.from.includes(p.status)) return { ok: false as const, code: 'bad_transition' as const }
     const now = new Date()

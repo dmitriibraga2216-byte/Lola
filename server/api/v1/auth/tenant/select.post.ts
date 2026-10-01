@@ -1,6 +1,6 @@
 import { tenantSelectSchema } from '../../../../../shared/schemas/auth'
 import { usersByPhone } from '../../../../services/authLookup'
-import { usersByEmail } from '../../../../services/password'
+import { passwordSelectable } from '../../../../services/password'
 import { createSession, verifySelectToken } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
 import { apiData, apiError } from '../../../../utils/apiResponse'
@@ -17,9 +17,10 @@ export default defineEventHandler(async (event) => {
     return apiError(event, 401, 'auth_required', 'Сесія вибору протухла. Увійдіть ще раз')
   }
 
-  // Токен выбора выдаётся и после кода (телефон), и после пароля (`email:<адрес>`, docs/04 §4.2)
-  const byEmail = claim.phone.startsWith('email:')
-  const users = byEmail ? (await usersByEmail(claim.phone.slice(6))).filter(u => u.password_login_enabled && !u.is_blocked) : await usersByPhone(claim.phone)
+  // Токен выбора выдаётся и после кода (телефон), и после пароля (`pwd:<tenant>/<user>,…` — только учётки,
+  // где пароль совпал, docs/04 §4.2). Вход по паролю всё ещё должен быть разрешён и человек не заблокирован.
+  const byEmail = claim.phone.startsWith('pwd:')
+  const users = byEmail ? await passwordSelectable(claim.phone.slice(4)) : await usersByPhone(claim.phone)
   const user = onHostTenant(event, users as { tenant_id: string, user_id: string }[]).find(u => u.tenant_id === parsed.data.tenantId)
   if (!user) {
     return apiError(event, 404, 'not_found', 'Простір не знайдено')

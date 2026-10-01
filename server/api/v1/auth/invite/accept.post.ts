@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { inviteAcceptSchema } from '../../../../../shared/schemas/auth'
 import { invitationByTokenHash } from '../../../../services/authLookup'
 import { assertCandidateMayEnter } from '../../../../services/candidateAccess'
@@ -25,11 +25,14 @@ export default defineEventHandler(async (event) => {
   await assertCandidateMayEnter(invite.tenant_id, invite.user_id)
 
   const markAccepted = (at: Date | null) => withTenant(invite.tenant_id, invite.user_id, async (tx) => {
-    await tx.update(invitations)
+    // Одноразовость — условием в самом UPDATE: два параллельных клика не дадут двух сессий
+    const rows = await tx.update(invitations)
       .set({ acceptedAt: at })
-      .where(eq(invitations.id, invite.invitation_id))
+      .where(at ? and(eq(invitations.id, invite.invitation_id), isNull(invitations.acceptedAt)) : eq(invitations.id, invite.invitation_id))
+      .returning({ id: invitations.id })
+    return rows.length > 0
   })
-  await markAccepted(new Date())
+  if (!await markAccepted(new Date())) return apiError(event, 401, 'invite_invalid', 'Запрошення недійсне або протухло')
 
   let session: Awaited<ReturnType<typeof createSession>>
   try {

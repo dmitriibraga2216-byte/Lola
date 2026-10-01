@@ -160,12 +160,15 @@ export async function loginWithPassword(email: string, password: string): Promis
     return { ok: true, users: matched }
   }
   if (candidates.length && !anyEnabled) return { ok: false, code: 'disabled' }
-  // Попытки считаем по e-mail; лимит — политика первого тенанта с включённым входом (docs/24 §3.4.1 «Аутентифікація»)
-  const first = candidates.find(c => c.password_login_enabled)
-  const policy = first ? (await withTenant(first.tenant_id, first.user_id, tx => readSettings(tx, first.tenant_id))).policies : null
-  const limitEnabled = policy?.auth.limitLoginAttempts ?? true
-  const limit = policy?.auth.loginAttempts ?? 5
-  const blockSec = (policy?.session.blockMinutes ?? 30) * 60
+  // Попытки считаем по e-mail (docs/24 §3.4.1 «Аутентифікація»). Почта может быть в нескольких тенантах, и
+  // любой из них заводит её сам: берём **самую строгую** из их политик, иначе тенант с выключенным лимитом
+  // открывал бы перебор пароля чужой учётки с той же почтой (security-sweep-1)
+  const enabled = candidates.filter(c => c.password_login_enabled)
+  const policies = await Promise.all(enabled.map(c => withTenant(c.tenant_id, c.user_id, tx => readSettings(tx, c.tenant_id)).then(st => st.policies)))
+  const limitEnabled = policies.length === 0 || policies.some(p => p.auth.limitLoginAttempts ?? true)
+  const limits = policies.filter(p => p.auth.limitLoginAttempts ?? true).map(p => p.auth.loginAttempts ?? 5)
+  const limit = limits.length ? Math.min(...limits) : 5
+  const blockSec = (policies.length ? Math.max(...policies.map(p => p.session.blockMinutes ?? 30)) : 30) * 60
   // N-я неудача подряд блокирует (как пятый неверный код OTP, docs/01 §1.5): окно счётчика = время блокировки
   const allowed = await hitRateLimit(key, Math.max(1, limit - 1), blockSec)
   const blocked = limitEnabled && !allowed
@@ -175,4 +178,17 @@ export async function loginWithPassword(email: string, password: string): Promis
     await logSecurity({ tenantId: c.tenant_id, userId: c.user_id, event: blocked ? 'login.blocked' : 'login.failed', meta: { method: 'password', ...(blocked ? { reason: 'attempts' } : {}) } })
   }
   return blocked ? { ok: false, code: 'blocked', retryAfterSec: blockSec } : { ok: false, code: 'invalid' }
+}
+
+/** Учётки из токена пароля — с повторной проверкой, что вход по паролю ещё открыт. */
+export async function passwordSelectable(list: string): Promise<{ tenant_id: string, user_id: string }[]> {
+  const pairs = list.split(',').map(p => p.split('/')).filter((p): p is [string, string] => p.length === 2)
+  const out: { tenant_id: string, user_id: string }[] = []
+  for (const [tenantId, userId] of pairs) {
+    const [u] = await withTenant(tenantId, userId, tx => tx.select({ email: users.email }).from(users).where(eq(users.id, userId)))
+    if (!u?.email) continue
+    const ok = (await usersByEmail(u.email)).some(c => c.user_id === userId && c.tenant_id === tenantId && c.password_login_enabled && !c.is_blocked)
+    if (ok) out.push({ tenant_id: tenantId, user_id: userId })
+  }
+  return out
 }

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { decrypt, encrypt } from './crypto'
-import { isBlocked, setBlock } from './rateLimit'
+import { hitRateLimit } from './rateLimit'
 import { hostConfig } from './tenantResolve'
 
 /**
@@ -22,14 +22,17 @@ export function sealHandoff(sessionToken: string, now = Date.now()): string {
 
 /** Токен сессии из ссылки или null: подделка, истёкшая или уже использованная ссылка. */
 export async function openHandoff(h: string, now = Date.now()): Promise<string | null> {
-  const [n, c] = h.split('.')
+  const parts = h.split('.')
+  if (parts.length !== 2) return null
+  const [n, c] = parts as [string, string]
   if (!n || !c) return null
   let payload: { s?: unknown, e?: unknown }
   try { payload = JSON.parse(decrypt(Buffer.from(c, 'base64url'), Buffer.from(n, 'base64url'))) }
   catch { return null }
   if (typeof payload.s !== 'string' || typeof payload.e !== 'number' || payload.e < now) return null
-  if (await isBlocked(USED_KEY(h))) return null
-  await setBlock(USED_KEY(h), HANDOFF_TTL_SEC * 2)
+  // «Использована» — по nonce (байтам, а не строке ссылки: base64url терпит хвосты и иные написания),
+  // одной атомарной вставкой: два параллельных перехода по ссылке не дают двух входов (security-sweep-1)
+  if (!await hitRateLimit(USED_KEY(Buffer.from(n, 'base64url').toString('hex')), 1, HANDOFF_TTL_SEC * 2)) return null
   return payload.s
 }
 

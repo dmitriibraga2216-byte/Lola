@@ -1,4 +1,5 @@
 import { requireScope } from '../../../../services/access'
+import { assertPersonAccess } from '../../../../services/personGuard'
 import { resetByAdmin } from '../../../../services/twoFactor'
 import { apiData } from '../../../../utils/apiResponse'
 import { twoFactorError } from '../../../../utils/sessionAuth'
@@ -12,6 +13,7 @@ import { twoFactorError } from '../../../../utils/sessionAuth'
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'people.password')
+  await assertPersonAccess(a, 'people.password', getRouterParam(event, 'id')!, { sensitive: true })
   const r = await resetByAdmin({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!)
   if (!r.ok) return twoFactorError(event, r.code)
   return apiData({ ok: true })

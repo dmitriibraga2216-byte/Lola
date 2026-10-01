@@ -76,6 +76,11 @@ export async function validateBearer(raw: string): Promise<{ ok: true, auth: Tok
   // Лимит запросов в минуту — `tenant_limits.apiPerMinute` (docs/25 §10, докс/33 D-055), иначе константа по умолчанию.
   const perMinute = (await effectiveLimits(row.tenant_id)).apiPerMinute ?? DEFAULT_API_PER_MINUTE
   if (!await hitRateLimit(`api:${row.token_id}`, perMinute, 60)) return { ok: false, code: 'rate_limited' }
+  // Токен действует от имени создателя: заблокированный или уволенный создатель — токен мёртв, как его сессии (security-sweep-1)
+  if (row.created_by) {
+    const [creator] = await withTenant(row.tenant_id, null, tx => tx.execute(sql`select status, is_blocked from users where id = ${row.created_by}::uuid`)) as unknown as { status: string, is_blocked: boolean }[]
+    if (!creator || creator.is_blocked || creator.status === 'archived' || creator.status === 'suspended') return { ok: false, code: 'invalid' }
+  }
   await withTenant(row.tenant_id, null, async (tx) => {
     await tx.update(apiTokens).set({ lastUsedAt: new Date() }).where(eq(apiTokens.id, row.token_id))
   }).catch(() => {})

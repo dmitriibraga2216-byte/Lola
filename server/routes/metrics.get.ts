@@ -6,8 +6,12 @@ import { sql } from 'drizzle-orm'
 export default defineEventHandler(async (event) => {
   const token = process.env.METRICS_TOKEN
   const auth = getHeader(event, 'authorization') ?? ''
-  const ip = (getHeader(event, 'x-forwarded-for') ?? event.node.req.socket.remoteAddress ?? '').split(',')[0]!.trim()
-  const local = /^(127\.|::1|::ffff:127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip)
+  // Без токена — только прямой запрос из сети docker/localhost: адрес сокета, не `X-Forwarded-For` (его
+  // пишет клиент), и без заголовков прокси вовсе — запрос через Cloudflare Tunnel приходит с адреса
+  // контейнера cloudflared, то есть тоже «из docker-сети» (security-sweep-1)
+  const proxied = ['x-forwarded-for', 'cf-connecting-ip', 'x-real-ip', 'forwarded'].some(h => getHeader(event, h) !== undefined)
+  const ip = event.node.req.socket.remoteAddress ?? ''
+  const local = !proxied && /^(127\.|::1|::ffff:127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|::ffff:(10|172\.(1[6-9]|2\d|3[01])|192\.168)\.)/.test(ip)
   if (token ? auth !== `Bearer ${token}` : !local) throw createError({ statusCode: 403, message: 'forbidden' })
 
   try {

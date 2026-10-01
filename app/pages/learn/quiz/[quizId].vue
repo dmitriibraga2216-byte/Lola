@@ -491,7 +491,7 @@ function retry() {
 .body {
   flex: 1;
   padding: var(--space-4);
-  padding-bottom: 120px;
+  padding-bottom: calc(var(--space-7) * 2 + var(--space-5));
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -641,7 +641,7 @@ dd {
   background: var(--color-coral);
   color: var(--color-coral-deep);
   border-radius: var(--radius-pill);
-  padding: 2px var(--space-3);
+  padding: var(--space-half) var(--space-3);
 }
 
 .score {

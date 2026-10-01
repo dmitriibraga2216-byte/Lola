@@ -125,8 +125,8 @@ th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-in
 td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft); vertical-align: middle; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .desc { color: var(--color-ink-muted); }
-.tag { display: inline-block; background: var(--color-sun); border-radius: var(--radius-pill); padding: 2px var(--space-3); font-weight: 800; }
-.pill { display: inline-block; font-family: ui-monospace, monospace; font-size: var(--font-size-body-s); background: var(--color-bg-line-soft); border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.tag { display: inline-block; background: var(--color-sun); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); font-weight: 800; }
+.pill { display: inline-block; font-family: ui-monospace, monospace; font-size: var(--font-size-body-s); background: var(--color-bg-line-soft); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); }
 .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
 .error { color: var(--color-coral-ink); }

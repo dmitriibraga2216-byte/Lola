@@ -147,13 +147,13 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .chips { margin-bottom: var(--space-3); }
 .hits { display: grid; gap: var(--space-2); }
 .hit { display: grid; gap: var(--space-1); background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); text-decoration: none; color: var(--color-ink); }
-.kind { justify-self: start; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 1px var(--space-2); background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
+.kind { justify-self: start; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .kind.lesson, .kind.resource { background: var(--color-sun); color: var(--color-sun-ink); }
 .kind.notice { background: var(--color-coral); color: var(--color-coral-deep); }
 .kind.news { background: var(--color-teal); color: var(--color-teal-deep); }
 .hit-title { font-weight: 800; color: var(--color-ink); text-decoration: none; }
 .snippet { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
-.snippet :deep(b) { color: var(--color-ink); background: color-mix(in srgb, var(--color-sun) 40%, transparent); border-radius: 3px; padding: 0 2px; }
+.snippet :deep(b) { color: var(--color-ink); background: color-mix(in srgb, var(--color-sun) 40%, transparent); border-radius: 3px; padding: 0 var(--space-half); }
 .foot { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
 .sub, .empty { color: var(--color-ink-faint); }
 .empty { text-align: center; padding: var(--space-4); }

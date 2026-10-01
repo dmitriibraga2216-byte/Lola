@@ -228,7 +228,7 @@ async function cancelScheduled() {
 .kv { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
 .kv dt { color: var(--color-ink-muted); font-weight: 700; }
 .kv dd { margin: 0; font-weight: 800; }
-.pill { align-self: flex-start; display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; }
+.pill { align-self: flex-start; display: inline-block; padding: var(--space-half) var(--space-3); border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; }
 .pill.teal { background: var(--color-teal); color: var(--color-ink); }
 .blockers { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); color: var(--color-coral-deep); font-weight: 700; }
 .confirm { display: flex; gap: var(--space-2); align-items: flex-start; font-weight: 600; }

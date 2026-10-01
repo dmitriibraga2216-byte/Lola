@@ -306,7 +306,7 @@ async function pickRole(id: string) {
 <style scoped>
 .admin { min-height: 100dvh; display: grid; grid-template-columns: 236px minmax(0, 1fr); max-width: 100vw; overflow-x: clip; background: var(--color-bg); font-family: var(--font-family); color: var(--color-ink); }
 .side { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5) var(--space-3) var(--space-3); background: var(--color-bg-soft); border-right: 1px solid var(--color-bg-line-soft); box-sizing: border-box; }
-.brand { display: inline-flex; gap: 4px; padding: 0 var(--space-2); }
+.brand { display: inline-flex; gap: var(--space-1); padding: 0 var(--space-2); }
 .dot { width: 20px; height: 20px; border-radius: 5px; }
 .dot.sun { background: var(--color-sun); }
 .dot.teal { background: var(--color-teal); }
@@ -316,8 +316,8 @@ async function pickRole(id: string) {
 .section-btn { font: inherit; font-weight: 700; display: flex; align-items: center; gap: var(--space-3); width: 100%; text-align: left; border: none; background: transparent; color: var(--color-ink); border-radius: var(--radius-s); padding: var(--space-3) var(--space-3); cursor: pointer; }
 .section-btn.on { background: var(--color-bg); font-weight: 800; }
 .icon { width: 18px; height: 18px; color: var(--color-ink-muted); flex: none; }
-.items { display: grid; gap: 2px; padding: var(--space-1) 0 var(--space-2) 40px; }
-.group-label { margin: var(--space-2) 0 2px; padding: 0 var(--space-2); font-size: 11px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; color: var(--color-ink-muted); }
+.items { display: grid; gap: var(--space-half); padding: var(--space-1) 0 var(--space-2) calc(var(--space-6) + var(--space-2)); }
+.group-label { margin: var(--space-2) 0 var(--space-half); padding: 0 var(--space-2); font-size: 11px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; color: var(--color-ink-muted); }
 .items > .group-label:first-child { margin-top: 0; }
 .item { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); text-decoration: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-s); }
 .item.router-link-active { color: var(--color-ink); background: var(--color-bg); }
@@ -327,7 +327,7 @@ async function pickRole(id: string) {
 .who-text b { font-size: var(--font-size-body-s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .who-text small { font-size: 12px; color: var(--color-ink-muted); font-weight: 700; }
 .chevron { margin-left: auto; color: var(--color-ink-muted); }
-.menu { position: absolute; bottom: 100%; left: 0; right: 0; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1); display: grid; gap: 2px; margin-bottom: var(--space-2); }
+.menu { position: absolute; bottom: 100%; left: 0; right: 0; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1); display: grid; gap: var(--space-half); margin-bottom: var(--space-2); }
 .menu-item { font: inherit; font-weight: 700; font-size: var(--font-size-body-s); text-align: left; border: none; background: transparent; color: var(--color-ink); text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-s); cursor: pointer; }
 .menu-item:hover { background: var(--color-bg); }
 .menu-label { font-size: 12px; font-weight: 700; color: var(--color-ink-muted); padding: var(--space-1) var(--space-3) 0; }
@@ -343,7 +343,7 @@ async function pickRole(id: string) {
   .side { position: relative; z-index: 25; height: auto; min-width: 0; max-width: 100vw; flex-direction: row; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-right: none; border-bottom: 1px solid var(--color-bg-line-soft); }
   .brand { padding: 0; }
   .dot { width: 14px; height: 14px; border-radius: 4px; }
-  .nav { display: flex; flex: 1 1 0; min-width: 0; gap: 2px; overflow-x: auto; overflow-y: visible; }
+  .nav { display: flex; flex: 1 1 0; min-width: 0; gap: var(--space-half); overflow-x: auto; overflow-y: visible; }
   .section { position: static; }
   .section-btn { padding: var(--space-2); white-space: nowrap; font-size: var(--font-size-body-s); }
   .section-btn .icon { display: none; }

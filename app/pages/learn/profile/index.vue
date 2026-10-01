@@ -224,7 +224,7 @@ const fmt = (iso: string | null) => iso ? formatShortDate(new Date(iso)) : ''
 .records { display: grid; gap: var(--space-3); }
 .head { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-2) 0 var(--space-4); }
 .name { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: -0.01em; }
-.sub { margin: 2px 0 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
+.sub { margin: var(--space-half) 0 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
 .tiles { grid-template-columns: repeat(3, 1fr); margin-bottom: var(--space-5); }
 /* Індекс залученості (docs/v2/38 §5.3) — рядком під плитками: не бали, інше число й інший екран */
 .engagement { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; margin: calc(-1 * var(--space-3)) 0 var(--space-5); padding: var(--space-3) var(--space-4); border-radius: var(--radius-m); background: var(--color-teal-soft); color: var(--color-ink); text-decoration: none; }
@@ -258,7 +258,7 @@ a.tile { color: inherit; text-decoration: none; }
 .row-link.danger { color: var(--color-coral-ink); }
 .row-link.primary { background: var(--color-sun); border-color: var(--color-sun); text-align: center; }
 .pwd { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); background: var(--color-bg-soft); border-radius: var(--radius-s); }
-.pwd label { display: grid; gap: 2px; font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
+.pwd label { display: grid; gap: var(--space-half); font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
 .pwd input { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .pwd .error { margin: 0; color: var(--color-coral-ink); font-size: var(--font-size-body-s); }
 .pwd .hint { margin: 0; color: var(--color-ink-muted); font-size: var(--font-size-body-s); }

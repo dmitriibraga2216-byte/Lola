@@ -167,7 +167,7 @@ h2 { margin: 0; font-weight: 800; }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 160px; }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .btn { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: var(--color-bg-soft); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .btn.primary { background: var(--color-sun); border-color: var(--color-sun); }
@@ -186,7 +186,7 @@ input, select { font: inherit; border: 1px solid var(--color-bg-line); border-ra
 input[type="checkbox"] { width: auto; }
 .found { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-1); flex-wrap: wrap; }
 .chips { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--space-1); flex-wrap: wrap; }
-.chip { background: var(--color-bg-line-soft); border-radius: var(--radius-pill); padding: 2px var(--space-3); font-size: var(--font-size-body-s); }
+.chip { background: var(--color-bg-line-soft); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); font-size: var(--font-size-body-s); }
 .chip button { border: none; background: transparent; cursor: pointer; font: inherit; font-weight: 900; }
 .modal-actions { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; }
 </style>

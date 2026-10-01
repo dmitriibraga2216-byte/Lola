@@ -235,7 +235,7 @@ td { padding: var(--space-2); border-bottom: 1px solid var(--color-bg-line-soft)
 .chip:disabled { opacity: 0.5; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .primary:disabled { opacity: 0.5; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.planned, .badge.attended, .badge.registered { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.ongoing, .badge.waitlist { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.cancelled, .badge.missed { background: var(--color-coral); color: var(--color-coral-deep); }

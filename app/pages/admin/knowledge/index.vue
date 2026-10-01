@@ -66,7 +66,7 @@ input[aria-invalid="true"] { border-color: var(--color-coral); }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .row { display: flex; align-items: center; gap: var(--space-3); background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); text-decoration: none; color: var(--color-ink); }
 .title { flex: 1; font-weight: 700; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.published { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.draft { background: var(--color-sun); color: var(--color-sun-ink); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }

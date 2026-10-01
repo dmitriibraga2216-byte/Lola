@@ -83,19 +83,19 @@ h2 { margin: 0; font-weight: 800; }
 .table.plain { background: transparent; }
 th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); }
 td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft); vertical-align: top; }
-.pill { display: inline-block; margin: 2px 4px 2px 0; padding: 1px var(--space-2); border-radius: var(--radius-pill); background: var(--color-bg); }
+.pill { display: inline-block; margin: var(--space-half) var(--space-1) var(--space-half) 0; padding: var(--space-half) var(--space-2); border-radius: var(--radius-pill); background: var(--color-bg); }
 .pill.submitted { background: var(--color-teal); color: var(--color-teal-deep); }
 .pill.declined, .pill.expired { opacity: 0.5; text-decoration: line-through; }
 .link { color: var(--color-ink); font-weight: 700; }
 .red { color: var(--color-coral-deep); font-weight: 700; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.active { background: var(--color-teal); color: var(--color-teal-deep); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin: 0; }
 .error { color: var(--color-coral-ink); }
 .notice { color: var(--color-teal-ink); }
-.gaps { display: flex; flex-wrap: wrap; gap: 4px; }
-.gap { font-size: var(--font-size-body-s); font-weight: 700; padding: 0 6px; border-radius: var(--radius-pill); background: var(--color-bg-line-soft); }
+.gaps { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.gap { font-size: var(--font-size-body-s); font-weight: 700; padding: 0 var(--space-2); border-radius: var(--radius-pill); background: var(--color-bg-line-soft); }
 .gap.red { background: var(--color-coral-soft); color: var(--color-coral-ink); }
 </style>

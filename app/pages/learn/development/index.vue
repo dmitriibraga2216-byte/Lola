@@ -191,7 +191,7 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); color: inherit; text-decoration: none; }
 .goal-card { background: var(--color-bg-soft); border: 2px solid var(--color-bg-line); border-radius: var(--radius-l); padding: var(--space-4); margin-bottom: var(--space-3); }
 .goal-label { color: var(--color-ink-muted); font-size: var(--font-size-body-s); font-weight: 700; }
-.goal-value { font-size: var(--font-size-title-l); font-weight: 900; margin-top: 2px; }
+.goal-value { font-size: var(--font-size-title-l); font-weight: 900; margin-top: var(--space-half); }
 .status-row { margin-top: var(--space-2); }
 .card.link:hover { outline: 2px solid var(--color-sun); }
 .row { display: flex; justify-content: space-between; gap: var(--space-2); align-items: center; }
@@ -204,12 +204,12 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .empty { color: var(--color-ink-muted); }
 .error { background: var(--color-coral); color: var(--color-coral-deep); }
 .notice { background: var(--color-teal); color: var(--color-teal-deep); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); white-space: nowrap; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); white-space: nowrap; }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.sun { background: var(--color-sun); color: var(--color-ink); }
 .badge.muted { background: var(--color-bg); color: var(--color-ink-muted); }
-.scale { display: flex; gap: 4px; }
+.scale { display: flex; gap: var(--space-1); }
 .dot { width: 22px; height: 8px; border-radius: 4px; background: var(--color-bg-line); }
 .dot.cur { background: var(--color-teal); }
 .dot.req { outline: 2px solid var(--color-sun); outline-offset: 1px; }

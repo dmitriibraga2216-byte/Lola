@@ -56,7 +56,7 @@ h2 { margin: var(--space-4) 0 var(--space-2); font-weight: 800; font-size: var(-
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
 .progress { height: 6px; border-radius: 3px; background: var(--color-bg-line); overflow: hidden; }
 .progress span { display: block; height: 100%; background: var(--color-teal); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
 .badge.completed { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.in_progress { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.expired, .badge.failed { background: var(--color-coral); color: var(--color-coral-deep); }

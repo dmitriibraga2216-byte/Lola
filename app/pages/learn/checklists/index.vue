@@ -71,7 +71,7 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .row { display: flex; justify-content: space-between; gap: var(--space-2); align-items: center; }
 .card-title { font-weight: 800; }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .offline { background: var(--color-sun); color: var(--color-sun-ink); padding: var(--space-2) var(--space-3); border-radius: var(--radius-m); font-weight: 700; }

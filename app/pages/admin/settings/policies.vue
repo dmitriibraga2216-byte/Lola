@@ -337,7 +337,7 @@ const otpEmailEnabled = computed({
 
 <style scoped>
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-4); align-items: start; }
-.groups { display: grid; gap: 2px; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-m); padding: var(--space-2); }
+.groups { display: grid; gap: var(--space-half); background: var(--color-bg-soft); border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-m); padding: var(--space-2); }
 .group { font: inherit; font-weight: 700; text-align: left; border: none; background: transparent; color: var(--color-ink); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); cursor: pointer; }
 .group.on { background: var(--color-ink); color: var(--color-bg); }
 .panel { display: grid; gap: var(--space-2); }

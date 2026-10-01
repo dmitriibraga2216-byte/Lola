@@ -56,6 +56,6 @@ watch([orgUnitId, positionId, cityId], load)
 .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
 .cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-2); }
 .person { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: var(--space-3); align-items: start; }
-.who { display: grid; gap: 2px; font-size: var(--font-size-body-s); }
+.who { display: grid; gap: var(--space-half); font-size: var(--font-size-body-s); }
 .who b { font-size: var(--font-size-body); }
 </style>

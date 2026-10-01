@@ -117,7 +117,7 @@ h2 { margin: 0; font-weight: 800; }
 .row-link.on td { background: var(--color-bg-line-soft); }
 .acts { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .empty { color: var(--color-ink-faint); text-align: center; padding: var(--space-6); }
-.mini { font: inherit; font-size: 11px; border: 1px solid var(--color-bg-line); background: transparent; border-radius: var(--radius-pill); padding: 0 6px; cursor: pointer; color: var(--color-ink-muted); text-decoration: none; }
+.mini { font: inherit; font-size: 11px; border: 1px solid var(--color-bg-line); background: transparent; border-radius: var(--radius-pill); padding: 0 var(--space-2); cursor: pointer; color: var(--color-ink-muted); text-decoration: none; }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .field, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .short { width: 90px; }

@@ -120,7 +120,7 @@ const people = computed(() => (tab.value === 'notAcked' ? cov.value?.notAcked : 
 <style scoped>
 .layout { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: var(--space-4); align-items: start; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
-.item { width: 100%; text-align: left; font: inherit; border: 1px solid var(--color-bg-line-soft); background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-3); cursor: pointer; display: grid; gap: 2px; color: var(--color-ink); }
+.item { width: 100%; text-align: left; font: inherit; border: 1px solid var(--color-bg-line-soft); background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-3); cursor: pointer; display: grid; gap: var(--space-half); color: var(--color-ink); }
 .item.on { border-color: var(--color-ink); }
 .item .sub, .who .sub { display: block; font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 h2 { margin: var(--space-3) 0 var(--space-1); font-weight: 900; }

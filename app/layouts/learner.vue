@@ -55,9 +55,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .learner { min-height: 100dvh; background: var(--color-bg); font-family: var(--font-family); color: var(--color-ink); display: flex; flex-direction: column; }
-.content { flex: 1; padding: var(--space-4); padding-bottom: calc(72px + var(--space-4) + env(safe-area-inset-bottom)); max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.content { flex: 1; padding: var(--space-4); padding-bottom: calc(var(--space-7) + var(--space-5) + var(--space-4) + env(safe-area-inset-bottom)); max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .bottom { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-around; background: var(--color-bg-soft); border-top: 1px solid var(--color-bg-line-soft); padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom)); }
-.tab { display: grid; justify-items: center; gap: 2px; font-weight: 700; font-size: 11px; color: var(--color-ink-muted); text-decoration: none; padding: var(--space-1) var(--space-3); min-width: 72px; }
+.tab { display: grid; justify-items: center; gap: var(--space-half); font-weight: 700; font-size: 11px; color: var(--color-ink-muted); text-decoration: none; padding: var(--space-1) var(--space-3); min-width: 72px; }
 .tab svg { width: 22px; height: 22px; }
 .tab.on { color: var(--color-ink); font-weight: 800; }
 </style>

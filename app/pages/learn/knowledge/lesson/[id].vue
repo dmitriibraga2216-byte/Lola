@@ -30,7 +30,7 @@ onMounted(async () => {
 
 <style scoped>
 .back { color: var(--color-ink-muted); text-decoration: none; font-size: var(--font-size-body-s); }
-.kind { display: inline-block; margin-top: var(--space-2); font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 1px var(--space-2); background: var(--color-sun); color: var(--color-sun-ink); }
+.kind { display: inline-block; margin-top: var(--space-2); font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-sun); color: var(--color-sun-ink); }
 h1 { margin: var(--space-2) 0 var(--space-4); font-weight: 900; }
 .error { color: var(--color-coral-ink); }
 </style>

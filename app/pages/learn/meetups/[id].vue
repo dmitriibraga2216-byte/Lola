@@ -137,7 +137,7 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .chip { border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink); }
 .primary { border: none; background: var(--color-sun); color: var(--color-ink); font-weight: 800; }
 .primary:disabled, .chip:disabled { opacity: 0.5; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
 .badge.teal, .badge.registered, .badge.attended { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.sun, .badge.waitlist { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.coral, .badge.missed { background: var(--color-coral); color: var(--color-coral-deep); }

@@ -379,7 +379,7 @@ td {
 .update { background: color-mix(in srgb, var(--color-sun) 12%, transparent); }
 .warn { color: var(--color-sun-ink); }
 .steps { display: flex; gap: var(--space-2); list-style: none; margin: 0 0 var(--space-3); padding: 0; flex-wrap: wrap; font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
-.steps li { border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.steps li { border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); }
 .steps li.on { background: var(--color-sun); color: var(--color-ink); border-color: var(--color-sun); font-weight: 700; }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); margin-bottom: var(--space-3); display: grid; gap: var(--space-2); }
 .card h2 { margin: 0; font-size: var(--font-size-body); font-weight: 800; }
@@ -404,7 +404,7 @@ select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: v
 .import-main { min-width: 0; }
 .import-side { display: grid; gap: var(--space-3); position: sticky; top: var(--space-4); }
 .side-card h2 { margin: 0; font-size: var(--font-size-body); font-weight: 900; }
-.side-card .sub { margin: 2px 0 0; }
+.side-card .sub { margin: var(--space-half) 0 0; }
 .side-stats { display: grid; gap: var(--space-2); margin: var(--space-3) 0 0; }
 .side-stats div { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--font-size-body-s); }
 .side-stats dt { color: var(--color-ink-muted); }

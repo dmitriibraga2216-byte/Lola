@@ -269,10 +269,12 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); display: grid; gap: var(--space-3); align-content: start; }
 .card.wide { margin-bottom: var(--space-4); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
+/* Ширина подписи поля: подсказка под полем выравнивается по её правому краю */
+.row, .field-row { --label-w: 110px; }
 .row { display: flex; gap: var(--space-2); align-items: center; }
-.row label { min-width: 110px; font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-family: monospace; }
+.row label { min-width: var(--label-w); font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-family: monospace; }
 .field-row { display: grid; gap: var(--space-1); }
-.field-row .hint { margin: 0 0 0 118px; }
+.field-row .hint { margin: 0 0 0 calc(var(--label-w) + var(--space-2)); }
 .row.wrap { flex-wrap: wrap; }
 .scopes { max-height: 160px; overflow: auto; }
 .grow { flex: 1; }
@@ -283,9 +285,9 @@ input, select.bool { font: inherit; border: 1px solid var(--color-bg-line); bord
 .actions { display: flex; gap: var(--space-2); }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; justify-self: start; }
 .primary:disabled { opacity: 0.5; }
-.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: 2px var(--space-3); cursor: pointer; }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); cursor: pointer; }
 .chip.danger { color: var(--color-coral-ink); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.connected, .badge.delivered { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.failing, .badge.failed { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.pending { background: var(--color-sun); color: var(--color-sun-ink); }

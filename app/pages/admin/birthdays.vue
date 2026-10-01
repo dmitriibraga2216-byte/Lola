@@ -54,7 +54,7 @@ const marked = computed(() => new Set(data.value.items.filter(i => i.date.slice(
 .who { display: grid; }
 .who .muted { font-size: var(--font-size-body-s); }
 .date { white-space: nowrap; }
-.grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--space-1); }
 .day { display: grid; place-items: center; height: 32px; border-radius: var(--radius-s); font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); }
 .day.on { background: var(--color-sun); color: var(--color-sun-ink); }
 @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }

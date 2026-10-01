@@ -84,7 +84,7 @@ h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 .card.dim { opacity: 0.7; }
 .num { font-size: var(--font-size-body-s); color: var(--color-ink-faint); font-family: monospace; }
 .title { font-weight: 800; font-size: var(--font-size-title-l); }
-.badge { justify-self: start; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.badge { justify-self: start; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }

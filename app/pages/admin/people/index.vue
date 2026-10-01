@@ -372,7 +372,7 @@ th.num, td.num { text-align: right; white-space: nowrap; }
 .sort { font: inherit; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: 0 var(--space-2); cursor: pointer; }
 .sort.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .popover { position: absolute; right: 0; top: 100%; z-index: 6; width: min(280px, 80vw); white-space: normal; text-align: left; font-weight: 400; color: var(--color-ink); background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
-.rating { font-weight: 800; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-teal-soft); color: var(--color-teal-ink); }
+.rating { font-weight: 800; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-teal-soft); color: var(--color-teal-ink); }
 .rating.stale { background: var(--color-bg-line-soft); color: var(--color-ink-faint); }
 .rating.none { background: transparent; color: var(--color-ink-faint); font-weight: 400; }
 .table-wrap { overflow-x: auto; }
@@ -386,7 +386,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .mini { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin-left: var(--space-2); }
 .mini.coral { color: var(--color-coral-ink); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; }
 .badge.active { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.invited { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.suspended, .badge.archived { background: var(--color-coral); color: var(--color-coral-deep); }

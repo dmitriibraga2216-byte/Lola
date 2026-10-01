@@ -203,7 +203,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-4); cursor: pointer; }
 .tab.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .table-wrap { overflow-x: auto; margin-bottom: var(--space-3); }
-.cell { font-weight: 800; border-radius: var(--radius-s); padding: 2px var(--space-2); }
+.cell { font-weight: 800; border-radius: var(--radius-s); padding: var(--space-half) var(--space-2); }
 .cell.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .cell.sun { background: var(--color-sun); color: var(--color-sun-ink); }
 .cell.coral { background: var(--color-coral); color: var(--color-coral-deep); }

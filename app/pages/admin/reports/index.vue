@@ -234,14 +234,14 @@ h2 { margin: var(--space-4) 0 var(--space-2); font-weight: 800; font-size: var(-
 .delta.up { color: var(--color-teal-ink); }
 .delta.down { color: var(--color-coral-ink); }
 .funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
-.step { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); display: grid; gap: 2px; position: relative; overflow: hidden; }
+.step { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); display: grid; gap: var(--space-half); position: relative; overflow: hidden; }
 .step b { font-size: var(--font-size-title-l); font-weight: 900; }
 .step span { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .step i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--color-teal); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); margin-bottom: var(--space-3); }
 .card h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-body); }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
-.hours { display: flex; gap: 2px; align-items: flex-end; height: 80px; }
+.hours { display: flex; gap: var(--space-half); align-items: flex-end; height: 80px; }
 .hour { flex: 1; display: grid; grid-template-rows: 1fr auto; align-items: end; text-align: center; font-size: 10px; color: var(--color-ink-faint); }
 .hour i { display: block; background: var(--color-sun); border-radius: 2px 2px 0 0; }
 .notice { color: var(--color-teal-ink); }

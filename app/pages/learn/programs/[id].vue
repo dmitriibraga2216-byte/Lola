@@ -65,7 +65,7 @@ h1 { margin: var(--space-2) 0 0; font-weight: 900; }
 .step.available .num, .step.in_progress .num { background: var(--color-sun); color: var(--color-sun-ink); }
 .step.failed .num { background: var(--color-coral); color: var(--color-coral-deep); }
 .step.locked { opacity: 0.6; }
-.body { display: grid; gap: 4px; flex: 1; }
+.body { display: grid; gap: var(--space-1); flex: 1; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-3); cursor: pointer; justify-self: start; }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 </style>

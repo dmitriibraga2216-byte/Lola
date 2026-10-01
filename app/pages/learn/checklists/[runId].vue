@@ -55,7 +55,7 @@ h2 { margin: 0; font-weight: 800; }
 .score.ok { color: var(--color-teal-deep); }
 .score.bad { color: var(--color-coral-deep); }
 .group { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); margin-top: var(--space-3); }
-.item { border-top: 1px solid var(--color-bg-line-soft); padding-top: var(--space-2); display: grid; gap: 4px; }
+.item { border-top: 1px solid var(--color-bg-line-soft); padding-top: var(--space-2); display: grid; gap: var(--space-1); }
 .row { display: flex; justify-content: space-between; gap: var(--space-2); }
 .crit { color: var(--color-coral-deep); }
 .photos { display: flex; gap: var(--space-1); flex-wrap: wrap; }

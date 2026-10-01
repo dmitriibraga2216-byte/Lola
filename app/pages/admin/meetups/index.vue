@@ -115,7 +115,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .check { display: flex; gap: var(--space-1); align-items: center; font-size: var(--font-size-body-s); }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; justify-self: start; }
 .primary:disabled { opacity: 0.5; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.planned { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.ongoing { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.cancelled { background: var(--color-coral); color: var(--color-coral-deep); }

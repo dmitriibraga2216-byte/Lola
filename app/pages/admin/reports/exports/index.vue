@@ -42,7 +42,7 @@ h1 { margin: var(--space-2) 0 var(--space-3); font-weight: 900; }
 .table { width: 100%; border-collapse: collapse; background: var(--color-bg-soft); border-radius: var(--radius-m); overflow: hidden; }
 th { text-align: left; font-size: var(--font-size-body-s); color: var(--color-ink-muted); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line); }
 td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.ready { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.failed { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.running, .badge.queued { background: var(--color-sun); color: var(--color-sun-ink); }

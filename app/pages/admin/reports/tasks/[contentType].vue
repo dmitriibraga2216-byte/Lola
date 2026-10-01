@@ -247,7 +247,7 @@ select, input { font: inherit; border: 1px solid var(--color-bg-line); border-ra
 @media (min-width: 900px) { .two { grid-template-columns: 1.4fr 1fr; } }
 .bars { display: flex; gap: var(--space-2); align-items: flex-end; overflow-x: auto; padding-top: var(--space-4); }
 .week { flex: 1 0 44px; display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
-.pair { display: flex; gap: 3px; align-items: flex-end; height: 120px; }
+.pair { display: flex; gap: var(--space-1); align-items: flex-end; height: 120px; }
 .bar { width: 16px; border-radius: var(--radius-s) var(--radius-s) 0 0; position: relative; }
 .bar i { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 11px; font-weight: 800; color: var(--color-ink-muted); }
 .bar.hits, .sw.hits { background: var(--color-teal); }

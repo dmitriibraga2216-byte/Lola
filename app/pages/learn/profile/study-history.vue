@@ -72,22 +72,22 @@ h1 { margin: 0; font-weight: 900; font-size: var(--font-size-title-l); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-4); margin-bottom: var(--space-3); }
 .label { display: block; font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; }
 .value { display: block; font-family: ui-monospace, monospace; font-size: 32px; font-weight: 900; }
-.chart { display: flex; gap: 4px; align-items: flex-end; height: 56px; margin-top: var(--space-3); }
-.bars { flex: 1; display: flex; gap: 2px; align-items: flex-end; }
+.chart { display: flex; gap: var(--space-1); align-items: flex-end; height: 56px; margin-top: var(--space-3); }
+.bars { flex: 1; display: flex; gap: var(--space-half); align-items: flex-end; }
 .bar { flex: 1; border-radius: 5px 5px 2px 2px; }
 .bar.mine { background: var(--color-teal); }
 .bar.ext { background: var(--color-sun); }
 .legend { display: flex; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); }
-.legend span { display: flex; align-items: center; gap: 5px; }
+.legend span { display: flex; align-items: center; gap: var(--space-1); }
 .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .dot.mine { background: var(--color-teal); }
 .dot.ext { background: var(--color-sun); }
 .list { display: grid; gap: var(--space-2); }
 .row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3); }
-.row-main { display: grid; gap: 2px; min-width: 0; }
+.row-main { display: grid; gap: var(--space-half); min-width: 0; }
 .title { font-weight: 800; display: flex; align-items: center; gap: var(--space-2); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
-.badge { font-size: 11px; font-weight: 700; border-radius: var(--radius-pill); padding: 1px var(--space-2); white-space: nowrap; }
+.badge { font-size: 11px; font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); white-space: nowrap; }
 .badge.sun { background: var(--color-sun); color: var(--color-ink); }
 .status { font-weight: 800; white-space: nowrap; }
 .status.failed { color: var(--color-coral-ink); }

@@ -80,7 +80,7 @@ h1 { margin: var(--space-2) 0; font-weight: 900; }
 .result.ok { background: var(--color-teal); color: var(--color-teal-deep); }
 .result.bad { background: var(--color-coral); color: var(--color-coral-deep); }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: 0; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
 .badge.passed { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.failed { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.in_progress { background: var(--color-sun); color: var(--color-sun-ink); }

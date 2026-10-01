@@ -43,6 +43,8 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/attempt-requests', label: t('admin.nav.attemptRequests'), show: hasScope('review.grade'), group: t('admin.group.review') },
     { to: '/admin/review-workload', label: t('admin.nav.reviewWorkload'), show: hasScope('review.workload.view'), group: t('admin.group.review') },
     { to: '/admin/review-routing', label: t('admin.nav.reviewRouting'), show: hasScope('review.routing.manage'), group: t('admin.group.review') },
+    // Журнал «Делегування» (docs/v2/37 §9.4): хто кому передавав перевірку — поруч із навантаженням
+    { to: '/admin/reports/delegations', label: t('admin.nav.delegations'), show: hasScope('review.workload.view'), group: t('admin.group.review') },
     { to: '/admin/comments', label: t('admin.nav.comments'), show: hasScope('course.view'), group: t('admin.group.review') },
     // «Звіт про помилки» (docs/v2/36 §5.3): черга скарг на матеріали — поруч із коментарями
     { to: '/admin/content-issues', label: t('admin.nav.contentIssues'), show: hasScope('content_issue.view'), group: t('admin.group.review') },

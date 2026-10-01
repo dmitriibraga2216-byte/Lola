@@ -162,3 +162,22 @@ export function comparePlanFact(
   if (a.deviation === 'too_fast' && a.factor !== b.factor) return (a.factor ?? 0) - (b.factor ?? 0)
   return a.title.localeCompare(b.title, 'uk')
 }
+
+/**
+ * «Відхилення» одной работы в очереди проверки (`37` §5.1, §5.2, §9.1): факт этой сдачи
+ * (`content_seconds + attempt_seconds`) к снимку нормы (`estimated_seconds`), пороги те же, что
+ * у нормы элемента (§7.14). Флага выборки здесь нет — это одна работа, а не материал; поэтому
+ * и значок в очереди — подсказка проверяющему «план поставлен неточно или человек застрял»,
+ * а не оценка: ни в балл, ни в решение он не входит (§7.14 б).
+ *
+ * `no_data` — нормы нет, факта нет или измерение недостоверно (`unreliable`, §7.15: колонки
+ * времени серые, «неповні дані»): по такому факту сравнивать с планом нечего.
+ */
+export function queueItemDeviation(i: { estimatedSeconds: number | null, contentSeconds: number, attemptSeconds: number, timeConfidence: string }): { factor: number | null, flag: ContentTimeDeviationFlag } {
+  const fact = (i.contentSeconds ?? 0) + (i.attemptSeconds ?? 0)
+  if (i.timeConfidence === 'unreliable' || fact <= 0) return { factor: null, flag: 'no_data' }
+  const f = deviationFactor(i.estimatedSeconds, fact)
+  if (f === null) return { factor: null, flag: 'no_data' }
+  const factor = Math.round(f * 100) / 100
+  return { factor, flag: f > R.tooSlowFactor ? 'too_slow' : f < R.tooFastFactor ? 'too_fast' : 'none' }
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   TIME_NORM_RULES, appliedObservedSeconds, authorSecondsValid, autoMediaSeconds, autoQuizSeconds, autoTextSeconds,
   canApplyObserved, clampNorm, comparePlanFact, deviationFactor, deviationFlag, deviationNoticeDue, isDeviation,
-  observedShown, plannedSeconds, wholeMinutes,
+  observedShown, plannedSeconds, queueItemDeviation, wholeMinutes,
 } from '../../shared/domain/timeNorms'
 import { timeNormPutSchema, timePlanFactQuerySchema } from '../../shared/schemas/timeNorms'
 
@@ -151,5 +151,29 @@ describe('контракты', () => {
     expect(q).toMatchObject({ subjectType: 'lesson', deviation: 'too_slow', minSample: 20, includeArchived: true, format: 'json' })
     expect(Object.keys(timePlanFactQuerySchema.shape)).not.toContain('userId')
     expect(timePlanFactQuerySchema.safeParse({ deviation: 'slow' }).success).toBe(false)
+  })
+})
+
+describe('«Відхилення» работы в очереди (37 §5.1, §7.14; review-time-tails)', () => {
+  const item = (o: Partial<{ estimatedSeconds: number | null, contentSeconds: number, attemptSeconds: number, timeConfidence: string }>) =>
+    queueItemDeviation({ estimatedSeconds: 600, contentSeconds: 0, attemptSeconds: 0, timeConfidence: 'ok', ...o })
+
+  it('пороги те же, что у нормы элемента: > 2 — повільніше, < 0,4 — швидше', () => {
+    expect(item({ contentSeconds: 1201 })).toEqual({ factor: 2, flag: 'too_slow' })
+    expect(item({ contentSeconds: 1200 })).toEqual({ factor: 2, flag: 'none' })
+    expect(item({ contentSeconds: 200, attemptSeconds: 39 })).toEqual({ factor: 0.4, flag: 'too_fast' })
+    expect(item({ contentSeconds: 240 })).toEqual({ factor: 0.4, flag: 'none' })
+  })
+
+  it('факт — контент плюс випробування', () => {
+    expect(item({ contentSeconds: 900, attemptSeconds: 900 })).toEqual({ factor: 3, flag: 'too_slow' })
+  })
+
+  it('без плана, без факта и при недостоверном измерении — no_data', () => {
+    expect(item({ estimatedSeconds: null, contentSeconds: 600 })).toEqual({ factor: null, flag: 'no_data' })
+    expect(item({ estimatedSeconds: 0, contentSeconds: 600 })).toEqual({ factor: null, flag: 'no_data' })
+    expect(item({})).toEqual({ factor: null, flag: 'no_data' })
+    expect(item({ contentSeconds: 6000, timeConfidence: 'unreliable' })).toEqual({ factor: null, flag: 'no_data' })
+    expect(item({ contentSeconds: 6000, timeConfidence: 'partial' }).flag).toBe('too_slow')
   })
 })

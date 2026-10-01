@@ -14,6 +14,8 @@ const props = defineProps<{
   itemIds: string[]
   /** Срок проверки элемента — верхняя граница срока делегата (§6.1). Для пачки — самый ранний. */
   slaDueAt: string | null
+  /** Причина заранее: «Передати іншому» из плашки «Ви навчали цю людину» — `conflict_of_interest` (§7.9). */
+  reason?: ReviewDelegationReason
 }>()
 const emit = defineEmits<{ close: [], done: [message: string] }>()
 
@@ -26,7 +28,7 @@ interface Target { id: string, fullName: string, open: number, max: number, over
 const targets = ref<Target[] | null>(null)
 const busy = ref(false)
 const error = ref('')
-const form = reactive({ toUserId: '', reasonCode: 'workload' as ReviewDelegationReason, reasonText: '', dueAt: '', notify: true })
+const form = reactive({ toUserId: '', reasonCode: (props.reason ?? 'workload') as ReviewDelegationReason, reasonText: '', dueAt: '', notify: true })
 
 /** Значение для `<input type="datetime-local">` в часовом поясе браузера. */
 function localInput(d: Date): string {

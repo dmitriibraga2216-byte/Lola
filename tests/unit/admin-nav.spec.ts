@@ -57,6 +57,8 @@ const ORIGINAL_SHOW: Record<string, string> = {
   '/admin/review-queue': "hasScope('review.queue')",
   '/admin/review-workload': "hasScope('review.workload.view')",
   '/admin/review-routing': "hasScope('review.routing.manage')",
+  // review-time-tails (docs/v2/37 §9.4): журнал «Делегування» — рядом с нагрузкой проверяющих
+  '/admin/reports/delegations': "hasScope('review.workload.view')",
   '/admin/review-workshops': "hasScope('review.queue')",
   '/admin/review': "hasScope('review.queue')",
   '/admin/attempt-requests': "hasScope('review.grade')",

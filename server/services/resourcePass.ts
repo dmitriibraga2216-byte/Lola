@@ -35,7 +35,11 @@ type Progress = typeof resourceProgress.$inferSelect
 type Version = NonNullable<Awaited<ReturnType<typeof currentVersion>>>
 
 /** Откуда человек пришёл: экран возвращает его туда же (лента траектории). */
-export type PassContext = { type: 'trajectory', enrollmentId: string, title: string | null }
+/**
+ * Откуда пришёл человек. `nodeId` — узел траектории: экран шага меряет по нему время биениями
+ * (`subject_type = 'track_node'`, docs/v2/37 §3.6), и шаг попадает в «План і факт часу».
+ */
+export type PassContext = { type: 'trajectory', enrollmentId: string, title: string | null, nodeId: string | null }
 
 /** Состояние прохождения для экрана: факты, готовность по правилу типа и коды того, чего не хватает. */
 export interface PassState extends Evaluation {
@@ -104,10 +108,10 @@ async function resolveTarget(tx: TenantTx, ctx: Ctx, resourceId: string, assignm
 
 /** Назначение узла траектории несёт свою траекторию и прохождение (`createNodeAssignment`). */
 async function contextOf(tx: TenantTx, a: typeof assignments.$inferSelect): Promise<PassContext | null> {
-  const aud = a.audience as { trajectoryId?: string, trajectoryEnrollmentId?: string }
+  const aud = a.audience as { trajectoryId?: string, trajectoryEnrollmentId?: string, nodeId?: string }
   if (a.kind !== 'trajectory' || !aud.trajectoryId || !aud.trajectoryEnrollmentId) return null
   const [t] = await tx.select({ title: trajectories.title }).from(trajectories).where(eq(trajectories.id, aud.trajectoryId))
-  return { type: 'trajectory', enrollmentId: aud.trajectoryEnrollmentId, title: t?.title ?? null }
+  return { type: 'trajectory', enrollmentId: aud.trajectoryEnrollmentId, title: t?.title ?? null, nodeId: aud.nodeId ?? null }
 }
 
 /** Факты материала для правила зачёта: тип, тело, объём текста, страницы документа. Порог видео — правило типа (90 %). */

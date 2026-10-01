@@ -2,8 +2,11 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { attemptAnswers, attempts, locations, quizzes, reviewDelegations, reviewQueueItems, users, workshopSubmissions, workshops } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import type { TenantTx } from '../utils/withTenant'
 import { MAX_DELEGATION_DEPTH, claimIsLive } from './reviewRules'
 import { reviewConflict } from './reviewQueue'
+import { queueItemDeviation } from '../../shared/domain/timeNorms'
+import type { ContentTimeDeviationFlag } from '../../shared/enums'
 import type { ReviewConflict } from './reviewQueue'
 import type { ReviewActor } from './reviewActor'
 import type { SnapshotQuestion } from '../../shared/domain/grading'
@@ -52,6 +55,9 @@ export interface ReviewItemCard {
     contentSeconds: number
     attemptSeconds: number
     timeConfidence: string
+    /** Значок отклонения в строке времени шапки (`37` §5.2). */
+    deviation: ContentTimeDeviationFlag
+    deviationFactor: number | null
   }
   /** Чья работа — без контактов (сквозная проверка 20). */
   subject: { id: string, fullName: string | null, kind: string }
@@ -60,6 +66,13 @@ export interface ReviewItemCard {
   /** Цепочка передач — от первой к последней, в любом состоянии. */
   delegations: { id: string, depth: number, fromName: string | null, toName: string | null, reasonCode: string, reasonText: string | null, dueAt: Date, state: string, createdAt: Date, fromMe: boolean }[]
   conflict: ReviewConflict
+  /**
+   * «Ви навчали цю людину за цим треком» (`37` §7.9): смотрящий — назначенный наставник
+   * проверяемого в траектории, где есть эта работа (курс-трек, практикум или тест узлом).
+   * Не запрет и не автопереадресация — плашка и «Передати іншому» с причиной
+   * `conflict_of_interest`; обязанность снимается, право остаётся.
+   */
+  trainedByMe: boolean
   /** Что доступно смотрящему — экран не угадывает права, а читает их отсюда (CLAUDE.md п. 3). */
   can: { delegate: boolean, revoke: string | null, reassign: boolean }
   /** Содержание работы из источника по `(task_type, source_id)` — очередь его не копирует (В-2). */
@@ -81,6 +94,29 @@ interface AnswerWork {
   question: { kind: string, stem: unknown, points: number, criteria: string[], reference: string | null, graderHint: string | null } | null
   answer: unknown
   history: { attemptNo: number, status: string, score: number | null, submittedAt: Date | null }[]
+}
+
+/**
+ * Был ли `mentorId` назначенным наставником `userId` по треку этой работы (`37` §7.9). Наставник
+ * по треку — `trajectory_enrollments.mentor_id` (его ставит узел «Призначити наставника»,
+ * `docs/17`); «этот же трек» — траектория, у которой есть узел-задание с курсом работы
+ * (`review_queue_items.track_id`) или с самим практикумом / тестом. Отменённое прохождение
+ * траектории не в счёт: наставничество не состоялось.
+ */
+export async function trainedBy(tx: TenantTx, i: { mentorId: string, userId: string, trackId: string | null, content: { type: 'workshop' | 'test', id: string } | null }): Promise<boolean> {
+  if (i.mentorId === i.userId || (!i.trackId && !i.content)) return false
+  const matches = [
+    ...(i.trackId ? [sql`(n.content_type = 'course' and n.content_id = ${i.trackId}::uuid)`] : []),
+    ...(i.content ? [sql`(n.content_type = ${i.content.type} and n.content_id = ${i.content.id}::uuid)`] : []),
+  ]
+  const rows = await tx.execute(sql`
+    select 1 from trajectory_enrollments te
+    where te.user_id = ${i.userId}::uuid and te.mentor_id = ${i.mentorId}::uuid and te.cancelled_at is null
+      and exists (select 1 from trajectory_nodes n where n.trajectory_id = te.trajectory_id and n.kind = 'task'
+                  and (${sql.join(matches, sql` or `)}))
+    limit 1
+  `) as unknown as unknown[]
+  return rows.length > 0
 }
 
 export async function getReviewItem(actor: ReviewActor, itemId: string): Promise<ReviewItemCard | null> {
@@ -139,11 +175,14 @@ export async function getReviewItem(actor: ReviewActor, itemId: string): Promise
 
     let work: WorkshopWork | AnswerWork | null = null
     let authorIds: string[] = []
+    /** Элемент контента работы — узел траектории, по которому ищется наставничество (§7.9). */
+    let content: { type: 'workshop' | 'test', id: string } | null = null
     if (q.taskType === 'workshop') {
       const [s] = await tx.select().from(workshopSubmissions).where(eq(workshopSubmissions.id, q.sourceId))
       if (s) {
         const [w] = await tx.select({ authorIds: workshops.authorIds }).from(workshops).where(eq(workshops.id, s.workshopId))
         authorIds = w?.authorIds ?? []
+        content = { type: 'workshop', id: s.workshopId }
         const history = await tx.select({ attemptNo: workshopSubmissions.attemptNo, status: workshopSubmissions.status, reviewComment: workshopSubmissions.reviewComment, reviewedAt: workshopSubmissions.reviewedAt })
           .from(workshopSubmissions)
           .where(and(eq(workshopSubmissions.workshopId, s.workshopId), eq(workshopSubmissions.userId, s.userId), sql`${workshopSubmissions.id} <> ${s.id}::uuid`))
@@ -166,6 +205,7 @@ export async function getReviewItem(actor: ReviewActor, itemId: string): Promise
         .where(eq(attemptAnswers.id, q.sourceId))
       if (a) {
         authorIds = a.authorIds
+        content = { type: 'test', id: a.quizId }
         const s = (a.snapshot as SnapshotQuestion[]).find(x => x.id === a.questionId)
         const history = await tx.select({ attemptNo: attempts.attemptNo, status: attempts.status, score: attempts.score, submittedAt: attempts.submittedAt })
           .from(attempts)
@@ -196,6 +236,8 @@ export async function getReviewItem(actor: ReviewActor, itemId: string): Promise
     const active = chain.filter(d => d.state === 'active')
     const deepest = active[active.length - 1]
     const revokable = active.slice().reverse().find(d => d.fromUserId === me) ?? (manager ? deepest : undefined)
+    const dev = queueItemDeviation(q)
+    const trainedByMe = await trainedBy(tx, { mentorId: me, userId: q.userId, trackId: q.trackId, content })
 
     return {
       item: {
@@ -222,6 +264,8 @@ export async function getReviewItem(actor: ReviewActor, itemId: string): Promise
         contentSeconds: q.contentSeconds,
         attemptSeconds: q.attemptSeconds,
         timeConfidence: q.timeConfidence,
+        deviation: dev.flag,
+        deviationFactor: dev.factor,
       },
       subject: { id: q.userId, fullName: row.fullName, kind: q.subjectKind },
       contactsHidden: q.subjectKind === 'candidate',
@@ -238,6 +282,7 @@ export async function getReviewItem(actor: ReviewActor, itemId: string): Promise
         fromMe: d.fromUserId === me,
       })),
       conflict: await reviewConflict(tx, { actorId: me, subjectUserId: q.userId, authorIds }),
+      trainedByMe,
       can: {
         // «Делегувати» неактивна при глубине 2 (§5.2) и пока карточку держит другой.
         delegate: open && responsible && !heldByOther && q.delegationDepth < MAX_DELEGATION_DEPTH,

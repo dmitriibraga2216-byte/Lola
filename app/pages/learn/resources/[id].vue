@@ -42,7 +42,7 @@ interface Opened {
     videoThresholdPct: number
   }
   progress: PassState
-  context: { type: 'trajectory', enrollmentId: string, title: string | null } | null
+  context: { type: 'trajectory', enrollmentId: string, title: string | null, nodeId: string | null } | null
 }
 interface Media { urls: Record<string, string>, status: string, originalName: string }
 
@@ -56,6 +56,16 @@ const REASON_KEY: Record<Exclude<ReasonCode, 'time'>, string> = {
 }
 
 const data = ref<Opened | null>(null)
+
+/**
+ * Учёт времени шага траектории биениями (docs/v2/37 §7.10, `subject_type = 'track_node'`):
+ * узел известен только после открытия, поэтому счёт включается, когда сервер вернул
+ * контекст траектории. Материал вне траектории (элемент программы, прямое назначение) своим
+ * «элементом измерения» не является — там биений нет, как и раньше.
+ */
+const trackNodeId = ref<string | null>(null)
+const time = useLearningTime({ subjectType: 'track_node', get subjectId() { return trackNodeId.value ?? '' } })
+const stillHere = time.stillHere
 const media = ref<Media | null>(null)
 const error = ref('')
 const notice = ref('')
@@ -171,6 +181,10 @@ onMounted(async () => {
       body: { assignmentId, device: window.innerWidth < 768 ? 'mobile' : 'desktop' },
     })
     data.value = opened
+    if (opened.context?.nodeId && opened.progress.status !== 'completed') {
+      trackNodeId.value = opened.context.nodeId
+      time.setKind('content')
+    }
     blocksState.value = { ...opened.progress.blocksState }
     apply(opened.progress)
     if (opened.resource.mediaId) {
@@ -232,6 +246,7 @@ async function complete() {
     if (pendingBlocks) await tick() // досылаем отмеченные пункты; решение — за сервером
     await api(`/learning/resources/${resourceId}/complete`, { method: 'POST', body: { assignmentId } })
     completed.value = true
+    time.setKind(null) // последнее биение уходит сейчас, сегмент закрывается `session_end`
     notice.value = t('resourcePass.completed')
     clearTimeout(tickTimer)
     await navigateTo(backTo.value)
@@ -249,6 +264,7 @@ async function complete() {
 
 <template>
   <div :class="['player', { 'no-print': data && !data.resource.canPrint }]">
+    <StillHereDialog :open="stillHere" @confirm="time.confirmStillHere()" />
     <header class="top">
       <NuxtLink :to="backTo" class="close" :aria-label="backLabel">←</NuxtLink>
       <div class="crumbs">

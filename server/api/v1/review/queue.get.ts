@@ -1,6 +1,8 @@
 import { reviewQueueQuerySchema } from '../../../../shared/schemas/review'
-import { requireScope } from '../../../services/access'
-import { listReviewQueue, reviewQueueCounts } from '../../../services/reviewQueue'
+import { can, requireScope } from '../../../services/access'
+import { listReviewQueue, reviewQueueCounts, reviewQueueExportRows } from '../../../services/reviewQueue'
+import { toXlsx } from '../../../services/reports'
+import { toCsv } from '../../../services/reportExports'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
 /**
@@ -13,6 +15,9 @@ import { apiData, apiError } from '../../../utils/apiResponse'
  *
  * С PR-19 табы «Делеговані мені» и «Делеговані мною» наполнены (`review_delegations`), а ответ
  * несёт `counts` — счётчики всех табов для шапки экрана.
+ *
+ * `format=xlsx|csv` — выгрузка экрана «Черга перевірки» (`37` §9.1): те же таб и фильтры, все
+ * страницы (до 5000 строк), колонки §9.1. Право — `report.export`, как у всех выгрузок (docs/22 §3).
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'review.queue')
@@ -33,6 +38,18 @@ export default defineEventHandler(async (event) => {
   })
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Невірний фільтр черги')
   const ctx = { tenantId: a.tenantId, actorId: a.userId }
+  if (q.format === 'xlsx' || q.format === 'csv') {
+    if (!can(a, 'report.export')) return apiError(event, 403, 'forbidden', 'Немає права на вивантаження')
+    const rows = await reviewQueueExportRows(ctx, p.data)
+    if (q.format === 'csv') {
+      setHeader(event, 'Content-Type', 'text/csv; charset=utf-8')
+      setHeader(event, 'Content-Disposition', 'attachment; filename="lola-review-queue.csv"')
+      return toCsv(rows)
+    }
+    setHeader(event, 'Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    setHeader(event, 'Content-Disposition', 'attachment; filename="lola-review-queue.xlsx"')
+    return toXlsx('review-queue', rows)
+  }
   // Счётчики табов (`37` §5.1: «Мої» — ждущие и взятые, просроченные коралловые) — одним ответом
   // со списком, чтобы экран не делал четыре запроса на каждое переключение таба.
   return apiData({ ...(await listReviewQueue(ctx, p.data)), counts: await reviewQueueCounts(ctx) })

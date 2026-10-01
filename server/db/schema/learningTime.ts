@@ -82,10 +82,22 @@ export const learningTimeTotals = pgTable('learning_time_totals', {
   sessionsCount: integer('sessions_count').notNull().default(0),
   firstStartedAt: timestamp('first_started_at', { withTimezone: true }),
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
+  /**
+   * Перенос убранного (`time.purge_sessions`, миграция `0100`, Р-T1): сегменты старше 400 дней
+   * удаляются, их суммы копятся здесь, и свёртка считает «перенесено + оставшиеся сегменты».
+   * Иначе биение после уборки пересчитало бы витрину только из новых сегментов.
+   */
+  purgedContentSeconds: integer('purged_content_seconds').notNull().default(0),
+  purgedAttemptSeconds: integer('purged_attempt_seconds').notNull().default(0),
+  purgedDiscardedSeconds: integer('purged_discarded_seconds').notNull().default(0),
+  purgedSessionsCount: integer('purged_sessions_count').notNull().default(0),
+  purgedFirstStartedAt: timestamp('purged_first_started_at', { withTimezone: true }),
+  purgedLastActivityAt: timestamp('purged_last_activity_at', { withTimezone: true }),
 }, t => [
   index('idx_learning_time_totals_tenant').on(t.tenantId, t.subjectType, t.subjectId),
   unique('uq_learning_time_totals_key').on(t.tenantId, t.userId, t.subjectType, t.subjectId, t.enrollmentId).nullsNotDistinct(),
   check('ltt_conf_chk', sql`${t.confidence} in ('ok', 'partial', 'unreliable')`),
   check('ltt_subject_chk', sql`${t.subjectType} in ('lesson', 'quiz', 'workshop', 'track_node')`),
+  check('ltt_purged_chk', sql`${t.purgedContentSeconds} >= 0 and ${t.purgedAttemptSeconds} >= 0 and ${t.purgedDiscardedSeconds} >= 0 and ${t.purgedSessionsCount} >= 0`),
   check('ltt_seconds_chk', sql`${t.contentSeconds} >= 0 and ${t.attemptSeconds} >= 0 and ${t.discardedSeconds} >= 0 and ${t.sessionsCount} >= 0`),
 ])

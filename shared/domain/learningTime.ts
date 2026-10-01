@@ -47,6 +47,11 @@ export const LEARNING_TIME_RULES = {
   /** Достоверность (`37` §7.15): покрытие ≥ 80 % — ok, 40–79 % — partial, ниже — unreliable. */
   okCoverage: 0.8,
   partialCoverage: 0.4,
+  /**
+   * `time.purge_sessions` (`37` §11): сегменты пары «человек × элемент», замолчавшей больше
+   * 400 дней назад, удаляются; их суммы переносятся в витрину (Р-T1), цифры не меняются.
+   */
+  purgeAfterDays: 400,
 } as const
 
 const R = LEARNING_TIME_RULES
@@ -569,5 +574,38 @@ export class ActivityMeter {
     const v = this.activeMs
     this.activeMs = 0
     return v
+  }
+}
+
+// ── Перенос убранного (`time.purge_sessions`, Р-T1) ─────────────────────────────────────────
+
+/** Суммы, убранные уборкой сегментов и перенесённые в строку витрины. */
+export interface PurgedCarry {
+  content: number
+  attempt: number
+  discarded: number
+  sessions: number
+  first: Date | null
+  last: Date | null
+}
+
+export const NO_CARRY: PurgedCarry = { content: 0, attempt: 0, discarded: 0, sessions: 0, first: null, last: null }
+
+/**
+ * Итог пары = перенесённое уборкой + посчитанное по оставшимся сегментам. Сегменты убираются
+ * только целой замолчавшей парой, поэтому одни и те же секунды не могут попасть в обе части.
+ * Границы — самая ранняя и самая поздняя из двух частей.
+ */
+export function withCarry<T extends { content: number, attempt: number, discarded: number, sessions: number, first: Date | null, last: Date | null }>(sum: T, carry: PurgedCarry): T {
+  const minDate = (a: Date | null, b: Date | null) => (!a ? b : !b ? a : a < b ? a : b)
+  const maxDate = (a: Date | null, b: Date | null) => (!a ? b : !b ? a : a > b ? a : b)
+  return {
+    ...sum,
+    content: sum.content + carry.content,
+    attempt: sum.attempt + carry.attempt,
+    discarded: sum.discarded + carry.discarded,
+    sessions: sum.sessions + carry.sessions,
+    first: minDate(sum.first, carry.first),
+    last: maxDate(sum.last, carry.last),
   }
 }

@@ -48,6 +48,8 @@ export async function getBoss(): Promise<PgBoss> {
       // docs/v2/37 §11: учёт времени биениями (PR-21) — закрытие зависших сегментов и свёртка
       await b.createQueue('time.close_stale_sessions', { retryLimit: 2, expireInSeconds: 300 })
       await b.createQueue('time.rollup', { retryLimit: 2, expireInSeconds: 900 })
+      // docs/v2/37 §11: уборка сегментов старше 400 дней с переносом сумм в витрину (Р-T1)
+      await b.createQueue('time.purge_sessions', { retryLimit: 2, expireInSeconds: 1800 })
       // docs/v2/37 §11 (PR-19): срок проверки, возврат просроченных делегирований, отсутствия,
       // перебалансировка и суточная статистика проверяющих
       await b.createQueue('review.sla_scan', { retryLimit: 3, expireInSeconds: 600 })
@@ -169,6 +171,8 @@ export async function getBoss(): Promise<PgBoss> {
       await b.schedule('time.close_stale_sessions', '*/5 * * * *', {}, { singletonKey: 'time.close_stale_sessions' })
       await b.schedule('time.rollup', '*/10 * * * *', { windowMinutes: 120 }, { singletonKey: 'time.rollup', key: 'frequent' })
       await b.schedule('time.rollup', '40 4 * * *', { windowMinutes: 2880 }, { singletonKey: 'time.rollup.daily', key: 'daily', tz: 'Europe/Kyiv' })
+      // Уборка сегментов (docs/v2/37 §11) — раз в сутки, ночью, после суточной свёртки
+      await b.schedule('time.purge_sessions', '10 5 * * *', {}, { singletonKey: 'time.purge_sessions', tz: 'Europe/Kyiv' })
       // Очередь проверки (docs/v2/37 §11): пороги SLA ежечасно, возврат делегирований каждые
       // 15 минут, отсутствия в 06:00 (и сразу при создании записи), перебалансировка в 07:00,
       // статистика за прошедшие сутки в 03:00 — суточные по времени Киева

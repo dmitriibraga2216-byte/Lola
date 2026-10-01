@@ -10,8 +10,9 @@ import { personById } from './repo/people'
 import { closeDelegations } from './reviewDelegation'
 import { routeQueueItem } from './reviewRouting'
 import { CLAIM_TTL_MS, claimIsLive, restingStatus } from './reviewRules'
+import { queueItemDeviation } from '../../shared/domain/timeNorms'
+import type { ContentTimeDeviationFlag, ReviewTaskType  } from '../../shared/enums'
 import type { ReviewQueueQuery } from '../../shared/schemas/review'
-import type { ReviewTaskType } from '../../shared/enums'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -312,6 +313,9 @@ export interface ReviewQueueRow {
   contentSeconds: number
   attemptSeconds: number
   timeConfidence: string
+  /** «Відхилення» (`37` §5.1, §7.14): факт этой работы к снимку нормы; считает сервер. */
+  deviation: ContentTimeDeviationFlag
+  deviationFactor: number | null
   submittedAt: Date
   completedAt: Date | null
   status: string
@@ -476,13 +480,18 @@ export async function listReviewQueue(ctx: Ctx, filter: ReviewQueueQuery): Promi
     const hasMore = rows.length > filter.limit
     const now = Date.now()
     const pageRows = hasMore ? rows.slice(0, filter.limit) : rows
-    const items = pageRows.map(({ cursorAt: _cursorAt, ...r }) => ({
-      ...r,
-      taskType: r.taskType as ReviewTaskType,
-      myDelegation: r.myDelegation ? { ...r.myDelegation, dueAt: new Date(r.myDelegation.dueAt) } : null,
-      hoursLeft: r.slaDueAt ? Math.round((r.slaDueAt.getTime() - now) / 3_600_000) : null,
-      overdue: !!r.slaDueAt && r.slaDueAt.getTime() < now && r.status !== 'done',
-    }))
+    const items = pageRows.map(({ cursorAt: _cursorAt, ...r }) => {
+      const dev = queueItemDeviation(r)
+      return {
+        ...r,
+        deviation: dev.flag,
+        deviationFactor: dev.factor,
+        taskType: r.taskType as ReviewTaskType,
+        myDelegation: r.myDelegation ? { ...r.myDelegation, dueAt: new Date(r.myDelegation.dueAt) } : null,
+        hoursLeft: r.slaDueAt ? Math.round((r.slaDueAt.getTime() - now) / 3_600_000) : null,
+        overdue: !!r.slaDueAt && r.slaDueAt.getTime() < now && r.status !== 'done',
+      }
+    })
     const last = pageRows[pageRows.length - 1]
 
     return {
@@ -531,3 +540,43 @@ export async function attemptSnapshot(tx: TenantTx, attemptId: string) {
 
 /** Для тестов и карточки: состояние покоя строки (тот же расчёт, что и в `releaseReview`). */
 export { restingStatus }
+
+/** Потолок выгрузки §9.1: очередь — рабочий список, а не архив; больше — сузить фильтр. */
+export const QUEUE_EXPORT_MAX = 5000
+
+/**
+ * «Черга перевірки» — выгрузка экрана (`37` §9.1, csv/xlsx): те же таб, фильтры и строки, что
+ * на экране (`listReviewQueue` постранично), колонки §9.1 в их порядке. Своя работа не попадает
+ * и сюда — условие стоит в самой выборке очереди. Время — в минутах с десятыми, «Відхилення» —
+ * флаг и множитель факт/план этой работы (`queueItemDeviation`).
+ */
+export async function reviewQueueExportRows(ctx: Ctx, filter: Omit<ReviewQueueQuery, 'cursor' | 'limit'>): Promise<Record<string, unknown>[]> {
+  const rows: ReviewQueueRow[] = []
+  let cursor: string | undefined
+  do {
+    const page = await listReviewQueue(ctx, { ...filter, cursor, limit: 200 })
+    rows.push(...page.items)
+    cursor = page.cursor ?? undefined
+  } while (cursor && rows.length < QUEUE_EXPORT_MAX)
+  const min = (s: number | null) => (s === null ? null : Math.round(s / 6) / 10)
+  return rows.slice(0, QUEUE_EXPORT_MAX).map(r => ({
+    full_name: r.fullName,
+    subject_kind: r.subjectKind,
+    location: r.locationName,
+    track: r.trackTitle,
+    task_type: r.taskType,
+    task_title: r.taskTitle,
+    attempts: r.attemptNo,
+    estimated_min: min(r.estimatedSeconds),
+    content_min: min(r.contentSeconds),
+    attempt_min: min(r.attemptSeconds),
+    deviation: r.deviation,
+    deviation_factor: r.deviationFactor,
+    confidence: r.timeConfidence,
+    completed_at: r.completedAt,
+    reviewer: r.reviewerName,
+    delegated_by: r.delegatedByName,
+    sla_due_at: r.slaDueAt,
+    status: r.status,
+  }))
+}

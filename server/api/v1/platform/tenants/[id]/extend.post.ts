@@ -12,8 +12,8 @@ export default defineEventHandler(async (event) => {
   const actor = requirePlatform(event, 'billing.extend')
   const p = platformExtendSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 422, 'validation_failed', 'Перевірте дати та причину (10–500 знаків)', { issues: p.error.issues })
-  const { comment: _comment, ...dates } = p.data
-  const r = await extendTenantDates(getRouterParam(event, 'id')!, dates, actor)
+  const { comment, ...dates } = p.data
+  const r = await extendTenantDates(getRouterParam(event, 'id')!, dates, actor, comment)
   if (!r.ok) return apiError(event, 404, 'not_found', 'Тенант не знайдено')
   return apiData(r)
 })

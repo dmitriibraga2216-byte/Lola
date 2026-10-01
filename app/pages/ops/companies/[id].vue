@@ -79,6 +79,7 @@ const LIMIT_KEYS: LimitKey[] = ['users', 'candidates', 'storageGb', 'smsPerMonth
 const PLAN_LIMIT_KEYS = new Set<LimitKey>(['users', 'candidates', 'storageGb', 'smsPerMonth', 'aiGenerateOps', 'aiReviewOps', 'aiInterviewOps', 'exportRows'])
 const limits = ref<Limits | null>(null)
 const limitsForm = reactive<Record<LimitKey, string>>({ users: '', storageGb: '', smsPerMonth: '', apiPerMinute: '', webhooks: '', activeJobs: '', candidates: '', aiGenerateOps: '', aiReviewOps: '', aiInterviewOps: '', exportRows: '' })
+const limitsReason = ref('')
 const busy = ref(false)
 const plans = ref<{ code: string, name: string, isActive: boolean }[]>([])
 onMounted(async () => { try { plans.value = await ops('/plans') } catch { /* назва тарифу — кодом, якщо список недоступний */ } })
@@ -96,10 +97,11 @@ async function saveLimits() {
   if (busy.value) return
   error.value = ''
   busy.value = true
-  const body = Object.fromEntries(LIMIT_KEYS.map(k => [k, limitsForm[k].trim() === '' ? null : Number(limitsForm[k])]))
+  const body = { ...Object.fromEntries(LIMIT_KEYS.map(k => [k, limitsForm[k].trim() === '' ? null : Number(limitsForm[k])])), reason: limitsReason.value.trim() }
   try {
     await ops(`/tenants/${tenantId}/limits`, { method: 'PUT', body })
     notice.value = t('opsConsole.limits.saved')
+    limitsReason.value = ''
     await loadLimits()
   }
   catch (err) { error.value = apiErrorOf(err).message }
@@ -384,7 +386,12 @@ const purgeAt = computed(() => data.value?.tenant.archivedAt ? fmt(new Date(new 
             <input v-model="limitsForm[k]" class="field" type="number" min="0" inputmode="numeric" :disabled="!can('billing.limits')" :placeholder="t('opsConsole.limits.fromPlan')">
           </label>
         </div>
-        <div class="chips"><button v-if="can('billing.limits')" type="button" class="btn primary" :disabled="busy" @click="saveLimits">{{ t('common.save') }}</button></div>
+        <label v-if="can('billing.limits')" class="field-wrap">
+          <span class="label">{{ t('opsConsole.actionsTab.reason') }}</span>
+          <input v-model="limitsReason" class="field" maxlength="500" placeholder="10–500">
+          <span class="help">{{ t('opsConsole.limits.reasonHint') }}</span>
+        </label>
+        <div class="chips"><button v-if="can('billing.limits')" type="button" class="btn primary" :disabled="busy || limitsReason.trim().length < 10" @click="saveLimits">{{ t('common.save') }}</button></div>
       </section>
 
       <section v-else-if="tab === 'billing' && limits" class="stack">

@@ -1,6 +1,6 @@
 import postgres from 'postgres'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest'
 import { offboardingStartSchema } from '../../shared/schemas/offboarding'
 import { contentIssueQueueSchema, contentQualityQuerySchema } from '../../shared/schemas/contentIssues'
 
@@ -42,6 +42,7 @@ const { startAttempt, saveAnswer, submitAttempt, recalculateQuiz, planRecalc } =
 const { createCategory } = await import('../../server/services/categories')
 const { startOffboarding, completeOffboarding } = await import('../../server/services/offboarding')
 const { withTenant } = await import('../../server/utils/withTenant')
+const { managerIdOf } = await import('../../server/services/orgManager')
 const { FRAME_KEYS } = await import('../../server/services/reportFrame')
 const { attempts } = await import('../../server/db/schema')
 
@@ -379,7 +380,12 @@ describe('разбор карточки: переходы статусов, ре
     expect(contentIssueQueueSchema.safeParse({ tab: 'all', cursor: 'не-курсор' }).success).toBe(false)
   })
 
-  it('три `spam` подряд — `muted_until` +14 дней, человеку ушло `content_reporter_muted` (§7.11)', async () => {
+  it('Дано три `spam` подряд, тоді `muted_until` +14 дней, человеку и его руководителю ушло `content_reporter_muted` (§7.11, §13 к. 7)', async () => {
+    // Дано: у касира есть руководитель — руководитель его точки (шаг 2 `resolveManager()`)
+    const [place] = await admin`select l.id, l.manager_id from user_placements up join locations l on l.id = up.location_id
+      where up.user_id = ${cashierId} and up.is_primary and up.ended_at is null limit 1`
+    await admin`update locations set manager_id = ${mentorId} where id = ${place!.id}`
+    onTestFinished(async () => { await admin`update locations set manager_id = ${place!.manager_id ?? null} where id = ${place!.id}` })
     const targets = [await publishedResource('Спам 1', [authorId]), await publishedResource('Спам 2', [authorId]), await publishedResource('Спам 3', [authorId])]
     for (const t of targets) {
       const id = await report(cashierId, { targetType: 'resource', targetId: t, issueType: 'typo', source: 'lesson', context: {} })
@@ -392,6 +398,16 @@ describe('разбор карточки: переходы статусов, ре
     expect(days).toBeGreaterThan(13)
     const [n] = await admin`select * from notifications where user_id = ${cashierId} and code = 'content_reporter_muted'`
     expect(n).toBeDefined()
+    // 36 §13 к. 7: «…человеку и его руководителю ушло уведомление» — руководитель тот, кого даёт
+    // единая точка `resolveManager()` (В-7), с именем человека в тексте
+    const managerId = await withTenant(tenantId, adminId, tx => managerIdOf(tx, cashierId))
+    expect(managerId, 'у касира в посеве нет руководителя — критерий 7 нечем проверить').toBeTruthy()
+    expect(managerId).not.toBe(cashierId)
+    const toManager = await admin`select payload from notifications where user_id = ${managerId} and code = 'content_reporter_muted'`
+    expect(toManager).toHaveLength(1)
+    const [cashier] = await admin`select full_name from users where id = ${cashierId}`
+    expect((toManager[0]!.payload as { name: string, until: string })).toMatchObject({ name: cashier!.full_name })
+    expect((n!.payload as { name: string }).name).toBe('')
     const [rej] = await admin`select payload from notifications where user_id = ${cashierId} and code = 'content_issue_rejected' limit 1`
     expect((rej!.payload as { comment: string }).comment).toBe('Помилки в тексті немає')
     // Снимает mute администратор — и серия обнуляется

@@ -523,6 +523,47 @@ describe('карточка проверки `GET /review/items/:id` — види
   })
 })
 
+// ── Критерий 5: своя работа наставника — ни в табе, ни в круге, ни делегатом ────────────────
+
+describe('37 §13 критерий 5: наставник с правом оценки сам сдал работу', () => {
+  it('Дано наставник А сам сдал работу, тоді круг round_robin её ему не даёт, в его табах её нет, делегировать её ему нельзя', async () => {
+    const rule = await createRoutingRule(adminActor(), {
+      nameUk: 'PR19 Коло з автором роботи', priority: 1, matchScope: { locationIds: [lazareva] }, matchSubjectKind: null,
+      matchTaskTypes: ['offline_confirm'], strategy: 'round_robin', reviewerIds: [people.a!, people.b!, people.c!],
+      fallbackUserId: null, slaHoursOverride: null, isActive: true,
+    })
+    expect(rule.ok, JSON.stringify(rule)).toBe(true)
+    if (!rule.ok) return
+    ruleIds.push(rule.id)
+
+    // А — полноправный проверяющий круга (не «проверяемый без права оценки»), и работы — его
+    const items: string[] = []
+    for (let i = 0; i < 6; i++) items.push(await newItem(`своя ${i}`, { userId: people.a! }))
+    const assigned = await admin`select assigned_reviewer_id as r from review_queue_items where id in ${admin(items)}`
+    expect(assigned.some(x => x.r === people.a), 'круг предложил наставнику его же работу').toBe(false)
+    expect(assigned.filter(x => x.r === people.b).length + assigned.filter(x => x.r === people.c).length).toBe(6)
+
+    // Ни в одном табе А
+    for (const tab of ['mine', 'done', 'delegated_in', 'delegated_out'] as const) {
+      expect((await mine('a', tab)).some(i => items.includes(i.id)), `своя работа видна в табе ${tab}`).toBe(false)
+    }
+
+    // Делегировать её А нельзя: в списке целей его нет, прямой вызов — target_forbidden
+    const toB = items[assigned.findIndex(x => x.r === people.b)]!
+    expect((await delegateTargets(actor('b'), toB))!.map(t => t.id)).not.toContain(people.a!)
+    const r = await delegateItem(actor('b'), toB, { toUserId: people.a!, reasonCode: 'workload', dueAt: inH(24), notify: false })
+    expect(r).toEqual({ ok: false, code: 'target_forbidden' })
+    // Сам А свою работу не делегирует и не получает её карточку как проверяющий
+    expect(await delegateTargets(actor('a'), toB)).toBeNull()
+    expect((await delegateItem(actor('a'), toB, { toUserId: people.d!, reasonCode: 'workload', dueAt: inH(24), notify: false })).ok).toBe(false)
+
+    await deleteRoutingRule(adminActor(), rule.id)
+    // Нагрузка Б и В не должна перейти в следующий сценарий круга (критерий 12 считает 3/3)
+    await admin`delete from review_sla_events where queue_item_id in ${admin(items)}`
+    await admin`delete from review_queue_items where id in ${admin(items)}`
+  })
+})
+
 // ── Критерий 12: круговое распределение с отсутствующим ────────────────────────────────────
 
 describe('37 §13 критерий 12: round_robin на трёх, один в отпуске', () => {

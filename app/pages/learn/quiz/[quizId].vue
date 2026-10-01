@@ -110,6 +110,7 @@ async function start() {
   try {
     const r = await api<{ attemptId: string }>(`/learning/quizzes/${quizId}/attempts`, {
       method: 'POST',
+      idempotent: true,
       body: { enrollmentId, lessonId, device: window.innerWidth < 768 ? 'mobile' : 'desktop' },
     })
     await loadState(r.attemptId)

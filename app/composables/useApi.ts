@@ -7,6 +7,18 @@ export interface ApiOptions {
   body?: unknown
   query?: Record<string, unknown>
   headers?: Record<string, string>
+  /**
+   * Мутация, которую безопасно повторить (docs/04 §4.1): запрос уходит с новым `Idempotency-Key`,
+   * и обрыв сети или 5xx повторяются тем же ключом — сервер выполнит действие не больше одного раза.
+   */
+  idempotent?: boolean
+}
+
+/** Повторы идемпотентной мутации: сеть, таймаут, перегрузка, сбой сервера — не ошибки клиента. */
+const IDEMPOTENT_RETRY = { retry: 2, retryDelay: 800, retryStatusCodes: [408, 425, 429, 500, 502, 503, 504] }
+
+function newIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 export function useApi() {
@@ -33,8 +45,10 @@ export function useApi() {
     const headers: Record<string, string> = { ...(opts.headers as Record<string, string> || {}) }
     const token = method !== 'GET' ? csrfToken() : null
     if (token) headers['x-csrf-token'] = token
+    const { idempotent, ...rest } = opts
+    if (idempotent) headers['idempotency-key'] = newIdempotencyKey()
 
-    const res = await (requestFetch as unknown as (url: string, o: unknown) => Promise<{ data: T }>)(`/api/v1${path}`, { ...opts, headers })
+    const res = await (requestFetch as unknown as (url: string, o: unknown) => Promise<{ data: T }>)(`/api/v1${path}`, { ...rest, ...(idempotent ? IDEMPOTENT_RETRY : {}), headers })
     return res.data
   }
 

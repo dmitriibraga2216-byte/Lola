@@ -316,7 +316,7 @@ async function next() {
       if (pendingBlocks) await tick()
       const res = await api<{ courseCompleted: boolean }>(
         `/learning/enrollments/${enrollmentId}/lessons/${lessonId}/complete`,
-        { method: 'POST' },
+        { method: 'POST', idempotent: true },
       )
       if (res.courseCompleted) {
         await navigateTo(`/learn/${enrollmentId}`)

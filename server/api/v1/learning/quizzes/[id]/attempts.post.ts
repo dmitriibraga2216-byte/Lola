@@ -1,8 +1,10 @@
+import type { H3Event } from 'h3'
 import { z } from 'zod'
 import { requireScope } from '../../../../../services/access'
 import { startAttempt } from '../../../../../services/attempts'
 import { apiData, apiError } from '../../../../../utils/apiResponse'
 import { clientIp } from '../../../../../utils/authCookies'
+import { idempotent } from '../../../../../utils/idempotency'
 
 const body = z.object({
   enrollmentId: z.string().uuid().optional(),
@@ -12,6 +14,11 @@ const body = z.object({
 
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'learn.attempt')
+  // docs/04 §4.1: старт попытки — мутация, которая может повториться (Idempotency-Key)
+  return idempotent(event, a, () => start(event, a))
+})
+
+async function start(event: H3Event, a: { tenantId: string, userId: string }) {
   const p = body.parse((await readBody(event).catch(() => ({}))) ?? {})
   const r = await startAttempt({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, { ...p, ip: clientIp(event) })
   if (!r.ok) {
@@ -26,4 +33,4 @@ export default defineEventHandler(async (event) => {
     }
   }
   return apiData({ attemptId: r.attemptId, attemptNo: r.attemptNo, deadlineAt: r.deadlineAt, resumed: false })
-})
+}

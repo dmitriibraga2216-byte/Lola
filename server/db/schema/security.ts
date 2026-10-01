@@ -73,3 +73,23 @@ export const userTotpRecoveryCodes = pgTable('user_totp_recovery_codes', {
 }, t => [
   index('idx_user_totp_recovery_codes_tenant').on(t.tenantId, t.userId),
 ])
+
+/**
+ * Ключи идемпотентности мутаций (docs/04 §4.1: заголовок `Idempotency-Key`, хранение 24 часа;
+ * docs/v2/44 §18 Р-CC.3). Ключ — в пространстве «тенант × человек»: чужой ключ того же текста
+ * ничего не повторяет. `fingerprint` — хэш метода, пути и тела: тот же ключ с другим запросом —
+ * ошибка клиента, а не повтор. Пока запрос выполняется, `response_status` пуст.
+ */
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  ...baseColumns,
+  tenantId: tenantId().references(() => tenants.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  responseStatus: integer('response_status'),
+  responseBody: jsonb('response_body'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, t => [
+  unique('idempotency_keys_tenant_user_key_unique').on(t.tenantId, t.userId, t.key),
+  index('idx_idempotency_keys_tenant_expires').on(t.tenantId, t.expiresAt),
+])

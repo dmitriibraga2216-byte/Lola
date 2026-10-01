@@ -114,6 +114,8 @@ export async function getBoss(): Promise<PgBoss> {
       // публикации; уборка устаревших OAuth state — ежедневно
       await b.createQueue('platform_announcement.notify', { retryLimit: 2, retryDelay: 60, expireInSeconds: 900 })
       await b.createQueue('oauth.states_cleanup', { retryLimit: 2, expireInSeconds: 600 })
+      // docs/04 §4.1: ключи Idempotency-Key живут 24 часа (docs/v2/44 §18 Р-CC.3)
+      await b.createQueue('idempotency.purge', { retryLimit: 2, expireInSeconds: 600 })
       await b.createQueue('ai.calls_cleanup', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/30 §11 (PR-28): собеседование. Расшифровка и оценка — по событию; повторы после
       // отказа провайдера ставит сам сервис с отсрочкой (5/30 мин и 1/5/30 мин, §7.10, §7.12),
@@ -234,6 +236,7 @@ export async function getBoss(): Promise<PgBoss> {
       // раз в 30 мин (§11 vacancy.publication_health), всплеск блокировок — раз в 10 мин (§7.8)
       await b.schedule('vacancy.publication_health', '*/30 * * * *', {}, { singletonKey: 'vacancy.publication_health' })
       await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
+      await b.schedule('idempotency.purge', '20 4 * * *', {}, { singletonKey: 'idempotency.purge', tz: 'Europe/Kyiv' })
       await b.schedule('oauth.states_cleanup', '15 4 * * *', {}, { singletonKey: 'oauth.states_cleanup', tz: 'Europe/Kyiv' })
       await b.schedule('ai.calls_cleanup', '10 4 * * *', {}, { singletonKey: 'ai.calls_cleanup', tz: 'Europe/Kyiv' })
       await b.schedule('interview.reap', '*/15 * * * *', {}, { singletonKey: 'interview.reap' })

@@ -1,9 +1,16 @@
+import type { H3Event } from 'h3'
 import { requireScope } from '../../../../../../../services/access'
 import { completeLesson } from '../../../../../../../services/learning'
 import { apiData, apiError } from '../../../../../../../utils/apiResponse'
+import { idempotent } from '../../../../../../../utils/idempotency'
 
 export default defineEventHandler(async (event) => {
   const access = await requireScope(event, 'learn.view')
+  // docs/04 §4.1: отметка урока — мутация, которая может повториться (Idempotency-Key)
+  return idempotent(event, access, () => complete(event, access))
+})
+
+async function complete(event: H3Event, access: { tenantId: string, userId: string }) {
   const result = await completeLesson(
     { tenantId: access.tenantId, actorId: access.userId },
     getRouterParam(event, 'id')!,
@@ -16,4 +23,4 @@ export default defineEventHandler(async (event) => {
     })
   }
   return apiData(result)
-})
+}

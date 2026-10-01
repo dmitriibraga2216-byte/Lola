@@ -55,7 +55,9 @@ export function setAiHttp(f: typeof fetch | null): void {
   httpImpl = f
 }
 
-const doFetch: typeof fetch = (input, init) => (httpImpl ?? fetch)(input, init)
+// Редиректы не выполняются (security-sweep-3): API модели не перенаправляет, а редирект с проверенного
+// адреса во внутреннюю сеть обходил бы проверку адреса профиля
+const doFetch: typeof fetch = (input, init) => (httpImpl ?? fetch)(input, { ...init, redirect: 'error' })
 
 function isTimeout(err: unknown): boolean {
   const name = err instanceof Error ? err.name : ''

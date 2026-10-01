@@ -9,6 +9,7 @@ import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
 import { effectiveLimits } from './tenantLimits'
 import { measureLive, syncCounter } from './usageCounters'
+import { checkPublicUrl, postExternal, PrivateDestinationError } from './netGuard'
 
 interface Ctx { tenantId: string, actorId: string }
 
@@ -40,10 +41,11 @@ export async function listEndpoints(ctx: Ctx) {
   })
 }
 
-export type CreateEndpointResult = { ok: true, id: string, secret: string } | { ok: false, code: 'webhooks_limit' }
+export type CreateEndpointResult = { ok: true, id: string, secret: string } | { ok: false, code: 'webhooks_limit' | 'url_not_allowed' }
 
 /** Секрет показывается один раз при создании. Лимит вебхуков (docs/25 §10, докс/33 D-055) — переопределение тенанта, иначе тариф. */
 export async function createEndpoint(ctx: Ctx, input: { url: string, events: string[], description?: string }): Promise<CreateEndpointResult> {
+  if (await checkPublicUrl(input.url, { httpsOnly: true }) !== 'ok') return { ok: false, code: 'url_not_allowed' }
   const limit = (await effectiveLimits(ctx.tenantId)).webhooks
   if (limit != null) {
     const rows = await withTenant(ctx.tenantId, ctx.actorId, tx => tx.select({ count: sql<number>`count(*)::int` }).from(webhookEndpoints))
@@ -66,6 +68,7 @@ export async function createEndpoint(ctx: Ctx, input: { url: string, events: str
 }
 
 export async function updateEndpoint(ctx: Ctx, id: string, input: { isActive?: boolean, events?: string[], url?: string }) {
+  if (input.url !== undefined && await checkPublicUrl(input.url, { httpsOnly: true }) !== 'ok') return 'url_not_allowed' as const
   const e = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const [row] = await tx.update(webhookEndpoints).set({ ...input, updatedAt: new Date() }).where(eq(webhookEndpoints.id, id)).returning({ id: webhookEndpoints.id })
     return row ?? null
@@ -114,17 +117,14 @@ export async function deliverPending(tenantId: string, limit = 50): Promise<{ de
       let statusCode: number | null = null
       let responseBody = ''
       try {
-        const res = await fetch(e.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Lola-Event': d.event, 'X-Lola-Delivery': d.id, ...(secret ? { 'X-Lola-Signature': sign(secret, body) } : {}) },
-          body,
-          signal: AbortSignal.timeout(10_000),
-        })
+        // Адрес вписывает тенант, а ответ показывается ему же: назначение проверяется при соединении,
+        // внутренние адреса и редиректы запрещены (security-sweep-3, `netGuard.ts`)
+        const res = await postExternal(e.url, { 'Content-Type': 'application/json', 'X-Lola-Event': d.event, 'X-Lola-Delivery': d.id, ...(secret ? { 'X-Lola-Signature': sign(secret, body) } : {}) }, body, { timeoutMs: 10_000 })
         statusCode = res.status
-        responseBody = (await res.text()).slice(0, 2000)
+        responseBody = res.text.slice(0, 2000)
       }
       catch (err) {
-        responseBody = String(err).slice(0, 500)
+        responseBody = err instanceof PrivateDestinationError ? 'Адреса недоступна: внутрішня мережа' : String(err).slice(0, 500)
       }
       const ok = statusCode !== null && statusCode >= 200 && statusCode < 300
       if (ok) {

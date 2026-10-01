@@ -6,7 +6,7 @@ const { createProfile, applyProfile, previewProfile, createRule, runRules } = aw
 const { runDueScan } = await import('../../server/services/dueScan')
 const { renderTemplate, scheduleWithQuietHours, dispatchNotifications } = await import('../../server/services/notifications')
 const { createCourse, addModule, addLesson, publishCourse } = await import('../../server/services/courses')
-const { readiness, overdue, toXlsx } = await import('../../server/services/reports')
+const { readiness, readinessPeople, overdue, toXlsx } = await import('../../server/services/reports')
 const { addPlacement } = await import('../../server/services/people')
 
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
@@ -330,6 +330,47 @@ describe('отчёт готовности сходится с ручной пр�
 
     const xlsx = await toXlsx('readiness', rows)
     expect(xlsx.length).toBeGreaterThan(1000)
+  })
+
+  async function cellAndList() {
+    const rows = await readiness(ctx(), { locationId: lazarevaId, positionId: baristaPosId })
+    const cell = rows.find(r => r.position_id === baristaPosId)!
+    const people = await readinessPeople(ctx(), lazarevaId, baristaPosId)
+    return { people: Number(cell.people), ready: Number(cell.ready), list: people }
+  }
+
+  it('docs/22 §12 п. 2: список по клику на ячейку сходится с её числами, в том числе при просроченном результате', async () => {
+    const person = await makePerson('Готова бариста', baristaPosId, lazarevaId)
+    await syncAssignments(tenantId)
+    // Всё обязательное пройдено, результат действует
+    await admin`update enrollments set status = 'done', started_at = now() - interval '2 days', completed_at = now() - interval '1 day', valid_until = now() + interval '30 days' where user_id = ${person} and cancelled_at is null`
+    const before = await cellAndList()
+    expect(before.list).toHaveLength(before.people)
+    expect(before.list.filter(p => p.ready).length).toBe(before.ready)
+    expect(before.list.find(p => p.id === person)!.ready).toBe(true)
+
+    // Срок действия результата истёк — человек не готов ни в ячейке, ни в списке
+    await admin`update enrollments set valid_until = now() - interval '1 day' where user_id = ${person} and cancelled_at is null`
+    const expired = await cellAndList()
+    expect(expired.ready).toBe(before.ready - 1)
+    expect(expired.list.filter(p => p.ready).length).toBe(expired.ready)
+    const row = expired.list.find(p => p.id === person)!
+    expect(row.ready).toBe(false)
+    expect(row.done).toBe(0)
+  })
+
+  it('docs/22 §12 п. 6: архивированный исчезает из числителя и знаменателя готовности', async () => {
+    const person = await makePerson('Архівна бариста', baristaPosId, lazarevaId)
+    await syncAssignments(tenantId)
+    await admin`update enrollments set status = 'done', started_at = now() - interval '2 days', completed_at = now() - interval '1 day', valid_until = null where user_id = ${person} and cancelled_at is null`
+    const before = await cellAndList()
+    expect(before.list.find(p => p.id === person)!.ready).toBe(true)
+
+    await admin`update users set status = 'archived' where id = ${person}`
+    const after = await cellAndList()
+    expect(after.people).toBe(before.people - 1)
+    expect(after.ready).toBe(before.ready - 1)
+    expect(after.list.some(p => p.id === person)).toBe(false)
   })
 })
 

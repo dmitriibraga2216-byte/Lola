@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { EXPORT_SYNC_MAX_ROWS } from '#shared/schemas/reports'
+
 const { formatShortDate } = useFormat()
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'report.team' })
 
@@ -135,7 +137,9 @@ const fmtCell = (v: unknown) => v === null || v === undefined ? '—' : typeof v
           <option v-for="l in locations" :key="l.id" :value="l.id">{{ l.name }}</option>
         </select>
       </label>
-      <a v-if="hasScope('report.export') && report !== 'content'" :href="exportUrl" class="export">{{ t('reports.export') }}</a>
+      <!-- docs/22 §5 п. 3: больше EXPORT_SYNC_MAX_ROWS строк — сразу фоном, сервер ответил бы 202 -->
+      <a v-if="hasScope('report.export') && report !== 'content' && rows.length <= EXPORT_SYNC_MAX_ROWS" :href="exportUrl" class="export">{{ t('reports.export') }}</a>
+      <button v-else-if="hasScope('report.export') && report !== 'content'" class="export" @click="exportInBackground">{{ t('reports.export') }}</button>
       <button v-if="hasScope('report.export')" class="chip" @click="exportInBackground">{{ t('reports.exportBg') }}</button>
       <NuxtLink to="/admin/reports/exports" class="chip">{{ t('reports.myExports') }}</NuxtLink>
     </div>
@@ -251,7 +255,7 @@ h2 { margin: var(--space-4) 0 var(--space-2); font-weight: 800; font-size: var(-
 .filters { display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; margin-bottom: var(--space-4); }
 .filters label, .filters .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-3); background: var(--color-bg-soft); color: var(--color-ink); }
-.export { margin-left: auto; font-weight: 800; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); text-decoration: none; }
+.export { margin-left: auto; font-weight: 800; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); text-decoration: none; border: 0; cursor: pointer; }
 .kpis { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
 .kpi { background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); display: grid; text-align: center; min-width: 110px; }
 .kpi b { font-size: var(--font-size-title-l); font-weight: 900; color: var(--color-teal-ink); }

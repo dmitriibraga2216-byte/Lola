@@ -54,12 +54,20 @@ export async function readiness(ctx: Ctx, f: Filter = {}) {
   return rows.map(r => ({ ...r, pct: Number(r.people) ? Math.round(Number(r.ready) / Number(r.people) * 100) : 100 })) as (Row & { pct: number })[]
 }
 
-/** Люди в ячейке готовности (клик проваливается в список). */
+/**
+ * Люди в ячейке готовности (клик проваливается в список). `done` и `ready` считаются так же,
+ * как в `readiness()`: просроченный результат (`valid_until` прошёл) не засчитан — иначе число
+ * готовых в списке разошлось бы с процентом ячейки (docs/22 §12 п. 2).
+ */
 export async function readinessPeople(ctx: Ctx, locationId: string, positionId: string) {
   return q(ctx, sql`
     select u.id, u.full_name,
            count(e.id) filter (where a.is_mandatory)::int as mandatory,
-           count(e.id) filter (where a.is_mandatory and e.status = 'done')::int as done,
+           count(e.id) filter (where a.is_mandatory and e.status = 'done'
+                               and (e.valid_until is null or e.valid_until > now()))::int as done,
+           (count(e.id) filter (where a.is_mandatory)
+             = count(e.id) filter (where a.is_mandatory and e.status = 'done'
+                                   and (e.valid_until is null or e.valid_until > now()))) as ready,
            count(e.id) filter (where a.is_mandatory and e.status in ('not_started','in_progress') and e.due_at < now())::int as overdue
     from users u
     join user_placements up on up.user_id = u.id and up.is_primary and up.ended_at is null

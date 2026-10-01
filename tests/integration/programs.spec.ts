@@ -163,6 +163,29 @@ describe('программы и траектории (docs/17 §13)', () => {
     expect(rep!.people.find(x => x.userId === winner)!.currentStep).toBeGreaterThan(0)
   })
 
+  it('§13.5: человек на шаге 3 из 8 виден в воронке на третьем шаге', async () => {
+    const cs = [] as string[]
+    for (let i = 1; i <= 8; i++) cs.push(await makeCourse(`Воронка ${i}`))
+    const p = await pg.createProgram(ctx(), { title: `Вісім кроків ${Date.now()}`, mode: 'linear' })
+    programIds.push(p.id)
+    const nodes: string[] = []
+    for (const [i, c] of cs.entries()) nodes.push((await pg.upsertNode(ctx(), p.id, { itemType: 'course', itemId: c, sort: i + 1 }))!.id)
+    expect((await pg.publishProgram(ctx(), p.id)).ok).toBe(true)
+
+    const u = await makePerson('Третій крок')
+    const enr = await withTenant(tenantId, adminId, tx => pg.enrollProgram(tx, tenantId, p.id, u, { source: 'manual' }))
+    if (!enr.ok) throw new Error('enroll')
+    await passCourse(u, cs[0]!)
+    await passCourse(u, cs[1]!)
+
+    const rep = await pg.programReport(ctx(), p.id)
+    const me = rep!.people.find(x => x.userId === u)!
+    expect(me.currentStep).toBe(3)
+    expect(me.currentTitle).toBe(rep!.funnel[2]!.title)
+    // Воронка: шаги 1–2 пройдены, на третьем стоит, дальше не дошёл
+    expect(rep!.funnel.map(f => [f.reached, f.done])).toEqual([[1, 1], [1, 1], [1, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]])
+  })
+
   it('§13.3: no_assign_after_finish — после завершения правило не назначает повторно; linear-программа завершается по всем узлам', async () => {
     const c1 = await makeCourse('Лінійний 1')
     const p = await pg.createProgram(ctx(), { title: `Лінійна ${Date.now()}`, mode: 'linear' })

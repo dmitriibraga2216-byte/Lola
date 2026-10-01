@@ -22,7 +22,11 @@ interface Ctx { tenantId: string, actorId: string }
 
 export type SurveyQuestion = PollQuestion
 
-const ANON_THRESHOLD = 5
+/**
+ * Порог показа анонимного опроса (docs/22 §12 п. 5): меньше трёх ответов — «Замало відповідей для показу».
+ * Тот же порог, что `min_raters_to_show` оценки по умолчанию (docs/20 §2). Решение — docs/v2/44 Р-AC.22.5.
+ */
+const ANON_THRESHOLD = 3
 
 export async function listSurveys(ctx: Ctx) {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {

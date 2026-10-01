@@ -134,4 +134,29 @@ describe('этап 10: оргструктура и конструктор отч
     const [n] = await admin`select count(*)::int as c from notifications where user_id = ${adminId} and code = 'scheduled_report' and payload->>'name' = ${saved!.name}`
     expect(n!.c).toBe(1)
   })
+
+  it('docs/22 §12 п. 4: «понеділок 09:00» уходит в 09:00 по таймзоне тенанта, а не сервера (UTC) и не Киева', async () => {
+    const [t] = await admin`select timezone from tenants where id = ${tenantId}`
+    const saved = await rb.saveReport(ctx(), { name: `Тиждень ${Date.now()}`, spec: { entity: 'people', fields: ['full_name'], filters: { location_id: lazarevaId } }, schedule: { every: 'weekly', weekday: 1, hour: 9, channel: 'telegram', recipients: [adminId] } })
+    reportIds.push(saved!.id)
+    // Другие расписания тенанта в эти часы не мешают счёту: считаем только этот отчёт
+    const sent = async () => (await admin`select count(*)::int as c from notifications where user_id = ${adminId} and code = 'scheduled_report' and payload->>'name' = ${saved!.name}`)[0]!.c as number
+    try {
+      // Нью-Йорк в октябре — UTC−4: понедельник 05.10.2026 09:05 по Нью-Йорку = 13:05 UTC
+      await admin`update tenants set timezone = 'America/New_York' where id = ${tenantId}`
+      await rb.scheduledReportsScan(tenantId, new Date('2026-10-05T09:05:00Z')) // 09:05 UTC = 05:05 Нью-Йорк
+      await rb.scheduledReportsScan(tenantId, new Date('2026-10-05T06:05:00Z')) // 09:05 Киева
+      expect(await sent()).toBe(0)
+      await rb.scheduledReportsScan(tenantId, new Date('2026-10-06T13:05:00Z')) // вторник 09:05 Нью-Йорка
+      expect(await sent()).toBe(0)
+      await rb.scheduledReportsScan(tenantId, new Date('2026-10-05T13:05:00Z'))
+      expect(await sent()).toBe(1)
+      // Повторный скан в тот же час — не дублирует
+      await rb.scheduledReportsScan(tenantId, new Date('2026-10-05T13:40:00Z'))
+      expect(await sent()).toBe(1)
+    }
+    finally {
+      await admin`update tenants set timezone = ${t!.timezone} where id = ${tenantId}`
+    }
+  })
 })

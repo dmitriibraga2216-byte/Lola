@@ -10,6 +10,12 @@ import { keysetCursorSchema } from './keyset'
  */
 
 /** Колонки каркаса в том порядке, в котором они идут первыми в таблице и в выгрузке. */
+/**
+ * Выгрузка больше этого числа строк уходит в фоновую задачу, ссылка приходит уведомлением
+ * (docs/22 §5 п. 3, §12 п. 3). Экран при таком объёме сразу предлагает фоновую выгрузку.
+ */
+export const EXPORT_SYNC_MAX_ROWS = 5000
+
 export const FRAME_COLUMNS = ['full_name', 'position', 'city', 'unit', 'tags', 'assigned_at', 'completed_at', 'status', 'result'] as const
 export type FrameColumn = typeof FRAME_COLUMNS[number]
 

@@ -7,6 +7,7 @@ import { enqueueNotification } from './notifications'
 import { recordAudit } from './audit'
 import { toXlsx } from './reports'
 import { reportScope, loadAccess, narrowScope } from './access'
+import { EXPORT_SYNC_MAX_ROWS } from '../../shared/schemas/reports'
 
 interface Ctx { tenantId: string, actorId: string }
 type Row = Record<string, unknown>
@@ -26,6 +27,14 @@ export async function requestExport(ctx: Ctx & { activeRoleId?: string | null },
     await recordAudit(tx, { tenantId: ctx.tenantId, actorId: ctx.actorId, action: 'report.export', entity: 'report_export', entityId: e!.id, after: { report: input.report, filters: input.filters ?? {} } })
     return e!
   })
+}
+
+/** Отчёты экрана «Звіти», которые фоновая задача умеет собрать (`reportRows`, ветка `switch`). */
+const BACKGROUND_REPORTS = new Set(['readiness', 'overdue', 'attempts', 'mentors', 'activity', 'progress', 'content', 'questions'])
+
+/** docs/22 §5 п. 3: выгрузка больше `EXPORT_SYNC_MAX_ROWS` строк — только фоном. */
+export function exportGoesBackground(report: string, rows: number): boolean {
+  return rows > EXPORT_SYNC_MAX_ROWS && BACKGROUND_REPORTS.has(report)
 }
 
 export async function getExport(ctx: Ctx, id: string) {

@@ -52,6 +52,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   workshop_sla_breach: 'Перевірка «{{title}}» висить {{hours}} год',
   workshop_comment: 'Новий коментар до практикуму «{{title}}»',
   news_published: 'Новина: {{title}}',
+  // docs/v2/44 §18 Р-CC.1: нове оголошення Lola — адміністраторам у дзвіночок (лише inapp)
+  platform_announcement_published: 'Оголошення Lola: {{title}}',
   plan_on_approval: 'План розвитку чекає погодження',
   plan_approved: 'План розвитку погоджено',
   plan_returned: 'План розвитку повернуто на доопрацювання. {{comment}}',

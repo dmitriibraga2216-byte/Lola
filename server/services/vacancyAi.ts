@@ -11,6 +11,7 @@ import { callModel, type CallResult } from './ai/gateway'
 import type { AiUnavailableReason } from './ai/policy'
 import { VACANCY_CRITERIA_PROMPT, VACANCY_TEXT_PROMPT } from './ai/prompts'
 import type { VacancyCriteriaInput, VacancyCriterionDraft, VacancyTextInput } from './ai/prompts'
+import { sanitizeUserHtml } from './sanitize'
 
 /**
  * Генерация текста вакансии и черновика критериев (`docs/v2/29-vacancies.md` §7.10–§7.11,
@@ -99,7 +100,8 @@ export async function generateVacancyText(v: Viewer, vacancyId: string, input: V
         generatedAt: new Date().toISOString(), generatedBy: v.actorId, model: call.model.modelName,
         promptHash: null, editedAt: null, charsAtGeneration: generated.html.length, acknowledged: false,
       }
-      await tx.update(vacancies).set({ [column]: generated.html, aiBlocks, updatedAt: new Date() } as Partial<typeof vacancies.$inferInsert>)
+      // Ответ модели — тот же пользовательский HTML для `/j/<token>`: allowlist (security-sweep-2)
+      await tx.update(vacancies).set({ [column]: sanitizeUserHtml(generated.html), aiBlocks, updatedAt: new Date() } as Partial<typeof vacancies.$inferInsert>)
         .where(eq(vacancies.id, vacancyId))
       await tx.insert(vacancyAiGenerations).values({
         id: generationId, tenantId: v.tenantId, vacancyId, target: input.target, input: journalInput,

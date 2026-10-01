@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql, type SQL } from 'drizzle-orm'
 import { knowledgeArticles, knowledgeFeedback, knowledgeLinks, knowledgeRevisions, questions, resourceCategories, resources, searchQueries } from '../db/schema'
 import { enqueueNotification } from './notifications'
 import { resolveAudience } from './audience'
@@ -20,12 +20,22 @@ import { KNOWLEDGE_EMBEDDING_PROMPT } from './ai/prompts'
 
 interface Ctx { tenantId: string, actorId: string }
 
+const ENTITIES: Record<string, string> = { '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ', '&amp;': '&' }
+const decodeEntities = (t: string) => t.replace(/&(?:lt|gt|quot|#39|nbsp|amp);/g, m => ENTITIES[m]!)
+
+/**
+ * Сниппет поиска из `plain_text` — **экранированный** текст (security-sweep-2): `plain_text` — сырой текст
+ * заголовков, цитат, подписей, и страницы поиска рендерят сниппет через `v-html` ради `<b>` из `ts_headline`.
+ * Экранируем до `ts_headline`, тогда в ответе HTML только его `<b>`.
+ */
+export const escapedPlainText = (col: SQL) => sql`replace(replace(replace(coalesce(${col}, ''), '&', '&amp;'), '<', '&lt;'), '>', '&gt;')`
+
 /** Плоский текст из блоков — для FTS и embedding. */
 export function blocksToText(body: ContentBlock[]): string {
   return body.map((b) => {
     switch (b.type) {
       case 'heading': return b.text
-      case 'text': return b.html.replace(/<[^>]+>/g, ' ')
+      case 'text': return decodeEntities(b.html.replace(/<[^>]+>/g, ' '))
       case 'callout': return `${b.title ?? ''} ${b.text}`
       case 'checklist': return b.items.join(' ')
       case 'quote': return b.text
@@ -224,7 +234,7 @@ export async function search(ctx: Ctx, q: string, limit = 20, source: 'all' | 'r
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const none: never[] = []
     const articles = !want('resources') ? none : await tx.execute(sql`
-      select id, title, slug, ts_headline('simple', plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
+      select id, title, slug, ts_headline('simple', ${escapedPlainText(sql`plain_text`)}, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
              ts_rank(search_tsv, to_tsquery('simple', ${tsq})) as score, (title ilike ${like}) as title_hit
       from knowledge_articles
       where status = 'published' and deleted_at is null and (search_tsv @@ to_tsquery('simple', ${tsq}) or title ilike ${like})
@@ -232,7 +242,7 @@ export async function search(ctx: Ctx, q: string, limit = 20, source: 'all' | 'r
     `) as unknown as { id: string, title: string, slug: string, snippet: string, score: number, title_hit: boolean }[]
 
     const lessons = !want('resources') ? none : await tx.execute(sql`
-      select r.id, r.title, r.views_count, ts_headline('simple', r.plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
+      select r.id, r.title, r.views_count, ts_headline('simple', ${escapedPlainText(sql`r.plain_text`)}, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet,
              ts_rank(r.search_tsv, to_tsquery('simple', ${tsq})) as score, (r.title ilike ${like}) as title_hit
       from resources r
       where r.status = 'published' and r.deleted_at is null and (r.search_tsv @@ to_tsquery('simple', ${tsq}) or r.title ilike ${like})
@@ -250,7 +260,7 @@ export async function search(ctx: Ctx, q: string, limit = 20, source: 'all' | 'r
     let semantic: { id: string, title: string, slug: string, snippet: string, score: number }[] = []
     if (vec) {
       semantic = await tx.execute(sql`
-        select id, title, slug, left(plain_text, 160) as snippet, 1 - (embedding <=> ${`[${vec.join(',')}]`}::vector) as score
+        select id, title, slug, left(${escapedPlainText(sql`plain_text`)}, 160) as snippet, 1 - (embedding <=> ${`[${vec.join(',')}]`}::vector) as score
         from knowledge_articles
         where status = 'published' and deleted_at is null and embedding is not null
         order by embedding <=> ${`[${vec.join(',')}]`}::vector limit ${limit}
@@ -320,7 +330,7 @@ export async function categoriesTree(ctx: Ctx): Promise<{ id: string, name: stri
 export async function resourcesByCategory(ctx: Ctx, categoryId: string, limit = 50): Promise<SearchHit[]> {
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.execute(sql`
-      select r.id, r.title, r.views_count, left(coalesce(r.plain_text, ''), 160) as snippet
+      select r.id, r.title, r.views_count, left(${escapedPlainText(sql`r.plain_text`)}, 160) as snippet
       from resources r
       where r.status = 'published' and r.deleted_at is null and ${categoryId}::uuid = any(r.category_ids)
       order by r.title limit ${limit}

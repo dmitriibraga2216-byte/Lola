@@ -25,6 +25,7 @@ import { ensureBucket, s3, S3_BUCKET, tenantStorageBytes } from './media'
 import { LimitCheckFailedError, LimitExceededError, effectiveLimits } from './tenantLimits'
 import { recordUsage } from './usageCounters'
 import { isContactBlocked } from './contactBlocklist'
+import { sanitizeUserHtml } from './sanitize'
 
 /**
  * Публичный контур вакансии: страница по ссылке и приём отклика
@@ -247,10 +248,11 @@ export async function publicVacancy(token: string, ctx: PublicCtx): Promise<Publ
         experienceLevel: row.experienceLevel,
         educationLevel: row.educationLevel,
         salary: row.salaryVisible ? { from: row.salaryFrom, to: row.salaryTo, currency: row.salaryCurrency } : null,
-        descriptionHtml: row.descriptionHtml,
-        requirementsHtml: row.requirementsHtml,
-        dutiesHtml: row.dutiesHtml,
-        extraHtml: row.extraHtml,
+        // Санитайз и на выдаче: строки, сохранённые до security-sweep-2, могли нести сырой HTML
+        descriptionHtml: row.descriptionHtml === null ? null : sanitizeUserHtml(row.descriptionHtml),
+        requirementsHtml: row.requirementsHtml === null ? null : sanitizeUserHtml(row.requirementsHtml),
+        dutiesHtml: row.dutiesHtml === null ? null : sanitizeUserHtml(row.dutiesHtml),
+        extraHtml: row.extraHtml === null ? null : sanitizeUserHtml(row.extraHtml),
         languages: langs,
         otpRequired: row.publicApplyOtp,
         consentVersion: PUBLIC_CONSENT_TEXT_VERSION,

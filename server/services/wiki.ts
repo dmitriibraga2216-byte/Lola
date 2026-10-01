@@ -5,7 +5,7 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { slugify } from './courses'
-import { blocksToText } from './knowledge'
+import { blocksToText, escapedPlainText } from './knowledge'
 import { sanitizeBody } from './sanitize'
 
 interface Ctx { tenantId: string, actorId: string }
@@ -197,7 +197,7 @@ export async function searchWiki(ctx: Ctx, q: string) {
   const ids = new Set(tree.map(t => t.id))
   return withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
     const rows = await tx.execute(sql`
-      select id, title, slug, ts_headline('simple', plain_text, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet
+      select id, title, slug, ts_headline('simple', ${escapedPlainText(sql`plain_text`)}, to_tsquery('simple', ${tsq}), 'MaxWords=25, MinWords=10') as snippet
       from wiki_pages where deleted_at is null and status = 'published' and to_tsvector('simple', title || ' ' || plain_text) @@ to_tsquery('simple', ${tsq}) limit 20
     `) as unknown as { id: string, title: string, slug: string, snippet: string }[]
     return rows.filter(r => ids.has(r.id))

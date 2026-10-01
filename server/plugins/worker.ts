@@ -242,6 +242,11 @@ export default defineNitroPlugin(async () => {
       const n = await cleanupStates(tenantId)
       if (n) console.log(`[oauth.states_cleanup] ${tenantId}: видалено ${n}`)
     }))
+    await work('idempotency.purge', () => runPerTenant('idempotency.purge', async (tenantId) => {
+      const { purgeIdempotencyKeys } = await import('../services/idempotency')
+      const n = await purgeIdempotencyKeys(tenantId)
+      if (n) console.log(`[idempotency.purge] ${tenantId}: видалено ${n}`)
+    }))
     // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход в S3 живёт 90 дней, строка — 400
     await work('ai.calls_cleanup', () => runPerTenant('ai.calls_cleanup', async (tenantId) => {
       const { aiCallsCleanup } = await import('../services/ai/calls')

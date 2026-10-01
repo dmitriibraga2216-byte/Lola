@@ -20,6 +20,13 @@
 - Мутации требуют заголовок `X-CSRF-Token` (double submit cookie), кроме Bearer-запросов.
 - Идемпотентность мутаций, которые могут повториться (создание попытки, отметка урока):
   заголовок `Idempotency-Key`, хранение ключа 24 часа.
+  Реализовано (`v2/44` §18 Р-CC.3): `POST /tests/:id/attempts` (и `/learning/quizzes/:id/attempts`),
+  `POST /enrollments/:id/items/:itemId/complete` (и `/learning/enrollments/:id/lessons/:lessonId/complete`),
+  `POST /learning/resources/:id/complete`. Заголовок необязателен; ключ — 1–255 печатных ASCII без
+  пробелов, живёт в пространстве «тенант × человек». Повтор с тем же ключом и тем же запросом
+  (метод, путь, тело) отдаёт сохранённые статус и тело с заголовком `Idempotent-Replayed: true`,
+  действие второй раз не выполняется; ответ 5xx и сбой сервера ключ не запечатывают. Ключи хранятся
+  в `idempotency_keys`, истёкшие убирает `idempotency.purge` (ежедневно 04:20).
 
 **Формат ответа**
 
@@ -43,9 +50,12 @@
 | 401 | `otp_invalid` | неверный код |
 | 403 | `forbidden` | нет скоупа |
 | 404 | `not_found` | нет объекта в этом тенанте |
+| 400 | `idempotency.key_invalid` | `Idempotency-Key` пустой, длиннее 255 или с пробелами/не-ASCII |
 | 409 | `conflict` | параллельное изменение (см. `version`) |
+| 409 | `idempotency.in_progress` | первый запрос с этим ключом ещё выполняется — повторить позже |
 | 422 | `course.not_publishable` | не прошли проверки публикации |
 | 422 | `quiz.attempts_exhausted` | попытки исчерпаны |
+| 422 | `idempotency.key_reused` | тот же `Idempotency-Key` с другим запросом (метод, путь или тело) |
 | 423 | `attempt.locked` | попытка на проверке |
 | 429 | `rate_limited` | превышен лимит, `Retry-After` |
 | 500 | `internal` | всё остальное, с `trace_id` |

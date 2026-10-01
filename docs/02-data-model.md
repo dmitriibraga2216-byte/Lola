@@ -2381,6 +2381,8 @@ user_groups.location_id uuid references locations on delete cascade
 ```sql
 tenant_secrets(...)                             -- см. 09-integrations.md §9.4
 oauth_states(tenant_id, provider, state_hash, created_by, expires_at, consumed_at)
+idempotency_keys(tenant_id, user_id, key, fingerprint, response_status, response_body jsonb,
+          expires_at)                            -- Idempotency-Key, 24 часа (04 §4.1, v2/44 §18 Р-CC.3)
 webhook_endpoints(url, secret_encrypted, events text[], is_active boolean)
 webhook_deliveries(endpoint_id, event, payload jsonb, status_code int, attempt int,
           response_body text, delivered_at)

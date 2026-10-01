@@ -1,7 +1,9 @@
+import type { H3Event } from 'h3'
 import { resourcePassRefSchema } from '../../../../../../shared/schemas/resources'
 import { requireScope } from '../../../../../services/access'
 import { completeResourcePass } from '../../../../../services/resourcePass'
 import { apiData, apiError } from '../../../../../utils/apiResponse'
+import { idempotent } from '../../../../../utils/idempotency'
 
 /**
  * Завершить ресурс как задание: сервер сам проверяет правило типа (Г-11.5) и, если оно выполнено,
@@ -10,6 +12,11 @@ import { apiData, apiError } from '../../../../../utils/apiResponse'
  */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'learn.view')
+  // docs/04 §4.1: отметка материала — та же «отметка урока» (Idempotency-Key)
+  return idempotent(event, a, () => complete(event, a))
+})
+
+async function complete(event: H3Event, a: { tenantId: string, userId: string }) {
   const p = resourcePassRefSchema.safeParse((await readBody(event).catch(() => ({}))) ?? {})
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Некоректне призначення')
   const r = await completeResourcePass({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data)
@@ -18,4 +25,4 @@ export default defineEventHandler(async (event) => {
     return apiError(event, 422, 'resource.conditions_not_met', r.reasons[0] ?? 'Умови зарахування не виконані', { reasons: r.reasons, missing: r.missing })
   }
   return apiData(r)
-})
+}

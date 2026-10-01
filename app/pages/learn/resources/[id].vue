@@ -244,7 +244,7 @@ async function complete() {
   error.value = ''
   try {
     if (pendingBlocks) await tick() // досылаем отмеченные пункты; решение — за сервером
-    await api(`/learning/resources/${resourceId}/complete`, { method: 'POST', body: { assignmentId } })
+    await api(`/learning/resources/${resourceId}/complete`, { method: 'POST', idempotent: true, body: { assignmentId } })
     completed.value = true
     time.setKind(null) // последнее биение уходит сейчас, сегмент закрывается `session_end`
     notice.value = t('resourcePass.completed')

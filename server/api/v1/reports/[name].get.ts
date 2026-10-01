@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { can, locationAccess, narrowScope, reportScope, requireScope } from '../../../services/access'
 import * as R from '../../../services/reports'
 import * as X from '../../../services/reportsExtra'
+import { exportGoesBackground, requestExport } from '../../../services/reportExports'
+import { enqueueReportExport } from '../../../services/queue'
 import { apiData, apiError } from '../../../utils/apiResponse'
 
 const q = z.object({
@@ -55,6 +57,14 @@ export default defineEventHandler(async (event) => {
   if (f.format === 'xlsx') {
     if (!rows) return apiError(event, 400, 'validation_failed', 'Цей звіт не вивантажується')
     if (!can(a, 'report.export')) return apiError(event, 403, 'forbidden', 'Немає права на вивантаження')
+    // docs/22 §5 п. 3: большая выгрузка — фоновой задачей с теми же фильтрами, файл придёт уведомлением
+    if (exportGoesBackground(name, rows.length)) {
+      const { format: _format, tiles: _tiles, scope: _scope, ...filters } = f
+      const e = await requestExport({ tenantId: a.tenantId, actorId: a.userId, activeRoleId: a.activeRole?.id ?? null }, { report: name, filters, format: 'xlsx' })
+      await enqueueReportExport(a.tenantId, e.id)
+      setResponseStatus(event, 202)
+      return apiData({ exportId: e.id, status: e.status, rows: rows.length })
+    }
     setHeader(event, 'Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     setHeader(event, 'Content-Disposition', `attachment; filename="lola-${name}.xlsx"`)
     return R.toXlsx(name, rows)

@@ -165,7 +165,7 @@ describe('база знаний: поиск находит и статью, и �
 })
 
 describe('опросы', () => {
-  it('анонимный опрос: дедуп по участию, порог 5 скрывает отчёт, потом распределение и среднее', async () => {
+  it('анонимный опрос: дедуп по участию, порог 3 (docs/22 §12 п. 5) скрывает отчёт при двух ответах, потом распределение и среднее', async () => {
     const s = await createSurvey(ctx(), {
       title: `Анонімне ${Date.now()}`, kind: 'survey', mode: 'linear', isAnonymous: true, isConfidential: false, showResults: false, tags: [],
       questions: [
@@ -194,13 +194,14 @@ describe('опросы', () => {
     const [row] = await admin`select user_id from survey_responses where survey_id = ${s.id}`
     expect(row!.user_id).toBeNull()
 
+    const add = (i: number) => admin`insert into survey_responses (tenant_id, survey_id, answers) values (${tenantId}, ${s.id}, ${JSON.stringify({ q1: { value: 5 }, q2: { optionId: i % 2 ? 'yes' : 'no' } })}::jsonb)`
+    // Два ответа при пороге 3 — «Замало відповідей для показу», ни распределения, ни среднего
+    await add(0)
     const hidden = await surveyReport(ctx(), s.id)
-    expect(hidden!.hidden).toBe(true)
+    expect(hidden).toMatchObject({ hidden: true, threshold: 3, total: 2, questions: [] })
 
-    // Досыпаем 4 ответа напрямую — порог достигнут
-    for (let i = 0; i < 4; i++) {
-      await admin`insert into survey_responses (tenant_id, survey_id, answers) values (${tenantId}, ${s.id}, ${JSON.stringify({ q1: { value: 5 }, q2: { optionId: i % 2 ? 'yes' : 'no' } })}::jsonb)`
-    }
+    // Досыпаем ответы напрямую — порог достигнут
+    for (let i = 1; i < 4; i++) await add(i)
     const rep = await surveyReport(ctx(), s.id)
     expect(rep!.hidden).toBe(false)
     expect(rep!.total).toBe(5)

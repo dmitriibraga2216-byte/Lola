@@ -179,6 +179,21 @@ describe('валидация полотна (docs/17 §15 Г-17.1)', () => {
     expect(t2.problems.map(p => p.code)).toContain('condition_not_allowed')
   })
 
+  it('docs/17 §13.4: блок без пути до Finish — публикация отклонена с указанием проблемного узла', async () => {
+    const c1 = await makeCourse('Тупик 1'), c2 = await makeCourse('Тупик 2')
+    // a → Finish есть, но из b дальше никуда
+    const t = await makeTrajectory('Тупик', [task('a', 'course', c1), task('b', 'course', c2)], [edge('start', 'a'), edge('a', 'finish'), edge('a', 'b')], { publish: false })
+    const dead = t.problems.filter(p => p.code === 'no_path_to_finish')
+    expect(dead.map(p => p.nodeId)).toEqual([t.ids.get('b')])
+    expect(dead[0]!.message).toMatch(/Finish/)
+    const pub = await tr.publishTrajectory(ctx(), t.id)
+    expect(pub.ok).toBe(false)
+    if (!pub.ok) {
+      expect(pub.code).toBe('invalid')
+      expect(pub.problems).toContainEqual(expect.objectContaining({ code: 'no_path_to_finish', nodeId: t.ids.get('b') }))
+    }
+  })
+
   it('исправный граф публикуется; опубликованный не перестраивается (409), только координаты', async () => {
     const c1 = await makeCourse('Курс ок')
     const t = await makeTrajectory('Добра', [task('a', 'course', c1)], [edge('start', 'a'), edge('a', 'finish')])

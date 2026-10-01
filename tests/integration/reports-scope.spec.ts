@@ -134,6 +134,23 @@ describe('docs/22: каркас, прогресс, выгрузка, журна�
     await admin`delete from report_exports where id = ${e.id}`
   })
 
+  it('выгрузка (§12 п. 3): больше 5000 строк — только фоном; фоновая задача собирает те же цифры, что экран', async () => {
+    const { exportGoesBackground, reportRows } = await import('../../server/services/reportExports')
+    const { EXPORT_SYNC_MAX_ROWS } = await import('../../shared/schemas/reports')
+    expect(EXPORT_SYNC_MAX_ROWS).toBe(5000)
+    expect(exportGoesBackground('overdue', 12_000)).toBe(true)
+    expect(exportGoesBackground('overdue', 5000)).toBe(false)
+    // Отчёт, который фоновая задача не собирает, не уводится в фон — иначе файл был бы пустым
+    expect(exportGoesBackground('readiness-people', 12_000)).toBe(false)
+
+    // Те же строки, что на экране руководителя (область — его точка)
+    const access = await loadAccess({ sessionId: 't', tenantId, userId: managerId, impersonatedBy: null, activeRoleId: null } as never)
+    const scope = narrowScope(await reportScope(access!), undefined)
+    const ctx = { tenantId, actorId: managerId }
+    expect(await reportRows(tenantId, managerId, 'readiness', {})).toEqual(await R.readiness(ctx, { scope }))
+    expect(await reportRows(tenantId, managerId, 'overdue', {})).toEqual(await R.overdue(ctx, { scope }))
+  })
+
   it('журналы (§5): единый вход с фильтрами; очистка по срокам хранения', async () => {
     const { readLog, retentionScan, LOG_KINDS } = await import('../../server/services/logs')
     const ctx = { tenantId, actorId: adminId, canSeeCandidates: true }

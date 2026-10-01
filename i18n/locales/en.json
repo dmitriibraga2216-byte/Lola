@@ -1831,7 +1831,7 @@
       "active": "Active",
       "closed": "Closed"
     },
-    "hiddenThreshold": "Anonymous data shown from {n} responses",
+    "hiddenThreshold": "Not enough responses to show: anonymous data is shown from {n} responses",
     "avg": "Average",
     "short": "Surveys",
     "col": {

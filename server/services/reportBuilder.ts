@@ -473,17 +473,35 @@ export async function savedToXlsx(ctx: Ctx, id: string, scope: string[] | null =
 }
 
 /** Ежечасно: отчёты по расписанию — получателям уходит уведомление со сводкой и ссылкой на xlsx. */
+/** Дата (YYYY-MM-DD), час и день недели (0 — воскресенье) момента `at` в поясе `tz`. */
+function localClock(at: Date, tz: string): { day: string, hour: number, weekday: number } {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: 'numeric', hourCycle: 'h23', weekday: 'short',
+  }).formatToParts(at).map(p => [p.type, p.value]))
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.weekday!)
+  return { day: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour), weekday }
+}
+
+/**
+ * Рассылка сохранённых отчётов по расписанию (docs/22 §12 п. 4): час и день недели — по таймзоне
+ * тенанта (`tenants.timezone`), а не сервера; «уже отправлено сегодня» — тоже по её календарю.
+ */
 export async function scheduledReportsScan(tenantId: string, now = new Date()): Promise<number> {
-  const kyivHour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: 'numeric', hour12: false }).format(now))
-  const kyivWeekday = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Kyiv' })).getDay()
-  const day = now.toISOString().slice(0, 10)
+  const { reports, tz } = await withTenant(tenantId, null, async (tx) => {
+    const [t] = await tx.execute(sql`select timezone from tenants where id = ${tenantId}::uuid`) as unknown as { timezone: string | null }[]
+    return {
+      tz: t?.timezone || 'Europe/Kyiv',
+      reports: await tx.select().from(savedReports).where(sql`${savedReports.schedule} is not null`),
+    }
+  })
+  const local = localClock(now, tz)
+  const day = local.day
   let n = 0
-  const reports = await withTenant(tenantId, null, tx => tx.select().from(savedReports).where(sql`${savedReports.schedule} is not null`))
   for (const r of reports) {
     const s = r.schedule as Schedule
-    if (s.hour !== kyivHour) continue
-    if (s.every === 'weekly' && (s.weekday ?? 1) !== kyivWeekday) continue
-    if (r.lastRunAt && r.lastRunAt.toISOString().slice(0, 10) === day) continue
+    if (s.hour !== local.hour) continue
+    if (s.every === 'weekly' && (s.weekday ?? 1) !== local.weekday) continue
+    if (r.lastRunAt && localClock(r.lastRunAt, tz).day === day) continue
     const rows = await runReport({ tenantId, actorId: r.createdBy ?? '' }, { entity: r.entity, fields: r.fields, filters: r.filters as Record<string, unknown>, groupBy: r.groupBy }, 50)
     await withTenant(tenantId, null, async (tx) => {
       for (const uid of s.recipients) {

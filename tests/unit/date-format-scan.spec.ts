@@ -35,12 +35,9 @@ const EXCEPTIONS = new Map<string, string>([
     + '(docs/03 §3.10, docs/23 §13.2.1) через toLocaleString(\'en-US\', { timeZone }), не показ даты человеку',
   ],
   [
-    "server/services/reportBuilder.ts:toLocaleString:en-US",
-    'scheduledReportsScan — день тижня по Києву для розкладу звіту, той самий трюк з таймзоною',
-  ],
-  [
-    "server/services/reportBuilder.ts:DateTimeFormat:en-GB",
-    'scheduledReportsScan — час по Києву для порівняння з розкладом звіту, не показ дати',
+    "server/services/reportBuilder.ts:DateTimeFormat:en-US",
+    'localClock (scheduledReportsScan) — дата, година і день тижня в поясі тенанта для розкладу звіту '
+    + '(docs/22 §12 п. 4), машинні частини formatToParts, людині не показується',
   ],
   [
     "server/services/personDocuments.ts:DateTimeFormat:en-CA",

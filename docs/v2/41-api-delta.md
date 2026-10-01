@@ -371,7 +371,7 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | GET | `/content/time-norms/:subjectType/:subjectId` | `time.metrics.view` или `course.edit` | норма времени на материал и её источник |
 | PUT | `/content/time-norms/:subjectType/:subjectId` | `course.edit` | задать норму вручную |
 | POST | `/content/time-norms/:subjectType/:subjectId/apply-observed` | `course.edit` | принять наблюдённую медиану как норму |
-| GET | `/reports/reviewers` | `time.metrics.view` | «Робота перевіряючих» |
+| GET | `/reports/reviewers` | `time.metrics.view` + `review.workload.view` (`44` Р-MT.1.3) | «Робота перевіряючих» |
 | GET | `/reports/time-plan-fact` | `time.metrics.view` или `course.edit` | «План і факт часу», обезличенный |
 | GET | `/reports/delegations` | `review.workload.view` | журнал делегирований |
 

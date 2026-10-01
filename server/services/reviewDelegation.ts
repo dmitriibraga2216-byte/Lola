@@ -5,7 +5,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { currentRequestContext } from '../utils/requestContext'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import { absentUserIds, gradeReviewers, isActiveEmployee, managerChainOf, namesOf, reviewerLoads, tenantAdmins } from './reviewPeople'
+import { absentUserIds, escalationTarget, gradeReviewers, isActiveEmployee, namesOf, reviewerLoads } from './reviewPeople'
 import { notifyAssigned, notifyOverloaded } from './reviewRouting'
 import { BULK_DELEGATE_LIMIT, MAX_DELEGATION_DEPTH, claimIsLive, delegationDueCheck, restingStatus } from './reviewRules'
 import type { ReviewActor } from './reviewActor'
@@ -421,7 +421,11 @@ export async function closeDelegations(tx: TenantTx, tenantId: string, items: Pi
       if (person === opts.deciderId) continue
       let target: string | undefined = person
       if (!(await isActiveEmployee(tx, person))) {
-        target = (await managerChainOf(tx, tenantId, item.userId))[0] ?? (await tenantAdmins(tx))[0]
+        // Делегировавший ушёл — итог узнаёт руководитель проверяемого; нет его или он уже не
+        // работает — вверх по дереву до ближайшего действующего держателя, выше никого —
+        // администратор (тот же подъём, что у эскалации SLA, `44` Р-MT.1.4). Решивший сам себе
+        // итог не получает — как и раньше.
+        target = (await escalationTarget(tx, { tenantId, userId: item.userId, assignedReviewerId: null }))?.id
       }
       if (!target || target === opts.deciderId) continue
       await enqueueNotification(tx, {

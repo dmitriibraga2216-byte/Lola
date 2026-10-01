@@ -180,7 +180,8 @@
       "documentsReport": "Employee documents",
       "absencesReport": "Absence norms and balances",
       "learningActivityReport": "Learning activity",
-      "vacancyReports": "Vacancy reports"
+      "vacancyReports": "Vacancy reports",
+      "reviewerReport": "Reviewer performance"
     },
     "section": {
       "learning": "Learning",
@@ -8772,6 +8773,34 @@
       "reasonText": "Explanation",
       "state": "State",
       "resolvedAt": "Closed on"
+    }
+  },
+  "reviewerReport": {
+    "title": "Reviewer performance",
+    "hint": "How many works each reviewer checked, how fast, and how many they passed on — for the period",
+    "period": "Period: {from} — {to}",
+    "export": "Export to Excel",
+    "loadError": "Could not load the report. Please try again",
+    "empty": "No reviews in the selected period. Change the period or filters",
+    "badDates": "The “to” date cannot be earlier than the “from” date — fix the period",
+    "minutes": "{m} min",
+    "hours": "{h} h {m} min",
+    "col": {
+      "reviewer": "Reviewer",
+      "locations": "Branches",
+      "reviewed": "Reviewed",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "rework": "Sent for rework",
+      "acceptedShare": "Accepted share",
+      "medianReact": "Median reaction time",
+      "medianReview": "Median review time",
+      "delegatedOut": "Delegated by me",
+      "delegatedIn": "Delegated to me",
+      "delegatedShare": "Delegated share",
+      "breached": "Overdue",
+      "escalated": "Escalated",
+      "ownContent": "Reviews of own content"
     }
   },
   "orgReports": {

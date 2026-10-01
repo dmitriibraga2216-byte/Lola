@@ -15,9 +15,18 @@ export const queueDepth = new Gauge({ name: 'lola_queue_depth', help: 'Глуб�
 export const business = new Counter({ name: 'lola_business_events_total', help: 'Бизнес-события: attempt_started, course_completed, notification_sent, notification_failed, telegram_error', labelNames: ['event'] as const, registers: [registry] })
 export const dbPool = new Gauge({ name: 'lola_db_pool', help: 'Пул БД', labelNames: ['state'] as const, registers: [registry] })
 
-/** Схлопывает путь до шаблона: uuid и числа → :id, чтобы не плодить лейблы. */
+/**
+ * Схлопывает путь до шаблона: uuid и числа → :id, чтобы не плодить лейблы. Секреты в пути (токены публичных
+ * ссылок `/public/invite/<t>`, `/public/candidate-summaries/<t>`, `/c/<t>`…) → `:token`: лейбл виден всякому,
+ * кто читает `/metrics`, а токен приглашения — это вход (security-sweep-1). Имена маршрутов — kebab-case
+ * в нижнем регистре; длинный сегмент с заглавной, цифрой или `_` — токен.
+ */
 export function routeLabel(path: string): string {
-  return path.split('?')[0]!.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id').replace(/\/\d+(?=\/|$)/g, '/:n').replace(/\/c\/[A-Za-z0-9_-]{20,}/, '/c/:token').slice(0, 120)
+  return path.split('?')[0]!
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id')
+    .split('/').map(seg => (seg.length >= 16 && /^[A-Za-z0-9_-]+$/.test(seg) && /[A-Z0-9_]/.test(seg)) ? ':token' : seg).join('/')
+    .replace(/\/\d+(?=\/|$)/g, '/:n')
+    .slice(0, 120)
 }
 
 /** Обёртка для задач воркера: считает длительность и результат. */

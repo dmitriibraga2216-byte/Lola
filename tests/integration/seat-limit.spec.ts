@@ -282,7 +282,7 @@ describe('35 §13 к. 1: каждый путь, добавляющий сотр�
     expect((await statusOf(invited)).status).toBe('invited')
 
     // «Вхід не блокується» (§7.4) — для того, кто место уже занимает, даже сверх лимита
-    const [over] = await admin`select id from users where tenant_id = ${tenantId} and kind = 'employee' and status = 'active' and id <> ${adminId} limit 1`
+    const [over] = await admin`select id from users where tenant_id = ${tenantId} and kind = 'employee' and status = 'active' and not is_blocked and id <> ${adminId} limit 1`
     await person('active') // N + 1: оператор снизил лимит ниже факта (§12)
     expect(await createSession({ tenantId, userId: over!.id as string, loginMethod: 'otp_sms' })).toMatchObject({ token: expect.any(String) })
     // Кандидат места сотрудника не занимает — его вход лимитом сотрудников не проверяется

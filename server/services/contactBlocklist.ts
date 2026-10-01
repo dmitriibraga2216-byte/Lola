@@ -23,7 +23,10 @@ import { maskEmail, maskPhone } from './candidates'
  */
 
 function secret(): string {
-  return process.env.SESSION_SECRET || process.env.ENCRYPTION_KEY || 'dev-secret'
+  // Без ключа подпись подделывает любой — отказ, а не общеизвестная строка (security-sweep-1)
+  const key = process.env.SESSION_SECRET || process.env.ENCRYPTION_KEY
+  if (!key) throw new Error('SESSION_SECRET не задан')
+  return key
 }
 
 /** Нормализация: почта — нижний регистр без пробелов; телефон — `+380XXXXXXXXX` (как вход и форма). */

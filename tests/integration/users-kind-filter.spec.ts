@@ -96,7 +96,7 @@ const ALLOWLIST: Record<string, string> = {
   // Строка сдвинулась 151 → 155 в fix-candidate-access (проверка права входа кандидата в `createSession()`,
   // docs/v2/28 §7.7), затем → 169 в fix-seat-limit (первый вход проверяет место сотрудника, `markSignedIn`).
   // Сама выборка не менялась.
-  'server/services/session.ts:169':
+  'server/services/session.ts:180':
     'вход через Google: поиск человека по e-mail учётной записи, а не список людей — право входа решает контур доступа',
   'server/services/googleApps.ts:81':
     'сопоставление участников встречи Google Calendar с людьми тенанта по e-mail — поиск по ключу, не список',

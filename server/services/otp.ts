@@ -1,6 +1,6 @@
 import { createHmac, randomInt } from 'node:crypto'
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2'
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { otpCodes } from '../db/schema'
 import { hitRateLimit, isBlocked, setBlock } from './rateLimit'
@@ -130,23 +130,25 @@ export async function verifyOtp(phone: string, code: string): Promise<OtpVerifyR
     .limit(1)
 
   if (!row) return { ok: false, code: 'otp_invalid' }
-  if (row.attempts >= MAX_ATTEMPTS) return { ok: false, code: 'rate_limited' }
+  // Попытка резервируется атомарно до проверки кода (security-sweep-1): иначе параллельные запросы
+  // читали один и тот же счётчик и перебирали код сотнями догадок за раз вместо пяти
+  const [reserved] = await db.update(otpCodes)
+    .set({ attempts: sql`${otpCodes.attempts} + 1` })
+    .where(and(eq(otpCodes.id, row.id), isNull(otpCodes.consumedAt), lt(otpCodes.attempts, MAX_ATTEMPTS)))
+    .returning({ attempts: otpCodes.attempts })
+  if (!reserved) return { ok: false, code: 'rate_limited' }
 
-  const valid = await argonVerify(row.codeHash, pepper(code))
-  if (!valid) {
-    const [updated] = await db.update(otpCodes)
-      .set({ attempts: sql`${otpCodes.attempts} + 1` })
-      .where(eq(otpCodes.id, row.id))
-      .returning({ attempts: otpCodes.attempts })
-    const attempts = updated?.attempts ?? row.attempts + 1
-    if (attempts >= MAX_ATTEMPTS) {
+  if (!await argonVerify(row.codeHash, pepper(code))) {
+    if (reserved.attempts >= MAX_ATTEMPTS) {
       await setBlock(`otp:block:${phone}`, BLOCK_SEC)
       return { ok: false, code: 'rate_limited' }
     }
-    return { ok: false, code: 'otp_invalid', attemptsLeft: MAX_ATTEMPTS - attempts }
+    return { ok: false, code: 'otp_invalid', attemptsLeft: MAX_ATTEMPTS - reserved.attempts }
   }
 
-  await db.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, row.id))
+  // Код гасится условием «ещё не погашен»: верный код, отправленный дважды параллельно, даёт один вход
+  const consumed = await db.update(otpCodes).set({ consumedAt: new Date() }).where(and(eq(otpCodes.id, row.id), isNull(otpCodes.consumedAt))).returning({ id: otpCodes.id })
+  if (!consumed.length) return { ok: false, code: 'otp_invalid' }
   return { ok: true, channel: row.channel as 'telegram' | 'sms' | 'email' }
 }
 
@@ -214,22 +216,25 @@ export async function verifyContactCode(tenantId: string, contact: string, code:
       .orderBy(desc(otpCodes.createdAt))
       .limit(1)
     if (!row) return { ok: false, code: 'otp_invalid' }
-    if (row.attempts >= MAX_ATTEMPTS) return { ok: false, code: 'rate_limited' }
+    // Попытка резервируется атомарно до проверки кода (security-sweep-1): иначе параллельные запросы
+    // читали один и тот же счётчик и перебирали код сотнями догадок за раз вместо пяти
+    const [reserved] = await tx.update(otpCodes)
+      .set({ attempts: sql`${otpCodes.attempts} + 1` })
+      .where(and(eq(otpCodes.id, row.id), isNull(otpCodes.consumedAt), lt(otpCodes.attempts, MAX_ATTEMPTS)))
+      .returning({ attempts: otpCodes.attempts })
+    if (!reserved) return { ok: false, code: 'rate_limited' }
 
     if (!await argonVerify(row.codeHash, pepper(code))) {
-      const [updated] = await tx.update(otpCodes)
-        .set({ attempts: sql`${otpCodes.attempts} + 1` })
-        .where(eq(otpCodes.id, row.id))
-        .returning({ attempts: otpCodes.attempts })
-      const attempts = updated?.attempts ?? row.attempts + 1
-      if (attempts >= MAX_ATTEMPTS) {
+      if (reserved.attempts >= MAX_ATTEMPTS) {
         await setBlock(`otp:block:${contact}`, BLOCK_SEC)
         return { ok: false, code: 'rate_limited' }
       }
-      return { ok: false, code: 'otp_invalid', attemptsLeft: MAX_ATTEMPTS - attempts }
+      return { ok: false, code: 'otp_invalid', attemptsLeft: MAX_ATTEMPTS - reserved.attempts }
     }
 
-    await tx.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, row.id))
+    // Код гасится условием «ещё не погашен»: верный код, отправленный дважды параллельно, даёт один вход
+    const consumed = await tx.update(otpCodes).set({ consumedAt: new Date() }).where(and(eq(otpCodes.id, row.id), isNull(otpCodes.consumedAt))).returning({ id: otpCodes.id })
+    if (!consumed.length) return { ok: false, code: 'otp_invalid' }
     return { ok: true, channel: row.channel as 'telegram' | 'sms' | 'email' }
   })
 }

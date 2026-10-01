@@ -37,6 +37,13 @@ export class LoginFormHiddenError extends Error {
   constructor() { super('login_form_hidden') }
 }
 
+/** Заблокированный, приостановленный или уволенный человек не входит ни одним путём (security-sweep-1). */
+export class UserBlockedError extends Error {
+  statusCode = 403
+  data = { code: 'user_blocked', message: 'Доступ закрито. Зверніться до адміністратора простору' }
+  constructor() { super('user_blocked') }
+}
+
 /**
  * «Приховати форму входу» действует только когда есть чем заменить форму — Google настроен на платформе
  * (docs/09 §9.1); иначе политика игнорируется, чтобы администратор не запер всех снаружи.
@@ -90,6 +97,10 @@ export async function createSession(input: {
   // docs/v2/28 §7.7, §13 к. 7: кандидат вне `active` или с истёкшим `access_until` не входит ни одним
   // путём — все они приходят сюда (services/candidateAccess.ts); 403 `candidate.access_expired`
   await assertCandidateMayEnter(input.tenantId, input.userId)
+  // Блокировка и архив закрывают вход везде (docs/16 §7.4), а не только в поиске по телефону: иначе
+  // неистраченное приглашение или ссылка Telegram «воскрешали» бы человека — `markSignedIn` ставит `active`
+  const [person] = await withTenant(input.tenantId, input.userId, tx => tx.select({ status: users.status, isBlocked: users.isBlocked }).from(users).where(eq(users.id, input.userId)))
+  if (!person || person.isBlocked || person.status === 'suspended' || person.status === 'archived') throw new UserBlockedError()
   // docs/33 D-021: при скрытой форме входа код и пароль не пускают — только Google, приглашение и «от имени»
   if (input.loginMethod && (OTP_LOGIN_METHODS.includes(input.loginMethod) || input.loginMethod === 'password') && await loginFormHidden(input.tenantId, input.userId)) throw new LoginFormHiddenError()
   // Второй фактор (docs/24 §3.4, PR-39): решается здесь, в единственной точке создания сессии,
@@ -269,23 +280,45 @@ export async function revokeAllSessions(auth: AuthContext): Promise<number> {
  */
 const SELECT_TTL_MS = 5 * 60 * 1000
 
-export function issueSelectToken(phone: string): string {
+/** Ключ подписи: пустой ключ = подпись, которую подделает любой, — отказ, а не тихий `''` (security-sweep-1). */
+function selectSecret(): string {
+  const key = process.env.SESSION_SECRET
+  if (!key) throw new Error('SESSION_SECRET не задан')
+  return key
+}
+
+/**
+ * `subject` — номер телефона (вход по коду) или `pwd:<tenant>/<user>,…` — учётки, у которых **совпал
+ * пароль** (вход по паролю). Почту в токен не кладём: выбор по почте отдал бы и пространства, где
+ * пароль другой (security-sweep-1).
+ */
+export function issueSelectToken(subject: string): string {
   const exp = Date.now() + SELECT_TTL_MS
-  const payload = `${phone}:${exp}`
-  const sig = createHmac('sha256', process.env.SESSION_SECRET || '')
+  const payload = `${subject}:${exp}`
+  const sig = createHmac('sha256', selectSecret())
     .update(payload).digest('base64url')
   return Buffer.from(`${payload}:${sig}`).toString('base64url')
+}
+
+export function passwordSelectSubject(users: { tenant_id: string, user_id: string }[]): string {
+  return `pwd:${users.map(u => `${u.tenant_id}/${u.user_id}`).join(',')}`
 }
 
 export function verifySelectToken(token: string): { phone: string } | null {
   try {
     const raw = Buffer.from(token, 'base64url').toString()
-    const [phone, expStr, sig] = raw.split(':')
-    if (!phone || !expStr || !sig) return null
-    if (Number(expStr) < Date.now()) return null
-    const expected = createHmac('sha256', process.env.SESSION_SECRET || '')
+    // Подпись и срок — с конца: в субъекте могут быть двоеточия
+    const sigAt = raw.lastIndexOf(':')
+    const expAt = raw.lastIndexOf(':', sigAt - 1)
+    if (sigAt <= 0 || expAt <= 0) return null
+    const phone = raw.slice(0, expAt)
+    const expStr = raw.slice(expAt + 1, sigAt)
+    const sig = raw.slice(sigAt + 1)
+    const exp = Number(expStr)
+    if (!phone || !sig || !Number.isFinite(exp) || exp < Date.now()) return null
+    const expected = createHmac('sha256', selectSecret())
       .update(`${phone}:${expStr}`).digest('base64url')
-    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
+    if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
     return { phone }
   }
   catch {

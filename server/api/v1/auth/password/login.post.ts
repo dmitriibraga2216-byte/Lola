@@ -1,6 +1,6 @@
 import { passwordLoginSchema } from '../../../../../shared/schemas/auth'
 import { loginWithPassword } from '../../../../services/password'
-import { createSession, issueSelectToken } from '../../../../services/session'
+import { createSession, issueSelectToken, passwordSelectSubject } from '../../../../services/session'
 import { logSecurity } from '../../../../services/securityLog'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 import { clientIp, onHostTenant, setSessionCookies } from '../../../../utils/authCookies'
@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
   if (users.length > 1) {
     return apiData({
       requiresTenantSelect: true,
-      selectToken: issueSelectToken(`email:${parsed.data.email.toLowerCase()}`),
+      selectToken: issueSelectToken(passwordSelectSubject(users)),
       tenants: users.map(u => ({ tenantId: u.tenant_id, slug: u.tenant_slug, name: u.tenant_name })),
     })
   }

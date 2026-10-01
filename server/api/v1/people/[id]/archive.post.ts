@@ -1,11 +1,13 @@
 import { archiveSchema } from '../../../../../shared/schemas/people'
 import { requireScope } from '../../../../services/access'
+import { assertPersonAccess } from '../../../../services/personGuard'
 import { archivePerson } from '../../../../services/people'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 
 /** Архівування з причиною (docs/16 §4, §7.4). */
 export default defineEventHandler(async (event) => {
   const access = await requireScope(event, 'people.deactivate')
+  await assertPersonAccess(access, 'people.deactivate', getRouterParam(event, 'id')!, { sensitive: true })
   const parsed = archiveSchema.safeParse(await readBody(event))
   if (!parsed.success) return apiError(event, 400, 'validation_failed', 'Вкажіть причину', { issues: parsed.error.issues })
   const r = await archivePerson({ tenantId: access.tenantId, actorId: access.userId }, getRouterParam(event, 'id')!, parsed.data)

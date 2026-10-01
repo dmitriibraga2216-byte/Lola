@@ -15,6 +15,10 @@ describe('метрики Prometheus (docs/06 §6.7)', () => {
   it('routeLabel схлопывает id и токены', () => {
     expect(routeLabel('/api/v1/meetups/f419dabb-4ac7-4ab5-b43b-9801b4543983/qr?x=1')).toBe('/api/v1/meetups/:id/qr')
     expect(routeLabel('/c/AbCdEfGhIjKlMnOpQrStUvWxYz0123')).toBe('/c/:token')
+    // security-sweep-1: токены публичных ссылок не попадают в лейблы /metrics
+    expect(routeLabel('/api/v1/public/invite/AbCdEf_GhIjKlMn0123xyz')).toBe('/api/v1/public/invite/:token')
+    expect(routeLabel('/api/v1/public/candidate-summaries/x9Kd8s7d6f5g4h3j2k1l/pdf')).toBe('/api/v1/public/candidate-summaries/:token/pdf')
+    expect(routeLabel('/api/v1/settings/notification-templates')).toBe('/api/v1/settings/notification-templates')
   })
   it('timedJob считает результат и длительность, реестр отдаёт текст', async () => {
     await timedJob('test.job', async () => 1)

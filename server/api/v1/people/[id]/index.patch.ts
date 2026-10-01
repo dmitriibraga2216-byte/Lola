@@ -1,5 +1,6 @@
 import { personUpdateSchema } from '../../../../../shared/schemas/people'
 import { requireScope } from '../../../../services/access'
+import { assertPersonAccess } from '../../../../services/personGuard'
 import { updatePerson } from '../../../../services/people'
 import { apiData, apiError } from '../../../../utils/apiResponse'
 
@@ -13,6 +14,10 @@ export default defineEventHandler(async (event) => {
     ? 'people.deactivate'
     : 'people.edit'
   const access = await requireScope(event, scope)
+  // Вход, контакты и доступ чужого человека — только в своей области и не шире своих прав (personGuard)
+  const d = body.data
+  const sensitive = d.phone !== undefined || d.email !== undefined || d.status !== undefined || d.isBlocked !== undefined
+  await assertPersonAccess(access, scope, getRouterParam(event, 'id')!, { sensitive })
 
   const person = await updatePerson(
     { tenantId: access.tenantId, actorId: access.userId },

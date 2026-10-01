@@ -77,7 +77,10 @@ export type LinkState =
 function secret(): string {
   // Тот же корень, что у остальных подписей приложения. Отдельного ключа публичный контур
   // не заводит: ещё один секрет в `.env` — ещё один способ потерять его на стенде.
-  return process.env.SESSION_SECRET || process.env.ENCRYPTION_KEY || 'dev-secret'
+  // Без ключа подпись подделывает любой — отказ, а не общеизвестная строка (security-sweep-1)
+  const key = process.env.SESSION_SECRET || process.env.ENCRYPTION_KEY
+  if (!key) throw new Error('SESSION_SECRET не задан')
+  return key
 }
 
 /**

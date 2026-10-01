@@ -440,7 +440,9 @@ export async function updatePerson(ctx: Ctx, id: string, input: PersonUpdateInpu
     if (contactKeys.length) await logSecurity({ tenantId: ctx.tenantId, userId: id, event: 'contacts.changed', meta: { by: ctx.actorId, fields: contactKeys } })
     if (before.isBlocked !== after!.isBlocked) await logSecurity({ tenantId: ctx.tenantId, userId: id, event: after!.isBlocked ? 'user.blocked' : 'user.unblocked', meta: { by: ctx.actorId } })
     if (before.status !== 'archived' && after!.status === 'archived') await logSecurity({ tenantId: ctx.tenantId, userId: id, event: 'user.archived', meta: { by: ctx.actorId } })
-    return after!
+    // Хеш пароля в API не отдаётся никогда (как в `getPerson`): `returning()` вернул всю строку
+    const { passwordHash, ...safe } = after!
+    return { ...safe, hasPassword: passwordHash != null }
   })
 }
 
@@ -937,7 +939,7 @@ export type BulkResult =
  * Отмеченные поимённо (`ids`) — решение по каждому человеку, а не условие: их правило не трогает
  * (Р-35.5), экран же гасит «Архівувати», пока список отфильтрован одним индексом.
  */
-export async function bulkPeople(ctx: Ctx, input: BulkInput, opts: { ratingArea?: RatingArea } = {}): Promise<BulkResult> {
+export async function bulkPeople(ctx: Ctx, input: BulkInput, opts: { ratingArea?: RatingArea, guard?: (id: string) => Promise<boolean> } = {}): Promise<BulkResult> {
   let ids = input.ids ?? []
   if (input.filter) {
     const area = opts.ratingArea ?? 'none'
@@ -951,6 +953,7 @@ export async function bulkPeople(ctx: Ctx, input: BulkInput, opts: { ratingArea?
   const errors: { id: string, code: string }[] = []
   for (const id of ids) {
     try {
+      if (opts.guard && !(await opts.guard(id))) { errors.push({ id, code: 'forbidden' }); continue }
       switch (input.action) {
         case 'add_tag': {
           await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {

@@ -113,7 +113,7 @@ const period = (p: Payment) => (p.periodFrom && p.periodTo ? `${fmtDate(p.period
 .table { width: 100%; border-collapse: collapse; }
 .table th { text-align: left; font-size: 12px; font-weight: 900; color: var(--color-ink-muted); padding: 0 var(--space-3) var(--space-2); }
 .table td { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--color-bg-line-soft); }
-.pill { display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; background: var(--color-bg-line-soft); }
+.pill { display: inline-block; padding: var(--space-half) var(--space-3); border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; background: var(--color-bg-line-soft); }
 .pill.paid { background: var(--color-teal); color: var(--color-ink); }
 .pill.failed, .pill.refunded { background: var(--color-coral); color: var(--color-coral-deep); }
 .pill.pending, .pill.written_off { background: var(--color-sun); color: var(--color-ink); }

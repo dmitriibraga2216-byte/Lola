@@ -63,7 +63,7 @@ async function submit() {
   </main>
 </template>
 <style scoped>
-.wrap { max-width: 640px; margin: 0 auto; padding: var(--space-4) var(--space-4) 96px; }
+.wrap { max-width: 640px; margin: 0 auto; padding: var(--space-4) var(--space-4) calc(var(--space-7) * 2); }
 .head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-3); }
 .logo { font-weight: 900; font-size: var(--font-size-title-l); }
 h1 { margin: 0 0 var(--space-1); font-weight: 900; }

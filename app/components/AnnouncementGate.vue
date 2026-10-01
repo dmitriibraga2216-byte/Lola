@@ -70,7 +70,7 @@ function dismiss(a: A) { if (a.blockUntilAck) return; dismissed.value = new Set(
 .banner.normal, .banner.important { background: var(--color-sun); color: var(--color-sun-ink); }
 .banner.critical { background: var(--color-coral); color: var(--color-coral-deep); }
 .btitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.blink { font: inherit; font-weight: 800; border: 1px solid currentcolor; background: transparent; color: inherit; border-radius: var(--radius-pill); padding: 2px var(--space-3); cursor: pointer; }
+.blink { font: inherit; font-weight: 800; border: 1px solid currentcolor; background: transparent; color: inherit; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); cursor: pointer; }
 .gate { position: fixed; inset: 0; z-index: 90; background: rgb(12 15 20 / 55%); display: grid; place-items: center; padding: var(--space-4); overflow: auto; font-family: var(--font-family); color: var(--color-ink); }
 .gate.blocked { background: rgb(12 15 20 / 85%); }
 .modal { background: var(--color-bg-soft); border-radius: var(--radius-xl); padding: var(--space-5); width: min(560px, 100%); box-sizing: border-box; display: grid; gap: var(--space-3); max-height: 90dvh; overflow: hidden; border-top: 6px solid var(--color-sun); }

@@ -36,16 +36,16 @@ const fmt = (d: string) => formatDateTime(new Date(d), { dateStyle: 'short', tim
 .bell-wrap { position: relative; }
 .bell { font: inherit; border: none; background: transparent; cursor: pointer; position: relative; min-width: 44px; min-height: 44px; color: var(--color-ink); display: grid; place-items: center; }
 .bell svg { width: 24px; height: 24px; }
-.cnt { position: absolute; top: 2px; right: 0; min-width: 17px; height: 17px; background: var(--color-coral); color: var(--color-ink); font-size: 10px; font-weight: 900; border-radius: var(--radius-pill); padding: 0 4px; line-height: 17px; text-align: center; }
+.cnt { position: absolute; top: 2px; right: 0; min-width: 17px; height: 17px; background: var(--color-coral); color: var(--color-ink); font-size: 10px; font-weight: 900; border-radius: var(--radius-pill); padding: 0 var(--space-1); line-height: 17px; text-align: center; }
 .panel { position: absolute; right: 0; top: 100%; z-index: 30; width: min(360px, 92vw); background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-l); box-shadow: 0 12px 32px rgb(0 0 0 / 14%); padding: var(--space-3); display: grid; gap: var(--space-2); max-height: 70dvh; overflow: auto; }
 .backdrop { position: fixed; inset: 0; z-index: 29; }
 .head { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .head b { flex: 1; }
-.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: 2px var(--space-3); cursor: pointer; text-decoration: none; }
+.chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); cursor: pointer; text-decoration: none; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .item { border-radius: var(--radius-m); }
 .item.unread { background: var(--color-bg); border-left: 3px solid var(--color-sun); }
-.itembtn { font: inherit; text-align: left; border: none; background: transparent; cursor: pointer; width: 100%; padding: var(--space-2); display: grid; gap: 2px; color: var(--color-ink); }
+.itembtn { font: inherit; text-align: left; border: none; background: transparent; cursor: pointer; width: 100%; padding: var(--space-2); display: grid; gap: var(--space-half); color: var(--color-ink); }
 .text { font-size: var(--font-size-body-s); }
 .sub { font-size: 11px; color: var(--color-ink-faint); margin: 0; }
 </style>

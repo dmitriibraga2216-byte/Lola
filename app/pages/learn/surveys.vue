@@ -159,7 +159,7 @@ h2 { margin: 0; font-weight: 800; }
 .card { font: inherit; text-align: left; background: var(--color-bg-soft); border: none; border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); cursor: pointer; display: grid; gap: var(--space-1); color: var(--color-ink); }
 .card-title { font-weight: 800; }
 .results { display: grid; gap: var(--space-2); background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); margin-bottom: var(--space-3); }
-.rq { display: grid; gap: 2px; }
+.rq { display: grid; gap: var(--space-half); }
 .poll { display: flex; flex-direction: column; min-height: 70dvh; }
 .head { display: flex; align-items: center; gap: var(--space-3); }
 .back { font: inherit; border: none; background: none; font-size: 22px; font-weight: 900; cursor: pointer; padding: 0; color: var(--color-ink); }

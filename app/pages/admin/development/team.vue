@@ -80,7 +80,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .check { display: flex; gap: var(--space-1); align-items: center; font-size: var(--font-size-body-s); }
 .link { color: var(--color-ink); font-weight: 700; }
 .red { color: var(--color-coral-ink); font-weight: 700; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); }

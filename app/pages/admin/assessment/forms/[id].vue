@@ -158,7 +158,7 @@ async function duplicate() {
 @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
 .library { display: grid; gap: var(--space-2); }
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
-.lib-item { font: inherit; text-align: left; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); cursor: pointer; display: grid; gap: 2px; color: var(--color-ink); }
+.lib-item { font: inherit; text-align: left; background: var(--color-bg-soft); border: 1px solid var(--color-bg-line); border-radius: var(--radius-m); padding: var(--space-2) var(--space-3); cursor: pointer; display: grid; gap: var(--space-half); color: var(--color-ink); }
 .lib-item small { font-size: 11px; font-weight: 800; color: var(--color-ink-muted); }
 .lib-item:disabled { opacity: 0.5; cursor: default; }
 .composition { display: grid; gap: var(--space-2); }

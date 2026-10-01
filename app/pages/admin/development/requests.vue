@@ -118,7 +118,7 @@ const kindCount = (k: 'external' | 'career') => allRows.value.filter(r => r.kind
 </template>
 <style scoped>
 .head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 var(--space-4); }
-.eyebrow { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); margin-bottom: 3px; }
+.eyebrow { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); margin-bottom: var(--space-1); }
 h1 { margin: 0; font-weight: 900; }
 .route-hint { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); margin: 0 0 var(--space-3); }
 .tabs { display: flex; gap: var(--space-1); }
@@ -133,7 +133,7 @@ h1 { margin: 0; font-weight: 900; }
 .field { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-sun); color: var(--color-sun-ink); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.approved, .badge.completed { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.rejected { background: var(--color-coral); color: var(--color-coral-deep); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin: 0; }

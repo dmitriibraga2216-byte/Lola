@@ -204,7 +204,7 @@ tr.off { opacity: 0.5; }
 .mystery { margin-top: var(--space-4); }
 .links { background: var(--color-bg); }
 .url { font-size: var(--font-size-body-s); word-break: break-all; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.published { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.active { background: var(--color-sun); color: var(--color-sun-ink); }
 </style>

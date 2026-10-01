@@ -94,7 +94,7 @@ async function remove() { if (!confirm(t('wiki.deleteConfirm'))) return; await a
 <style scoped>
 .back { color: var(--color-ink-muted); text-decoration: none; font-weight: 700; }
 .crumbs { margin: var(--space-2) 0 0; font-size: var(--font-size-body-s); }
-.crumbs a { color: var(--color-ink-muted); text-decoration: none; margin-right: 4px; }
+.crumbs a { color: var(--color-ink-muted); text-decoration: none; margin-right: var(--space-1); }
 h1 { margin: var(--space-1) 0 0; font-weight: 900; }
 h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); margin: var(--space-1) 0; }
@@ -115,7 +115,7 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 .notice { background: var(--color-teal); color: var(--color-teal-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 .diff { margin-top: var(--space-2); font-size: var(--font-size-body-s); }
-.dl { margin: 0; padding: 2px var(--space-2); white-space: pre-wrap; }
+.dl { margin: 0; padding: var(--space-half) var(--space-2); white-space: pre-wrap; }
 .dl.add { background: var(--color-teal); color: var(--color-teal-deep); }
 .dl.del { background: var(--color-coral); color: var(--color-coral-deep); text-decoration: line-through; }
 </style>

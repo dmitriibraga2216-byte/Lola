@@ -72,7 +72,7 @@ h3 { margin: var(--space-2) 0 0; font-size: var(--font-size-body); color: var(--
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 input, select { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); min-width: 0; box-sizing: border-box; }
 .modal label, .modal .date-label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.active { background: var(--color-teal); color: var(--color-teal-deep); }
 .chip { font: inherit; font-size: var(--font-size-body-s); font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; color: var(--color-ink-muted); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); cursor: pointer; }
 .chip.danger { color: var(--color-coral-ink); }

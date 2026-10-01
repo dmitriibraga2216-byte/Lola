@@ -121,7 +121,7 @@ h2 { margin: 0; font-weight: 800; font-size: var(--font-size-title-l); }
 .text { margin: var(--space-2) 0; white-space: pre-wrap; }
 .eval { background: var(--color-sun); padding: var(--space-2); border-radius: var(--radius-m); margin: 0; }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-2); margin-top: var(--space-3); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); white-space: nowrap; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); white-space: nowrap; }
 .badge.teal, .chip.teal { background: var(--color-teal); color: var(--color-teal-deep); border-color: transparent; }
 .badge.coral, .chip.coral { background: var(--color-coral); color: var(--color-coral-deep); border-color: transparent; }
 .badge.sun, .chip.sun { background: var(--color-sun); color: var(--color-sun-ink); border-color: transparent; }

@@ -245,7 +245,7 @@ async function previewAs(r: Role) {
 .owner-who { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin: 0; }
 .transfer { display: grid; gap: var(--space-2); justify-items: start; }
 .transfer .field { width: 100%; }
-.people { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; width: 100%; max-height: 220px; overflow-y: auto; }
+.people { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-half); width: 100%; max-height: 220px; overflow-y: auto; }
 .person { font: inherit; font-weight: 700; text-align: left; width: 100%; border: none; background: transparent; color: var(--color-ink); padding: var(--space-2) var(--space-3); border-radius: var(--radius-s); cursor: pointer; }
 .person:hover, .person:focus-visible { background: var(--color-sun-soft); }
 .list tr { cursor: pointer; }

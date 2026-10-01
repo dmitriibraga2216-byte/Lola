@@ -120,7 +120,7 @@ td { padding: var(--space-3); border-bottom: 1px solid var(--color-bg-line-soft)
 .row-link:hover { background: var(--color-bg-line-soft); }
 .bar { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; width: 120px; }
 .bar-fill { height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }

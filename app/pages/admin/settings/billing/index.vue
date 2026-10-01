@@ -127,7 +127,7 @@ const statusTone = (s: string) => (s === 'active' ? 'teal' : s === 'grace' ? 'su
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .plan-name { font-size: var(--font-size-title-l); font-weight: 900; margin: var(--space-2) 0 0; }
 .price { font-weight: 800; color: var(--color-ink-muted); margin: var(--space-1) 0 0; }
-.pill { display: inline-block; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; background: var(--color-bg-line-soft); }
+.pill { display: inline-block; padding: var(--space-half) var(--space-3); border-radius: var(--radius-pill); font-size: 12px; font-weight: 800; background: var(--color-bg-line-soft); }
 .pill.teal { background: var(--color-teal); color: var(--color-ink); }
 .pill.sun { background: var(--color-sun); color: var(--color-ink); }
 .pill.coral { background: var(--color-coral); color: var(--color-coral-deep); }
@@ -136,7 +136,7 @@ const statusTone = (s: string) => (s === 'active' ? 'teal' : s === 'grace' ? 'su
 .kv dd { margin: 0; font-weight: 800; }
 .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }
 .addons { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
-.addon { display: flex; flex-direction: column; gap: 2px; background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
+.addon { display: flex; flex-direction: column; gap: var(--space-half); background: var(--color-bg-soft); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); }
 .history-link { margin-top: var(--space-3); }
 .sub { color: var(--color-ink-muted); font-weight: 600; }
 </style>

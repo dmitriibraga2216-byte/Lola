@@ -57,13 +57,13 @@ h1 { margin: 0 0 var(--space-3); font-weight: 900; }
 .tabs { display: flex; gap: var(--space-1); margin-bottom: var(--space-3); overflow-x: auto; }
 .tab { font: inherit; font-weight: 700; border: 1px solid var(--color-bg-line); background: transparent; border-radius: var(--radius-pill); padding: var(--space-1) var(--space-3); white-space: nowrap; color: var(--color-ink-muted); }
 .tab.on { background: var(--color-ink); color: var(--color-bg); border-color: var(--color-ink); }
-.tab b { background: var(--color-coral); color: var(--color-coral-deep); border-radius: var(--radius-pill); padding: 0 6px; margin-left: 4px; }
+.tab b { background: var(--color-coral); color: var(--color-coral-deep); border-radius: var(--radius-pill); padding: 0 var(--space-2); margin-left: var(--space-1); }
 .list { display: grid; gap: var(--space-2); }
 .card { background: var(--color-bg-soft); border-radius: var(--radius-l); padding: var(--space-3); display: grid; gap: var(--space-1); color: inherit; text-decoration: none; }
 .row { display: flex; justify-content: space-between; gap: var(--space-2); align-items: center; }
 .card-title { font-weight: 800; }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); background: var(--color-bg); color: var(--color-ink-muted); }
 .badge.submitted { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.in_progress { background: var(--color-sun); color: var(--color-sun-ink); }
 .empty { color: var(--color-ink-muted); padding: var(--space-3); }

@@ -102,7 +102,7 @@ h3 { margin: 0 0 var(--space-2); font-size: var(--font-size-body); display: flex
 .cover { width: 40px; height: 40px; border-radius: var(--radius-s); display: grid; place-items: center; font-weight: 900; flex: none; }
 .body { min-width: 0; flex: 1; display: grid; gap: var(--space-1); }
 .name { overflow-wrap: anywhere; }
-dl { margin: 0; display: grid; gap: 2px; }
+dl { margin: 0; display: grid; gap: var(--space-half); }
 dl div { display: flex; gap: var(--space-1); flex-wrap: wrap; font-size: var(--font-size-body-s); }
 dt { color: var(--color-ink-faint); }
 dt::after { content: ':'; }
@@ -115,7 +115,7 @@ dd { margin: 0; }
 .ring .rail { fill: none; stroke: var(--color-bg-line); stroke-width: 4; }
 .ring .bar { fill: none; stroke: var(--color-teal); stroke-width: 4; stroke-linecap: round; }
 .ring text { font-size: var(--font-size-body-s); font-weight: 800; fill: var(--color-ink); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); color: var(--color-ink-muted); width: fit-content; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); color: var(--color-ink-muted); width: fit-content; }
 .link { color: var(--color-teal-ink); font-weight: 700; text-decoration: none; }
 .muted { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
 .state { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; color: var(--color-coral-ink); }

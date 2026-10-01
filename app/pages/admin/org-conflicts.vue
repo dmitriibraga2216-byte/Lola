@@ -157,7 +157,7 @@ td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--colo
 .nowrap { white-space: nowrap; }
 .event { max-width: 320px; }
 .link { color: var(--color-ink); font-weight: 700; text-decoration: none; }
-.pill { display: inline-block; padding: 2px var(--space-3); border-radius: var(--radius-pill); font-size: var(--font-size-body-s); font-weight: 800; white-space: nowrap; }
+.pill { display: inline-block; padding: var(--space-half) var(--space-3); border-radius: var(--radius-pill); font-size: var(--font-size-body-s); font-weight: 800; white-space: nowrap; }
 .pill-open { background: var(--color-coral); color: var(--color-coral-deep); }
 .pill-ok { background: var(--color-teal); color: var(--color-teal-deep); }
 .sub { color: var(--color-ink-muted); font-size: var(--font-size-body-s); }

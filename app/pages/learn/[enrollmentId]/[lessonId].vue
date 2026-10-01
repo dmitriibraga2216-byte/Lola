@@ -452,7 +452,7 @@ async function next() {
 .pos { font-size: var(--font-size-body-s); color: var(--color-ink-muted); font-weight: 700; white-space: nowrap; }
 .print-btn { font: inherit; border: none; background: var(--color-bg); border-radius: var(--radius-pill); width: 36px; height: 36px; cursor: pointer; color: var(--color-ink); }
 .offline { background: var(--color-sun); color: var(--color-sun-ink); text-align: center; padding: var(--space-2); font-size: var(--font-size-body-s); font-weight: 700; }
-.body { flex: 1; padding: var(--space-4); padding-bottom: 120px; max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.body { flex: 1; padding: var(--space-4); padding-bottom: calc(var(--space-7) * 2 + var(--space-5)); max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; }
 .section-label { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; color: var(--color-ink-muted); margin-bottom: var(--space-1); }
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 .video-wrap { position: relative; display: grid; gap: var(--space-1); margin-bottom: var(--space-4); }

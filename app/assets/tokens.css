@@ -45,7 +45,8 @@
   --radius-2xl: 36px;
   --radius-pill: 999px;
 
-  /* Отступы */
+  /* Отступы. --space-half — полшага для плотных значков и чипов (docs/v2/44 §18 Р-CC.4) */
+  --space-half: 2px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

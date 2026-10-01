@@ -307,6 +307,8 @@ PYEOF
 #      однозначный магический цвет, который обязан быть токеном;
 #   б) inline style/:style с px-значением в шаблоне — обход токенов прямо в разметке, самый
 #      дешёвый в написании и самый простой в проверке случай.
+# Отступы px в <style scoped> (padding/margin/gap) переведены на токены cross-cutting-tails
+# (docs/v2/44 §18 Р-CC.4); их сторожит tests/unit/scoped-style-tokens.spec.ts.
 check5_tokens() {
   local hex_hits
   hex_hits="$(grep -rnoE '#[0-9a-fA-F]{3,8}\b' app --include='*.vue' --include='*.css' 2>/dev/null \

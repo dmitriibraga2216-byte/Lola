@@ -523,14 +523,14 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .role-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .revoke { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .revoke input { flex: 1 1 160px; min-width: 0; }
-.field { display: grid; gap: 2px; font-size: 12px; font-weight: 700; color: var(--color-ink-muted); }
+.field { display: grid; gap: var(--space-half); font-size: 12px; font-weight: 700; color: var(--color-ink-muted); }
 .field.grow { flex: 1 1 200px; min-width: 0; }
 .ended { opacity: 0.5; }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
 .tags { margin: var(--space-1) 0 0; display: flex; gap: var(--space-1); flex-wrap: wrap; }
 .tagchip { background: var(--color-sun); border-radius: var(--radius-pill); padding: 0 var(--space-2); font-size: var(--font-size-body-s); font-weight: 800; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
-.stats div { display: grid; gap: 2px; }
+.stats div { display: grid; gap: var(--space-half); }
 .stats dd { font-size: var(--font-size-title-l); font-weight: 900; }
 .stats dd.teal { color: var(--color-teal-ink); }
 .stats dd.coral { color: var(--color-coral-ink); }
@@ -540,13 +540,13 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.muted { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 /* Етап людини в шапці (docs/v2/33 §5.3): колір етапу — токен бренд-бука з довідника */
-.stage { font-size: var(--font-size-body-s); font-weight: 800; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.stage { font-size: var(--font-size-body-s); font-weight: 800; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); }
 .stage.c-ink { background: var(--color-ink); color: var(--color-bg-soft); }
 .stage.c-sun { background: var(--color-sun); color: var(--color-sun-ink); }
 .stage.c-teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .stage.c-coral { background: var(--color-coral); color: var(--color-coral-deep); }
 /* Індекс залученості — результат (бірюза); старше 48 годин — сірим (docs/v2/38 §3.1) */
-.index-chip { font-size: var(--font-size-body-s); border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-teal-soft); color: var(--color-teal-ink); text-decoration: none; }
+.index-chip { font-size: var(--font-size-body-s); border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-teal-soft); color: var(--color-teal-ink); text-decoration: none; }
 .index-chip.stale, dd.faint .link { color: var(--color-ink-faint); background: var(--color-bg-line-soft); }
 /* Срок сдвинут с дней отсутствия (docs/v2/38 §7.14): справка рядом с датой, не тревога */
 .badge.shifted { display: block; width: fit-content; margin-top: var(--space-1); color: var(--color-ink-muted); }
@@ -558,7 +558,7 @@ textarea { flex: 1; min-width: 200px; }
 .btn.danger { background: var(--color-coral); border-color: var(--color-coral); color: var(--color-coral-deep); }
 .btn.small { font-size: var(--font-size-body-s); padding: 0 var(--space-3); }
 .btn:disabled { opacity: 0.5; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.active, .badge.completed { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.invited, .badge.in_progress { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.suspended, .badge.archived, .badge.overdue { background: var(--color-coral); color: var(--color-coral-deep); }

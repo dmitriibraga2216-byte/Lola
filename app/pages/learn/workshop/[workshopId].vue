@@ -289,7 +289,7 @@ function fileState(f: SubFile): string | null {
 .top { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--color-bg-soft); border-bottom: 1px solid var(--color-bg-line); position: sticky; top: 0; }
 .close { width: 36px; height: 36px; display: grid; place-items: center; border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-ink); text-decoration: none; font-weight: 800; }
 .title { font-weight: 800; }
-.body { flex: 1; padding: var(--space-4); padding-bottom: 100px; max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; display: grid; gap: var(--space-4); align-content: start; }
+.body { flex: 1; padding: var(--space-4); padding-bottom: calc(var(--space-7) * 2 + var(--space-1)); max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; display: grid; gap: var(--space-4); align-content: start; }
 h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-body-s); color: var(--color-ink-faint); text-transform: uppercase; letter-spacing: 0.04em; }
 .block { display: grid; gap: var(--space-2); }
 .status { border-radius: var(--radius-m); padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-1); }
@@ -331,6 +331,6 @@ summary { cursor: pointer; font-weight: 700; }
 .ghost { background: transparent; border: 1px solid var(--color-bg-line); color: var(--color-ink-muted); }
 .error { color: var(--color-coral-ink); }
 .rate { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-2); }
-.stars { display: flex; gap: 2px; }
+.stars { display: flex; gap: var(--space-half); }
 .star { font: inherit; font-size: var(--font-size-title-l); border: none; background: transparent; cursor: pointer; color: var(--color-sun-ink); line-height: 1; min-width: 44px; min-height: 44px; }
 </style>

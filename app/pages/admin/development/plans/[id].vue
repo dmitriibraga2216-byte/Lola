@@ -149,7 +149,7 @@ async function addGoal() {
 .head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); flex-wrap: wrap; }
 .head2 { justify-content: space-between; margin-bottom: var(--space-2); }
 .eyebrow { font-size: var(--font-size-body-s); font-weight: 700; color: var(--color-ink-muted); }
-h1 { margin: 2px 0 4px; font-weight: 900; }
+h1 { margin: var(--space-half) 0 var(--space-1); font-weight: 900; }
 h2 { margin: 0; font-weight: 800; }
 .row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .actions-row { margin-bottom: var(--space-4); }
@@ -160,7 +160,7 @@ h2 { margin: 0; font-weight: 800; }
 .link { color: var(--color-ink); font-weight: 700; }
 .bar { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; width: 100px; margin-left: auto; }
 .bar-fill { height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); }

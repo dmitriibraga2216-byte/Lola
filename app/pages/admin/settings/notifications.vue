@@ -334,7 +334,7 @@ tr.on td { background: var(--color-bg); }
 .chip.small { padding: 0 var(--space-2); font-family: ui-monospace, monospace; }
 .chip.on { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg-soft); }
 .pill-btn { font: inherit; border: none; background: transparent; padding: 0; cursor: pointer; }
-.pill { display: inline-block; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); }
+.pill { display: inline-block; font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); }
 .pill.on { background: var(--color-teal); color: var(--color-teal-deep); }
 .pill.off { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .pill.default { opacity: 0.6; border: 1px dashed var(--color-bg-line); }
@@ -348,7 +348,7 @@ tr.on td { background: var(--color-bg); }
 .mono { font-family: ui-monospace, monospace; }
 /* v2-allow: check5 — фон превью HTML-письма обязан быть буквально белым «листом бумаги» */
 .html-preview { width: 100%; height: 240px; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); background: #fff; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.global { background: var(--color-bg-line-soft); color: var(--color-ink-muted); }
 .badge.custom { background: var(--color-teal); color: var(--color-teal-deep); }
 .revs { font-size: var(--font-size-body-s); }

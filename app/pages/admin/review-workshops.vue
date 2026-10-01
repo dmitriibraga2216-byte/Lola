@@ -205,7 +205,7 @@ h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--font-size-body-s)
 .hist-item { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .crit { display: grid; gap: var(--space-1); }
 .crit-row { display: flex; gap: var(--space-2); align-items: flex-start; font-weight: 700; }
-.crit-row input { width: 20px; height: 20px; accent-color: var(--color-teal); flex: none; margin-top: 2px; }
+.crit-row input { width: 20px; height: 20px; accent-color: var(--color-teal); flex: none; margin-top: var(--space-half); }
 .critical { color: var(--color-coral-ink); font-size: var(--font-size-body-s); }
 .crit-comment, textarea { font: inherit; border: 1px solid var(--color-bg-line); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); background: var(--color-bg); color: var(--color-ink); width: 100%; box-sizing: border-box; }
 .actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }

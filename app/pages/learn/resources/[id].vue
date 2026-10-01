@@ -338,7 +338,7 @@ async function complete() {
 .context { font-weight: 800; font-size: var(--font-size-body-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .print-btn { font: inherit; border: none; background: var(--color-bg); border-radius: var(--radius-pill); width: 36px; height: 36px; cursor: pointer; color: var(--color-ink); flex: none; }
 .offline { background: var(--color-sun); color: var(--color-sun-ink); text-align: center; padding: var(--space-2); font-size: var(--font-size-body-s); font-weight: 700; }
-.body { flex: 1; padding: var(--space-4); padding-bottom: 120px; max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; overflow-wrap: anywhere; }
+.body { flex: 1; padding: var(--space-4); padding-bottom: calc(var(--space-7) * 2 + var(--space-5)); max-width: 720px; width: 100%; margin: 0 auto; box-sizing: border-box; overflow-wrap: anywhere; }
 .kind-label { font-size: var(--font-size-body-s); font-weight: 800; letter-spacing: 0.06em; color: var(--color-ink-muted); margin-bottom: var(--space-1); }
 h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 .video { width: 100%; border-radius: var(--radius-m); background: var(--color-teal); display: block; margin-bottom: var(--space-4); }

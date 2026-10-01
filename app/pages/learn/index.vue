@@ -183,9 +183,9 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
 .greet { margin: 0; color: var(--color-ink-muted); font-weight: 700; font-size: var(--font-size-body-s); }
 .bucket { margin: var(--space-4) 0 var(--space-2); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-ink-muted); display: flex; gap: var(--space-2); }
 .bucket-n { color: var(--color-ink-faint); }
-.hello { margin: 2px 0 0; font-weight: 900; font-size: 28px; letter-spacing: -0.02em; }
+.hello { margin: var(--space-half) 0 0; font-weight: 900; font-size: 28px; letter-spacing: -0.02em; }
 
-.chips { display: flex; gap: var(--space-2); margin: var(--space-4) 0 var(--space-3); overflow-x: auto; padding-bottom: 2px; }
+.chips { display: flex; gap: var(--space-2); margin: var(--space-4) 0 var(--space-3); overflow-x: auto; padding-bottom: var(--space-half); }
 .chip {
   font: inherit; font-weight: 800; font-size: var(--font-size-body-s); line-height: 16px; white-space: nowrap;
   border: 1px solid transparent; background: var(--color-bg-soft); color: var(--color-ink-muted);
@@ -227,7 +227,7 @@ const emptyText = computed(() => t(`learner.empty.${tab.value}`))
 .link { color: var(--color-teal-ink); font-weight: 700; }
 .error { color: var(--color-coral-ink); }
 
-.sections { display: flex; gap: var(--space-1); overflow-x: auto; margin: var(--space-5) 0 var(--space-2); padding-bottom: 2px; }
+.sections { display: flex; gap: var(--space-1); overflow-x: auto; margin: var(--space-5) 0 var(--space-2); padding-bottom: var(--space-half); }
 .section { white-space: nowrap; font-weight: 700; font-size: var(--font-size-body-s); color: var(--color-ink); text-decoration: none; background: var(--color-bg-soft); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-3); }
 .counter { margin: 0; color: var(--color-ink-faint); font-size: var(--font-size-body-s); }
 </style>

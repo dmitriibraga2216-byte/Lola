@@ -90,7 +90,7 @@ h1 { margin: 0 0 var(--space-4); font-weight: 900; }
 .card.pinned { background: color-mix(in srgb, var(--color-sun) 15%, var(--color-bg-soft)); }
 .row { display: flex; align-items: center; gap: var(--space-2); }
 .card-title { flex: 1; font-weight: 800; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 1px var(--space-2); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-2); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }

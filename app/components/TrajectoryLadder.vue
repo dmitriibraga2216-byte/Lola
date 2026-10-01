@@ -142,7 +142,7 @@ function stepLink(s: Step) {
 .step.done .mark { background: var(--color-teal); color: var(--color-teal-deep); }
 .step.current .mark { background: var(--color-sun); color: var(--color-sun-ink); }
 .step.failed .mark { background: var(--color-coral); color: var(--color-coral-deep); }
-.body { display: grid; gap: 2px; min-width: 0; }
+.body { display: grid; gap: var(--space-half); min-width: 0; }
 .step-title { font-weight: 800; color: inherit; text-decoration: none; }
 a.step-title { text-decoration: underline; }
 .step-sub { font-size: var(--font-size-body-s); color: var(--color-ink-muted); }

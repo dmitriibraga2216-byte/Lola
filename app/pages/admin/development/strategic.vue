@@ -166,12 +166,12 @@ h2 { margin: 0 0 var(--space-1); font-weight: 900; font-size: var(--font-size-bo
 .bar.coral { background: var(--color-coral); }
 .grow { flex: 1; min-width: 0; cursor: pointer; }
 .title { font-weight: 800; }
-.sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin-top: 2px; }
+.sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin-top: var(--space-half); }
 .progress { width: 120px; flex-shrink: 0; }
 .bar-track { height: 8px; background: var(--color-bg-line-soft); border-radius: var(--radius-pill); overflow: hidden; }
 .bar-fill { height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); }
 .status-select { font: inherit; font-size: var(--font-size-body-s); border: 1px solid var(--color-bg-line); border-radius: var(--radius-pill); padding: var(--space-1) var(--space-2); background: var(--color-bg); color: var(--color-ink); flex-shrink: 0; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; flex-shrink: 0; }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); white-space: nowrap; flex-shrink: 0; }
 .badge.teal { background: var(--color-teal); color: var(--color-teal-deep); }
 .badge.sun { background: var(--color-sun); color: var(--color-sun-ink); }
 .badge.coral { background: var(--color-coral); color: var(--color-coral-deep); }

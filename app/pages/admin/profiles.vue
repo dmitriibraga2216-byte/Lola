@@ -136,7 +136,7 @@ input, select { max-width: 100%; box-sizing: border-box; font: inherit; border: 
 .chip.danger { color: var(--color-coral-ink); }
 .primary { font: inherit; font-weight: 800; border: none; background: var(--color-sun); color: var(--color-ink); border-radius: var(--radius-pill); padding: var(--space-2) var(--space-4); cursor: pointer; justify-self: start; }
 .primary:disabled { opacity: 0.5; }
-.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: 2px var(--space-3); background: var(--color-bg-line-soft); }
+.badge { font-size: var(--font-size-body-s); font-weight: 700; border-radius: var(--radius-pill); padding: var(--space-half) var(--space-3); background: var(--color-bg-line-soft); }
 .badge.on { background: var(--color-teal); color: var(--color-teal-deep); }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); }
 .empty { color: var(--color-ink-faint); text-align: center; padding: var(--space-6); }

@@ -248,7 +248,7 @@ h2 { margin: 0; font-size: var(--font-size-body); font-weight: 800; }
 .row { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
 .form { display: grid; gap: var(--space-2); }
 .employees { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
-.emp-card { background: var(--color-bg); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: 2px; }
+.emp-card { background: var(--color-bg); border-radius: var(--radius-s); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-half); }
 .emp-name { color: var(--color-ink); font-weight: 700; text-decoration: none; }
 .form label { display: grid; gap: var(--space-1); font-size: var(--font-size-body-s); color: var(--color-ink-muted); }
 .check { display: flex !important; align-items: center; gap: var(--space-2); color: var(--color-ink) !important; }

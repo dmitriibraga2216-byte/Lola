@@ -113,7 +113,7 @@ h1 {
   background: var(--color-teal);
   color: var(--color-teal-deep);
   border-radius: var(--radius-pill);
-  padding: 2px var(--space-3);
+  padding: var(--space-half) var(--space-3);
   font-weight: 700;
 }
 

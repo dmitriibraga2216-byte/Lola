@@ -228,6 +228,14 @@ describe('курс: создание → публикация → прохожд
     expect(tree!.version.version).toBe(1)
     expect(tree!.modules[0]!.lessons[0]!.title).toBe('Урок 1')
 
+    // docs/11 §13.1: новая запись — на новой версии
+    const [other] = await admin`select id from users where tenant_id = ${tenantId} and phone = '+380670000002'`
+    const fresh = await selfEnroll({ tenantId, actorId: other!.id as string }, courseId)
+    if (!fresh.ok) throw new Error(fresh.code)
+    const freshTree = await enrollmentTree({ tenantId, actorId: other!.id as string }, fresh.enrollmentId)
+    expect(freshTree!.version.version).toBe(2)
+    expect(freshTree!.modules[0]!.lessons[0]!.title).toBe('Урок 1 (оновлений)')
+
     // Одновременно опубликована ровно одна версия
     const [{ count }] = await admin<[{ count: number }]>`
       select count(*)::int as count from course_versions where course_id = ${courseId} and status = 'published'

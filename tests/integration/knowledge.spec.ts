@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const { createArticle, updateArticle, search, revisions, blocksToText, linkArticle, feedback, confirmActual, reviewScan, knowledgeReport } = await import('../../server/services/knowledge')
 const { createSurvey, updateSurvey, mySurveys, startSurvey, answerQuestion, surveyReport, triggerCourseFeedback } = await import('../../server/services/surveys')
-const { createNews, listNews, getNews, ackNews, newsReaders, trackView, publishScan } = await import('../../server/services/news')
+const { createNews, listNews, getNews, ackNews, newsReaders, newsAckReport, trackView, publishScan } = await import('../../server/services/news')
 const { createWorkshop, submitWorkshop, reviewQueue, claim, grade, workshopForLearner, workshopSlaScan, addComment } = await import('../../server/services/workshops')
 const { createCourse, addModule, addLesson, publishCourse } = await import('../../server/services/courses')
 const { selfEnroll, enrollmentTree, openLesson, completeLesson } = await import('../../server/services/learning')
@@ -247,6 +247,23 @@ describe('новости', () => {
     const readers = await newsReaders(ctx(), pinned.id)
     expect(readers.find(r => r.userId === learnerId)!.ackedAt).not.toBeNull()
     expect((await listNews(learner())).find(n => n.id === pinned.id)!.acked).toBe(true)
+  })
+
+  it('docs/21 §13.1: новость с обязательным прочтением для своей аудитории — в отчёте имя и время подтвердившего, кто не подтвердил', async () => {
+    const n = await createNews(ctx(), {
+      title: `Кухня Лазарева ${Date.now()}`, body: text('<p>Нова санітарна норма</p>'), requiresAck: true, publish: true,
+      audience: { rules: [{ type: 'user', ids: [learnerId, mentorId] }], match: 'any' },
+    })
+    newsIds.push(n.id)
+    await getNews(learner(), n.id)
+    await ackNews(learner(), n.id, { force: true })
+    const rep = await newsAckReport(ctx(), n.id)
+    expect(rep).toMatchObject({ total: 2, acked: 1 })
+    const reader = rep!.readers.find(r => r.id === learnerId)!
+    expect(reader.fullName).toBeTruthy()
+    expect(reader.ackedAt).not.toBeNull()
+    expect(rep!.notAcked.map(r => r.id)).toEqual([mentorId])
+    expect(rep!.byLocation.reduce((a, b) => a + b.total, 0)).toBe(2)
   })
 })
 

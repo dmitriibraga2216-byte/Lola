@@ -418,3 +418,32 @@ describe('правила по эталону (docs/15 §3.6): четыре гр�
     await admin`delete from cities where id in (${odesa!.id}, ${lviv!.id})`
   })
 })
+
+describe('переаттестация (docs/10 §13.4, docs/14 §13.4)', () => {
+  it('validity_months=12: за 30 дней до конца — новая запись source=repeat и уведомление; раньше — ничего; повтор не дублирует', async () => {
+    const courseId = await makeCourse('Курс з терміном дії')
+    await admin`update courses set validity_months = 12 where id = ${courseId}`
+    const person = await makePerson('Переатестація', baristaPosId, lazarevaId)
+    const [v] = await admin`select published_version_id from courses where id = ${courseId}`
+    // Сертификат на 12 месяцев выдан 11 месяцев назад: результат действует ещё 31 день
+    const [done] = await admin`insert into enrollments (tenant_id, user_id, subject_id, version_id, source, status, started_at, completed_at, valid_until)
+      values (${tenantId}, ${person}, ${courseId}, ${v!.published_version_id}, 'self', 'done', now() - interval '335 days', now() - interval '334 days', now() + interval '31 days') returning id`
+    const repeats = () => admin`select id, status, due_at from enrollments where user_id = ${person} and subject_id = ${courseId} and source = 'repeat'`
+    await runDueScan(tenantId)
+    expect(await repeats()).toHaveLength(0)
+
+    await admin`update enrollments set valid_until = now() + interval '29 days' where id = ${done!.id}`
+    await runDueScan(tenantId)
+    const [rep] = await repeats()
+    expect(rep).toMatchObject({ status: 'not_started' })
+    const [orig] = await admin`select valid_until from enrollments where id = ${done!.id}`
+    expect(new Date(rep!.due_at as string).getTime()).toBe(new Date(orig!.valid_until as string).getTime()) // срок — конец действия
+    const [n] = await admin`select payload from notifications where user_id = ${person} and code = 'enrollment_repeat_due'`
+    expect((n!.payload as { enrollmentId: string }).enrollmentId).toBe(rep!.id)
+
+    await runDueScan(tenantId)
+    expect(await repeats()).toHaveLength(1)
+    const [{ c }] = await admin<[{ c: number }]>`select count(*)::int as c from notifications where user_id = ${person} and code = 'enrollment_repeat_due'`
+    expect(c).toBe(1)
+  })
+})

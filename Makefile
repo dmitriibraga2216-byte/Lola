@@ -54,10 +54,12 @@ backup: ## Ручной дамп сейчас (по крону — scripts/backu
 	$(COMPOSE) exec db sh -c 'PGPASSWORD=$$POSTGRES_PASSWORD pg_dump -U $$POSTGRES_USER -Fc $$POSTGRES_DB' > backups/db/manual-$$(date +%F-%H%M).dump
 
 restore-check: ## Ежемесячная проверка: вчерашний дамп во временный контейнер + smoke (docs/26 §26.9)
-	@f=$$(ls -t backups/db/*.dump | head -1); echo "проверяю $$f"; \
-	docker run --rm -d --name lola-restore-check -e POSTGRES_PASSWORD=x pgvector/pgvector:pg16 >/dev/null && sleep 5 && \
-	docker cp $$f lola-restore-check:/tmp/d.dump && \
-	docker exec lola-restore-check sh -c 'pg_restore -U postgres -d postgres /tmp/d.dump && psql -U postgres -c "select count(*) as tenants from tenants"' ; \
+	@f=$$(ls -t backups/db/*.sql.gz 2>/dev/null | head -1); [ -n "$$f" ] || { echo "в backups/db нет дампа *.sql.gz — сначала make backup"; exit 1; }; echo "проверяю $$f"; \
+	docker run --rm -d --name lola-restore-check -e POSTGRES_PASSWORD=x pgvector/pgvector:pg16 >/dev/null && \
+	until docker exec lola-restore-check psql -h 127.0.0.1 -U postgres -c 'select 1' >/dev/null 2>&1; do sleep 1; done && \
+	docker exec lola-restore-check psql -q -U postgres -c "create role $${POSTGRES_USER:-lola}; create role app_user; create role platform_admin" && \
+	gunzip -c $$f | docker exec -i lola-restore-check psql -q -U postgres -d postgres >/dev/null && \
+	docker exec lola-restore-check psql -U postgres -c "select count(*) as tenants from tenants" ; \
 	docker rm -f lola-restore-check >/dev/null
 
 tunnel-init: ## Регистрация именованного тунеля Cloudflare — конфиг-файлом, не токеном (docs/26 §26.13.1)

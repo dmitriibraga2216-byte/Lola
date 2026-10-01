@@ -63,7 +63,7 @@ const ROW = {
   createdAt: vacancyPublications.createdAt,
 }
 
-function buildPayload(row: { title: string, descriptionHtml: string | null, requirementsHtml: string | null, dutiesHtml: string | null, extraHtml: string | null, city: string | null, countryCode: string | null, employmentType: string | null, workFormat: string | null, experienceLevel: string | null, educationLevel: string | null, salaryFrom: string | null, salaryTo: string | null, salaryCurrency: string, salaryVisible: boolean, publicToken: string | null }, languages: { langCode: string, level: string, isRequired: boolean }[]): JobBoardPublishPayload {
+function buildPayload(row: { title: string, descriptionHtml: string | null, requirementsHtml: string | null, dutiesHtml: string | null, extraHtml: string | null, city: string | null, countryCode: string | null, employmentType: string | null, workFormat: string | null, experienceLevel: string | null, educationLevel: string | null, salaryFrom: string | null, salaryTo: string | null, salaryCurrency: string, salaryVisible: boolean, publicToken: string | null }, languages: { langCode: string, level: string, isRequired: boolean }[], publicationId: string): JobBoardPublishPayload {
   const base = (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
   return {
     title: row.title,
@@ -83,7 +83,8 @@ function buildPayload(row: { title: string, descriptionHtml: string | null, requ
     salaryCurrency: row.salaryCurrency,
     salaryVisible: row.salaryVisible,
     languages,
-    applyUrl: row.publicToken ? `${base}/j/${row.publicToken}` : base,
+    // §7.19: метка публикации в ссылке — по ней отклик попадает в «Джерела» и в отчёт площадок §9.2.
+    applyUrl: row.publicToken ? `${base}/j/${row.publicToken}?s=${publicationId}` : base,
   }
 }
 
@@ -191,7 +192,7 @@ export async function attemptPublish(tenantId: string, publicationId: string): P
     return
   }
 
-  const payload = buildPayload(vac, languages)
+  const payload = buildPayload(vac, languages, publicationId)
   const result = await adapterFor(account.provider as JobBoardProvider).publish(secret, payload)
 
   if (result.ok) {

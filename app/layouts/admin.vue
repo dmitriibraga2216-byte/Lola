@@ -145,7 +145,6 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/reports/learning-activity', label: t('admin.nav.learningActivityReport'), show: hasScope('person.activity.view_others'), group: t('admin.group.coreReports') },
     { to: '/admin/journals', label: t('admin.nav.journals'), show: hasScope('audit.view'), group: t('admin.group.coreReports') },
     { to: '/admin/reports/tasks/test', label: t('admin.nav.taskReports'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
-    { to: '/admin/reports/recruiting-funnel', label: t('admin.nav.funnelReport'), show: recruitingOn() && hasScope('candidate.view'), group: t('admin.group.moduleReports') },
     { to: '/admin/checklists/report', label: t('admin.nav.checklistReport'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/meetups/report', label: t('admin.nav.attendanceReport'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/development/reports', label: t('admin.nav.devReports'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
@@ -156,6 +155,10 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/reports/ai', label: t('admin.nav.aiReports'), show: hasScope('ai.audit'), group: t('admin.group.moduleReports') },
     // «План і факт часу» (docs/v2/37 §9.3, §5.3): обезличенный отчёт и нормы времени — автору и тем, кто видит отклонение (§2)
     { to: '/admin/reports/time-plan-fact', label: t('admin.nav.timePlanFact'), show: hasScope('time.metrics.view') || hasScope('course.edit'), group: t('admin.group.moduleReports') },
+    // Рекрутинг окремою пачкою: у «Звітах модулів» уже 10 пунктів. Воронка (docs/v2/28 §9) і звіти
+    // вакансій (docs/v2/29 §9.1–§9.5, область — як у реєстрі вакансій)
+    { to: '/admin/reports/recruiting-funnel', label: t('admin.nav.funnelReport'), show: recruitingOn() && hasScope('candidate.view'), group: t('admin.group.recruitingReports') },
+    { to: '/admin/reports/vacancies', label: t('admin.nav.vacancyReports'), show: recruitingOn() && hasScope('vacancy.view'), group: t('admin.group.recruitingReports') },
   ] },
   { key: 'settings', label: t('admin.section.settings'), icon: 'gear', items: [
     { to: '/admin/settings/notifications', label: t('admin.nav.notifications'), show: hasScope('settings.notifications'), group: t('admin.group.notifications') },

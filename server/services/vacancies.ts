@@ -403,6 +403,7 @@ export type UpdateResult =
   | { ok: false, code: 'not_found' }
   | { ok: false, code: 'conflict', vacancy: VacancyCard }
   | { ok: false, code: 'state_locked' }
+  | { ok: false, code: 'salary_range' }
 
 /**
  * Правка (`29` §7.12). **Созданные назначения не трогает — вообще никак.** Изменение
@@ -421,6 +422,11 @@ export async function updateVacancy(v: Viewer, id: string, input: VacancyUpdateI
     if (input.updatedAt && new Date(input.updatedAt).getTime() !== before.updatedAt.getTime()) {
       return { ok: false, code: 'conflict', vacancy: await cardOf(tx, before) } as UpdateResult
     }
+    // «Нижня межа більша за верхню» (§6.1): границы сверяются с учётом той, что не пришла в
+    // запросе, — иначе правка одной границы падала бы на `vacancies_salary_chk` пятисотой.
+    const from = input.salaryFrom !== undefined ? input.salaryFrom : before.salaryFrom == null ? null : Number(before.salaryFrom)
+    const to = input.salaryTo !== undefined ? input.salaryTo : before.salaryTo == null ? null : Number(before.salaryTo)
+    if (from != null && to != null && from > to) return { ok: false, code: 'salary_range' } as UpdateResult
     const fields = writableFields(input) as Record<string, unknown>
 
     // Правка текстового блока людиною знімає позначку «непроверено» (§3.6, §7.9): без

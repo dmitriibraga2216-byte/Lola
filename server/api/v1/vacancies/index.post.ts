@@ -13,5 +13,8 @@ export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'vacancy.edit')
   const p = vacancyCreateSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 422, 'validation_failed', 'Перевірте дані вакансії', { issues: p.error.issues })
+  if (p.data.salaryFrom != null && p.data.salaryTo != null && p.data.salaryFrom > p.data.salaryTo) {
+    return apiError(event, 422, 'vacancy.salary_range', 'Нижня межа більша за верхню')
+  }
   return apiData(await createVacancy({ tenantId: a.tenantId, actorId: a.userId }, p.data))
 })

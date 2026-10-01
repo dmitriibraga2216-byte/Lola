@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
   const r = await updateVacancy(viewerOf(a), getRouterParam(event, 'id')!, p.data)
   if (r.ok) return apiData(r.vacancy)
   if (r.code === 'not_found') return apiError(event, 404, 'not_found', 'Вакансію не знайдено')
+  if (r.code === 'salary_range') return apiError(event, 422, 'vacancy.salary_range', 'Нижня межа більша за верхню')
   if (r.code === 'conflict') return apiError(event, 409, 'conflict', 'Вакансію змінив інший користувач', { vacancy: r.vacancy })
   return apiError(event, 409, 'vacancy.archived', 'Архівну вакансію не редагують: спочатку відновіть її')
 })

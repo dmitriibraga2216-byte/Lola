@@ -835,6 +835,8 @@ lifecycle.not_for_candidate` на `POST /assignments` и `POST /tasks` (`33` §7
 | POST | `/vacancies/:id/applications/:aid/reject` | отказ с причиной (`candidate.edit`); `422 validation_failed` |
 | POST | `/vacancies/:id/applications/:aid/spam` | пометка «спам» (`candidate.edit`): человеку ничего не уходит |
 | POST | `/vacancies/:id/applications/:aid/blocklist` | «До чорного списку» (`candidate.edit`, vacancies-tails): телефон и почта отклика разом, `{reason?}`; состояние отклика не меняется; `409 blocklist.duplicate` |
+| GET | `/vacancies/:id/applications/export` | выгрузка откликов `29` §9.6 (vacancies-tails, часть 2): `?format=xlsx\|csv`; имя, контакт, источник, дата, состояние, признаки спама, ссылка на кандидата; только `vacancy.view` на весь тенант и `report.export` (иначе `403`), `audit_log` `vacancy.applications_export` с числом строк; чужая — `404` |
+| GET | `/reports/vacancies/:name` | отчёты вакансий `29` §9.1–§9.5 (`vacancy.view`, область реестра; vacancies-tails, часть 2): `effectiveness`, `boards`, `publications`, `protection`, `ai`; фильтры `from`, `to`, `locationId`, `recruiterId`, `categoryId`, `state`, `provider`; `format=xlsx\|csv` — те же строки, `report.export` |
 
 **Публичный контур вакансии** (`29` §10, решение `docs/v2/44` В-9) — префикс `/api/v1/public/*`,
 без сессии, тенант из токена ссылки, правило контура — `docs/27-gateway-public.md` §27.8.1.

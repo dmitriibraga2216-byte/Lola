@@ -70,6 +70,8 @@ async function cleanup() {
   }
   await admin`delete from assignments where title like ${`${PREFIX}%`}`
   await admin`delete from otp_codes where phone like ${`${PHONE_BASE}%`}`
+  await admin`delete from user_roles where role_id in (select id from roles where tenant_id = ${tenantId} and code = 'v2-vt-jb')`
+  await admin`delete from roles where tenant_id = ${tenantId} and code = 'v2-vt-jb'`
   await admin`delete from notifications where tenant_id = ${tenantId} and code like 'vacancy_%'`
   await admin`delete from audit_log where tenant_id = ${tenantId} and (action like 'contact_blocklist.%' or action like 'jobboard.account_%')`
 }
@@ -230,6 +232,50 @@ describe('площадка молчит: failing и «Спробувати ще 
     const [back] = await admin`select status, last_error from job_board_accounts where id = ${acc.id}`
     expect(back).toMatchObject({ status: 'active', last_error: null })
     expect((await admin`select 1 from audit_log where entity_id = ${acc.id} and action = 'jobboard.account_recovered'`).length).toBe(1)
+  })
+
+  it('переход в failing — одно уведомление на эпизод носителям jobboard.connect, со ссылкой на «Інтеграції» (44 Р-VT.5)', async () => {
+    // Рекрутер с jobboard.connect — через кастомную роль; без скоупа уведомление не получает никто, кроме админов.
+    const [role] = await admin`insert into roles (tenant_id, code, name, scopes) values (${tenantId}, 'v2-vt-jb', 'v2-vt jobboard', array['jobboard.connect']::text[]) returning id`
+    await admin`insert into user_roles (tenant_id, user_id, role_id, scope_type) values (${tenantId}, ${recruiterId}, ${role!.id}, 'tenant')`
+    try {
+      const acc = await companyAccount('robota_ua')
+      const notes = () => admin`select user_id, payload, dedup_key from notifications where tenant_id = ${tenantId} and code = 'vacancy_account_failing' and ref_id = ${acc.id}`
+
+      await simulateProviderOutage(tenantId, acc.id)
+      await vacancyPublicationHealthTenant(tenantId)
+      const first = await notes()
+      const users = first.map(n => n.user_id as string)
+      expect(users).toContain(recruiterId)
+      expect(users).toContain(adminId)
+      expect(new Set(users).size).toBe(users.length)
+      expect(first[0]!.payload).toMatchObject({ platform: 'robota_ua', url: '/admin/vacancies?tab=integrations' })
+
+      // Пока площадка молчит — без повторов: ни фоновый проход, ни «Спробувати ще раз».
+      await vacancyPublicationHealthTenant(tenantId)
+      expect(await recheckAccount(hrAdminCtx, acc.id)).toEqual({ ok: true, outcome: 'failing' })
+      expect((await notes()).length).toBe(first.length)
+
+      // Вернулась и снова замолчала — новый эпизод, новое уведомление.
+      await simulateProviderRecovery(tenantId, acc.id)
+      await vacancyPublicationHealthTenant(tenantId)
+      await simulateProviderOutage(tenantId, acc.id)
+      await vacancyPublicationHealthTenant(tenantId)
+      expect((await notes()).length).toBe(first.length * 2)
+
+      // Личный аккаунт админа рекрутер не видит (§7.14) — и уведомления о нём не получает.
+      const personal = await connectAccount(hrAdminCtx, { provider: 'telegram', ownerType: 'personal', label: `${PREFIX}personal-failing` })
+      if (!personal.ok) throw new Error('personal setup failed')
+      await simulateProviderOutage(tenantId, personal.account.id)
+      await vacancyPublicationHealthTenant(tenantId)
+      const own = await admin`select user_id from notifications where code = 'vacancy_account_failing' and ref_id = ${personal.account.id}`
+      expect(own.map(n => n.user_id)).toContain(adminId)
+      expect(own.map(n => n.user_id)).not.toContain(recruiterId)
+    }
+    finally {
+      await admin`delete from user_roles where role_id = ${role!.id}`
+      await admin`delete from roles where id = ${role!.id}`
+    }
   })
 
   it('«Спробувати ще раз» по чужому личному аккаунту — not_found (§7.14)', async () => {

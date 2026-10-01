@@ -444,7 +444,7 @@ Bearer-токену тенанта `/api/v1/platform/*` недоступен.
 | GET/PATCH | `/platform/tenants/:id` |
 | POST | `/platform/tenants/:id/suspend` \| `/resume` \| `/extend-trial` |
 | POST | `/platform/tenants/:id/impersonate` `{reason}` |
-| GET/POST, PATCH `/:code`, POST `/:code/archive` \| `/:code/restore` | `/platform/plans` (§4.4.2, ops-plans-crud; удаления нет — архив) |
+| GET/POST, PATCH `/:code`, POST `/:code/archive` \| `/:code/restore` | `/platform/plans` (§4.4.2, ops-plans-crud; удаления нет — архив). `GET` отдаёт `priceMissing` — «ціну не задано» (решение владельца 01.10, `v2/44` Р-BL.1) |
 | GET | `/platform/metrics` |
 | GET/POST, PATCH `/:id`, POST `/:id/publish` \| `/:id/archive` | `/platform/announcements` (§4.7, PR-39) |
 | POST | `/platform/tenants/:id/users/:userId/two-factor-reset` `{reason}` (§4.8, PR-39) |
@@ -452,6 +452,12 @@ Bearer-токену тенанта `/api/v1/platform/*` недоступен.
 | GET, POST `/verify` \| `/setup` \| `/confirm` \| `/recovery-codes`, DELETE | `/auth/two-factor` |
 | GET | `/settings/two-factor` |
 | DELETE | `/people/:id/two-factor` |
+
+> [дополнено, решение владельца 01.10, `v2/44` Р-BL.1, Р-BL.2] **Цены и ИИ.** Цены тарифов в код не зашиваются:
+> их задаёт оператор в каталоге (`/platform/plans`). Тариф без `price_uah` и без действующей строки `plan_prices`
+> — «ціну не задано»: консоль показывает отметку в сетке и плашку над ней; `0` — явно бесплатный тариф. Вызовы
+> ИИ деньгами не тарифицируются — входят в тариф и ограничены квотами осей; `ai_calls.cost_minor` в
+> `/platform/metrics` — себестоимость для оператора, не сумма к оплате.
 
 ## 10. Фоновые задачи
 

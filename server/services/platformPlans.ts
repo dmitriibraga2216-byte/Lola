@@ -1,5 +1,5 @@
-import { asc, eq, inArray, sql } from 'drizzle-orm'
-import { auditLog, planAddons, platformAudit, plans, tenantLimits, tenants } from '../db/schema'
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { auditLog, planAddons, planPrices, platformAudit, plans, tenantLimits, tenants } from '../db/schema'
 import { currentRequestContext } from '../utils/requestContext'
 import { platformDb, type PlatformAuth } from './platform'
 import { invalidateLimits } from './tenantLimits'
@@ -75,13 +75,24 @@ async function unknownAddons(tx: Tx, codes: string[] | undefined): Promise<boole
   return found.length !== new Set(codes).size
 }
 
-/** Сетка тарифов с числом компаний на каждом — оператор видит, кого заденет правка. */
+/**
+ * Сетка тарифов с числом компаний на каждом — оператор видит, кого заденет правка.
+ *
+ * `priceMissing` — «ціну не задано» (решение владельца 01.10, docs/v2/44 Р-BL.1): цены в код не
+ * зашиваются, их задаёт оператор. Цена считается заданной, если есть `price_uah` (в том числе `0` —
+ * явно бесплатный тариф) или действующая строка `plan_prices`; `null` без строки — не «бесплатно»,
+ * а «не задано», и консоль просит её задать.
+ */
 export async function listPlansForOperator() {
   const db = platformDb()
   const rows = await db.select().from(plans).orderBy(asc(plans.sort), asc(plans.code))
   const counts = await db.select({ plan: tenants.plan, n: sql<number>`count(*)::int` }).from(tenants).groupBy(tenants.plan)
   const byPlan = new Map(counts.map(c => [c.plan, c.n]))
-  return rows.map(p => ({ ...p, companies: byPlan.get(p.code) ?? 0 }))
+  const priced = new Set((await db.selectDistinct({ code: planPrices.planCode }).from(planPrices).where(and(
+    lte(planPrices.validFrom, sql`current_date`),
+    or(isNull(planPrices.validTo), gte(planPrices.validTo, sql`current_date`)),
+  ))).map(r => r.code))
+  return rows.map(p => ({ ...p, companies: byPlan.get(p.code) ?? 0, priceMissing: p.priceUah == null && !priced.has(p.code) }))
 }
 
 export async function createPlan(actor: PlatformAuth, input: PlanCreateInput): Promise<{ ok: true, plan: Plan } | PlanError> {

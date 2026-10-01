@@ -484,6 +484,24 @@ describe('каталог тарифов (docs/24 §4.4.2, docs/v2/44 В-21)', ()
     expect(bad).toEqual({ ok: false, code: 'unknown_addon' })
   })
 
+  it('цена не задана — признак для консоли: ни price_uah, ни действующей plan_prices (44 Р-BL.1)', async () => {
+    const bare = `${code}np`
+    expect((await Plans.createPlan(actor, { code: bare, name: 'Без ціни' })).ok).toBe(true)
+    const missing = async (c: string) => (await Plans.listPlansForOperator()).find(p => p.code === c)?.priceMissing
+    // Новый тариф без цены и засеянные «Точка»/«Мережа» (0107 сняла цены-заглушки) — «не задано»
+    expect(await missing(bare)).toBe(true)
+    expect(await missing('point')).toBe(true)
+    expect(await missing('network')).toBe(true)
+    // «Пробний» 0 ₴ — явно бесплатный, а не «не задано»; заданная цена в каталоге — тоже
+    expect(await missing('trial')).toBe(false)
+    expect(await missing(code)).toBe(false)
+    // Истёкшая строка plan_prices цену не задаёт, действующая — задаёт
+    await admin`insert into plan_prices (plan_code, billing_period, currency, amount_minor, valid_from, valid_to) values (${bare}, 'month', 'EUR', 4900, current_date - 60, current_date - 1)`
+    expect(await missing(bare)).toBe(true)
+    await admin`insert into plan_prices (plan_code, billing_period, currency, amount_minor) values (${bare}, 'month', 'EUR', 5900)`
+    expect(await missing(bare)).toBe(false)
+  })
+
   it('правка тарифа с компаниями: без причины — отказ с их числом; сниженный лимит закрепляется, повышенный — применяется', async () => {
     const a = await mkTenant('pa', code) // без своего переопределения
     const b = await mkTenant('pb', code) // со своим переопределением users = 70

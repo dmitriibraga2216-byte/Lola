@@ -252,6 +252,8 @@ export const DEFAULT_TEMPLATES: Record<string, string> = {
   vacancy_published_external: 'Вакансію «{{vacancy}}» опубліковано на {{platform}}',
   vacancy_publication_failed: 'Не вдалося опублікувати «{{vacancy}}» на {{platform}}: {{error}}',
   vacancy_account_revoked: 'Акаунт {{platform}} більше не авторизований. Підключіть його заново',
+  // docs/v2/44 Р-VT.5 (решение владельца 01.10): площадка перестала отвечать — раз на эпизод `failing`
+  vacancy_account_failing: 'Майданчик {{platform}} не відповідає{{#since}} з {{since}}{{/since}}. Нові публікації на ньому не виходять. Відкрийте «Інтеграції» і натисніть «Спробувати ще раз»; якщо не допомогло — перевірте акаунт на самому майданчику або підключіть його заново',
   vacancy_publication_expiring: 'Оголошення «{{vacancy}}» на {{platform}} завершується {{date}}',
   // vacancies.ts (PR-15) уже пише в комментарии «получает vacancy.closed_with_candidates» —
   // код был анонсирован раньше, чем заведён; закрываем разрыв.

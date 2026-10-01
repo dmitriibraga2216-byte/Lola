@@ -1,6 +1,7 @@
 import { and, desc, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm'
 import { jobBoardAccounts, vacancies, vacancyLanguages, vacancyPublications } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
+import type { TenantTx } from '../utils/withTenant'
 import { recordAudit } from './audit'
 import { accountSecret, revokeAccount } from './jobBoardAccounts'
 import { adapterFor, payloadHash } from './jobBoardAdapter'
@@ -8,6 +9,7 @@ import type { JobBoardPublishPayload } from './jobBoardAdapter'
 import { rowById } from './vacancies'
 import type { Viewer } from './vacancies'
 import { enqueueNotification, tenantAdminIds } from './notifications'
+import { scopeHolders } from './contentIssueNotify'
 import { enqueuePublishRetry } from './queue'
 import { VACANCY_PUBLICATION_EXPIRING_DAYS, VACANCY_PUBLISH_RETRY_DELAYS_SEC } from '../../shared/enums'
 import type { JobBoardProvider } from '../../shared/enums'
@@ -255,6 +257,34 @@ export async function attemptPublish(tenantId: string, publicationId: string): P
  * пишутся в `audit_log`: «с какого момента молчит» — вопрос разбора, а не только экрана.
  * `manual`-строки не проверяются: у них нет секрета и нечего спрашивать.
  */
+/** Экран площадки — вкладка «Інтеграції» реестра вакансий (`29` §5.4): там «Спробувати ще раз». */
+export const JOB_BOARD_ACCOUNTS_URL = '/admin/vacancies?tab=integrations'
+
+/**
+ * «Майданчик мовчить» (`44` Р-VT.5, решение владельца 01.10): одно уведомление на эпизод
+ * `active → failing`. Адресаты — те, кто может сам нажать «Спробувати ще раз» по этому аккаунту:
+ * носители `jobboard.connect` (скоуп ручки recheck) с видимостью аккаунта по §7.14 — у
+ * компанейского все, у личного только его владелец, — плюс админы тенанта, как у отзыва токена.
+ * Ключ — аккаунт × прежний `last_ok_at` × человек: повторный проход задачи и две проверки разом
+ * второго письма не дают, а после возврата в `active` `last_ok_at` новый — и новый эпизод.
+ */
+async function notifyAccountFailing(tx: TenantTx, tenantId: string, account: typeof jobBoardAccounts.$inferSelect): Promise<void> {
+  const recipients = new Set<string>(await tenantAdminIds(tx, tenantId))
+  if (account.ownerType === 'company') {
+    for (const id of await scopeHolders(tx, 'jobboard.connect')) recipients.add(id)
+  }
+  else if (account.ownerUserId) recipients.add(account.ownerUserId)
+  const episode = account.lastOkAt?.toISOString() ?? 'never'
+  for (const userId of recipients) {
+    await enqueueNotification(tx, {
+      tenantId, userId, code: 'vacancy_account_failing',
+      payload: { platform: account.provider, since: account.lastOkAt?.toISOString() ?? null, url: JOB_BOARD_ACCOUNTS_URL },
+      dedupKey: `vacancy_account_failing:${account.id}:${episode}:${userId}`,
+      refType: 'job_board_account', refId: account.id,
+    }).catch(() => false)
+  }
+}
+
 export type HealthOutcome = 'ok' | 'failing' | 'revoked' | 'skipped'
 
 export async function checkAccountHealth(tenantId: string, accountId: string): Promise<HealthOutcome> {
@@ -284,6 +314,7 @@ export async function checkAccountHealth(tenantId: string, accountId: string): P
       .where(eq(jobBoardAccounts.id, accountId))
     if (account.status === 'active') {
       await recordAudit(tx, { tenantId, actorId: null, action: 'jobboard.account_failing', entity: 'job_board_account', entityId: accountId, before: { status: 'active' }, after: { status: 'failing', error: health.error, lastOkAt: account.lastOkAt } })
+      await notifyAccountFailing(tx, tenantId, account)
     }
   })
   return health.ok ? 'ok' : 'failing'

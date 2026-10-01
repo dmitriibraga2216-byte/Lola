@@ -23,12 +23,16 @@ interface Plan extends Record<LimitField, number | null> {
   code: string, name: string, titleUk: string | null, tier: number
   aiIncluded: boolean, aiTermDays: number | null, addonsAllowed: string[], priceUah: number | null
   isActive: boolean, sort: number, validFrom: string, validTo: string | null, companies: number
+  /** Ціну не задано (docs/v2/44 Р-BL.1): ні `price_uah`, ні чинного рядка `plan_prices` — рахує сервер */
+  priceMissing: boolean
 }
 const plans = ref<Plan[]>([])
 const error = ref('')
 const notice = ref('')
 const busy = ref(false)
 const manage = computed(() => can('billing.plans'))
+/** Чинні тарифи без ціни — оператор має її задати: у коді цін немає (docs/v2/44 Р-BL.1) */
+const unpriced = computed(() => plans.value.filter(p => p.isActive && p.priceMissing))
 
 async function load() {
   try { plans.value = await ops<Plan[]>('/plans') }
@@ -139,6 +143,10 @@ async function runArchive() {
     <p class="help">{{ t(manage ? 'opsConsole.plansPage.hintManage' : 'opsConsole.plansPage.hint') }}</p>
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <p v-if="notice" class="note teal" role="status">{{ notice }} <button type="button" class="link" :aria-label="t('common.close')" @click="notice = ''">×</button></p>
+    <div v-if="unpriced.length" class="note coral" role="status" data-testid="ops-plans-unpriced">
+      <p><b>{{ t('opsConsole.plansPage.unpricedTitle', { plans: unpriced.map(p => p.name).join(', ') }) }}</b></p>
+      <p>{{ t(manage ? 'opsConsole.plansPage.unpricedManage' : 'opsConsole.plansPage.unpricedView') }}</p>
+    </div>
     <div v-if="manage && !formOpen" class="chips head"><button type="button" class="btn primary" data-testid="ops-plan-new" @click="openForm(null)">{{ t('opsConsole.plansPage.new') }}</button></div>
 
     <form v-if="formOpen" class="card create" data-testid="ops-plan-form" @submit.prevent="save" @keydown.esc="closeForm">
@@ -215,7 +223,7 @@ async function runArchive() {
             <td class="num">{{ n(p.maxStorageGb) }}</td>
             <td class="num">{{ n(p.maxSmsPerMonth) }}</td>
             <td class="num">{{ n(p.maxCandidates) }}</td>
-            <td class="num">{{ p.priceUah != null ? `${p.priceUah} ₴` : '—' }}</td>
+            <td class="num"><span v-if="p.priceMissing" class="badge coral">{{ t('opsConsole.plansPage.priceMissing') }}</span><template v-else>{{ p.priceUah != null ? `${p.priceUah} ₴` : '—' }}</template></td>
             <td><span class="badge" :class="p.isActive ? 'teal' : 'muted'">{{ t(p.isActive ? 'opsConsole.plansPage.active' : 'opsConsole.plansPage.inactive') }}</span></td>
             <td v-if="manage">
               <div class="actions">

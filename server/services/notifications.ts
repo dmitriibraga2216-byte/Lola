@@ -387,7 +387,15 @@ export const RECIPIENT_TIME_CODES = new Set(['summary_auto_send_scheduled'])
  * людини. Викликач вирішує, чи діставати пояс з БД (дорого при масовій розсилці) — саме тому
  * тут не запит, а вже готовий рядок.
  */
-export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s, locale: Locale = 'uk', ctx: { code?: string, timezone?: string } = {}): string {
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+const escapeHtmlValue = (v: string) => v.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!)
+
+/**
+ * `ctx.html` — шаблон становится HTML письма (`body_mjml`, шапка и подвал): подстановки экранируются
+ * (security-sweep-2). Значения — имена людей, названия курсов, комментарии к бонусам: без экранирования
+ * любой автор контента вставлял бы в письмо от имени тенанта свои ссылки и формы.
+ */
+export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (phrase: string) => string = s => s, locale: Locale = 'uk', ctx: { code?: string, timezone?: string, html?: boolean } = {}): string {
   const withHour = ctx.code != null && RECIPIENT_TIME_CODES.has(ctx.code)
   let out = tpl.replace(/\{\{#_tr\}\}([\s\S]*?)\{\{\/_tr\}\}/g, (_, phrase: string) => tr(phrase))
   out = out.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key: string, inner: string) =>
@@ -400,7 +408,7 @@ export function renderTemplate(tpl: string, vars: Record<string, unknown>, tr: (
         ? formatDateTime(new Date(v), locale, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: ctx.timezone })
         : formatDate(new Date(v), locale, { day: 'numeric', month: 'long' })
     }
-    return String(v)
+    return ctx.html ? escapeHtmlValue(String(v)) : String(v)
   })
   return out.trim()
 }
@@ -719,9 +727,9 @@ export async function dispatchNotifications(tenantId: string, limit = 100): Prom
         const subject = channel === 'email' && tpl.subject ? renderTemplate(tpl.subject, vars, tr, locale, renderCtx) : n.code
         const html = channel === 'email' && tpl.bodyMjml
           ? buildEmailHtml({
-              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr, locale, renderCtx),
+              bodyMjml: renderTemplate(tpl.bodyMjml, vars, tr, locale, { ...renderCtx, html: true }),
               fallbackText: text,
-              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr, locale, renderCtx) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr, locale, renderCtx) : '' },
+              layout: { headerMjml: tenantSettings.emailLayout.headerMjml ? renderTemplate(tenantSettings.emailLayout.headerMjml, vars, tr, locale, { ...renderCtx, html: true }) : '', footerMjml: tenantSettings.emailLayout.footerMjml ? renderTemplate(tenantSettings.emailLayout.footerMjml, vars, tr, locale, { ...renderCtx, html: true }) : '' },
             })
           : undefined
         const res = await sendViaChannel(tenantId, channel as 'sms' | 'email' | 'push', { userId: n.userId, text, subject, html })

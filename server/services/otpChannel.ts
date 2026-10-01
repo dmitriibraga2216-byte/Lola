@@ -46,7 +46,7 @@ export async function sendOtpEmail(tenantId: string, email: string, code: string
     const subject = renderTemplate(tpl.subject ?? DEFAULT_OTP_SUBJECT, vars, tr, loc)
     const mjmlSrc = tpl.bodyMjml ?? (tpl.scope === 'global' ? DEFAULT_OTP_MJML : null)
     const html = buildEmailHtml({
-      bodyMjml: mjmlSrc ? renderTemplate(mjmlSrc, vars, tr, loc) : null,
+      bodyMjml: mjmlSrc ? renderTemplate(mjmlSrc, vars, tr, loc, { html: true }) : null,
       fallbackText: text,
       layout: { headerMjml: settings.emailLayout.headerMjml, footerMjml: settings.emailLayout.footerMjml },
     })

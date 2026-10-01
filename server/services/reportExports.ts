@@ -106,7 +106,13 @@ export async function reportRows(tenantId: string, userId: string, report: strin
 export function toCsv(rows: Row[]): Buffer {
   if (!rows.length) return Buffer.from('')
   const cols = Object.keys(rows[0]!)
-  const esc = (v: unknown) => { const s = v == null ? '' : v instanceof Date ? v.toISOString() : String(v); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+  // Строка с `=`/`+`/`-`/`@` в начале — формула для Excel/Sheets: имена и названия пишут люди, в т. ч.
+  // анонимный отклик на вакансию, — гасим апострофом, как `csvCell` импорта (security-sweep-2)
+  const esc = (v: unknown) => {
+    let s = v == null ? '' : v instanceof Date ? v.toISOString() : String(v)
+    if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`
+    return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
   return Buffer.from(`\uFEFF${[cols.join(';'), ...rows.map(r => cols.map(c => esc(r[c])).join(';'))].join('\n')}`, 'utf-8')
 }
 

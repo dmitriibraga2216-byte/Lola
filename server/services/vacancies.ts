@@ -21,6 +21,7 @@ import { candidates as candidatesQuery } from './repo/people'
 import { recordAudit } from './audit'
 import { createAssignmentTx } from './assignments'
 import { enqueueNotification, tenantAdminIds } from './notifications'
+import { sanitizeUserHtml } from './sanitize'
 
 /**
  * Вакансии: реестр, состояния, критерии оценки, шаблон параметров назначения
@@ -323,6 +324,9 @@ async function languagesOf(tx: TenantTx, vacancyId: string): Promise<LanguageRow
 
 const num = (v: number | null | undefined) => (v === null || v === undefined ? null : String(v))
 
+/** HTML вакансии рендерится публичной страницей `/j/<token>` через `v-html` — allowlist при сохранении (security-sweep-2). */
+const html = (v: string | null | undefined) => (typeof v === 'string' ? sanitizeUserHtml(v) : v)
+
 function writableFields(input: VacancyCreateInput | VacancyUpdateInput) {
   const o: Record<string, unknown> = {}
   const set = <K extends string>(k: K, value: unknown) => { if (value !== undefined) o[k] = value }
@@ -333,10 +337,10 @@ function writableFields(input: VacancyCreateInput | VacancyUpdateInput) {
   set('locationId', input.locationId)
   set('orgUnitId', input.orgUnitId)
   set('positionId', input.positionId)
-  set('descriptionHtml', input.descriptionHtml)
-  set('requirementsHtml', input.requirementsHtml)
-  set('dutiesHtml', input.dutiesHtml)
-  set('extraHtml', input.extraHtml)
+  set('descriptionHtml', html(input.descriptionHtml))
+  set('requirementsHtml', html(input.requirementsHtml))
+  set('dutiesHtml', html(input.dutiesHtml))
+  set('extraHtml', html(input.extraHtml))
   set('employmentType', input.employmentType)
   set('workFormat', input.workFormat)
   set('countryCode', input.countryCode)
@@ -386,10 +390,10 @@ export async function createVacancy(ctx: Ctx, input: VacancyCreateInput): Promis
     const created = await rowById(tx, v, row!.id)
     return {
       ...created!,
-      descriptionHtml: input.descriptionHtml ?? null,
-      requirementsHtml: input.requirementsHtml ?? null,
-      dutiesHtml: input.dutiesHtml ?? null,
-      extraHtml: input.extraHtml ?? null,
+      descriptionHtml: html(input.descriptionHtml) ?? null,
+      requirementsHtml: html(input.requirementsHtml) ?? null,
+      dutiesHtml: html(input.dutiesHtml) ?? null,
+      extraHtml: html(input.extraHtml) ?? null,
       aiBlocks: {},
       assignmentTemplate: templateOf(input.assignmentTemplate),
       criteria: [],

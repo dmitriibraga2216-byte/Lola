@@ -703,7 +703,7 @@ const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'a
           <tr v-for="p in publications" :key="p.id">
             <td>{{ t(`vacancy.jobBoardProvider.${p.provider}`) }} · {{ t(`vacancy.jobBoardOwnerType.${p.ownerType}`) }}</td>
             <td>
-              <a v-if="p.externalUrl" :href="p.externalUrl" target="_blank" rel="noopener">{{ t(`vacancy.publicationState.${p.state}`) }}</a>
+              <a v-if="p.externalUrl && /^https?:\/\//i.test(p.externalUrl)" :href="p.externalUrl" target="_blank" rel="noopener">{{ t(`vacancy.publicationState.${p.state}`) }}</a>
               <span v-else>{{ t(`vacancy.publicationState.${p.state}`) }}</span>
             </td>
             <td>

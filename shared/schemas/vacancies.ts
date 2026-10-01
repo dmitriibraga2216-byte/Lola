@@ -279,7 +279,8 @@ export const vacancyPublicationCreateSchema = z
     manual: z
       .object({
         accountId: z.string().uuid(),
-        externalUrl: z.string().trim().min(3).max(2000),
+        // Ссылка рендерится в `href`: только http(s) — `javascript:` и прочие схемы отсекаются (security-sweep-2)
+        externalUrl: z.string().trim().min(3).max(2000).regex(/^https?:\/\//i, 'Посилання має починатися з https://'),
       })
       .strict()
       .optional(),

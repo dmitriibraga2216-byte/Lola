@@ -5954,7 +5954,17 @@
     "nothingFound": "No nodes match these filters",
     "resetFilters": "Reset filters",
     "filters": "Structure filters",
-    "employeeAfterSave": "You will choose the employee right after saving the node"
+    "employeeAfterSave": "You will choose the employee right after saving the node",
+    "sot": {
+      "title": "Tree as the source of truth",
+      "hint": "The tree already has {n} nodes. Make it the source of truth and each person's manager will come from the tree, not from the location's “Manager” field. Notifications, digests and escalations will go to managers from the tree.",
+      "mismatches": "Open mismatches between the tree and the location field: {n}. After the switch the tree wins — review “Structure conflicts”.",
+      "enable": "Make the tree the source of truth",
+      "confirm": "Managers will be defined by the tree from now on. You can't switch back to the location field. Continue?",
+      "yes": "Yes, switch",
+      "cancel": "Cancel",
+      "done": "The tree is now the source of truth. The manager changed for {n} people — they have been notified"
+    }
   },
   "orgImport": {
     "title": "Org structure import",

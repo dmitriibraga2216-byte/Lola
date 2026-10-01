@@ -45,7 +45,8 @@ interface Node {
   holders: Holder[]
   children: Node[]
 }
-interface Tree { nodes: Node[], total: number, mode: 'admin' | 'view', canEditAll: boolean, branches: string[] }
+interface SourceOfTruth { enabled: boolean, liveNodes: number, eligible: boolean, mismatches: number }
+interface Tree { nodes: Node[], total: number, mode: 'admin' | 'view', canEditAll: boolean, branches: string[], sourceOfTruth: SourceOfTruth | null }
 interface Ref { id: string, name: string, isActive?: boolean }
 
 /** Подпись роли держателя — ключи словаря, а не склейка строки из кода роли. */
@@ -307,6 +308,23 @@ async function snapshot() {
   finally { busy.value = false }
 }
 
+/**
+ * Дерево — источник истины о руководителе (`32` §7.8): как только живых узлов стало пять,
+ * администратору предлагается перевод; переводит его подтверждение — второй шаг той же плашки.
+ */
+const sotConfirm = ref(false)
+async function enableSourceOfTruth() {
+  busy.value = true
+  error.value = ''
+  try {
+    const r = await api<{ changed: number }>('/org-structure/source-of-truth', { method: 'POST', body: { confirm: true } })
+    sotConfirm.value = false
+    await dialogDone(t('orgStructure.sot.done', { n: r.changed }))
+  }
+  catch (err) { fail(err) }
+  finally { busy.value = false }
+}
+
 function askMove(node: Node, targetId: string | null) {
   const target = targetId ? byId.value.get(targetId) ?? null : null
   moveReq.value = { node, target, descendants: descendantsOf(flat.value, node.id).length }
@@ -362,6 +380,19 @@ onMounted(load)
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+    <section v-if="tab === 'admin' && tree?.sourceOfTruth?.eligible" class="card sot" :aria-label="t('orgStructure.sot.title')">
+      <h2>{{ t('orgStructure.sot.title') }}</h2>
+      <p class="sub">{{ t('orgStructure.sot.hint', { n: tree.sourceOfTruth.liveNodes }) }}</p>
+      <p v-if="tree.sourceOfTruth.mismatches" class="sub">{{ t('orgStructure.sot.mismatches', { n: tree.sourceOfTruth.mismatches }) }}</p>
+      <div class="actions">
+        <button v-if="!sotConfirm" type="button" class="btn primary" :disabled="busy" @click="sotConfirm = true">{{ t('orgStructure.sot.enable') }}</button>
+        <template v-else>
+          <span class="sub">{{ t('orgStructure.sot.confirm') }}</span>
+          <button type="button" class="btn primary" :disabled="busy" @click="enableSourceOfTruth">{{ t('orgStructure.sot.yes') }}</button>
+          <button type="button" class="btn" :disabled="busy" @click="sotConfirm = false">{{ t('orgStructure.sot.cancel') }}</button>
+        </template>
+      </div>
+    </section>
     <div v-if="loadFailed" class="error" role="alert">
       {{ t('orgStructure.loadError') }}
       <button type="button" class="btn small" @click="load">{{ t('orgStructure.retry') }}</button>
@@ -540,4 +571,5 @@ input[type="checkbox"], input[type="radio"] { width: auto; }
 .sub { color: var(--color-ink-faint); font-size: var(--font-size-body-s); margin: 0; }
 .error { background: var(--color-coral); color: var(--color-coral-deep); padding: var(--space-3); border-radius: var(--radius-m); }
 .notice { color: var(--color-teal-ink); }
+.sot { display: grid; gap: var(--space-2); margin-bottom: var(--space-3); }
 </style>

@@ -56,6 +56,12 @@ export const orgSnapshotCreateSchema = z.object({
   kind: z.enum(ORG_SNAPSHOT_KINDS).optional(),
 })
 
+/**
+ * Перевод дерева в источник истины о руководителе (`docs/v2/32` §7.8): подтверждение
+ * администратора — явное `confirm: true`, а не пустой POST.
+ */
+export const orgSourceOfTruthSchema = z.object({ confirm: z.literal(true) })
+
 export const orgTreeQuerySchema = z.object({
   mode: z.enum(['admin', 'view']).optional(),
   includeArchived: z.coerce.boolean().optional(),

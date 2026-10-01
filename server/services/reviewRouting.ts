@@ -5,7 +5,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { currentRequestContext } from '../utils/requestContext'
 import { recordAudit } from './audit'
 import { enqueueNotification } from './notifications'
-import { absentUserIds, gradeReviewers, isActiveEmployee, managerChainOf, namesOf, reviewerLoads, tenantAdmins } from './reviewPeople'
+import { absentUserIds, escalationTarget, gradeReviewers, isActiveEmployee, managerChainOf, namesOf, reviewerLoads, tenantAdmins } from './reviewPeople'
 import { pickLeastLoaded, pickRoundRobin, restingStatus, ruleMatches, scopeIsEmpty } from './reviewRules'
 import type { RuleScope } from './reviewRules'
 import type { ReviewActor } from './reviewActor'
@@ -257,8 +257,9 @@ export async function notifyAssigned(tx: TenantTx, tenantId: string, item: Pick<
 export async function notifyOverloaded(tx: TenantTx, tenantId: string, reviewerId: string): Promise<void> {
   const load = (await reviewerLoads(tx, [reviewerId])).get(reviewerId)
   if (!load || load.open < load.max) return
-  const managers = await managerChainOf(tx, tenantId, reviewerId)
-  const target = managers[0] ?? (await tenantAdmins(tx)).find(id => id !== reviewerId)
+  // Руководитель проверяющего; уволен, заблокирован или его нет — вверх по дереву до ближайшего
+  // действующего держателя, выше никого — администратор (`44` Р-MT.1.4).
+  const target = (await escalationTarget(tx, { tenantId, userId: reviewerId, assignedReviewerId: null }))?.id
   if (!target || target === reviewerId) return
   const names = await namesOf(tx, [reviewerId])
   await enqueueNotification(tx, {

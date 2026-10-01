@@ -140,3 +140,19 @@ export const reviewDelegationJournalQuerySchema = z.object({
   format: z.enum(['xlsx']).optional(),
 })
 export type ReviewDelegationJournalQuery = z.infer<typeof reviewDelegationJournalQuerySchema>
+
+/**
+ * Отчёт «Робота перевіряючих» — `GET /reports/reviewers` (`docs/v2/37` §9.2, `41` §2). Фильтры
+ * §9.2: період, філія (точка работы — только сужает область смотрящего), тип завдання, тип
+ * суб'єкта. Без периода — последние 30 суток по сегодня включительно (`44` Р-MT.1.2).
+ * `format=xlsx` — выгрузка теми же строками (`report.export`).
+ */
+export const reviewerWorkReportQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  locationId: z.string().uuid().optional(),
+  taskType: z.enum(REVIEW_TASK_TYPES).optional(),
+  subjectKind: z.enum(USER_KINDS).optional(),
+  format: z.enum(['xlsx']).optional(),
+}).refine(v => !v.from || !v.to || v.from <= v.to, { message: 'from_after_to', path: ['to'] })
+export type ReviewerWorkReportQuery = z.infer<typeof reviewerWorkReportQuerySchema>

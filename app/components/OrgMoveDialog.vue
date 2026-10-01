@@ -26,7 +26,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await api(`/org-structure/nodes/${props.node.id}/move`, { method: 'POST', body: { parentId: props.target?.id ?? null, keepChildren: keepChildren.value } })
+    await api(`/org-structure/nodes/${props.node.id}/move`, { method: 'POST', idempotent: true, body: { parentId: props.target?.id ?? null, keepChildren: keepChildren.value } })
     emit('done', t('orgStructure.moved'))
   }
   catch (err) {

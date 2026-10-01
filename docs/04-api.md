@@ -22,7 +22,10 @@
   заголовок `Idempotency-Key`, хранение ключа 24 часа.
   Реализовано (`v2/44` §18 Р-CC.3): `POST /tests/:id/attempts` (и `/learning/quizzes/:id/attempts`),
   `POST /enrollments/:id/items/:itemId/complete` (и `/learning/enrollments/:id/lessons/:lessonId/complete`),
-  `POST /learning/resources/:id/complete`. Заголовок необязателен; ключ — 1–255 печатных ASCII без
+  `POST /learning/resources/:id/complete`; все мутации `/org-structure/*` (`v2/32` §10, `v2/44`
+  Р-CC.5). У `POST /vacancies/:id/publications` заголовок **обязателен** (`v2/41` §5.3): без него
+  `400 idempotency.key_required`. Multipart (импорт CSV) сравнивается по частям, без границы.
+  В остальных ручках заголовок необязателен; ключ — 1–255 печатных ASCII без
   пробелов, живёт в пространстве «тенант × человек». Повтор с тем же ключом и тем же запросом
   (метод, путь, тело) отдаёт сохранённые статус и тело с заголовком `Idempotent-Replayed: true`,
   действие второй раз не выполняется; ответ 5xx и сбой сервера ключ не запечатывают. Ключи хранятся
@@ -51,6 +54,7 @@
 | 403 | `forbidden` | нет скоупа |
 | 404 | `not_found` | нет объекта в этом тенанте |
 | 400 | `idempotency.key_invalid` | `Idempotency-Key` пустой, длиннее 255 или с пробелами/не-ASCII |
+| 400 | `idempotency.key_required` | ручка требует `Idempotency-Key`, а его нет (публикация на площадку) |
 | 409 | `conflict` | параллельное изменение (см. `version`) |
 | 409 | `idempotency.in_progress` | первый запрос с этим ключом ещё выполняется — повторить позже |
 | 422 | `course.not_publishable` | не прошли проверки публикации |

@@ -503,6 +503,8 @@ export async function decideRequest(ctx: Ctx, enrollmentId: string, approve: boo
     // Заявка через каталог: status = not_assigned + requested_at; отказ — cancelled_at
     const [enr] = await tx.select().from(programEnrollments).where(and(eq(programEnrollments.id, enrollmentId), eq(programEnrollments.status, 'not_assigned'), sql`${programEnrollments.requestedAt} is not null`, isNull(programEnrollments.cancelledAt)))
     if (!enr) return null
+    // Свою заявку не одобряют (security-sweep-4): наставник с `assignment.create` выдавал себе программу «с погодженням»
+    if (approve && enr.userId === ctx.actorId) return { status: 'self' as const }
     if (!approve) {
       await tx.update(programEnrollments).set({ cancelledAt: new Date(), cancelReason: reason ?? null, updatedAt: new Date() }).where(eq(programEnrollments.id, enrollmentId))
       await logPassEvent(tx, ctx.tenantId, { subjectType: 'training_program', subjectId: enr.programId, enrollmentId, userId: enr.userId, event: 'cancelled', payload: { from: 'not_assigned', reason: reason ?? 'request_rejected' }, actorId: ctx.actorId })

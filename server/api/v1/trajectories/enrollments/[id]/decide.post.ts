@@ -8,6 +8,7 @@ export default defineEventHandler(async (event) => {
   const p = catalogDecideSchema.safeParse(await readBody(event))
   if (!p.success) return apiError(event, 400, 'validation_failed', 'Вкажіть approve', { issues: p.error.issues })
   const r = await decideRequest({ tenantId: a.tenantId, actorId: a.userId }, getRouterParam(event, 'id')!, p.data.approve, p.data.reason)
+  if (!r.ok && r.code === 'self') return apiError(event, 403, 'request.self', 'Власну заявку не погоджують — її розглядає інший відповідальний')
   if (!r.ok) return r.code === 'not_found' ? apiError(event, 404, 'not_found', 'Заявку не знайдено') : apiError(event, 409, 'trajectory.not_requested', 'Це не заявка або рішення вже ухвалено')
   return apiData(r)
 })

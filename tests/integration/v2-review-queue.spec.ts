@@ -321,7 +321,7 @@ describe('37 §13 критерий 5: своя работа не появляе�
 })
 
 describe('37 §13 критерий 6: автор материала проверяет, но под плашкой и под запись в журнале', () => {
-  it('карточка отдаёт conflict=author, решение проходит, факт записан в audit_log', async () => {
+  it('Дано наставник в author_ids, тоді карточка отдаёт conflict=author, решение проходит, факт в audit_log и в отчёте §9.2', async () => {
     const w = await createWorkshop(mentor(), {
       title: 'PR18 Практикум свого автора', description: stem('Опис'), submissionKinds: ['text'],
       minTextLength: 5, criteria: [{ text: 'Зроблено' }], reviewerRule: 'any_mentor', slaHours: 48, status: 'published',
@@ -349,6 +349,24 @@ describe('37 §13 критерий 6: автор материала провер
       select id from audit_log
        where action = 'review.author_conflict' and entity_id = ${sub.submissionId} and actor_id = ${mentorId}`
     expect(log, 'факт проверки автором не записан в audit_log (основание отчёта 37 §9.2)').toBeDefined()
+
+    // …и доходит до отчёта §9.2 «Робота перевіряючих»: ночной свёрткой в `reviewer_stats_daily`,
+    // колонкой «Перевірок власного контенту» конструктора (сущность `reviewers`)
+    const { reviewStatsRollup } = await import('../../server/services/reviewSla')
+    const { runReport } = await import('../../server/services/reportBuilder')
+    const [{ day }] = await admin`select current_date::text as day` as unknown as [{ day: string }]
+    expect(await reviewStatsRollup(tenantId, day)).toBeGreaterThan(0)
+    try {
+      const rows = await runReport({ tenantId, actorId: adminId } as never, {
+        entity: 'reviewers', fields: ['reviewer', 'day', 'reviewed', 'own_content'], filters: { reviewer_id: mentorId, day_from: day, day_to: day }, groupBy: null,
+      } as never, 50, null)
+      expect(rows.length, 'строки проверяющего за сутки в отчёте §9.2 нет').toBeGreaterThan(0)
+      expect(Number(rows[0]!.own_content)).toBeGreaterThanOrEqual(1)
+      expect(Number(rows[0]!.reviewed)).toBeGreaterThanOrEqual(1)
+    }
+    finally {
+      await admin`delete from reviewer_stats_daily where tenant_id = ${tenantId} and day = ${day}::date`
+    }
   })
 
   it('своя работа даёт conflict=self, чужая без авторства — null', async () => {

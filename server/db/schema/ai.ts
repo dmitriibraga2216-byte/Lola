@@ -118,7 +118,7 @@ export const aiCalls = pgTable('ai_calls', {
   // «5 неудач подряд» по профилю (`30` §8 `ai.provider_down`) — последние вызовы одного профиля
   index('idx_ai_calls_tenant_provider').on(t.tenantId, t.providerId, t.createdAt.desc()),
   check('ai_calls_status_chk', sql`${t.status} in ('queued', 'running', 'ok', 'failed', 'timeout', 'refused', 'degraded')`),
-  check('ai_calls_ref_chk', sql`${t.refKind} in ('interview_session', 'interview_turn', 'review_hint', 'summary', 'vacancy_generation', 'library_module', 'knowledge_article', 'search_query')`),
+  check('ai_calls_ref_chk', sql`${t.refKind} in ('interview_session', 'interview_turn', 'review_hint', 'summary', 'vacancy_generation', 'library_module', 'knowledge_article', 'search_query', 'interview_scenario', 'course')`),
   check('ai_calls_axis_chk', sql`${t.usageAxis} is null or ${t.usageAxis} in ('ai_interview_ops', 'ai_review_ops', 'ai_generate_ops')`),
   check('ai_calls_purpose_chk', sql`${t.purpose} in ('transcribe', 'interview_score', 'review_hint', 'summary', 'generate', 'embed')`),
   check('ai_calls_prompt_version_chk', sql`char_length(${t.promptVersion}) between 1 and 40`),

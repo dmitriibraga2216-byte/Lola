@@ -967,7 +967,16 @@
     "settings": "Settings",
     "openResource": "Open resource",
     "version": "version {v}",
-    "newSectionTitle": "Section title"
+    "newSectionTitle": "Section title",
+    "aiGenerate": "Generate track (AI)",
+    "aiTitle": "Generate a track",
+    "aiHint": "AI will build a draft course from modules already published in the library. Nothing is assigned: you review, edit and publish the course yourself.",
+    "aiGoal": "Track goal",
+    "aiGoalHint": "Who the track is for and what they should learn — at least 10 characters",
+    "aiStage": "Stage",
+    "aiNoStage": "No stage",
+    "aiSubmit": "Create draft",
+    "aiBusy": "Building the draft…"
   },
   "blocks": {
     "heading": "Heading",
@@ -7799,7 +7808,12 @@
     "critical": "Critical",
     "critMeta": "weight {weight} · scale up to {max}",
     "addCriterion": "Add criterion",
-    "removeCriterion": "Remove criterion “{name}”"
+    "removeCriterion": "Remove criterion “{name}”",
+    "aiGenerate": "Generate criteria (AI)",
+    "aiReview": "Review and save: these criteria were created by the program. None is added to the scenario until you save it.",
+    "aiSave": "Save",
+    "aiDiscard": "Discard",
+    "aiBadge": "AI"
   },
   "reviewHint": {
     "title": "AI hint",

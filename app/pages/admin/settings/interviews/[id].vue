@@ -108,6 +108,42 @@ async function addCriterion() {
   finally { busy.value = false }
 }
 
+// ── «Згенерувати критерії (ШІ)» (§6.2, docs/v2/44 Р-AI2.10) ────────────────────────────
+// Пропозиції моделі живуть лише на екрані: жоден критерій не з'являється, доки людина не
+// перевірить і не збереже його сама (інваріант 18). Збережений має `source = 'ai_suggested'`.
+interface AiDraft { name: string, description: string, weight: number, scaleMax: number, isCritical: boolean }
+const aiDrafts = ref<AiDraft[]>([])
+
+async function generateCriteria() {
+  if (!scenario.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    const r = await api<{ criteria: AiDraft[] }>(`/interview-scenarios/${scenario.value.id}/criteria/generate`, { method: 'POST', body: {} })
+    aiDrafts.value = r.criteria
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+
+async function saveDraft(i: number) {
+  const d = aiDrafts.value[i]
+  if (!scenario.value || !d) return
+  busy.value = true
+  error.value = ''
+  try {
+    await api(`/interview-scenarios/${scenario.value.id}/criteria`, { method: 'POST', body: { ...d, name: d.name.trim(), description: d.description.trim(), source: 'ai_suggested' } })
+    aiDrafts.value = aiDrafts.value.filter((_, idx) => idx !== i)
+    await load()
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = false }
+}
+
+function dropDraft(i: number) {
+  aiDrafts.value = aiDrafts.value.filter((_, idx) => idx !== i)
+}
+
 async function removeCriterion(id: string) {
   if (!scenario.value) return
   busy.value = true
@@ -219,13 +255,48 @@ function toggleMode(m: InterviewAnswerMode, on: boolean) {
       </form>
 
       <section class="card stack">
-        <h2 class="panel-title">{{ t('interviewAdmin.criteria') }}</h2>
+        <div class="head">
+          <h2 class="panel-title">{{ t('interviewAdmin.criteria') }}</h2>
+          <button v-if="draft" class="btn ghost small" type="button" :disabled="busy" @click="generateCriteria">{{ t('interviewAdmin.aiGenerate') }}</button>
+        </div>
+        <div v-if="aiDrafts.length" class="stack ai-drafts">
+          <p class="note sun" role="status">{{ t('interviewAdmin.aiReview') }}</p>
+          <div v-for="(d, i) in aiDrafts" :key="i" class="stack ai-draft">
+            <label class="stack">
+              <span class="label">{{ t('interviewAdmin.critName') }}</span>
+              <input v-model="d.name" class="field" minlength="3" maxlength="100" required>
+            </label>
+            <label class="stack">
+              <span class="label">{{ t('interviewAdmin.critDescription') }}</span>
+              <textarea v-model="d.description" class="field" rows="3" minlength="20" maxlength="500" required />
+            </label>
+            <div class="grid">
+              <label class="stack">
+                <span class="label">{{ t('interviewAdmin.critWeight') }}</span>
+                <input v-model.number="d.weight" class="field" type="number" min="0.1" max="10" step="0.1">
+              </label>
+              <label class="stack">
+                <span class="label">{{ t('interviewAdmin.critMax') }}</span>
+                <input v-model.number="d.scaleMax" class="field" type="number" min="2" max="100">
+              </label>
+            </div>
+            <label class="row">
+              <input v-model="d.isCritical" type="checkbox">
+              <span>{{ t('interviewAdmin.critical') }}</span>
+            </label>
+            <div class="actions">
+              <button class="btn primary small" type="button" :disabled="busy || d.name.trim().length < 3 || d.description.trim().length < 20" @click="saveDraft(i)">{{ t('interviewAdmin.aiSave') }}</button>
+              <button class="btn ghost small" type="button" :disabled="busy" @click="dropDraft(i)">{{ t('interviewAdmin.aiDiscard') }}</button>
+            </div>
+          </div>
+        </div>
         <p v-if="!scenario.criteria.length" class="muted">{{ t('interviewAdmin.criteriaEmpty') }}</p>
         <ul class="crit">
           <li v-for="c in scenario.criteria" :key="c.id">
             <div class="grow">
               <strong>{{ c.name }}</strong>
               <span v-if="c.isCritical" class="badge coral">{{ t('interviewAdmin.critical') }}</span>
+              <span v-if="c.source === 'ai_suggested'" class="badge">{{ t('interviewAdmin.aiBadge') }}</span>
               <p class="sub">{{ c.description }}</p>
               <p class="sub">{{ t('interviewAdmin.critMeta', { weight: c.weight, max: c.scaleMax }) }}</p>
             </div>
@@ -276,6 +347,8 @@ function toggleMode(m: InterviewAnswerMode, on: boolean) {
 .crit li { display: flex; gap: var(--space-2); align-items: flex-start; border-bottom: 1px solid var(--color-bg-line-soft); padding-bottom: var(--space-2); }
 .crit .sub { margin: var(--space-1) 0 0; color: var(--color-ink-muted); font-size: var(--font-size-body-s); }
 .grow { flex: 1; min-width: 0; }
+.head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; justify-content: space-between; }
+.ai-draft { border: 1px solid var(--color-bg-line-soft); border-radius: var(--radius-m); padding: var(--space-3); }
 fieldset { border: none; margin: 0; padding: 0; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 </style>

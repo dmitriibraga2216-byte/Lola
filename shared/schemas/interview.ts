@@ -1,7 +1,10 @@
 import { z } from 'zod'
 import { KEYSETS } from '../domain/keyset'
 import { INTERVIEW_TEXT_ANSWER_MAX } from '../domain/interview'
-import { INTERVIEW_ALTERNATIVE_PATHS, INTERVIEW_ANSWER_MODES, INTERVIEW_SCENARIO_STATUSES } from '../enums'
+import {
+  INTERVIEW_AI_CRITERIA_DEFAULT, INTERVIEW_AI_CRITERIA_MAX, INTERVIEW_ALTERNATIVE_PATHS, INTERVIEW_ANSWER_MODES, INTERVIEW_CRITERION_SOURCES,
+  INTERVIEW_SCENARIO_STATUSES,
+} from '../enums'
 import { keysetCursorSchema } from './keyset'
 
 /**
@@ -98,9 +101,21 @@ export const interviewCriterionSchema = z.object({
   scaleMax: z.number().min(2, 'Максимальний бал від 2 до 100').max(100, 'Максимальний бал від 2 до 100').default(5),
   isCritical: z.boolean().default(false),
   sort: z.number().int().min(0).max(1000).optional(),
+  /**
+   * `ai_suggested` — человек сохраняет предложение «Згенерувати критерії (ШІ)» (`30` §6.2):
+   * отметка остаётся у критерия, даже если его поправили перед сохранением (`44` Р-AI2.10).
+   */
+  source: z.enum(INTERVIEW_CRITERION_SOURCES).default('manual'),
 }).strict()
 
 export type InterviewCriterionInput = z.infer<typeof interviewCriterionSchema>
+
+/** `POST /interview-scenarios/:id/criteria/generate` (`30` §10 `{count}`). */
+export const interviewCriteriaGenerateSchema = z.object({
+  count: z.number().int().min(1, 'Від 1 до 8 критеріїв').max(INTERVIEW_AI_CRITERIA_MAX, 'Від 1 до 8 критеріїв').default(INTERVIEW_AI_CRITERIA_DEFAULT),
+}).strict()
+
+export type InterviewCriteriaGenerateInput = z.infer<typeof interviewCriteriaGenerateSchema>
 
 export const interviewCriterionUpdateSchema = z.object({
   name: z.string().trim().min(3, 'Назва від 3 символів').max(100).optional(),

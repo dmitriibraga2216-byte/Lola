@@ -5,6 +5,7 @@ import { withTenant } from '../utils/withTenant'
 import type { AnnouncementCreate, AnnouncementPatch } from '../../shared/schemas/platformAnnouncements'
 import { platformDb, type PlatformAuth } from './platform'
 import { recordPlatformAudit } from './platformTenants'
+import { enqueueNotification, tenantAdminIds } from './notifications'
 
 /**
  * Объявления платформы (docs/v2/39 П-21, П-24.2; docs/24 §4.7) — **вторая «новость»**, не
@@ -71,6 +72,7 @@ export async function createAnnouncement(op: PlatformAuth, input: AnnouncementCr
     publishedAt: input.publish ? new Date() : null, createdBy: op.adminId,
   }).returning({ id: platformAnnouncements.id })
   await recordPlatformAudit(op, { action: 'announcement.create', entity: 'platform_announcement', entityId: row!.id, after: { title: input.title, audience: input.audience, published: input.publish } })
+  if (input.publish) await announceToTenants(row!.id)
   return { ok: true, id: row!.id }
 }
 
@@ -104,6 +106,7 @@ export async function publishAnnouncement(op: PlatformAuth, id: string): Promise
   if (!cur.publishedAt) {
     await db.update(platformAnnouncements).set({ publishedAt: new Date(), updatedAt: new Date() }).where(eq(platformAnnouncements.id, id))
     await recordPlatformAudit(op, { action: 'announcement.publish', entity: 'platform_announcement', entityId: id })
+    await announceToTenants(id)
   }
   return { ok: true }
 }
@@ -163,5 +166,45 @@ export async function markRead(ctx: Ctx, id: string): Promise<'ok' | 'not_found'
     if (!a) return 'not_found'
     await tx.insert(platformAnnouncementReads).values({ tenantId: ctx.tenantId, announcementId: id, userId: ctx.actorId }).onConflictDoNothing()
     return 'ok'
+  })
+}
+
+// ── Уведомление о новом объявлении (docs/v2/44 §18 Р-CC.1) ──────────────────────────────
+
+/** Код колокольчика; не начинается с `announcement_` — дневной лимит не обходит (это не блокирующее объявление тенанта). */
+export const ANNOUNCEMENT_NOTIFY_CODE = 'platform_announcement_published'
+
+/**
+ * Первая публикация ставит одну платформенную задачу; рассылку по тенантам делает воркер кругом
+ * `runPerTenant` — каждый тенант своей транзакцией `withTenant()` (docs/25 §5), а не один проход
+ * по всем тенантам под ролью оператора.
+ */
+async function announceToTenants(id: string): Promise<void> {
+  const { enqueueAnnouncementNotify } = await import('./queue')
+  await enqueueAnnouncementNotify(id)
+}
+
+/**
+ * Тенантная часть рассылки: если объявление адресовано тенанту (то же правило `addressedTo`, что у
+ * ленты) — уведомление в колокольчик администраторам и владельцам. Канал `inapp`: объявление
+ * Lola не повод писать в Telegram в рабочее время сети. Повтор задачи безопасен — ключ дедупликации
+ * на объявление и человека. Снятое до рассылки объявление не рассылается.
+ */
+export async function notifyAnnouncementTenant(tenantId: string, id: string): Promise<number> {
+  if (!UUID_RE.test(id)) return 0
+  return withTenant(tenantId, null, async (tx) => {
+    const [a] = await tx.select({ title: platformAnnouncements.title }).from(platformAnnouncements)
+      .where(sql`${platformAnnouncements.id} = ${id}::uuid and ${addressedTo(tenantId)}`)
+    if (!a) return 0
+    let n = 0
+    for (const userId of await tenantAdminIds(tx, tenantId)) {
+      const queued = await enqueueNotification(tx, {
+        tenantId, userId, code: ANNOUNCEMENT_NOTIFY_CODE, channel: 'inapp',
+        payload: { title: a.title, url: '/admin/platform-announcements' },
+        dedupKey: `platform_announcement:${id}:${userId}`,
+      })
+      if (queued) n++
+    }
+    return n
   })
 }

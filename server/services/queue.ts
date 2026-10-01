@@ -110,6 +110,10 @@ export async function getBoss(): Promise<PgBoss> {
       await b.createQueue('org.daily_snapshot', { retryLimit: 2, expireInSeconds: 900 })
       await b.createQueue('org.snapshot_cleanup', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход 90 дней, строка 400 дней
+      // docs/v2/44 §18 (cross-cutting-tails): рассылка о новом объявлении платформы — по событию
+      // публикации; уборка устаревших OAuth state — ежедневно
+      await b.createQueue('platform_announcement.notify', { retryLimit: 2, retryDelay: 60, expireInSeconds: 900 })
+      await b.createQueue('oauth.states_cleanup', { retryLimit: 2, expireInSeconds: 600 })
       await b.createQueue('ai.calls_cleanup', { retryLimit: 2, expireInSeconds: 900 })
       // docs/v2/30 §11 (PR-28): собеседование. Расшифровка и оценка — по событию; повторы после
       // отказа провайдера ставит сам сервис с отсрочкой (5/30 мин и 1/5/30 мин, §7.10, §7.12),
@@ -230,6 +234,7 @@ export async function getBoss(): Promise<PgBoss> {
       // раз в 30 мин (§11 vacancy.publication_health), всплеск блокировок — раз в 10 мин (§7.8)
       await b.schedule('vacancy.publication_health', '*/30 * * * *', {}, { singletonKey: 'vacancy.publication_health' })
       await b.schedule('vacancy.spam_watch', '*/10 * * * *', {}, { singletonKey: 'vacancy.spam_watch' })
+      await b.schedule('oauth.states_cleanup', '15 4 * * *', {}, { singletonKey: 'oauth.states_cleanup', tz: 'Europe/Kyiv' })
       await b.schedule('ai.calls_cleanup', '10 4 * * *', {}, { singletonKey: 'ai.calls_cleanup', tz: 'Europe/Kyiv' })
       await b.schedule('interview.reap', '*/15 * * * *', {}, { singletonKey: 'interview.reap' })
       await b.schedule('interview.media_purge', '40 3 * * *', {}, { singletonKey: 'interview.media_purge', tz: 'Europe/Kyiv' })
@@ -262,6 +267,12 @@ export async function enqueueExpand(tenantId: string, assignmentId: string): Pro
 export async function enqueueRatingBackfill(tenantId: string): Promise<void> {
   const b = await getBoss()
   await b.send('rating.backfill', { tenantId }, { singletonKey: `rating.backfill:${tenantId}` })
+}
+
+/** Объявление платформы опубликовано (docs/v2/44 §18 Р-CC.1): одна задача на объявление, повтор публикации её не дублирует. */
+export async function enqueueAnnouncementNotify(announcementId: string): Promise<void> {
+  const b = await getBoss()
+  await b.send('platform_announcement.notify', { announcementId }, { singletonKey: `announcement:${announcementId}` })
 }
 
 export async function enqueueReportExport(tenantId: string, exportId: string) {

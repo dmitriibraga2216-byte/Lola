@@ -231,6 +231,17 @@ export default defineNitroPlugin(async () => {
       const n = await vacancySpamWatchTenant(tenantId)
       if (n) console.log(`[vacancy.spam_watch] ${tenantId}: посилено вакансій ${n}`)
     }, recruitingTenantIds))
+    // docs/v2/44 §18 (cross-cutting-tails): объявление платформы — одна задача на публикацию,
+    // рассылка кругом по работающим тенантам, адресацию проверяет каждый тенант своим withTenant()
+    await work<{ announcementId: string }>('platform_announcement.notify', async (jobs) => {
+      const { notifyAnnouncementTenant } = await import('../services/platformAnnouncements')
+      for (const j of jobs) await runPerTenant('platform_announcement.notify', tenantId => notifyAnnouncementTenant(tenantId, j.data.announcementId))
+    })
+    await work('oauth.states_cleanup', () => runPerTenant('oauth.states_cleanup', async (tenantId) => {
+      const { cleanupStates } = await import('../services/oauth')
+      const n = await cleanupStates(tenantId)
+      if (n) console.log(`[oauth.states_cleanup] ${tenantId}: видалено ${n}`)
+    }))
     // docs/v2/30 §11 (PR-27): журнал ИИ-вызовов — ссылка на вход в S3 живёт 90 дней, строка — 400
     await work('ai.calls_cleanup', () => runPerTenant('ai.calls_cleanup', async (tenantId) => {
       const { aiCallsCleanup } = await import('../services/ai/calls')

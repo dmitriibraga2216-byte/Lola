@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, lt, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { oauthStates, tenantSecrets } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -112,6 +112,26 @@ export async function authUrl(ctx: { tenantId: string, actorId: string | null },
   })
   const params = new URLSearchParams({ client_id: d.clientId()!, redirect_uri: redirectUri(provider, purpose), response_type: 'code', scope: d.scopes(purpose).join(' '), state, ...d.extraAuthParams(purpose) })
   return { url: `${d.authUrl}?${params}` }
+}
+
+/**
+ * Сколько истёкший state ещё лежит в таблице: сутки колбек по старой ссылке отвечает понятным
+ * «посилання застаріло» (`state_expired`), а не «невідомий state». Потреблённые убираются тем же
+ * правилом — срок у них короче суток, поэтому отдельного условия по `consumed_at` нет.
+ */
+export const STATE_KEEP_AFTER_EXPIRY_MS = 24 * 3600_000
+
+/**
+ * `oauth.states_cleanup` (ежедневно 04:15, docs/v2/44 §18 Р-CC.2): удаляет state, истёкшие больше
+ * суток назад. Внутри `withTenant()` — прежний уборщик удалял с общего соединения, RLS скрывал от
+ * него все строки, и он не удалял ничего (запись журнала 0079).
+ */
+export async function cleanupStates(tenantId: string, now = new Date()): Promise<number> {
+  const before = new Date(now.getTime() - STATE_KEEP_AFTER_EXPIRY_MS)
+  return withTenant(tenantId, null, async (tx) => {
+    const rows = await tx.delete(oauthStates).where(and(eq(oauthStates.tenantId, tenantId), lt(oauthStates.expiresAt, before))).returning({ id: oauthStates.id })
+    return rows.length
+  })
 }
 
 export type CallbackResult

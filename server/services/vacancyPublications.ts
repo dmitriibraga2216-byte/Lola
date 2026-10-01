@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm'
 import { jobBoardAccounts, vacancies, vacancyLanguages, vacancyPublications } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
 import { recordAudit } from './audit'
@@ -9,7 +9,7 @@ import { rowById } from './vacancies'
 import type { Viewer } from './vacancies'
 import { enqueueNotification, tenantAdminIds } from './notifications'
 import { enqueuePublishRetry } from './queue'
-import { VACANCY_PUBLISH_RETRY_DELAYS_SEC } from '../../shared/enums'
+import { VACANCY_PUBLICATION_EXPIRING_DAYS, VACANCY_PUBLISH_RETRY_DELAYS_SEC } from '../../shared/enums'
 import type { JobBoardProvider } from '../../shared/enums'
 import type { VacancyPublicationCreateInput, VacancyPublicationLinkExternalInput } from '../../shared/schemas/vacancies'
 
@@ -182,7 +182,9 @@ export async function attemptPublish(tenantId: string, publicationId: string): P
   if (!ctx) return
   const { pub, account, vac, languages, secret } = ctx
 
-  if (!secret || account.status !== 'active') {
+  // `failing` (площадка молчит) — не повод бросать строку: адаптер ответит временной ошибкой,
+  // и она уйдёт на обычные повторы §7.16. Новые публикации в такой аккаунт не создаются (§6.1).
+  if (!secret || !['active', 'failing'].includes(account.status)) {
     await withTenant(tenantId, null, tx => tx.update(vacancyPublications)
       .set({ state: 'conflict', lastErrorCode: 'jobboard.account_not_active', updatedAt: new Date() })
       .where(eq(vacancyPublications.id, publicationId)))
@@ -243,33 +245,199 @@ export async function attemptPublish(tenantId: string, publicationId: string): P
 }
 
 /**
- * Ревалидация здоровья активных публикаций через адаптер (`29` §11 `vacancy.publication_health`,
- * критерий §13 к. 12). `manual`-строки не проверяются: у них нет секрета и нечего спрашивать.
+ * Здоровье аккаунта (`29` §11 `vacancy.publication_health`, критерий §13 к. 12; `docs/09` §9.3).
+ *
+ * Три исхода вместо двух: отзыв токена — каскад `revokeAccount()`; «площадка молчит» (токен
+ * есть, операции не проходят) — `failing` с текстом ошибки и прежним `last_ok_at`, из которого
+ * экран строит «Інтеграція не відповідає з 14:20»; ответ есть — снова `active`. `failing`
+ * проверяется тем же проходом, иначе замолчавший аккаунт не вернулся бы сам. Переходы
+ * пишутся в `audit_log`: «с какого момента молчит» — вопрос разбора, а не только экрана.
+ * `manual`-строки не проверяются: у них нет секрета и нечего спрашивать.
  */
-export async function checkAccountHealth(tenantId: string, accountId: string): Promise<void> {
-  const account = await withTenant(tenantId, null, async (tx) => {
+export type HealthOutcome = 'ok' | 'failing' | 'revoked' | 'skipped'
+
+export async function checkAccountHealth(tenantId: string, accountId: string): Promise<HealthOutcome> {
+  const ctx = await withTenant(tenantId, null, async (tx) => {
     const [a] = await tx.select().from(jobBoardAccounts).where(eq(jobBoardAccounts.id, accountId))
-    return a && a.status === 'active' ? a : null
+    if (!a || !['active', 'failing'].includes(a.status)) return null
+    const secret = await accountSecret(tx, accountId)
+    return secret ? { account: a, secret } : null
   })
-  if (!account) return
-  const secret = await withTenant(tenantId, null, tx => accountSecret(tx, accountId))
-  if (!secret) return
+  if (!ctx) return 'skipped'
+  const { account, secret } = ctx
   const health = await adapterFor(account.provider as JobBoardProvider).health(secret)
-  if (!health.ok && health.revoked) await revokeAccount(tenantId, accountId)
+  if (!health.ok && health.revoked) {
+    await revokeAccount(tenantId, accountId)
+    return 'revoked'
+  }
+  await withTenant(tenantId, null, async (tx) => {
+    if (health.ok) {
+      await tx.update(jobBoardAccounts).set({ status: 'active', lastOkAt: new Date(), lastError: null, updatedAt: new Date() })
+        .where(eq(jobBoardAccounts.id, accountId))
+      if (account.status === 'failing') {
+        await recordAudit(tx, { tenantId, actorId: null, action: 'jobboard.account_recovered', entity: 'job_board_account', entityId: accountId, before: { status: 'failing' }, after: { status: 'active' } })
+      }
+      return
+    }
+    await tx.update(jobBoardAccounts).set({ status: 'failing', lastError: health.error, updatedAt: new Date() })
+      .where(eq(jobBoardAccounts.id, accountId))
+    if (account.status === 'active') {
+      await recordAudit(tx, { tenantId, actorId: null, action: 'jobboard.account_failing', entity: 'job_board_account', entityId: accountId, before: { status: 'active' }, after: { status: 'failing', error: health.error, lastOkAt: account.lastOkAt } })
+    }
+  })
+  return health.ok ? 'ok' : 'failing'
 }
 
-export type RemoveResult = { ok: true } | { ok: false, code: 'not_found' | 'not_active' }
+export type RecheckResult = { ok: true, outcome: HealthOutcome } | { ok: false, code: 'not_found' }
 
-/** Снятие публикации (`29` §7.13): помечается `removed`, адаптер не вызывается — за рамками PR-17 (см. `docs/v2/46-progress.md`). */
+/**
+ * «Спробувати ще раз» на карточке площадки (`29` §5.4): та же проверка, что у фоновой задачи,
+ * но сразу. Видимость — как у публикации (§7.14): чужой личный аккаунт — `404`.
+ */
+export async function recheckAccount(ctx: { tenantId: string, actorId: string, isAdmin: boolean }, accountId: string): Promise<RecheckResult> {
+  const visible = await withTenant(ctx.tenantId, ctx.actorId, async (tx) => {
+    const [a] = await tx.select().from(jobBoardAccounts).where(eq(jobBoardAccounts.id, accountId))
+    return !!a && accountVisible(ctx, a)
+  })
+  if (!visible) return { ok: false, code: 'not_found' }
+  return { ok: true, outcome: await checkAccountHealth(ctx.tenantId, accountId) }
+}
+
+// ── Снятие с площадок (`29` §4, §7.13, §11 `vacancy.remove_external`) ────────────────────
+
+/** Состояния, которые ещё держат объявление (или заявку на него) на площадке. */
+const LIVE_STATES = ['queued', 'publishing', 'active', 'manual', 'conflict'] as const
+
+type RemoveOutcome = 'removed' | 'pending' | 'kept'
+
+/**
+ * Снять одну строку. Адаптер зовётся только у `active` с `external_id` — у остальных на
+ * площадке нечего снимать через API: `queued` ещё не ушла, `manual` рекрутер ставил руками,
+ * `conflict` — объявление не наше. Временная ошибка — `pending` (строка остаётся `active` с
+ * `last_error_code`, повтор решает вызывающий); отзыв токена — каскад `revokeAccount()`, и
+ * строка остаётся `conflict` на виду в журнале (`kept`): делать вид, что объявление снято,
+ * когда площадка нас больше не слушает, нельзя.
+ */
+async function removeRow(tenantId: string, publicationId: string, actorId: string | null): Promise<RemoveOutcome> {
+  const ctx = await withTenant(tenantId, null, async (tx) => {
+    const [pub] = await tx.select().from(vacancyPublications).where(eq(vacancyPublications.id, publicationId))
+    if (!pub) return null
+    const [account] = await tx.select().from(jobBoardAccounts).where(eq(jobBoardAccounts.id, pub.accountId))
+    const needsAdapter = pub.state === 'active' && !!pub.externalId && !!account && ['active', 'failing'].includes(account.status)
+    const secret = needsAdapter ? await accountSecret(tx, pub.accountId) : null
+    return { pub, account, secret }
+  })
+  if (!ctx) return 'kept'
+  const { pub, account, secret } = ctx
+
+  if (secret && account) {
+    const r = await adapterFor(account.provider as JobBoardProvider).remove(secret, pub.externalId!)
+    if (!r.ok && r.revoked) {
+      await revokeAccount(tenantId, pub.accountId)
+      return 'kept'
+    }
+    if (!r.ok) {
+      await withTenant(tenantId, null, tx => tx.update(vacancyPublications)
+        .set({ lastErrorCode: 'jobboard.remove_failed', lastError: r.error, updatedAt: new Date() })
+        .where(eq(vacancyPublications.id, publicationId)))
+      return 'pending'
+    }
+  }
+
+  await withTenant(tenantId, null, async (tx) => {
+    await tx.update(vacancyPublications).set({ state: 'removed', removedAt: new Date(), lastErrorCode: null, lastError: null, updatedAt: new Date() })
+      .where(eq(vacancyPublications.id, publicationId))
+    await recordAudit(tx, {
+      tenantId, actorId, action: 'vacancy.unpublished_external', entity: 'vacancy_publication', entityId: publicationId,
+      before: { state: pub.state }, after: { state: 'removed', viaAdapter: !!secret },
+    })
+  })
+  return 'removed'
+}
+
+/**
+ * `vacancy.remove_external` (§11, по событию закрытия с «Зняти оголошення з майданчиків»).
+ * Возвращает, сколько строк снято и сколько ждут повтора; повтор делает очередь (задача
+ * бросает исключение, пока `pending > 0`, — `retryLimit` и экспонента из `queue.ts`).
+ */
+export async function removeExternalPublications(tenantId: string, vacancyId: string): Promise<{ removed: number, pending: number }> {
+  const rows = await withTenant(tenantId, null, tx => tx.select({ id: vacancyPublications.id }).from(vacancyPublications)
+    .where(and(eq(vacancyPublications.vacancyId, vacancyId), inArray(vacancyPublications.state, [...LIVE_STATES]))))
+  let removed = 0
+  let pending = 0
+  for (const r of rows) {
+    const outcome = await removeRow(tenantId, r.id, null)
+    if (outcome === 'removed') removed++
+    if (outcome === 'pending') pending++
+  }
+  return { removed, pending }
+}
+
+export type RemoveResult = { ok: true } | { ok: false, code: 'not_found' | 'not_active' | 'remote_failed' }
+
+/**
+ * Снятие одной публикации (`29` §7.13, `DELETE /vacancies/:id/publications/:pid`): у `active`
+ * — через `remove()` адаптера тем же путём, что и задача `vacancy.remove_external`; площадка
+ * не ответила — `remote_failed`, строка остаётся на месте с ошибкой. `failed` снимается без
+ * адаптера: на площадке её нет.
+ */
 export async function removePublication(v: Viewer, vacancyId: string, pubId: string): Promise<RemoveResult> {
-  return withTenant(v.tenantId, v.actorId, async (tx) => {
-    if (!await rowById(tx, v, vacancyId)) return { ok: false, code: 'not_found' }
-    const [row] = await tx.select().from(vacancyPublications).where(and(eq(vacancyPublications.id, pubId), eq(vacancyPublications.vacancyId, vacancyId)))
-    if (!row) return { ok: false, code: 'not_found' }
-    if (!['queued', 'active', 'manual', 'conflict', 'failed'].includes(row.state)) return { ok: false, code: 'not_active' }
-    await tx.update(vacancyPublications).set({ state: 'removed', removedAt: new Date(), updatedAt: new Date() }).where(eq(vacancyPublications.id, pubId))
-    await recordAudit(tx, { tenantId: v.tenantId, actorId: v.actorId, action: 'vacancy.unpublished_external', entity: 'vacancy_publication', entityId: pubId, before: { state: row.state } })
-    return { ok: true }
+  const row = await withTenant(v.tenantId, v.actorId, async (tx) => {
+    if (!await rowById(tx, v, vacancyId)) return null
+    const [r] = await tx.select().from(vacancyPublications).where(and(eq(vacancyPublications.id, pubId), eq(vacancyPublications.vacancyId, vacancyId)))
+    return r ?? null
+  })
+  if (!row) return { ok: false, code: 'not_found' }
+  if (!([...LIVE_STATES, 'failed'] as string[]).includes(row.state)) return { ok: false, code: 'not_active' }
+  const outcome = await removeRow(v.tenantId, pubId, v.actorId)
+  return outcome === 'pending' ? { ok: false, code: 'remote_failed' } : { ok: true }
+}
+
+// ── Срок объявления (`29` §11 `vacancy.publication_expiry`, §8) ───────────────────────────
+
+/**
+ * `vacancy.publication_expiry` — ежедневно в 08:00. Истёкшие `active` → `expired`; те, что
+ * истекают в ближайшие `VACANCY_PUBLICATION_EXPIRING_DAYS` дня, — `vacancy_publication_expiring`
+ * рекрутеру вакансии (без рекрутера — инициатору публикации), только в колокольчик (§8).
+ * Ключ дедупликации несёт сам срок: продлённое объявление предупредит заново, а повторный
+ * прогон того же дня — нет. Срок даёт площадка (`expires_at` из `publish()`); заглушка его
+ * не придумывает (Г-29.8), поэтому на стенде задача работает по строкам с заданным сроком.
+ */
+export async function publicationExpiryScan(tenantId: string, now = new Date()): Promise<{ expired: number, warned: number }> {
+  return withTenant(tenantId, null, async (tx) => {
+    const gone = await tx.update(vacancyPublications).set({ state: 'expired', updatedAt: now })
+      .where(and(eq(vacancyPublications.state, 'active'), isNotNull(vacancyPublications.expiresAt), lte(vacancyPublications.expiresAt, now)))
+      .returning({ id: vacancyPublications.id, vacancyId: vacancyPublications.vacancyId, expiresAt: vacancyPublications.expiresAt })
+    for (const g of gone) {
+      await recordAudit(tx, {
+        tenantId, actorId: null, action: 'vacancy.publication_expired', entity: 'vacancy_publication', entityId: g.id,
+        before: { state: 'active' }, after: { state: 'expired', vacancyId: g.vacancyId, expiresAt: g.expiresAt },
+      })
+    }
+
+    const horizon = new Date(now.getTime() + VACANCY_PUBLICATION_EXPIRING_DAYS * 86_400_000)
+    const soon = await tx.select({
+      id: vacancyPublications.id,
+      expiresAt: vacancyPublications.expiresAt,
+      requestedBy: vacancyPublications.requestedBy,
+      provider: jobBoardAccounts.provider,
+      title: vacancies.title,
+      recruiterId: vacancies.recruiterId,
+    }).from(vacancyPublications)
+      .innerJoin(jobBoardAccounts, eq(jobBoardAccounts.id, vacancyPublications.accountId))
+      .innerJoin(vacancies, eq(vacancies.id, vacancyPublications.vacancyId))
+      .where(and(eq(vacancyPublications.state, 'active'), gt(vacancyPublications.expiresAt, now), lte(vacancyPublications.expiresAt, horizon)))
+    let warned = 0
+    for (const p of soon) {
+      const ok = await enqueueNotification(tx, {
+        tenantId, userId: p.recruiterId ?? p.requestedBy, code: 'vacancy_publication_expiring', channel: 'inapp',
+        payload: { vacancy: p.title, platform: p.provider, date: p.expiresAt!.toISOString() },
+        dedupKey: `vacancy_publication_expiring:${p.id}:${p.expiresAt!.toISOString()}`,
+        refType: 'vacancy_publication', refId: p.id,
+      }).catch(() => false)
+      if (ok) warned++
+    }
+    return { expired: gone.length, warned }
   })
 }
 

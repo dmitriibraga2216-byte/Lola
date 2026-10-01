@@ -29,7 +29,7 @@ const { generateVacancyText, generateVacancyCriteria, acknowledgeAiText } = awai
 const { createVacancy, publishVacancy, updateVacancy, closeVacancy, viewerOf } = await import('../../server/services/vacancies')
 const { createCandidate } = await import('../../server/services/candidates')
 const { submitApplication, confirmApplication, signNonce, uploadApplicationResume } = await import('../../server/services/publicApply')
-const { vacancyPublicationHealthTenant, vacancySpamWatchTenant } = await import('../../server/jobs/vacancyPublish')
+const { vacancyPublicationHealthTenant, vacancyRemoveExternalJob, vacancySpamWatchTenant } = await import('../../server/jobs/vacancyPublish')
 const { currentUsage } = await import('../../server/services/usageCounters')
 const { invalidateLimits } = await import('../../server/services/tenantLimits')
 
@@ -403,7 +403,7 @@ describe('vacancy_closed_with_candidates (§8)', () => {
     expect(notes.some(n => n.user_id === adminId)).toBe(true)
   })
 
-  it('закрытие с removeExternal снимает активные публикации (§4 «в очередь на снятие»)', async () => {
+  it('закрытие с removeExternal снимает активные публикации задачей vacancy.remove_external (§4 «в очередь на снятие»)', async () => {
     const acc = await connectAccount(hrAdminCtx, { provider: 'work_ua', ownerType: 'company', label: `${PREFIX}close` })
     if (!acc.ok) throw new Error('acc setup failed')
     const v = await newVacancy({ title: `${PREFIX}Закриття знімає публікації` })
@@ -412,6 +412,9 @@ describe('vacancy_closed_with_candidates (§8)', () => {
     expect(pub.publications[0]!.state).toBe('active')
 
     await closeVacancy(hr, v.id, { reason: 'filled', removeExternal: true, notifyCandidates: false })
+    // Снятие — фоновая задача, которую ставит ручка закрытия (vacancies-tails): вызов площадки
+    // не держит транзакцию закрытия. Подробно — `v2-vacancies-tails.spec.ts`.
+    await vacancyRemoveExternalJob(tenantId, v.id)
     const [row] = await admin`select state from vacancy_publications where id = ${pub.publications[0]!.id}`
     expect(row!.state).toBe('removed')
   })

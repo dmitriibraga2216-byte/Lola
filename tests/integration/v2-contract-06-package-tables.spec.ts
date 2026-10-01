@@ -53,7 +53,7 @@ const NOT_CREATED: Record<string, string> = {
   storage_quota_addons: 'docs/v2/40 Р-6, PR-08 #94 / PR-36 #122: докупка места — tenant_addons со storage_pack (сквозная проверка 23)',
 }
 
-/** Шесть тенантных таблиц сверх `40` §6.1 (`40` §2.13). */
+/** Девять тенантных таблиц сверх `40` §6.1 (`40` §2.13). */
 const ADDED_TENANT: Record<string, string> = {
   review_queue_items: 'docs/v2/44 В-2, PR-18 #100: очередь — таблица с нуля вместо витрины (71-я таблица плана)',
   user_notes: 'docs/v2/43 §1.2, PR-32 #121: пакетная person_notes под своим именем; PR-32 дотянул её до контрактов 1–3',
@@ -61,6 +61,9 @@ const ADDED_TENANT: Record<string, string> = {
   position_groups: 'docs/v2/39 П-24.5, PR-39 #124: группы должностей',
   user_totp: 'docs/v2/39 П-24.1, PR-39 #124: второй фактор входа',
   user_totp_recovery_codes: 'docs/v2/39 П-24.1, PR-39 #124: резервные коды второго фактора',
+  vacancy_subscribers: 'docs/v2/44 Р-VT.2, vacancies-tails: подписка на странице 410 (`29` §5.6, §10 /j/:token/subscribe)',
+  vacancy_stats_daily: 'docs/v2/44 Р-VT.3, vacancies-tails: свёртка публичной страницы `vacancy.stats_rollup` (`29` §11)',
+  contact_blocklist: 'docs/v2/44 Р-VT.4, vacancies-tails: чёрный список контактов тенанта (`29` §7.7, слагаемое 100)',
 }
 
 /** Одна платформенная сверх `40` §6.2 (`40` §2.13). */
@@ -69,11 +72,11 @@ const ADDED_PLATFORM: Record<string, string> = {
 }
 
 /**
- * Длина списков по факту — 71 − 3 + 6 = **74** тенантные и 2 + 1 = **3** платформенные. Числа зашиты
+ * Длина списков по факту — 71 − 3 + 9 = **77** тенантные и 2 + 1 = **3** платформенные. Числа зашиты
  * намеренно: изменение состава пакета обязано пройти через `docs/v2/40-data-model-delta.md` §2.13
  * (строка «было в пакете → стало → каким PR и почему») и через эти константы, а не молча через список.
  */
-const EXPECTED_TENANT_TABLES = 74
+const EXPECTED_TENANT_TABLES = 77
 const EXPECTED_PLATFORM_TABLES = 3
 
 /** `user_notes` — единственная таблица списка, созданная не миграцией пакета (`0019`, базовое ТЗ). */
@@ -111,7 +114,7 @@ describe('v2-contract-06: состав пакета — списки на дли
     expect(V2_PACKAGE_TENANT_TABLES.filter(t => V2_PACKAGE_PLATFORM_TABLES.includes(t)), 'таблица в обоих списках').toEqual([])
   })
 
-  it('арифметика расхождений сходится: 71 − 3 + 6 = 74, 2 + 1 = 3', () => {
+  it('арифметика расхождений сходится: 71 − 3 + 9 = 77, 2 + 1 = 3', () => {
     expect(new Set(DOC_40_TENANT).size, 'docs/v2/40 §6.1 перечисляет 71 таблицу').toBe(71)
     for (const t of Object.keys(NOT_CREATED)) expect(DOC_40_TENANT as readonly string[], `${t} — из 40 §6.1`).toContain(t)
     for (const t of Object.keys(ADDED_TENANT)) expect(DOC_40_TENANT as readonly string[], `${t} — сверх 40 §6.1`).not.toContain(t)

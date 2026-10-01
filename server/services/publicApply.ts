@@ -24,6 +24,7 @@ import { emitWebhook } from './webhooks'
 import { ensureBucket, s3, S3_BUCKET, tenantStorageBytes } from './media'
 import { LimitCheckFailedError, LimitExceededError, effectiveLimits } from './tenantLimits'
 import { recordUsage } from './usageCounters'
+import { isContactBlocked } from './contactBlocklist'
 
 /**
  * Публичный контур вакансии: страница по ссылке и приём отклика
@@ -57,7 +58,7 @@ export interface PublicCtx {
   userAgent?: string | null
 }
 
-interface LinkRow {
+export interface LinkRow {
   id: string
   tenant_id: string
   state: string
@@ -145,14 +146,24 @@ export async function alignDelay(): Promise<void> {
  * CLAUDE.md, критерий `29` §13 к. 14, сквозная проверка 16).
  */
 export async function resolveVacancyToken(token: string): Promise<LinkState> {
-  if (!token || token.length > 64) return { ok: false, code: 'not_found' }
-  const rows = await db.execute(sql`select * from vacancy_public_lookup(${token})`) as unknown as LinkRow[]
-  const link = rows[0]
+  const link = await lookupVacancyLink(token)
   if (!link || !link.public_enabled) return { ok: false, code: 'not_found' }
   // Приостановленная и закрытая вакансия — `410`: ссылка была настоящей, и человеку честнее
   // сказать «набір призупинено», чем делать вид, что страницы не существовало (§4, §12.1).
   if (link.state !== 'published') return { ok: false, code: 'gone' }
   return { ok: true, link }
+}
+
+/**
+ * Сам вызов `vacancy_public_lookup` — отдельно, потому что подписке на странице 410
+ * (`vacancySubscribers.ts`, `29` §5.6) нужна строка ссылки именно тогда, когда
+ * `resolveVacancyToken()` отвечает `gone`. Решение «существует ли ссылка» остаётся за
+ * вызывающим; второго способа выйти из токена в тенанта не появляется.
+ */
+export async function lookupVacancyLink(token: string): Promise<LinkRow | null> {
+  if (!token || token.length > 64) return null
+  const rows = await db.execute(sql`select * from vacancy_public_lookup(${token})`) as unknown as LinkRow[]
+  return rows[0] ?? null
 }
 
 // ── Журнал попыток ────────────────────────────────────────────────────────────────────────
@@ -253,7 +264,7 @@ export async function publicVacancy(token: string, ctx: PublicCtx): Promise<Publ
  * Язык публичной страницы (§7.20): вакансии, иначе пространства. Язык администратора,
  * открывшего форму вакансии, к посетителю отношения не имеет — он сюда не попадает никак.
  */
-async function pageLanguage(tx: TenantTx, tenantId: string, vacancyLanguage: string | null): Promise<string> {
+export async function pageLanguage(tx: TenantTx, tenantId: string, vacancyLanguage: string | null): Promise<string> {
   if (vacancyLanguage) return vacancyLanguage
   const rows = await tx.execute(sql`select locale from tenants where id = ${tenantId}::uuid`) as unknown as { locale: string }[]
   return rows[0]?.locale ?? 'uk'
@@ -268,6 +279,8 @@ export interface SpamInput {
   fillSeconds: number | null
   nonceReplay: boolean
   ipMarkedSpam: boolean
+  /** Телефон или почта отклика есть в `contact_blocklist` тенанта (`29` §7.7, миграция 0104). */
+  contactBlocked?: boolean
 }
 
 export interface SpamVerdict {
@@ -279,10 +292,9 @@ export interface SpamVerdict {
  * Слагаемые §7.7 — чистая функция, потому что это правило, а не запрос: её проверяет
  * `tests/unit/vacancy-apply.spec.ts` построчно, без базы.
  *
- * Чёрного списка контактов тенанта (§7.7, слагаемое 100) в продукте нет ни таблицей, ни
- * экраном — заводить его молча здесь значило бы придумать сущность мимо ТЗ (CLAUDE.md
- * «не выдумывать поля»). Слагаемое учтено списком `29` §7.7 и добавится вместе с самим
- * списком; сегодня его место занимает `ipMarkedSpam`, который считается по журналу.
+ * Все семь слагаемых §7.7 на месте. Последнее — «контакт в чёрном списке тенанта» (100) —
+ * появилось вместе с самим списком (`contact_blocklist`, миграция 0104, `contactBlocklist.ts`);
+ * до него PR-16 оставлял слагаемое пустым, чтобы не заводить сущность мимо ТЗ.
  */
 export function spamOf(input: SpamInput): SpamVerdict {
   const reasons: string[] = []
@@ -314,6 +326,10 @@ export function spamOf(input: SpamInput): SpamVerdict {
   if (input.ipMarkedSpam) {
     score += VACANCY_APPLY_SPAM_SCORES.ipMarkedSpam
     reasons.push('ip_spam')
+  }
+  if (input.contactBlocked) {
+    score += VACANCY_APPLY_SPAM_SCORES.contactBlocked
+    reasons.push('contact_blocked')
   }
   return { score, reasons }
 }
@@ -381,6 +397,7 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
   const hardened = !!link.spam_hardened_until && new Date(link.spam_hardened_until) > new Date()
   const blocked = await rateVerdict(tenantId, link.id, ipH, hardened)
   const ipMarkedSpam = await ipWasSpam(tenantId, ipH)
+  const contactBlocked = await withTenant(tenantId, link.owner_id, tx => isContactBlocked(tx, tenantId, [input.phone, input.email]))
   const verdict = spamOf({
     website: input.website,
     comment: input.comment,
@@ -388,6 +405,7 @@ export async function submitApplication(token: string, input: PublicApplyInput, 
     fillSeconds,
     nonceReplay,
     ipMarkedSpam,
+    contactBlocked,
   })
   if (blocked) verdict.reasons.push(blocked)
 

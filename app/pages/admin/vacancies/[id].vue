@@ -17,7 +17,7 @@ import type { VacancyState } from '#shared/enums'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-scope', requiredScope: 'vacancy.view' })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { api } = useApi()
 const route = useRoute()
 const id = route.params.id as string
@@ -313,6 +313,22 @@ async function decide(aid: string, action: 'accept' | 'reject' | 'spam') {
   finally { busy.value = '' }
 }
 
+/** «До чорного списку» (docs/v2/29 §7.7): телефон і пошта відгуку разом; стан відгуку не змінюється. */
+async function blocklistApp(aid: string) {
+  error.value = ''
+  notice.value = ''
+  busy.value = aid
+  try {
+    await api(`/vacancies/${id}/applications/${aid}/blocklist`, { method: 'POST', body: {} })
+    notice.value = t('vacancies.applications.blocklisted')
+  }
+  catch (err) { error.value = apiErrorOf(err).message }
+  finally { busy.value = '' }
+}
+
+/** Ознаки спаму — людською мовою; невідома ознака показується кодом, а не порожнечею. */
+const reasonLabel = (r: string) => (te(`vacancy.spamReason.${r}`) ? t(`vacancy.spamReason.${r}`) : r)
+
 const tone = (s: VacancyState) => (s === 'published' ? 'teal' : s === 'paused' ? 'sun' : s === 'draft' ? 'ink' : 'muted')
 const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'active'))
 </script>
@@ -570,13 +586,19 @@ const activeAccounts = computed(() => accounts.value.filter(a => a.status === 'a
             <td>{{ app.fullName }}</td>
             <td>{{ app.phone || app.email }}</td>
             <td>{{ app.source }}</td>
-            <td>{{ app.spamReasons.join(', ') }}</td>
+            <td>{{ app.spamReasons.map(reasonLabel).join(', ') }}</td>
             <td class="row-actions">
               <template v-if="appTab === 'pending' || appTab === 'pending_review'">
                 <button class="btn ghost small" type="button" :disabled="busy === app.id" @click="decide(app.id, 'accept')">{{ t('vacancies.applications.accept') }}</button>
                 <button class="btn ghost small" type="button" :disabled="busy === app.id" @click="decide(app.id, 'reject')">{{ t('vacancies.applications.reject') }}</button>
                 <button class="btn ghost small" type="button" :disabled="busy === app.id" @click="decide(app.id, 'spam')">{{ t('vacancies.applications.spam') }}</button>
               </template>
+              <button
+                v-if="appTab !== 'accepted'" class="btn ghost small" type="button"
+                :disabled="busy === app.id" @click="blocklistApp(app.id)"
+              >
+                {{ t('vacancies.applications.blocklist') }}
+              </button>
             </td>
           </tr>
           <tr v-if="!applications.length"><td colspan="5" class="sub">{{ t('vacancies.applications.empty') }}</td></tr>

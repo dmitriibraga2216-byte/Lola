@@ -5613,7 +5613,8 @@
     "tab": {
       "vacancies": "Vacancies",
       "templates": "Templates",
-      "integrations": "Integrations"
+      "integrations": "Integrations",
+      "blocklist": "Blocklist"
     },
     "tpl": {
       "name": "Template name",
@@ -5677,7 +5678,13 @@
       "provider": "Job board",
       "ownerType": "Owned by",
       "label": "Label (optional)",
-      "empty": "No accounts connected"
+      "empty": "No accounts connected",
+      "silentSince": "The integration has not responded since {date}",
+      "silent": "The integration is not responding",
+      "retry": "Try again",
+      "recheckOk": "The job board responds — the integration works",
+      "recheckFailing": "The job board still does not respond. Check your account on the job board and try again later",
+      "lastOk": "Checked {date}"
     },
     "applications": {
       "title": "Applications",
@@ -5690,7 +5697,23 @@
       "source": "Source",
       "received": "Received",
       "resume": "Resume",
-      "reasons": "Flags"
+      "reasons": "Flags",
+      "blocklist": "To blocklist",
+      "blocklisted": "The response contacts have been added to the blocklist"
+    },
+    "blocklist": {
+      "title": "Contact blocklist",
+      "hint": "A response with this phone or email silently goes to “Spam”, the recruiter will not see it. We do not keep the contacts themselves — only a fingerprint for matching and a mask.",
+      "contact": "Phone or email",
+      "contactHint": "+380XXXXXXXXX or name{'@'}example.com",
+      "reason": "Reason (optional)",
+      "add": "Add to the list",
+      "empty": "The list is empty",
+      "remove": "Remove",
+      "by": "Added by",
+      "date": "When",
+      "added": "The contact has been added to the blocklist",
+      "removed": "The contact has been removed from the list"
     }
   },
   "vacancy": {
@@ -5786,6 +5809,20 @@
       "expired": "Expired",
       "conflict": "Conflict",
       "manual": "Manual"
+    },
+    "spamReason": {
+      "honeypot": "Hidden field filled in",
+      "nonce_replay": "Form submitted again",
+      "fast_submit": "Filled in too fast",
+      "comment_links": "Links in the comment",
+      "consonant_name": "Name without vowels",
+      "ip_spam": "The address has sent spam before",
+      "contact_blocked": "Contact is on the blocklist",
+      "ip_hour": "Too many responses from the address in an hour",
+      "ip_day": "Too many responses from the address in a day",
+      "vacancy_day": "Repeated response from the address",
+      "daily_cap": "Vacancy daily cap exceeded",
+      "limit": "Plan candidate limit reached"
     }
   },
   "apply": {
@@ -5810,7 +5847,11 @@
     "code": "Six-digit code",
     "confirm": "Confirm",
     "acceptedTitle": "Thank you! Your application is accepted",
-    "acceptedHint": "We will send you a link to the selection process"
+    "acceptedHint": "We will send you a link to the selection process",
+    "pausedTitle": "Hiring is temporarily paused",
+    "pausedHint": "Leave your email — we will write once when hiring reopens.",
+    "notify": "Notify me when it reopens",
+    "subscribed": "Done. We will write as soon as hiring reopens."
   },
   "orgStructure": {
     "title": "Org structure",

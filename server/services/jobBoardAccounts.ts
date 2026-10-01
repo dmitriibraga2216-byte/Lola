@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { jobBoardAccounts, tenantSecrets, users, vacancyPublications } from '../db/schema'
 import { withTenant } from '../utils/withTenant'
@@ -5,7 +6,7 @@ import type { TenantTx } from '../utils/withTenant'
 import { employeeOnly } from './repo/people'
 import { recordAudit } from './audit'
 import { decrypt, encrypt } from './crypto'
-import { adapterFor, REVOKED_STUB_SECRET } from './jobBoardAdapter'
+import { adapterFor, REVOKED_STUB_SECRET, SILENT_STUB_SECRET } from './jobBoardAdapter'
 import type { JobBoardAccountCreateInput } from '../../shared/schemas/vacancies'
 import type { JobBoardAccountStatus } from '../../shared/enums'
 import { enqueueNotification, tenantAdminIds } from './notifications'
@@ -209,16 +210,30 @@ export async function revokeAccount(tenantId: string, accountId: string): Promis
 }
 
 /**
- * Сеанс имитации отзыва провайдером — **только для тестов**. Секрет заменяется на сигнальное
- * значение `REVOKED_STUB_SECRET`: следующий вызов `publish()`/`health()` заглушки прочитает
- * его и пойдёт по тому же коду, что и настоящий отзыв (`revokeAccount()` выше вызывается тем
- * же путём, что и в бою — фоновой задачей, не тестовым обходом).
+ * Подмена секрета-заглушки — **только для тестов и стенда**. Следующий вызов адаптера прочитает
+ * сигнальное значение и пойдёт по тому же коду, что и настоящий ответ площадки: отзыв и
+ * «площадка молчит» обрабатывают фоновые задачи, а не тестовый обход.
  */
-export async function simulateProviderRevocation(tenantId: string, accountId: string): Promise<void> {
+async function setStubSecret(tenantId: string, accountId: string, value: (provider: string) => string): Promise<void> {
   await withTenant(tenantId, null, async (tx) => {
-    const [row] = await tx.select({ secretRef: jobBoardAccounts.secretRef }).from(jobBoardAccounts).where(eq(jobBoardAccounts.id, accountId))
+    const [row] = await tx.select({ secretRef: jobBoardAccounts.secretRef, provider: jobBoardAccounts.provider }).from(jobBoardAccounts).where(eq(jobBoardAccounts.id, accountId))
     if (!row?.secretRef) return
-    const { ciphertext, nonce } = encrypt(REVOKED_STUB_SECRET)
+    const { ciphertext, nonce } = encrypt(value(row.provider))
     await tx.update(tenantSecrets).set({ valueEncrypted: ciphertext, nonce }).where(eq(tenantSecrets.id, row.secretRef))
   })
+}
+
+/** Площадка отозвала токен (§7.15): `health()`/`publish()` ответят `revoked`. */
+export async function simulateProviderRevocation(tenantId: string, accountId: string): Promise<void> {
+  await setStubSecret(tenantId, accountId, () => REVOKED_STUB_SECRET)
+}
+
+/** Площадка молчит (`docs/09` §9.3): токен цел, операции падают временной ошибкой. */
+export async function simulateProviderOutage(tenantId: string, accountId: string): Promise<void> {
+  await setStubSecret(tenantId, accountId, () => SILENT_STUB_SECRET)
+}
+
+/** Площадка снова отвечает: обычный секрет-заглушка той же площадки. */
+export async function simulateProviderRecovery(tenantId: string, accountId: string): Promise<void> {
+  await setStubSecret(tenantId, accountId, provider => `stub:${provider}:${randomUUID()}`)
 }

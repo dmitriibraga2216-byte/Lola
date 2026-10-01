@@ -72,6 +72,14 @@ export interface JobBoardAdapter {
 export const REVOKED_STUB_SECRET = 'stub:revoked'
 
 /**
+ * Секрет-заглушка со смыслом «площадка молчит» (`docs/09` §9.3 «Мовчить», статус `failing`):
+ * токен не отозван, но ни одна операция не проходит — `health()` отвечает ошибкой без
+ * `revoked`, `publish`/`update`/`remove` — временной ошибкой. Доводится только через
+ * `jobBoardAccounts.ts#simulateProviderOutage()`, снимается `simulateProviderRecovery()`.
+ */
+export const SILENT_STUB_SECRET = 'stub:silent'
+
+/**
  * Один детерминированный адаптер на все три площадки: продукту не важно различие в API
  * вендоров, пока каждый работает по одному контракту §7.18. `publish`/`update` отказывают
  * ретраибельно, если заголовок несёт маркер `__JOBBOARD_FAIL__` — единственный крючок для
@@ -85,6 +93,7 @@ function stubAdapter(provider: JobBoardProvider): JobBoardAdapter {
     },
     async publish(secret, payload) {
       if (secret === REVOKED_STUB_SECRET) return { ok: false, error: 'jobboard.revoked', retryable: false, revoked: true }
+      if (secret === SILENT_STUB_SECRET) return { ok: false, error: 'jobboard.no_response', retryable: true }
       if (payload.title.includes('__JOBBOARD_FAIL__')) return { ok: false, error: 'jobboard.temporary_error', retryable: true }
       const externalId = createHash('sha256').update(`${secret}:${payload.title}`).digest('hex').slice(0, 16)
       return {
@@ -96,15 +105,18 @@ function stubAdapter(provider: JobBoardProvider): JobBoardAdapter {
     },
     async update(secret, _externalId, payload) {
       if (secret === REVOKED_STUB_SECRET) return { ok: false, error: 'jobboard.revoked', retryable: false, revoked: true }
+      if (secret === SILENT_STUB_SECRET) return { ok: false, error: 'jobboard.no_response', retryable: true }
       if (payload.title.includes('__JOBBOARD_FAIL__')) return { ok: false, error: 'jobboard.temporary_error', retryable: true }
       return { ok: true }
     },
     async remove(secret) {
       if (secret === REVOKED_STUB_SECRET) return { ok: false, error: 'jobboard.revoked', retryable: false, revoked: true }
+      if (secret === SILENT_STUB_SECRET) return { ok: false, error: 'jobboard.no_response', retryable: true }
       return { ok: true }
     },
     async health(secret) {
       if (secret === REVOKED_STUB_SECRET) return { ok: false, revoked: true, error: 'jobboard.revoked' }
+      if (secret === SILENT_STUB_SECRET) return { ok: false, revoked: false, error: 'jobboard.no_response' }
       return { ok: true }
     },
   }

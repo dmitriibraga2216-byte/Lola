@@ -9,5 +9,6 @@ export default defineEventHandler(async (event) => {
   const r = await removePublication(viewerOf(a), getRouterParam(event, 'id')!, getRouterParam(event, 'pid')!)
   if (r.ok) { setResponseStatus(event, 204); return null }
   if (r.code === 'not_found') return apiError(event, 404, 'not_found', 'Публікацію не знайдено')
+  if (r.code === 'remote_failed') return apiError(event, 409, 'publication.remove_failed', 'Майданчик не відповів — оголошення поки не знято. Спробуйте ще раз за кілька хвилин')
   return apiError(event, 409, 'publication.not_active', 'Публікація вже знята')
 })

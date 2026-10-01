@@ -60,6 +60,14 @@ const form = reactive({
 
 const LOCALES = ['uk', 'en', 'ru'] as const
 
+/**
+ * Приостановленная вакансия (410, §5.6): вместо формы отклика — «Повідомити, коли відкриється».
+ * Одна почта, одно письмо при возобновлении; ответ сервера одинаков, что бы ни случилось внутри.
+ */
+const paused = ref(false)
+const subscribeEmail = ref('')
+const subscribed = ref(false)
+
 onMounted(async () => {
   try {
     const data = await api<Vacancy>(`/public/j/${route.params.token}`)
@@ -67,9 +75,27 @@ onMounted(async () => {
     if ((LOCALES as readonly string[]).includes(data.language)) setLocale(data.language as typeof LOCALES[number])
   }
   catch (err) {
-    error.value = apiErrorOf(err).message
+    const e = apiErrorOf(err)
+    paused.value = e.code === 'vacancy.paused'
+    error.value = e.message
   }
 })
+
+async function subscribe() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await api(`/public/j/${route.params.token}/subscribe`, { method: 'POST', body: { email: subscribeEmail.value } })
+    subscribed.value = true
+  }
+  catch (err) {
+    error.value = apiErrorOf(err).message
+  }
+  finally {
+    busy.value = false
+  }
+}
 
 const chips = computed(() => {
   const v = vacancy.value
@@ -157,7 +183,21 @@ const canSubmit = computed(() =>
       <span class="sub">{{ t('apply.header') }}</span>
     </header>
 
-    <p v-if="error && !vacancy" class="error" role="alert">{{ error }}</p>
+    <section v-if="paused && !vacancy" class="card">
+      <h1>{{ t('apply.pausedTitle') }}</h1>
+      <p v-if="subscribed" class="note" role="status">{{ t('apply.subscribed') }}</p>
+      <form v-else novalidate @submit.prevent="subscribe">
+        <p class="sub">{{ t('apply.pausedHint') }}</p>
+        <label class="field-row">
+          <span class="label">{{ t('apply.email') }}</span>
+          <input v-model="subscribeEmail" class="field" type="email" maxlength="200" autocomplete="email" required>
+        </label>
+        <p v-if="error && subscribeEmail" class="error" role="alert">{{ error }}</p>
+        <button class="primary" type="submit" :disabled="busy || !subscribeEmail.includes('@')">{{ t('apply.notify') }}</button>
+      </form>
+    </section>
+
+    <p v-else-if="error && !vacancy" class="error" role="alert">{{ error }}</p>
 
     <template v-else-if="vacancy">
       <h1>{{ vacancy.title }}</h1>
@@ -298,4 +338,5 @@ h2 { margin: 0 0 var(--space-2); font-size: var(--font-size-body); color: var(--
 .primary:disabled { opacity: 0.5; cursor: default; }
 .sub { font-size: var(--font-size-body-s); color: var(--color-ink-faint); margin: 0 0 var(--space-1); }
 .error { color: var(--color-coral-ink); }
+.note { background: var(--color-teal-soft); border-radius: var(--radius-s); padding: var(--space-2); margin: 0 0 var(--space-2); }
 </style>

@@ -399,7 +399,7 @@ zod-схемы из `shared/schemas`, `X-CSRF-Token` на мутациях се�
 | PATCH | `/people/:id/absences/:id` | `person.absence.manage` | правка записи отсутствия |
 | GET | `/reports/documents` | `person.document.view_others` | «Документи співробітників» |
 | GET | `/reports/absences` | `person.absence.manage` | «Норми і залишки відсутностей» |
-| GET | `/reports/activity` | `person.activity.view_others` | «Навчальна активність» |
+| GET | `/reports/activity` | `person.activity.view_others` | «Навчальна активність» `[реализовано как `/reports/learning-activity` — путь занят отчётом docs/03, `44` Р-BT.4]` |
 | GET | `/reports/rating` | `person.rating.view_others` | «Індекс залученості», выгрузка только по явной галке |
 
 **23 эндпоинта.** Четыре строки `/person-document-types` развёрнуты из записи `CRUD` (§8.5).

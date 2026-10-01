@@ -309,5 +309,38 @@ export interface EngagementView {
   formula: { version: number, changedAt: string | null }
   /** Своя динамика за 12 месяцев (§7.3): последнее значение каждого месяца, без чужих людей. */
   history: { month: string, total: number }[]
+  /** «Розподіл по точці» (§7.3): гистограмма без имён; `null` — у человека нет текущей точки. */
+  distribution: EngagementDistribution | null
+}
+
+/** Ширина столбца гистограммы, п. п. индекса (`44` Р-BT.5). */
+export const ENGAGEMENT_DISTRIBUTION_STEP = 10
+/**
+ * Меньше пяти человек с индексом в точке — столбцов нет (`44` Р-BT.5): в точке из двух-трёх
+ * людей «гистограмма без имён» называет каждого по его столбцу, а сравнение коллег по имени
+ * сотруднику запрещено (§7.3).
+ */
+export const ENGAGEMENT_DISTRIBUTION_MIN_PEOPLE = 5
+
+export interface EngagementDistribution {
+  location: string | null
+  /** Людей с рассчитанным индексом в точке (скрытые и уволенные не входят, §7.2). */
+  total: number
+  /** Пусто, если `tooFew`. Последний столбец включает потолок `ENGAGEMENT_CAP`. */
+  buckets: { from: number, to: number, count: number }[]
+  /** Индекс столбца, где стоит сам человек; `null` — индекса нет или столбцов нет. */
+  ownBucket: number | null
+  tooFew: boolean
+}
+
+/** Столбцы распределения по точке — только числа, без людей (§7.3). */
+export function engagementDistribution(values: readonly number[], own: number | null, location: string | null): EngagementDistribution {
+  const n = Math.ceil(ENGAGEMENT_CAP / ENGAGEMENT_DISTRIBUTION_STEP)
+  const bucketOf = (v: number) => Math.min(n - 1, Math.max(0, Math.floor(v / ENGAGEMENT_DISTRIBUTION_STEP)))
+  const tooFew = values.length < ENGAGEMENT_DISTRIBUTION_MIN_PEOPLE
+  if (tooFew) return { location, total: values.length, buckets: [], ownBucket: null, tooFew }
+  const buckets = Array.from({ length: n }, (_, i) => ({ from: i * ENGAGEMENT_DISTRIBUTION_STEP, to: Math.min(ENGAGEMENT_CAP, (i + 1) * ENGAGEMENT_DISTRIBUTION_STEP), count: 0 }))
+  for (const v of values) buckets[bucketOf(v)]!.count++
+  return { location, total: values.length, buckets, ownBucket: own === null ? null : bucketOf(own), tooFew }
 }
 

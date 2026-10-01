@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ENGAGEMENT_DISTRIBUTION_MIN_PEOPLE, engagementDistribution,
   ENGAGEMENT_CAP, computeEngagementIndex, earlyShare, enrollmentCredit, isEngagementStale, ratingIsOnlyCondition,
   ratingOnlyBulkForbidden, round1,
 } from '../../shared/domain/engagementIndex'
@@ -148,5 +149,22 @@ describe('«Призначені треки» §5.1, §7.15', () => {
     expect(formatHms(3725)).toBe('01:02:05')
     expect(formatHms(90_061)).toBe('25:01:01')
     expect(formatHms(null)).toBe('00:00:00')
+  })
+})
+
+describe('engagementDistribution — «Розподіл по точці» (38 §7.3, 44 Р-BT.5)', () => {
+  it('меньше пяти человек — столбцов нет, свой столбец не выдаётся', () => {
+    expect(ENGAGEMENT_DISTRIBUTION_MIN_PEOPLE).toBe(5)
+    expect(engagementDistribution([10, 20, 30, 40], 20, 'Точка')).toEqual({ location: 'Точка', total: 4, buckets: [], ownBucket: null, tooFew: true })
+  })
+
+  it('столбцы по 10 п. п. от 0 до 130, потолок — в последнем, свой отмечен', () => {
+    const d = engagementDistribution([0, 9.9, 10, 55, 130], 55, null)
+    expect(d.buckets).toHaveLength(13)
+    expect(d.buckets[0]).toEqual({ from: 0, to: 10, count: 2 })
+    expect(d.buckets[1]!.count).toBe(1)
+    expect(d.buckets[12]).toEqual({ from: 120, to: 130, count: 1 })
+    expect(d.ownBucket).toBe(5)
+    expect(engagementDistribution([1, 2, 3, 4, 5], null, null).ownBucket).toBeNull()
   })
 })

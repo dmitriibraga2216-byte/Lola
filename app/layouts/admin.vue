@@ -139,6 +139,10 @@ const sections = computed<Section[]>(() => [
     { to: '/admin/reports/people', label: t('admin.nav.peopleReport'), show: hasScope('report.team'), group: t('admin.group.coreReports') },
     // «Індекс залученості» (docs/v2/38 §9 п. 5): тем, кто видит чужой индекс (§2), — без места в списке (§7.3)
     { to: '/admin/reports/rating', label: t('admin.nav.ratingReport'), show: hasScope('person.rating.view_others'), group: t('admin.group.coreReports') },
+    // Отчёты карточки человека (docs/v2/38 §9 п. 1–4): по правам соответствующего блока карточки (§2)
+    { to: '/admin/reports/documents', label: t('admin.nav.documentsReport'), show: hasScope('person.document.view_others') || hasScope('person.document.manage'), group: t('admin.group.coreReports') },
+    { to: '/admin/reports/absences', label: t('admin.nav.absencesReport'), show: hasScope('person.absence.manage'), group: t('admin.group.coreReports') },
+    { to: '/admin/reports/learning-activity', label: t('admin.nav.learningActivityReport'), show: hasScope('person.activity.view_others'), group: t('admin.group.coreReports') },
     { to: '/admin/journals', label: t('admin.nav.journals'), show: hasScope('audit.view'), group: t('admin.group.coreReports') },
     { to: '/admin/reports/tasks/test', label: t('admin.nav.taskReports'), show: hasScope('report.team'), group: t('admin.group.moduleReports') },
     { to: '/admin/reports/recruiting-funnel', label: t('admin.nav.funnelReport'), show: recruitingOn() && hasScope('candidate.view'), group: t('admin.group.moduleReports') },

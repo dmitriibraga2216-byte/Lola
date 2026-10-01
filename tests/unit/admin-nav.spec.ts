@@ -168,6 +168,10 @@ const ORIGINAL_SHOW: Record<string, string> = {
   // person-card-tails (docs/v2/38 §9 п. 5): «Індекс залученості» в «Основних звітах» — тем, кто
   // видит чужой индекс; в «Звітах модулів» уже десять пунктов
   '/admin/reports/rating': "hasScope('person.rating.view_others')",
+  // package-criteria-tails (docs/v2/38 §9 п. 1–4): отчёты карточки — там же, по правам своего блока (§2)
+  '/admin/reports/documents': "hasScope('person.document.view_others') || hasScope('person.document.manage')",
+  '/admin/reports/absences': "hasScope('person.absence.manage')",
+  '/admin/reports/learning-activity': "hasScope('person.activity.view_others')",
 }
 
 /** Пункты одного раздела → визуальные «пачки» (как `groupsOf` в admin.vue): подряд идущие

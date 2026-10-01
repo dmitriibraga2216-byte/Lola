@@ -923,6 +923,9 @@ export async function listNotifications(ctx: { tenantId: string, actorId: string
       channel: notifications.channel,
       status: notifications.status,
       renderedText: notifications.renderedText,
+      // docs/23 §12 п. 6: автор и текст ручной рассылки — из payload, текст виден и до отправки
+      author: sql<string | null>`${notifications.payload}->>'author'`,
+      text: sql<string | null>`coalesce(${notifications.renderedText}, ${notifications.payload}->>'text')`,
       error: notifications.error,
       scheduledFor: notifications.scheduledFor,
       sentAt: notifications.sentAt,

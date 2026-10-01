@@ -132,9 +132,10 @@ export async function readLogPage(ctx: PersonLogCtx, kind: LogKind, f: LogFilter
           where true ${period(sql`o.created_at`)} ${cursor(sql`o.created_at`, sql`o.id`)} ${byUser(sql`o.user_id`)} ${byUnit} ${kindGate} ${f.type ? sql`and o.kind = ${f.type}` : sql``}
             ${f.state === 'open' ? sql`and o.resolved_at is null` : f.state === 'resolved' ? sql`and o.resolved_at is not null` : sql``}
           order by o.created_at desc, o.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>
+      // docs/23 §12 п. 6: ручная рассылка видна с автором и текстом ещё до отправки (`payload.author`, `payload.text`)
       case 'notifications':
         return tx.execute(sql`
-          select n.id, n.created_at, ${cursorAt(sql`n.created_at`)}, n.code, n.channel, n.status, n.error, n.rendered_text, n.sent_at, n.scheduled_for, ${person}, ${context(sql`n.request_context`, null)}
+          select n.id, n.created_at, ${cursorAt(sql`n.created_at`)}, n.code, n.channel, n.status, n.payload->>'author' as author, coalesce(n.rendered_text, n.payload->>'text') as text, n.error, n.rendered_text, n.sent_at, n.scheduled_for, ${person}, ${context(sql`n.request_context`, null)}
           from notifications n join users u on u.id = n.user_id ${joins}
           where true ${period(sql`n.created_at`)} ${cursor(sql`n.created_at`, sql`n.id`)} ${byUser(sql`n.user_id`)} ${kindGate} ${f.type ? sql`and n.code = ${f.type}` : sql``}
           order by n.created_at desc, n.id::text desc limit ${limit + 1}`) as unknown as Promise<Row[]>

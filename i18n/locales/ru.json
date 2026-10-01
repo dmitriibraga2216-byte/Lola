@@ -616,6 +616,8 @@
       "channel": "Канал",
       "status": "Статус",
       "error": "Ошибка",
+      "author": "Автор",
+      "text": "Текст",
       "sent_at": "Отправлено",
       "scheduled_for": "Запланировано",
       "recipient": "Кому",

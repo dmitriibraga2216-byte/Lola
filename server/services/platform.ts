@@ -300,6 +300,12 @@ export async function impersonate(tenantId: string, userId: string, reason: stri
   return r.ok ? { token: r.token, expiresAt: r.expiresAt } : null
 }
 
+/**
+ * Пользователи компании в панели оператора — **только администраторы** (роли `admin` и `owner`):
+ * контактные лица клиента и единственные адресаты сброса второго фактора (docs/24 §4.8). Строк
+ * рядовых сотрудников оператор без входа «от имени» не видит (docs/25 §14 п. 9, решение
+ * docs/v2/44 Р-AC.25.9); численность — агрегатами карточки (`getTenantCard`).
+ */
 export async function tenantUsers(tenantId: string) {
   const db = platformDb()
   return db.select({
@@ -307,7 +313,12 @@ export async function tenantUsers(tenantId: string) {
     // Подключён ли второй фактор (docs/24 §3.4, PR-39) — для кнопки «Скинути 2FA» в панели оператора; без секретов
     twoFactor: sql<boolean>`exists (select 1 from user_totp t where t.user_id = ${schema.users.id} and t.confirmed_at is not null)`,
   })
-    .from(schema.users).where(employeeOnly(eq(schema.users.tenantId, tenantId))).orderBy(desc(schema.users.createdAt)).limit(200)
+    .from(schema.users)
+    .where(employeeOnly(
+      eq(schema.users.tenantId, tenantId),
+      sql`exists (select 1 from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = ${schema.users.id} and r.code in ('admin', ${OWNER_ROLE_CODE}))`,
+    ))
+    .orderBy(desc(schema.users.createdAt)).limit(200)
 }
 
 /**

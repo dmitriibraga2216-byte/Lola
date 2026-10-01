@@ -616,6 +616,8 @@
       "channel": "Channel",
       "status": "Status",
       "error": "Error",
+      "author": "Author",
+      "text": "Text",
       "sent_at": "Sent",
       "scheduled_for": "Scheduled",
       "recipient": "To",

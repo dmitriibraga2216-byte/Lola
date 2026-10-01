@@ -193,6 +193,24 @@ describe('docs/25 §14 — критерии приёмки', () => {
     expect(a).toBeDefined()
     expect(Object.keys(a)).toEqual(expect.arrayContaining(['active_users', 'total_users', 'media_bytes', 'users_limit', 'status', 'archived_at']))
     for (const r of rows) expect(JSON.stringify(r)).not.toMatch(/\+380|full_name|phone|email/)
+
+    // Карточка и обзор компании — тоже агрегаты (Р-AC.25.9)
+    const { getTenantCard, tenantUsers } = await import('../../server/services/platform')
+    const { tenantOverview } = await import('../../server/services/platformConsole')
+    const card = await getTenantCard(tenantA.id)
+    expect(card).toMatchObject({ id: tenantA.id })
+    expect(JSON.stringify(card)).not.toMatch(/\+380|full_name|phone|email|Адмін А/)
+    const overview = await tenantOverview(tenantA.id, { withBilling: true })
+    expect(JSON.stringify(overview)).not.toMatch(/\+380|full_name|"phone"|Адмін А/)
+
+    // Список людей — только администраторы компании (адресаты сброса 2FA, docs/24 §4.8); рядового сотрудника нет
+    const [emp] = await admin`insert into users (tenant_id, phone, full_name, status) values (${tenantA.id}, '+380501000077', 'Рядовий Співробітник', 'active') returning id`
+    try {
+      const people = await tenantUsers(tenantA.id)
+      expect(people.map(p => p.id)).toEqual([tenantA.adminUserId])
+      expect(JSON.stringify(people)).not.toContain('Рядовий Співробітник')
+    }
+    finally { await admin`delete from users where id = ${emp!.id}` }
   })
 
   it('10. Дано тенант приостановлен, тоді вход закрыт, фоновые задачи по нему не идут, уведомления не отправляются, данные целы', async () => {

@@ -1,10 +1,12 @@
 import postgres from 'postgres'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const N = await import('../../server/services/notifications')
 const T = await import('../../server/services/telegram')
 const A = await import('../../server/services/notificationActions')
 const { withTenant } = await import('../../server/utils/withTenant')
+const Secrets = await import('../../server/services/secrets')
+const { readLog } = await import('../../server/services/logs')
 
 /** docs/23: тихие часы, настройки человека, троттлинг, ретраи, 403 → telegram_blocked, колокольчик, рассылка, эскалация, кнопки бота. */
 const admin = postgres(process.env.DATABASE_ADMIN_URL!, { max: 1, onnotice: () => {} })
@@ -58,10 +60,28 @@ describe('уведомления (docs/23)', () => {
     expect(at.toISOString()).toBe('2026-09-20T06:00:00.000Z')
     expect(N.scheduleWithQuietHours(new Date('2026-09-19T09:00:00Z'), 'Europe/Kyiv').toISOString()).toBe('2026-09-19T09:00:00.000Z')
     await withTenant(tenantId, adminId, tx => N.enqueueNotification(tx, { tenantId, userId, code: 'assignment_created', payload: { course: 'X' }, dedupKey: `qh:${userId}:${Date.now()}` }))
+    await admin`delete from notifications where user_id = ${userId}`
+    // Событие в 21:30 по Киеву: часы подменены только для `Date` — БД и таймеры живут как есть,
+    // результат не зависит от того, когда запущен тест
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-09-19T18:30:00Z'))
+      await withTenant(tenantId, adminId, tx => N.enqueueNotification(tx, { tenantId, userId, code: 'assignment_created', payload: { course: 'X' }, dedupKey: `qh:${userId}:${Date.now()}` }))
+    }
+    finally { vi.useRealTimers() }
     const [n] = await admin`select skip_reason, scheduled_for from notifications where user_id = ${userId} order by created_at desc limit 1`
-    const kyivHour = Number(new Date().toLocaleString('en-US', { timeZone: 'Europe/Kyiv', hour: 'numeric', hour12: false }))
-    if (kyivHour < 9 || kyivHour >= 20) expect(n!.skip_reason).toBe('quiet_hours')
-    else expect(n!.skip_reason).toBeNull()
+    expect(n!.skip_reason).toBe('quiet_hours')
+    expect(new Date(n!.scheduled_for as string).toISOString()).toBe('2026-09-20T06:00:00.000Z') // 09:00 следующего дня
+    // Днём (14:00 Киева) — сразу, без причины
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-09-19T11:00:00Z'))
+      await withTenant(tenantId, adminId, tx => N.enqueueNotification(tx, { tenantId, userId, code: 'assignment_created', payload: { course: 'Y' }, dedupKey: `qh-day:${userId}:${Date.now()}` }))
+    }
+    finally { vi.useRealTimers() }
+    const [d] = await admin`select skip_reason, scheduled_for from notifications where user_id = ${userId} and payload->>'course' = 'Y'`
+    expect(d!.skip_reason).toBeNull()
+    expect(new Date(d!.scheduled_for as string).toISOString()).toBe('2026-09-19T11:00:00.000Z')
     await admin`delete from notifications where user_id = ${userId}`
   })
 
@@ -69,6 +89,9 @@ describe('уведомления (docs/23)', () => {
     const key = `dup:${userId}:${Date.now()}`
     expect(await withTenant(tenantId, adminId, tx => N.enqueueNotification(tx, { tenantId, userId, code: 'assignment_created', payload: {}, dedupKey: key }))).toBe(true)
     expect(await withTenant(tenantId, adminId, tx => N.enqueueNotification(tx, { tenantId, userId, code: 'assignment_created', payload: {}, dedupKey: key }))).toBe(false)
+    // Р-AC.23.2: дубль не пишется отдельной строкой — в журнале одна строка на ключ
+    const [{ c }] = await admin<[{ c: number }]>`select count(*)::int as c from notifications where user_id = ${userId} and dedup_key = ${key}`
+    expect(c).toBe(1)
     await admin`delete from notifications where user_id = ${userId}`
   })
 
@@ -187,6 +210,81 @@ describe('уведомления (docs/23)', () => {
     const [m] = await admin`select id from notifications where user_id = ${u} and code = 'news_published'`
     expect(await A.mute(tenantId, u, m!.id as string)).toBe('ok')
     expect((await N.listPrefs({ tenantId, actorId: u })).find(p => p.code === 'news_published')?.enabled).toBe(false)
+  })
+})
+
+describe('критерии приёмки docs/23 §12 (сверка docs/47)', () => {
+  it('п. 3: бот заблокирован — первая отправка ставит telegram_blocked, следующее критичное уходит SMS, руководителю уведомление', async () => {
+    await Secrets.setSecret(ctx(), 'sms', Secrets.SECRET_KEYS.sms.PROVIDER, 'log')
+    await Secrets.setSecret(ctx(), 'sms', Secrets.SECRET_KEYS.sms.API_KEY, 'test-key')
+    await admin`insert into notification_templates (tenant_id, code, channel, locale, body, is_mandatory) values (${tenantId}, 'enrollment_due_today', 'telegram', 'uk', 'Сьогодні дедлайн: {{course}}', true)`
+    try {
+      tgMode = 'blocked'
+      const u = await makePerson('Заблокував Бота', 777010)
+      await enqueue(u, 'assignment_created', { course: 'Перше' }, { urgent: true })
+      await dueNow(u)
+      await N.dispatchNotifications(tenantId, 50)
+      expect((await rows(u))[0]).toMatchObject({ code: 'assignment_created', status: 'skipped', skip_reason: 'blocked' })
+      const [usr] = await admin`select telegram_blocked from users where id = ${u}`
+      expect(usr!.telegram_blocked).toBe(true)
+      const [mgr] = await admin`select count(*)::int as c from notifications where user_id = ${adminId} and code = 'telegram_blocked_manager' and payload->>'name' = 'Заблокував Бота'`
+      expect(mgr!.c).toBe(1)
+
+      // Следующее критичное — в Telegram уже не ходит, сразу SMS
+      tgMode = 'ok'; sentTexts.length = 0
+      await enqueue(u, 'enrollment_due_today', { course: 'Каса' }, { urgent: true })
+      await dueNow(u)
+      await N.dispatchNotifications(tenantId, 50)
+      const crit = (await rows(u)).find(r => r.code === 'enrollment_due_today')!
+      expect(crit).toMatchObject({ status: 'sent', channel: 'sms' })
+      expect(sentTexts).toHaveLength(0)
+    }
+    finally {
+      tgMode = 'ok'
+      await admin`delete from tenant_secrets where tenant_id = ${tenantId} and provider = 'sms'`
+      await admin`delete from notification_templates where tenant_id = ${tenantId} and code = 'enrollment_due_today' and body = 'Сьогодні дедлайн: {{course}}'`
+    }
+  })
+
+  it('п. 5: шаблон отредактирован — ранее отправленное в журнале показывает старый текст', async () => {
+    tgMode = 'ok'
+    const u = await makePerson('Старий Текст', 777011)
+    await enqueue(u, 'assignment_created', { course: 'Піца' }, { urgent: true })
+    await dueNow(u)
+    await N.dispatchNotifications(tenantId, 50)
+    const [before] = await admin`select id, status, rendered_text, template_version from notifications where user_id = ${u}`
+    expect(before!.status).toBe('sent')
+    expect(before!.rendered_text).toContain('Піца')
+    await admin`insert into notification_templates (tenant_id, code, channel, locale, body, version) values (${tenantId}, 'assignment_created', 'telegram', 'uk', 'НОВИЙ ТЕКСТ {{course}}', 99)`
+    try {
+      await enqueue(u, 'assignment_created', { course: 'Суші' }, { urgent: true })
+      await dueNow(u)
+      await N.dispatchNotifications(tenantId, 50)
+      const list = await N.listNotifications(ctx(), { userId: u })
+      const old = list.find(n => n.id === before!.id)!
+      expect(old.renderedText).toBe(before!.rendered_text)
+      expect(old.renderedText).not.toContain('НОВИЙ ТЕКСТ')
+      expect(list.find(n => n.id !== before!.id)!.renderedText).toBe('НОВИЙ ТЕКСТ Суші')
+      const log = await readLog({ tenantId, actorId: adminId, canSeeCandidates: true }, 'notifications', { userId: u })
+      expect(log.find(r => r.id === before!.id)!.text).toBe(before!.rendered_text)
+    }
+    finally { await admin`delete from notification_templates where tenant_id = ${tenantId} and code = 'assignment_created' and version = 99` }
+  })
+
+  it('п. 6: ручная рассылка на 200 человек — в журнале как manual с автором и текстом', async () => {
+    const tag = `розсилка-${Date.now()}`
+    const phones = Array.from({ length: 200 }, (_, i) => `+38099${String(Date.now() % 1e4).padStart(4, '0')}${String(i).padStart(3, '0')}`)
+    const ids = (await admin`insert into users ${admin(phones.map((phone, i) => ({ tenant_id: tenantId, phone, full_name: `Розсилка ${i}`, status: 'active', tags: [tag] })))} returning id`).map(r => r.id as string)
+    userIds.push(...ids)
+    const r = await N.broadcast(ctx(), { audience: { rules: [{ type: 'tag', values: [tag] }], match: 'any' }, text: 'Завтра інвентаризація о 8:00' })
+    expect(r).toEqual({ recipients: 200, queued: 200 })
+    const log = await readLog({ tenantId, actorId: adminId, canSeeCandidates: true }, 'notifications', { userId: ids[17]!, type: 'manual' })
+    expect(log).toHaveLength(1)
+    expect(log[0]).toMatchObject({ code: 'manual', author: 'Адмін Каппі', text: 'Завтра інвентаризація о 8:00' })
+    const list = await N.listNotifications(ctx(), { userId: ids[0]! })
+    expect(list[0]).toMatchObject({ code: 'manual', author: 'Адмін Каппі', text: 'Завтра інвентаризація о 8:00' })
+    const [{ c }] = await admin<[{ c: number }]>`select count(*)::int as c from notifications where code = 'manual' and user_id in ${admin(ids)}`
+    expect(c).toBe(200)
   })
 })
 

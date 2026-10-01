@@ -188,6 +188,8 @@ afterAll(async () => {
 describe('каждый вызов — строка ai_calls; списание одной транзакцией с результатом (30 §7.16, 35 §12)', () => {
   it('успешный вызов заглушкой: журнал, одна операция оси и сохранённый результат', async () => {
     const before = await currentUsage(tenantId, 'ai_generate_ops')
+    const paymentsOf = async () => (await admin`select count(*)::int as n from tenant_payments where tenant_id = ${tenantId}`)[0]!.n as number
+    const paymentsBefore = await paymentsOf()
     const refId = randomUUID()
     const r = await callModel(ctx(), GENERATE, { n: 7 }, {
       ref: { kind: 'vacancy_generation', id: refId },
@@ -207,6 +209,9 @@ describe('каждый вызов — строка ai_calls; списание о
     const events = await admin`select meta from usage_events where tenant_id = ${tenantId} and axis = 'ai_generate_ops'`
     expect(events.map(e => (e.meta as { aiCallId: number }).aiCallId)).toEqual([Number(call!.id)])
     expect((await admin`select count(*)::int as n from audit_log where action = 'pr27.persisted' and entity_id = ${refId}`)[0]!.n).toBe(1)
+    // ИИ деньгами не тарифицируется (решение владельца 01.10, `44` Р-BL.2): списана операция оси, а
+    // `cost_minor` — только себестоимость для метрик оператора; денежной строки вызов не создаёт.
+    expect(await paymentsOf()).toBe(paymentsBefore)
   })
 
   it('результат не сохранился — операция не списана, вызов помечен persist_failed', async () => {

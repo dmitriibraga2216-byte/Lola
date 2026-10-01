@@ -3563,7 +3563,8 @@
       "plan_grace_started": "Grace period started",
       "plan_readonly": "Workspace is read-only",
       "plan_changed": "Plan changed",
-      "plan_change_blocked": "Plan change is not possible"
+      "plan_change_blocked": "Plan change is not possible",
+      "vacancy_account_failing": "Job board is not responding"
     }
   },
   "ntpl": {
@@ -8331,6 +8332,10 @@
       }
     },
     "plansPage": {
+      "priceMissing": "Price not set",
+      "unpricedTitle": "Price not set: {plans}",
+      "unpricedManage": "Plan prices are not built into the system — the operator sets them. Open “Edit” and enter a price: without it the company owner cannot see what the plan costs. A free plan has price 0.",
+      "unpricedView": "Plan prices are set by an operator with access to the plan catalog — let them know a price is needed.",
       "hint": "The platform plan grid and how many companies are on each plan. Plans can be changed by a role with the plan catalog permission.",
       "name": "Plan",
       "price": "Price, ₴/mo",

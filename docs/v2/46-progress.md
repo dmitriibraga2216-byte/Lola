@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-10-01 · idempotency-storefront, часть 1 — `Idempotency-Key` мутаций оргструктуры и публикации вакансии
+
+**Ветка:** `idempotency-storefront` от `origin/main` (`5863e81`). **Миграции нет** — механизм и таблица
+`idempotency_keys` из cross-cutting-tails, часть 2 (`0105`). Решение — `44` §18 Р-CC.5; пометки — `docs/04` §4.1,
+`32` §10, `41` §5.3.
+
+### Что сделано
+
+- Все 13 мутаций `/org-structure` обёрнуты `idempotent()` после проверки прав; конструктор (узел, перенос, привязка,
+  снятие, архив, снимок, откат, импорт, источник истины) шлёт `Idempotency-Key` и повторяет обрыв тем же ключом.
+- `POST /vacancies/:id/publications`: ключ обязателен (`41` §5.3) — без него `400 idempotency.key_required`;
+  экран вакансии шлёт ключ. `confirm: true` требовался и раньше.
+- Отпечаток multipart (загрузка CSV) — по частям и хэшу файла, без границы: повтор того же файла не даёт `key_reused`.
+
+### Как проверено
+
+`tests/integration/v2-idempotency.spec.ts` (12, +3): обязательный ключ, multipart, узел с тем же ключом — один;
+сторож `tests/unit/idempotent-routes.spec.ts` (3). Гейт — lint, typecheck, unit, `rls.spec.ts`, `schema-parity.spec.ts`.
+
+### Что осталось
+
+- Кэш витрины оргструктуры на 5 минут (`32` §7 п. 7) — часть 2 этой ветки.
+
+---
+
 ## 2026-10-01 · owner-decisions-ai-track — ИИ-критерии сценария и «Згенерувати трек» (решения владельца 01.10)
 
 **Ветка:** `owner-decisions-ai-track` от `origin/main` (`34537bb`). **Миграция `0106_v2_ai_ref_scenario_course`:**
@@ -261,8 +286,9 @@ pg-boss из ручек (две строки) и `console.log` воркера.
 
 ### Что осталось
 
-- `Idempotency-Key` + `confirm:true` у публикации вакансии на площадку (`41` §5.3) — смена контракта, вопрос в PR.
-- `Idempotency-Key` мутаций оргструктуры (`32` §7) — подключается той же обёрткой.
+- ~~`Idempotency-Key` + `confirm:true` у публикации вакансии на площадку (`41` §5.3) — смена контракта, вопрос в PR.~~
+- ~~`Idempotency-Key` мутаций оргструктуры (`32` §7) — подключается той же обёрткой.~~ — закрыто idempotency-storefront,
+  часть 1 (01.10, `44` Р-CC.5).
 
 ---
 
@@ -1246,7 +1272,8 @@ e2e `billing.spec.ts` + новый сценарий экрана. Покрыти
   library-tails (части 1 и 2, 30.09). Осталось: выбор владельца и соавторов в форме модуля (`44` Р-LT.6).
 - **Оргструктура:** ~~автоперевод `org_structure_is_source_of_truth`, отчёты подчинения и журнала изменений,
   `org.daily_snapshot`, `.snapshot_cleanup`, писатели `org_node_assigned`/`org_structure_conflict`~~ (PR-30, PR-31) —
-  закрыто org-structure-tails, части 1 и 2 (30.09). Осталось: `Idempotency-Key` мутаций и кэш витрины (`32` §7, §10).
+  закрыто org-structure-tails, части 1 и 2 (30.09); ~~`Idempotency-Key` мутаций~~ — idempotency-storefront, часть 1 (01.10).
+  Осталось: кэш витрины на 5 минут (`32` §7 п. 7).
 - **Хранилище:** ~~`storage.retention_scan`, `.orphan_scan`, `.object_reconcile`, `.quota_warn` (политики — только
   всухую)~~ — закрыто `storage-jobs` (сухой прогон с отчётом, `44` §11 Р-S1); ~~`deleteS3Prefix()` при удалении
   тенанта глушит ошибку пакетного `DeleteObjects` — объекты остаются~~ — закрыто #154 (PR-36). Осталось: исполнение

@@ -354,7 +354,7 @@ async function publish() {
   error.value = ''
   busy.value = 'pub'
   try {
-    await api(`/vacancies/${id}/publications`, { method: 'POST', body: { confirm: true, accountIds: selectedAccountIds.value } })
+    await api(`/vacancies/${id}/publications`, { method: 'POST', idempotent: true, body: { confirm: true, accountIds: selectedAccountIds.value } })
     selectedAccountIds.value = []
     await loadPublications()
   }
@@ -366,7 +366,7 @@ async function publishManual() {
   error.value = ''
   busy.value = 'pub-manual'
   try {
-    await api(`/vacancies/${id}/publications`, { method: 'POST', body: { confirm: true, manual: { accountId: manualPub.accountId, externalUrl: manualPub.externalUrl } } })
+    await api(`/vacancies/${id}/publications`, { method: 'POST', idempotent: true, body: { confirm: true, manual: { accountId: manualPub.accountId, externalUrl: manualPub.externalUrl } } })
     manualPub.accountId = ''
     manualPub.externalUrl = ''
     await loadPublications()

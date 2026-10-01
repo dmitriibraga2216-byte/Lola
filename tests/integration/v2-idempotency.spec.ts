@@ -10,10 +10,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
  * проверяется на минимальном событии с теми же функциями поверх простого объекта.
  */
 
-interface FakeEvent { method: string, path: string, headers: Record<string, string>, body: unknown, status: number, out: Record<string, string> }
+interface FakeEvent { method: string, path: string, headers: Record<string, string>, body: unknown, status: number, out: Record<string, string>, parts?: { name: string, filename?: string, type?: string, data: Buffer }[] }
 const g = globalThis as unknown as Record<string, unknown>
 g.getRequestHeader = (e: FakeEvent, n: string) => e.headers[n.toLowerCase()]
 g.readBody = async (e: FakeEvent) => e.body
+g.readMultipartFormData = async (e: FakeEvent) => e.parts
 g.setResponseStatus = (e: FakeEvent, s: number) => { e.status = s }
 g.getResponseStatus = (e: FakeEvent) => e.status
 g.setResponseHeader = (e: FakeEvent, k: string, v: string) => { e.out[k] = v }
@@ -147,5 +148,48 @@ describe('Р-CC.3: Idempotency-Key', () => {
     expect((await admin`select count(*)::int as n from idempotency_keys where key in (${`${PREFIX}old`}, ${`${PREFIX}same`})`)[0]!.n).toBe(0)
     const [{ ttl }] = await admin`select extract(epoch from expires_at - created_at)::int as ttl from idempotency_keys where key = ${`${PREFIX}fp`}` as unknown as [{ ttl: number }]
     expect(Math.abs(ttl - 86_400)).toBeLessThan(5)
+  })
+
+  it('Р-CC.5: required — без заголовка 400 idempotency.key_required, действие не выполняется', async () => {
+    let n = 0
+    const e = ev(undefined)
+    expect(await idempotent(e as never, me(), async () => ({ data: ++n }), { required: true })).toMatchObject({ error: { code: 'idempotency.key_required' } })
+    expect(e.status).toBe(400)
+    expect(n).toBe(0)
+    expect(await idempotent(ev(`${PREFIX}req`) as never, me(), async () => ({ data: ++n }), { required: true })).toEqual({ data: 1 })
+  })
+
+  it('Р-CC.5: multipart — отпечаток по частям: тот же файл с новой границей — повтор, другой файл — key_reused', async () => {
+    const mp = (data: string): FakeEvent => ({
+      ...ev(`${PREFIX}csv`, `--b${Math.random()}\r\n…`, '/api/v1/org-structure/import'),
+      headers: { 'idempotency-key': `${PREFIX}csv`, 'content-type': `multipart/form-data; boundary=b${Math.random()}` },
+      parts: [{ name: 'file', filename: 'org.csv', type: 'text/csv', data: Buffer.from(data) }],
+    })
+    let n = 0
+    await idempotent(mp('a;b\n1;2') as never, me(), async () => ({ data: ++n }))
+    const again = mp('a;b\n1;2')
+    expect(await idempotent(again as never, me(), async () => ({ data: ++n }))).toEqual({ data: 1 })
+    expect(again.out['Idempotent-Replayed']).toBe('true')
+    expect(await idempotent(mp('a;b\n3;4') as never, me(), async () => ({ data: ++n }))).toMatchObject({ error: { code: 'idempotency.key_reused' } })
+    expect(n).toBe(1)
+  })
+
+  it('Р-CC.5: создание узла оргструктуры с тем же ключом — один узел, повтор получает тот же', async () => {
+    const { createNode } = await import('../../server/services/orgStructure')
+    const title = `${PREFIX}вузол-${Date.now()}`
+    const ctx = { tenantId, actorId: adminId }
+    const run = () => {
+      const e = ev(`${PREFIX}node`, { title }, '/api/v1/org-structure/nodes')
+      return idempotent(e as never, me(), async () => {
+        const r = await createNode(ctx, { title, type: 'position' })
+        return r.ok ? { data: r.node } : { error: { code: r.code } }
+      })
+    }
+    const first = await run() as { data: { id: string } }
+    const second = await run() as { data: { id: string } }
+    expect(second.data.id).toBe(first.data.id)
+    expect((await admin`select count(*)::int as n from org_nodes where title = ${title}`)[0]!.n).toBe(1)
+    await admin`delete from audit_log where entity_id = ${first.data.id}`.catch(() => {})
+    await admin`delete from org_nodes where id = ${first.data.id}`
   })
 })

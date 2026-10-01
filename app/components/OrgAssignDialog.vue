@@ -70,6 +70,7 @@ async function submit(extra: { transferPrimary?: boolean, isPrimary?: boolean } 
   try {
     await api(`/org-structure/nodes/${props.node.id}/assignments`, {
       method: 'POST',
+      idempotent: true,
       body: {
         userId: person.value.id,
         isPrimary: extra.isPrimary ?? form.isPrimary,

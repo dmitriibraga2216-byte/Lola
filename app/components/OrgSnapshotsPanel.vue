@@ -56,7 +56,7 @@ async function rollback() {
   busy.value = true
   error.value = ''
   try {
-    const r = await api<RollbackResult>(`/org-structure/snapshots/${s.id}/rollback`, { method: 'POST' })
+    const r = await api<RollbackResult>(`/org-structure/snapshots/${s.id}/rollback`, { method: 'POST', idempotent: true })
     const parts = [t('orgStructure.rollbackDone', { nodes: r.nodes, created: r.assignmentsCreated, ended: r.assignmentsEnded })]
     if (r.dismissedSkipped) parts.push(t('orgStructure.rollbackDismissed', { n: r.dismissedSkipped }))
     notice.value = parts.join(' ')

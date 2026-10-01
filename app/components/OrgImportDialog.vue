@@ -79,7 +79,7 @@ async function upload() {
   try {
     const form = new FormData()
     form.append('file', file.value)
-    take(await api<View>('/org-structure/import', { method: 'POST', body: form }))
+    take(await api<View>('/org-structure/import', { method: 'POST', idempotent: true, body: form }))
   }
   catch (err) { error.value = messageOf(err) }
   finally { busy.value = false }
@@ -91,7 +91,7 @@ async function recheck() {
   busy.value = true
   error.value = ''
   try {
-    take(await api<View>(`/org-structure/import/${view.value.jobId}/mapping`, { method: 'POST', body: { mapping: mapping.value, options: { ...options } } }))
+    take(await api<View>(`/org-structure/import/${view.value.jobId}/mapping`, { method: 'POST', idempotent: true, body: { mapping: mapping.value, options: { ...options } } }))
   }
   catch (err) { error.value = messageOf(err) }
   finally { busy.value = false }
@@ -116,7 +116,7 @@ async function run() {
   busy.value = true
   error.value = ''
   try {
-    await api(`/org-structure/import/${view.value.jobId}/apply`, { method: 'POST' })
+    await api(`/org-structure/import/${view.value.jobId}/apply`, { method: 'POST', idempotent: true })
     view.value = { ...view.value, status: 'queued' }
     poll = setInterval(refresh, 1500)
   }
@@ -136,7 +136,7 @@ async function rollbackImport() {
   busy.value = true
   error.value = ''
   try {
-    const r = await api<{ nodes: number, assignmentsCreated: number, assignmentsEnded: number }>(`/org-structure/snapshots/${id}/rollback`, { method: 'POST' })
+    const r = await api<{ nodes: number, assignmentsCreated: number, assignmentsEnded: number }>(`/org-structure/snapshots/${id}/rollback`, { method: 'POST', idempotent: true })
     notice.value = t('orgStructure.rollbackDone', { nodes: r.nodes, created: r.assignmentsCreated, ended: r.assignmentsEnded })
     emit('changed', notice.value)
   }

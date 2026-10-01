@@ -250,7 +250,7 @@ async function save() {
       note: form.note || null,
     }
     if (form.id) {
-      await api(`/org-structure/nodes/${form.id}`, { method: 'PUT', body })
+      await api(`/org-structure/nodes/${form.id}`, { method: 'PUT', idempotent: true, body })
       const node = editedNode.value
       const moved = form.parentId !== form.originalParentId
       form.open = false
@@ -260,7 +260,7 @@ async function save() {
       if (moved && node) askMove(node, form.parentId)
     }
     else {
-      const created = await api<Node>('/org-structure/nodes', { method: 'POST', body: { ...body, parentId: form.parentId } })
+      const created = await api<Node>('/org-structure/nodes', { method: 'POST', idempotent: true, body: { ...body, parentId: form.parentId } })
       form.open = false
       notice.value = t('orgStructure.nodeCreated')
       await load()
@@ -276,7 +276,7 @@ async function save() {
 async function archive(id: string) {
   busy.value = true
   error.value = ''
-  try { await api(`/org-structure/nodes/${id}/archive`, { method: 'POST' }); await load() }
+  try { await api(`/org-structure/nodes/${id}/archive`, { method: 'POST', idempotent: true }); await load() }
   catch (err) { fail(err) }
   finally { busy.value = false }
 }
@@ -285,7 +285,7 @@ async function unassign(assignmentId: string) {
   busy.value = true
   error.value = ''
   try {
-    await api(`/org-structure/assignments/${assignmentId}`, { method: 'DELETE', body: { endedReason: 'manual' } })
+    await api(`/org-structure/assignments/${assignmentId}`, { method: 'DELETE', idempotent: true, body: { endedReason: 'manual' } })
     notice.value = t('orgStructure.unassigned')
     await load()
   }
@@ -301,7 +301,7 @@ async function snapshot() {
     // (`32` §8 `org_structure_rollback`), в журнале она лежит в `audit_log.after`. Поэтому это
     // местное время в языке интерфейса (`useFormat()`), а не UTC-строка `toISOString()`,
     // которая для Киева отставала на два-три часа.
-    await api('/org-structure/snapshots', { method: 'POST', body: { label: formatDateTime(new Date()) } })
+    await api('/org-structure/snapshots', { method: 'POST', idempotent: true, body: { label: formatDateTime(new Date()) } })
     notice.value = t('orgStructure.snapshotDone')
   }
   catch (err) { fail(err) }
@@ -317,7 +317,7 @@ async function enableSourceOfTruth() {
   busy.value = true
   error.value = ''
   try {
-    const r = await api<{ changed: number }>('/org-structure/source-of-truth', { method: 'POST', body: { confirm: true } })
+    const r = await api<{ changed: number }>('/org-structure/source-of-truth', { method: 'POST', idempotent: true, body: { confirm: true } })
     sotConfirm.value = false
     await dialogDone(t('orgStructure.sot.done', { n: r.changed }))
   }

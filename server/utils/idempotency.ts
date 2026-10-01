@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { IDEMPOTENCY_KEY_RE, beginIdempotent, finishIdempotent, releaseIdempotent, requestFingerprint } from '../services/idempotency'
 import { apiError } from './apiResponse'
@@ -6,13 +7,19 @@ import { apiError } from './apiResponse'
  * Обёртка ручки с заголовком `Idempotency-Key` (docs/04 §4.1). Без заголовка — обычное
  * выполнение: ключ необязателен, старые клиенты и интеграции работают как раньше. Вызывается
  * после проверки прав — ключ живёт в пространстве «тенант × человек».
+ *
+ * `required` — ручка с побочным эффектом снаружи (публикация на площадку, `v2/41` §5.3): без
+ * заголовка — `400 idempotency.key_required`, мутация не выполняется.
  */
-export async function idempotent(event: H3Event, a: { tenantId: string, userId: string }, fn: () => Promise<unknown>): Promise<unknown> {
+export async function idempotent(event: H3Event, a: { tenantId: string, userId: string }, fn: () => Promise<unknown>, opts: { required?: boolean } = {}): Promise<unknown> {
   const key = getRequestHeader(event, 'idempotency-key')
-  if (key === undefined) return fn()
+  if (key === undefined) {
+    if (opts.required) return apiError(event, 400, 'idempotency.key_required', 'Потрібен заголовок Idempotency-Key — оновіть сторінку й повторіть дію')
+    return fn()
+  }
   if (!IDEMPOTENCY_KEY_RE.test(key)) return apiError(event, 400, 'idempotency.key_invalid', 'Некоректний Idempotency-Key: 1–255 друкованих символів без пробілів')
   const ctx = { tenantId: a.tenantId, actorId: a.userId }
-  const body = event.method === 'GET' ? null : await readBody(event).catch(() => null)
+  const body = event.method === 'GET' ? null : await requestBodyForFingerprint(event)
   const begin = await beginIdempotent(ctx, key, requestFingerprint(event.method, event.path, body))
   switch (begin.kind) {
     case 'mismatch':
@@ -34,4 +41,16 @@ export async function idempotent(event: H3Event, a: { tenantId: string, userId: 
   }
   await finishIdempotent(ctx, begin.id, getResponseStatus(event), result)
   return result
+}
+
+/**
+ * Тело для отпечатка. Multipart (импорт CSV) — по частям: имя, файл, тип и хэш содержимого, без
+ * границы — повтор того же файла клиентом идёт с новой границей, и сырое тело бы не совпало.
+ */
+async function requestBodyForFingerprint(event: H3Event): Promise<unknown> {
+  if (/^multipart\//i.test(getRequestHeader(event, 'content-type') ?? '')) {
+    const parts = await readMultipartFormData(event).catch(() => undefined)
+    return (parts ?? []).map(p => ({ name: p.name ?? null, filename: p.filename ?? null, type: p.type ?? null, sha256: createHash('sha256').update(p.data).digest('hex') }))
+  }
+  return readBody(event).catch(() => null)
 }

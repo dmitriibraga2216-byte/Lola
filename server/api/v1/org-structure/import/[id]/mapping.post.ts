@@ -3,6 +3,7 @@ import { orgImportRemapSchema } from '../../../../../../shared/schemas/orgStruct
 import { requireScope } from '../../../../../services/access'
 import { remapOrgImport } from '../../../../../services/orgImport'
 import { apiData, apiError } from '../../../../../utils/apiResponse'
+import { idempotent } from '../../../../../utils/idempotency'
 
 const STATUS = { not_found: 404, not_ready: 409, mapping_invalid: 422 } as const
 const MESSAGE = {
@@ -14,11 +15,14 @@ const MESSAGE = {
 /** POST /org-structure/import/:id/mapping — сопоставление колонок и опции, повторная проверка тех же строк. */
 export default defineEventHandler(async (event) => {
   const a = await requireScope(event, 'org.structure.import')
-  const id = z.string().uuid().safeParse(getRouterParam(event, 'id'))
-  if (!id.success) return apiError(event, 404, 'not_found', MESSAGE.not_found)
-  const p = orgImportRemapSchema.safeParse(await readBody(event))
-  if (!p.success) return apiError(event, 422, 'mapping_invalid', MESSAGE.mapping_invalid, { issues: p.error.issues })
-  const r = await remapOrgImport({ tenantId: a.tenantId, actorId: a.userId }, id.data, p.data)
-  if (!r.ok) return apiError(event, STATUS[r.code], r.code, MESSAGE[r.code])
-  return apiData(r.view)
+  // docs/v2/32 §10: мутации идемпотентны по Idempotency-Key (Р-CC.3)
+  return idempotent(event, a, async () => {
+    const id = z.string().uuid().safeParse(getRouterParam(event, 'id'))
+    if (!id.success) return apiError(event, 404, 'not_found', MESSAGE.not_found)
+    const p = orgImportRemapSchema.safeParse(await readBody(event))
+    if (!p.success) return apiError(event, 422, 'mapping_invalid', MESSAGE.mapping_invalid, { issues: p.error.issues })
+    const r = await remapOrgImport({ tenantId: a.tenantId, actorId: a.userId }, id.data, p.data)
+    if (!r.ok) return apiError(event, STATUS[r.code], r.code, MESSAGE[r.code])
+    return apiData(r.view)
+  })
 })

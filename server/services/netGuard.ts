@@ -61,7 +61,7 @@ export function checkUrlShape(raw: string, opts: { httpsOnly?: boolean } = {}): 
   return 'ok'
 }
 
-/** То же плюс DNS: все адреса имени должны быть публичными (проверка при сохранении настроек). */
+/** То же плюс DNS: все адреса имени должны быть публичными (проверка при сохранении настроек; не резолвится — решит соединение). */
 export async function checkPublicUrl(raw: string, opts: { httpsOnly?: boolean } = {}): Promise<UrlCheck> {
   const shape = checkUrlShape(raw, opts)
   if (shape !== 'ok' || allowPrivate) return shape
@@ -69,9 +69,11 @@ export async function checkPublicUrl(raw: string, opts: { httpsOnly?: boolean } 
   if (net.isIP(host)) return 'ok'
   try {
     const addrs = await dns.promises.lookup(host, { all: true })
-    return addrs.length && addrs.every(a => !isPrivateAddress(a.address)) ? 'ok' : 'private'
+    return addrs.every(a => !isPrivateAddress(a.address)) ? 'ok' : 'private'
   }
-  catch { return 'invalid' }
+  // Имя пока не резолвится (DNS ещё не настроен, временный сбой) — сохранить можно: доставку всё равно
+  // проверяет `lookup` сокета в момент соединения
+  catch { return 'ok' }
 }
 
 export class PrivateDestinationError extends Error {

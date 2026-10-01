@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PERSON_DOCUMENT_LIMITS, PERSON_NOTE_CATEGORIES, PERSON_NOTE_LIMITS, PERSON_NOTE_VISIBILITIES } from '../enums'
+import { PERSON_DOCUMENT_LIMITS, PERSON_DOCUMENT_STATUSES, PERSON_NOTE_CATEGORIES, PERSON_NOTE_LIMITS, PERSON_NOTE_VISIBILITIES } from '../enums'
 import { normalizeNoteBody } from '../domain/personRecords'
 import { KEYSETS } from '../domain/keyset'
 import { keysetCursorSchema } from './keyset'
@@ -111,3 +111,43 @@ export const documentTypeUpdateSchema = z.object({
   isActive: z.boolean().optional(),
 })
 export type DocumentTypeUpdateInput = z.infer<typeof documentTypeUpdateSchema>
+
+// ── Отчёты §9 п. 1–4 (`38` §9, запись `46` «package-criteria-tails», часть 3) ────────────────
+
+const reportFormat = z.enum(['json', 'xlsx', 'csv']).default('json')
+const flag = z.enum(['0', '1']).optional().transform(v => v === '1')
+
+/** «Документи співробітників» (п. 1) и «Прострочені та близькі до завершення» (п. 2 — `preset=expiring`). */
+export const documentsReportQuerySchema = z.object({
+  preset: z.enum(['all', 'expiring']).default('all'),
+  locationId: z.string().uuid().optional(),
+  positionId: z.string().uuid().optional(),
+  typeId: z.string().uuid().optional(),
+  status: z.enum(PERSON_DOCUMENT_STATUSES).optional(),
+  expiresFrom: z.string().date().optional(),
+  expiresTo: z.string().date().optional(),
+  missingOnly: flag,
+  q: z.string().trim().max(100).optional(),
+  format: reportFormat,
+})
+export type DocumentsReportQuery = z.infer<typeof documentsReportQuerySchema>
+
+/** «Норми і залишки відсутностей» (п. 3). */
+export const absenceNormsReportQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  locationId: z.string().uuid().optional(),
+  negativeOnly: flag,
+  q: z.string().trim().max(100).optional(),
+  format: reportFormat,
+})
+export type AbsenceNormsReportQuery = z.infer<typeof absenceNormsReportQuerySchema>
+
+/** «Навчальна активність» (п. 4): период произвольный, `[from, to]` включительно. */
+export const activityReportQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  locationId: z.string().uuid().optional(),
+  q: z.string().trim().max(100).optional(),
+  format: reportFormat,
+}).refine(v => !v.from || !v.to || v.from <= v.to, { message: 'Початок періоду пізніше за кінець', path: ['to'] })
+export type ActivityReportQuery = z.infer<typeof activityReportQuerySchema>

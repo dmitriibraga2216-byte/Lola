@@ -176,7 +176,10 @@
       "libraryReports": "Library reports",
       "library": "Module library",
       "interviewReports": "Interview reports",
-      "delegations": "Delegation log"
+      "delegations": "Delegation log",
+      "documentsReport": "Employee documents",
+      "absencesReport": "Absence norms and balances",
+      "learningActivityReport": "Learning activity"
     },
     "section": {
       "learning": "Learning",
@@ -7471,7 +7474,12 @@
     "loadFailed": "Could not load the index",
     "retry": "Retry",
     "backProfile": "My profile",
-    "backCard": "Person card"
+    "backCard": "Person card",
+    "distribution": "Distribution at “{location}”",
+    "distributionHint": "How many people at the location fall into each index range. No names, no ranks.",
+    "distributionTooFew": "Fewer than {min} people at the location have an index — we hide the distribution so no one can be recognised by a bar.",
+    "distributionYou": "you are here",
+    "distributionThem": "this person is here"
   },
   "interview": {
     "title": "Online interview",
@@ -8747,6 +8755,73 @@
       "org_structure_snapshot": "Snapshot",
       "org_structure_snapshot_cleanup": "Snapshot cleanup",
       "org_structure_source_of_truth": "Tree became the source of truth"
+    }
+  },
+  "peopleReports": {
+    "loading": "Loading the report…",
+    "loadError": "Could not load the report. Check your connection and try again.",
+    "retry": "Try again",
+    "empty": "Nobody matches these filters. Change the filters or the period.",
+    "exportXlsx": "Excel",
+    "exportCsv": "CSV",
+    "filter": {
+      "search": "Search",
+      "searchPlaceholder": "Last or first name",
+      "location": "Location",
+      "position": "Position",
+      "all": "All"
+    },
+    "col": {
+      "person": "Full name",
+      "position": "Position",
+      "location": "Location"
+    },
+    "documents": {
+      "title": "Employee documents",
+      "hint": "Documents of people in your area: validity, status and who uploaded them.",
+      "tabAll": "All documents",
+      "tabExpiring": "Expired and expiring soon",
+      "type": "Type",
+      "status": "Status",
+      "statusActive": "All except revoked",
+      "expiresFrom": "Valid until — from",
+      "expiresTo": "Valid until — to",
+      "missingOnly": "Only missing required ones",
+      "issuedAt": "Issued",
+      "expiresAt": "Valid until",
+      "daysLeft": "Days left",
+      "uploadedBy": "Uploaded by",
+      "selfUploaded": "Uploaded by the employee",
+      "emptyMissing": "Everyone matching these filters has their required documents."
+    },
+    "absences": {
+      "title": "Absence norms and balances",
+      "hint": "Vacation and sick-leave norms, days used and balance — the same numbers as on the person card.",
+      "year": "Year",
+      "negativeOnly": "Only negative balance",
+      "kind": "Type",
+      "norm": "Norm",
+      "source": "Norm source",
+      "used": "Used",
+      "remaining": "Balance",
+      "emptyNegative": "Nobody matching these filters has a negative balance.",
+      "sources": {
+        "tenant": "Company norm",
+        "location": "Location norm",
+        "user": "Individual",
+        "system": "System norm"
+      }
+    },
+    "activity": {
+      "title": "Learning activity",
+      "hint": "Days with learning, longest streak, events and hours for the selected period.",
+      "from": "From",
+      "to": "To",
+      "badRange": "The period starts after it ends — fix the dates.",
+      "daysActive": "Active days",
+      "longestStreak": "Longest streak",
+      "totalEvents": "Total events",
+      "hours": "Hours"
     }
   }
 }

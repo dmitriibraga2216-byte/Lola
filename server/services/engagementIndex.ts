@@ -4,9 +4,9 @@ import { withTenant } from '../utils/withTenant'
 import type { TenantTx } from '../utils/withTenant'
 import {
   ENGAGEMENT_BATCH_SIZE, ENGAGEMENT_FORMULA_VERSION, ENGAGEMENT_HELP_KINDS, ENGAGEMENT_RECALC_COOLDOWN_MINUTES,
-  ENGAGEMENT_WINDOW_DAYS, computeEngagementIndex, isEngagementStale,
+  ENGAGEMENT_WINDOW_DAYS, computeEngagementIndex, engagementDistribution, isEngagementStale,
 } from '../../shared/domain/engagementIndex'
-import type { EngagementState, EngagementView, IndexBreakdown, IndexEnrollment, IndexInput, IndexResult } from '../../shared/domain/engagementIndex'
+import type { EngagementDistribution, EngagementState, EngagementView, IndexBreakdown, IndexEnrollment, IndexInput, IndexResult } from '../../shared/domain/engagementIndex'
 import type { StageCapabilityMap } from '../../shared/enums'
 import type { Access } from './access'
 import { areaCovers, areaOf } from './access'
@@ -231,6 +231,7 @@ async function buildView(tx: TenantTx, subject: CardSubject, self: boolean): Pro
                     and coalesce((o.breakdown ->> 'formula_version')::int, 0) <> ${ENGAGEMENT_FORMULA_VERSION}::int)`) as unknown as { since: string | null }[]
 
   const updatedAt = u?.rating_updated_at ? new Date(u.rating_updated_at).toISOString() : null
+  const distribution = await locationDistribution(tx, subject, snap ? Number(snap.total) : null)
   const state: EngagementState = snap ? 'ok' : updatedAt ? 'no_assignments' : 'pending'
   return {
     person: { id: subject.id, fullName: subject.fullName },
@@ -246,7 +247,28 @@ async function buildView(tx: TenantTx, subject: CardSubject, self: boolean): Pro
     stale: isEngagementStale(updatedAt),
     formula: { version: ENGAGEMENT_FORMULA_VERSION, changedAt: changed?.since ?? null },
     history: history.map(h => ({ month: h.month, total: Number(h.total) })),
+    distribution,
   }
+}
+
+/**
+ * «Розподіл по точці» (§7.3, `44` Р-BT.5): текущие индексы сотрудников **текущей** точки человека —
+ * тот же каркас, что у отчёта п. 5 (без уволенных, без скрытых), но наружу уходят только числа
+ * столбцов, ни одного имени и ни одного id. Видят сам человек и руководитель — по тем же правам,
+ * что и цифру (`scopeOf`).
+ */
+async function locationDistribution(tx: TenantTx, subject: CardSubject, own: number | null): Promise<EngagementDistribution | null> {
+  if (!subject.locationId) return null
+  const rows = await tx.execute(sql`
+    select prs.total_pct::float8 as total, l.name as location
+      from person_rating_snapshots prs
+      join users u on u.id = prs.user_id
+      ${frameJoins()}
+     where prs.is_current and not u.is_hidden
+       ${frameWhere({ kind: 'employee' })}
+       and pl.location_id = ${subject.locationId}::uuid`) as unknown as { total: number, location: string | null }[]
+  const [loc] = rows.length ? rows : await tx.execute(sql`select name as location from locations where id = ${subject.locationId}::uuid`) as unknown as { location: string | null }[]
+  return engagementDistribution(rows.map(r => Number(r.total)), own, loc?.location ?? null)
 }
 
 /** `GET /people/:id/rating`: цифра, слагаемые, числа формулы, окно, динамика. */

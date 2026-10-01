@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ENGAGEMENT_BASE_MAX, ENGAGEMENT_BONUS_MAX, ENGAGEMENT_CAP } from '#shared/domain/engagementIndex'
+import { ENGAGEMENT_BASE_MAX, ENGAGEMENT_BONUS_MAX, ENGAGEMENT_CAP, ENGAGEMENT_DISTRIBUTION_MIN_PEOPLE } from '#shared/domain/engagementIndex'
 import type { EngagementView } from '#shared/domain/engagementIndex'
 
 /**
@@ -56,6 +56,11 @@ const b = computed(() => data.value?.breakdown ?? null)
 const earlyPct = computed(() => (b.value?.early.avg_share === null || b.value?.early.avg_share === undefined ? null : b.value.early.avg_share * 100))
 const monthLabel = (month: string) => formatDate(new Date(`${month}-01T12:00:00Z`), { month: 'short', year: '2-digit' })
 const barWidth = (total: number) => `${Math.max(2, Math.round((total / ENGAGEMENT_CAP) * 100))}%`
+/** Столбец распределения — доля от самого высокого столбца точки; пустой — без заливки. */
+const distWidth = (count: number) => {
+  const max = Math.max(1, ...(data.value?.distribution?.buckets.map(b => b.count) ?? [1]))
+  return count ? `${Math.max(2, Math.round((count / max) * 100))}%` : '0%'
+}
 const statusText = (s: string) => t(`engagement.status.${['done', 'in_progress', 'failed', 'not_started'].includes(s) ? s : 'other'}`)
 </script>
 
@@ -138,6 +143,19 @@ const statusText = (s: string) => t(`engagement.status.${['done', 'in_progress',
         </ul>
         <p v-else class="sub">{{ t('engagement.historyEmpty') }}</p>
       </section>
+
+      <section v-if="data.distribution" class="history" data-testid="engagement-distribution">
+        <h2>{{ t('engagement.distribution', { location: data.distribution.location ?? '—' }) }}</h2>
+        <p class="sub">{{ t('engagement.distributionHint') }}</p>
+        <p v-if="data.distribution.tooFew" class="sub">{{ t('engagement.distributionTooFew', { min: ENGAGEMENT_DISTRIBUTION_MIN_PEOPLE }) }}</p>
+        <ul v-else class="bars dist">
+          <li v-for="(bucket, i) in data.distribution.buckets" :key="bucket.from" :class="{ own: i === data.distribution.ownBucket }">
+            <span class="month">{{ bucket.from }}–{{ bucket.to }}</span>
+            <span class="track"><span class="fill" :style="{ width: distWidth(bucket.count) }" /></span>
+            <span class="v">{{ bucket.count }}<span v-if="i === data.distribution.ownBucket" class="here"> · {{ data.self ? t('engagement.distributionYou') : t('engagement.distributionThem') }}</span></span>
+          </li>
+        </ul>
+      </section>
     </template>
   </section>
 </template>
@@ -172,6 +190,9 @@ details summary { cursor: pointer; color: var(--color-teal-ink); font-weight: 70
 .track { display: block; height: 10px; border-radius: var(--radius-pill); background: var(--color-bg-line-soft); overflow: hidden; }
 .fill { display: block; height: 100%; background: var(--color-teal); border-radius: var(--radius-pill); }
 .v { text-align: right; font-weight: 700; }
+.dist li { grid-template-columns: 64px 1fr minmax(72px, auto); }
+.dist li.own .fill { background: var(--color-sun); }
+.here { color: var(--color-sun-ink); font-weight: 700; }
 .state { margin: 0; color: var(--color-ink-muted); background: var(--color-bg-soft); border-radius: var(--radius-m); padding: var(--space-4); }
 .state.error { color: var(--color-coral-ink); display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 .state.error p { margin: 0; }
